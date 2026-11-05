@@ -4,8 +4,12 @@
 
      Two modes, one markup: in the public sandbox (/try/edit) Save opens the door into the real thing
      (there is no account behind it); in host mode (/edit?host=, inside the dashboard) Save talks to the
-     parent. Nothing is fixed on screen for the sandbox: its one line ("kept in this browser") and
-     Start over live at the top of Cards options. -->
+     parent. Nothing is fixed on screen for the sandbox: its sign-in entry ("kept in this browser") is
+     the first row of Cards settings, and Start over is in that panel's red group at the bottom.
+
+     🔴 ONE GLASS LAYER for anything opened (a tile's sheet, the picker, Cards settings, the door, a
+     tile up close): the whole screen, this top bar included, goes under frosted glass, and only the
+     glass's ✕ (#close, last below) floats above it, at the top-left where the logo is. -->
 
 <!-- THE NOTICE, top edge: status, progress and errors (waiting for the page, saving, not saved, could not
      open). A full-width bar that pushes the page down, never floats over it (w3/notice.mjs). -->
@@ -41,7 +45,7 @@
   </div>
 </div>
 
-<!-- the pencil's sheet (and Cards options): the field ids inside are cell-form-core's own (f-<name>, e-<name>) -->
+<!-- the pencil's sheet (and the whole file's raw content): the field ids inside are cell-form-core's own (f-<name>, e-<name>) -->
 <div class="ctw-modal" id="modal" hidden>
   <div class="ctw-modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <h2 id="modal-title"></h2>
@@ -54,6 +58,18 @@
     </div>
   </div>
 </div>
+
+<!-- Cards settings (w3/settings-nav.mjs is its shape): a panel that slides up from the bottom of the glass and
+     back down when closed. Narrow, iOS Settings (pages pushed from the right); wide, iPadOS Settings (a sidebar
+     and the group's rows). Changes go into the draft at once; the top bar's Save is how they are saved. -->
+<div class="set-layer" id="settings" hidden>
+  <div class="set-panel" id="set-panel" tabindex="-1" role="dialog" aria-modal="true" data-l-label="options">
+    <div class="set-pages" id="set-pages"></div>
+    <div class="set-confirm" id="set-confirm" hidden></div>
+    <div class="set-note ctw-modal-foot"></div>
+  </div>
+</div>
+<input type="file" id="opt-file" accept=".md,text/markdown,text/plain" hidden>
 
 <!-- SANDBOX ONLY: Save, with no account behind it, is the door into the real creation flow -->
 <div class="ctw-modal" id="doormodal" hidden>

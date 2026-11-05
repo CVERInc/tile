@@ -56,6 +56,9 @@ header{position:relative;z-index:5;height:60px;display:flex;align-items:center;g
 .hd-main{flex:0 0 auto;position:relative;display:inline-flex;align-items:center;gap:6px;height:var(--hit);padding:0 18px 0 14px;border-radius:999px;border:1.5px solid var(--accent);background:var(--accent);color:var(--carrier-accent-ink);font:inherit;font-weight:800;cursor:pointer;white-space:nowrap}
 .hd-main svg{width:16px;height:16px}
 .hd-main[disabled]{background:var(--btn-surface);color:var(--carrier-link);border-color:color-mix(in srgb,var(--accent) 60%,var(--btn-surface));cursor:default}
+/* the unsaved dot: the draft holds something Save has not kept yet (Cards settings writes there too) */
+.hd-dot{position:absolute;top:-3px;right:-3px;width:12px;height:12px;border-radius:50%;background:#f2795c;box-shadow:0 0 0 2px var(--carrier-bg-solid)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 @media (hover:hover){
   .icon-btn:hover{border-color:var(--btn-border-hover);color:var(--carrier-link)}
   .modes button:hover:not([aria-pressed=true]){color:var(--ink);background:var(--btn-ghost-hover)}
@@ -134,11 +137,18 @@ main[hidden]{display:none!important}   /* #edit/#layout set display by id, which
 /* empty: the one "+" keeps a tile's shape (it is where the first tile will be), not the screen's */
 .row.is-empty .new svg{width:64px;height:64px}
 
-/* ── sheets: the porch panel. ONE close (the frosted button), at the open sheet's top-left. ── */
+/* ── ONE GLASS LAYER for anything opened (a tile's sheet, the picker, Cards settings, the door, a tile up close):
+   the whole screen — the top bar too — goes under frosted glass; only the glass's ✕ floats above it, at the
+   top-left where the logo is (edit3.mjs placeClose). A sheet never reaches above the bar's line (--bar-bottom),
+   so nothing covers the ✕. ── */
+:root{--glass-veil:color-mix(in srgb,var(--carrier-bg-solid) 40%,transparent)}
+.ctw-modal,.zoom,.set-layer{background:var(--glass-veil)!important;-webkit-backdrop-filter:blur(22px) saturate(1.2);backdrop-filter:blur(22px) saturate(1.2)}
+.ctw-modal:not([hidden]),.zoom:not([hidden]),.set-layer:not([hidden]){animation:glass-in .22s ease both}
+@keyframes glass-in{from{opacity:0}to{opacity:1}}
+@keyframes glass-out{from{opacity:1}to{opacity:0}}
 .ctw-modal{z-index:50}
 .ctw-modal-panel{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--accent) 30%,transparent) transparent}
-.ctw-modal-panel h2{margin:.35rem 0 .3rem 3.4rem!important;min-height:30px}
-.ctw-small .ctw-modal-panel h2,.ctw-door h2{margin-left:0!important}
+.ctw-modal-panel h2{margin:.35rem 0 .3rem 0!important;min-height:30px}
 .ctw-modal-foot{justify-content:flex-start;align-items:center;flex-wrap:wrap;position:sticky;bottom:-1rem;background:var(--carrier-bg-solid);margin:0 -1.2rem -1rem;padding:.7rem 1.2rem 1rem;z-index:2}
 .ctw-modal-foot[hidden]{display:none}
 #modal-save{margin-left:auto}
@@ -147,8 +157,7 @@ main[hidden]{display:none!important}   /* #edit/#layout set display by id, which
 .ctw-leave{width:min(420px,100%)}
 .ctw-leave .ctw-modal-foot{position:static;margin:0;padding:.8rem 0 0;border-top:0;gap:8px}
 .ctw-leave #leave-save{margin-left:auto}
-.glass-close{position:fixed;top:max(16px,env(safe-area-inset-top));left:max(16px,env(safe-area-inset-left));z-index:60;width:var(--hit);height:var(--hit);border-radius:50%;border:1.5px solid var(--btn-border);background:var(--glass);color:var(--ink);display:grid;place-items:center;cursor:pointer;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:0}
-.glass-close.on-sheet{background:var(--btn-surface)}
+.glass-close{position:fixed;top:8px;left:16px;z-index:60;width:var(--hit);height:var(--hit);border-radius:50%;border:1.5px solid var(--btn-border);background:var(--btn-surface);color:var(--ink);display:grid;place-items:center;cursor:pointer;padding:0;box-shadow:0 2px 10px rgba(0,0,0,.08)}
 .glass-close svg{width:18px;height:18px}
 .glass-close[hidden]{display:none}
 @media (hover:hover){.glass-close:hover{color:var(--carrier-link);border-color:var(--btn-border-hover)}}
@@ -203,38 +212,144 @@ main[hidden]{display:none!important}   /* #edit/#layout set display by id, which
 .open-seg button[hidden]{display:none}
 .ctw-md.whole{min-height:min(56vh,520px)}
 
-/* ── Cards options: an iOS-style grouped list. Label left, control right; every change applies at once. ── */
-.set-group{margin:0 0 22px}
-.set-group>h3{margin:0 6px 7px;font-size:13px;font-weight:800;letter-spacing:.02em;color:var(--dim)}
-.set-list{background:var(--btn-surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
-.set-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;width:100%;min-height:52px;margin:0;padding:8px 14px;border:0;border-top:1px solid var(--line);background:none;font:inherit;color:inherit;text-align:start}
-.set-list>.set-row:first-child,.set-list>:first-child{border-top:0}
-.set-label{flex:1 1 9rem;min-width:0;display:grid;gap:2px}
-.set-name{font-weight:700;color:var(--carrier-heading)}
-.set-label small{font-size:12.5px;line-height:1.4;color:var(--dim);text-wrap:pretty}
-.set-ctl{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-left:auto;max-width:100%}
-.set-row.is-switch{cursor:pointer;flex-wrap:nowrap}
-.set-row.is-input .set-ctl{flex:1 1 12rem}
-.set-row.is-input input{width:100%;min-height:var(--hit);font:inherit;padding:.4rem .7rem;border-radius:var(--console-radius-sm);border:1.5px solid var(--btn-border);background:var(--carrier-input-bg);color:var(--carrier-text);text-align:start}
-.set-row.is-link{cursor:pointer;flex-wrap:nowrap}
-.set-row.is-link .set-ctl svg,.set-val svg{width:18px;height:18px;color:var(--dim)}
-.set-val{display:inline-flex;align-items:center;gap:4px;min-height:var(--hit);padding:0 4px 0 8px;border:0;background:none;cursor:pointer;color:inherit;font:inherit}
-.set-row .addr{font-weight:700;color:var(--carrier-heading);overflow-wrap:anywhere}
-.set-row .addr small{font-weight:600;color:var(--dim)}
-.set-row.is-status .set-name{font-weight:600;color:var(--carrier-text)}
-.set-row.is-backup .set-ctl{flex-wrap:wrap}
-.set-row .ctw-err{margin:4px 0 0;font-size:13px}
-.set-row input[type=color]{width:56px;height:var(--hit);padding:2px;border-radius:12px;border:1.5px solid var(--btn-border);background:var(--btn-surface);cursor:pointer}
-.set-block{padding:12px 14px 4px;border-top:1px solid var(--line)}
-.set-list>.set-block:first-child{border-top:0}
-.set-block .ctw-field{margin-bottom:12px}
-.set-row .bc-mini{--cw:132px;--ch:184px;margin-top:8px;cursor:default}
-.optlast{margin-top:0}
-.hd-change{display:grid;gap:8px;padding:12px 14px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--accent) 5%,var(--btn-surface))}
-.hd-change label{display:grid;gap:4px;font-size:13px;font-weight:700;color:var(--dim)}
-.hd-change input{min-height:var(--hit);font:inherit;padding:.4rem .7rem;border-radius:var(--console-radius-sm);border:1.5px solid var(--btn-border);background:var(--carrier-input-bg);color:var(--carrier-text)}
-.hd-change .warn{margin:0;font-size:13px;color:var(--carrier-heading)}
-.hd-change .acts{display:flex;gap:8px;justify-content:flex-end}
+/* ── Cards settings (edit3.mjs draws it; w3/settings-nav.mjs is its shape). iOS Settings is the ruler: grouped inset
+   lists, one thing per row (label left, value right, a chevron when it opens a page), explanations only as grey
+   footnotes under a group, destructive actions red at the bottom. Slides up from the bottom of the glass, back
+   down when closed. Narrow (<700): pages pushed in from the right. Wide (≥700): a sidebar and the group's rows,
+   at most 1000px wide, centred, the glass on both sides. Every row is at least 44px. ── */
+:root{--set-bg:var(--carrier-bg-solid);--set-grp:var(--btn-surface);--set-sep:var(--carrier-border);--set-red:var(--btn-danger-ink);--set-act:var(--carrier-link)}
+.set-layer{position:fixed;inset:0;z-index:45}
+.set-layer[hidden]{display:none}
+.set-panel{position:absolute;left:0;right:0;top:var(--bar-bottom,60px);bottom:0;margin:0 auto;width:100%;max-width:1000px;background:var(--set-bg);color:var(--carrier-text);border-radius:16px 16px 0 0;overflow:hidden;box-shadow:0 -6px 30px rgba(0,0,0,.14);outline:none;
+  animation:set-up .38s cubic-bezier(.2,.8,.2,1) backwards}   /* backwards: once in, a finger's drag (inline transform) moves it */
+.set-panel[data-layout=wide]{top:calc(var(--bar-bottom,60px) + 8px);bottom:16px;width:calc(100% - 32px);border-radius:16px;border:1px solid var(--set-sep)}
+.set-layer.is-closing{animation:glass-out .3s ease .05s both}
+.set-layer.is-closing .set-panel{animation:set-down .3s cubic-bezier(.4,0,.8,.4) both}
+@keyframes set-up{from{transform:translateY(105%)}to{transform:translateY(0)}}
+@keyframes set-down{from{transform:translateY(var(--set-from,0px))}to{transform:translateY(105%)}}
+.set-pages{position:absolute;inset:0}
+/* narrow: the pages, stacked; a pushed one slides in from the right over the one it came from */
+.set-pg{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;background:var(--set-bg);transition:transform .32s cubic-bezier(.3,.7,.2,1);padding-bottom:calc(40px + env(safe-area-inset-bottom))}
+.set-pg + .set-pg{box-shadow:-10px 0 28px rgba(0,0,0,.08)}
+.set-pg.is-off{transform:translateX(100%)}
+.set-pg.is-under{transform:translateX(-30%)}
+/* the panel's header: the root's large title, or a pushed page's nav bar ("‹ Settings" lives HERE, in the panel;
+   ✕ stays on the glass). A downward swipe on it closes the panel. */
+.set-head{touch-action:none}
+.set-big{padding:18px 20px 4px}
+.set-big h2{margin:0;font:700 30px/1.15 var(--font-body);letter-spacing:-.01em;color:var(--carrier-heading)}
+.set-nav{position:sticky;top:0;z-index:2;height:52px;display:flex;align-items:center;padding:0 8px;background:color-mix(in srgb,var(--set-bg) 84%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+.set-nt{position:absolute;left:104px;right:104px;margin:0;text-align:center;font:600 17px/1.2 var(--font-body);color:var(--carrier-heading);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.set-back{position:relative;z-index:1;display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit);max-width:100px;padding:0 6px 0 0;border:0;background:none;color:var(--set-act);font:inherit;font-size:17px;cursor:pointer;white-space:nowrap}
+.set-back span{overflow:hidden;text-overflow:ellipsis}
+.set-back svg{width:24px;height:24px;flex:0 0 auto}
+.set-main .set-back{max-width:none}
+.set-main .set-nt{left:40%;right:16px;text-align:end}
+/* the groups */
+.set-body{padding:2px 0 24px}
+.set-body > .set-g:first-child{margin-top:16px}
+.set-gh{margin:24px 20px 7px;font:600 13px/1.3 var(--font-body);letter-spacing:.01em;color:var(--dim)}
+.set-g{margin:0 16px;background:var(--set-grp);border-radius:12px;overflow:hidden}
+.set-g + .set-g,.set-foot + .set-g{margin-top:24px}
+.set-foot{margin:7px 20px 0;font-size:13px;line-height:1.4;color:var(--dim);text-wrap:pretty}
+.set-foot.is-err{color:var(--set-red);font-weight:700}
+.set-foot.is-centre{text-align:center;margin-top:10px}
+/* the rows: one thing each; a hairline between them, inset from the left as on iOS */
+.set-g > *{position:relative}
+.set-g > * + *::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:1px solid var(--set-sep);pointer-events:none}
+.set-r{display:flex;align-items:center;gap:10px;width:100%;min-height:var(--hit);margin:0;padding:6px 16px;border:0;background:none;color:inherit;font:inherit;font-size:16px;line-height:1.3;text-align:start;box-sizing:border-box}
+button.set-r,label.set-r{cursor:pointer}
+.set-r:focus-visible,.set-acct:focus-visible,.set-si:focus-visible,.set-sw:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+button.set-r:active:not(:disabled),label.set-r:active,.set-acct:active{background:color-mix(in srgb,var(--carrier-text) 8%,transparent)}
+@media (hover:hover){button.set-r:hover:not(:disabled),.set-acct:hover{background:color-mix(in srgb,var(--carrier-text) 5%,transparent)}}
+.set-l{flex:1 1 auto;min-width:0;display:grid;gap:1px;color:var(--carrier-heading)}
+.set-l small{font-size:13px;line-height:1.3;color:var(--dim)}
+.set-v{flex:0 1 auto;max-width:62%;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.set-chev{flex:0 0 auto;display:grid;margin-right:-4px;color:color-mix(in srgb,var(--dim) 70%,transparent)}
+.set-chev svg{width:18px;height:18px}
+.set-r.is-act .set-l{color:var(--set-act)}
+.set-r.is-red .set-l{color:var(--set-red)}
+.set-r:disabled{cursor:default}
+.set-r:disabled .set-l{color:var(--dim)}
+.set-r.is-switch{flex-wrap:nowrap}
+.set-r .switch{flex:0 0 auto}
+.set-r.is-field input{flex:1 1 8rem;min-width:0;min-height:40px;margin:0;padding:0;border:0;background:none;color:var(--carrier-heading);font:inherit;font-size:16px;text-align:end;outline:none}
+.set-r.is-field:has(.set-pre) input,.set-r.is-field > input:first-child{text-align:start}
+.set-r.is-field input::placeholder{color:var(--dim)}
+.set-r.is-field:focus-within{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent);border-radius:inherit}
+.set-pre{flex:0 0 auto;color:var(--dim)}
+.set-ck{flex:0 0 auto;width:22px;height:22px;color:var(--set-act)}
+.set-ck svg{display:block;width:22px;height:22px}
+.set-dot{flex:0 0 auto;width:24px;height:24px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.14)}
+.set-sel{appearance:none;-webkit-appearance:none;flex:0 1 auto;max-width:62%;min-height:var(--hit);margin:0;padding:0 22px 0 6px;border:0;border-radius:8px;
+  background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='14' viewBox='0 0 10 14' fill='none' stroke='%238a8a8e' stroke-width='1.6'%3E%3Cpath d='M2 5l3-3 3 3M2 9l3 3 3-3'/%3E%3C/svg%3E") no-repeat right 4px center;
+  color:var(--dim);font:inherit;font-size:16px;text-align:end;cursor:pointer}
+.set-sel:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+.set-inl{flex:0 0 auto;min-height:var(--hit);padding:0 4px;border:0;background:none;color:var(--set-act);font:inherit;font-size:16px;cursor:pointer;white-space:nowrap}
+.set-inl:disabled{color:var(--dim);cursor:default}
+/* the main colour: a row of swatches (no native colour picker); the chosen one is ringed */
+.set-r.is-pal{flex-wrap:wrap;padding:6px 12px}
+.set-r.is-pal:has(.set-l){padding-left:16px}
+.set-pal{display:flex;flex-wrap:wrap;gap:4px}
+.set-sw{position:relative;display:grid;place-items:center;width:var(--hit);height:var(--hit);padding:0;border:0;border-radius:50%;background:none;cursor:pointer}
+.set-sw::before{content:"";width:32px;height:32px;border-radius:50%;background:var(--sw);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--carrier-text) 22%,transparent)}
+.set-sw[aria-checked=true]::after{content:"";position:absolute;inset:1px;border-radius:50%;border:2.5px solid var(--sw);box-shadow:0 0 0 1px color-mix(in srgb,var(--carrier-text) 18%,transparent)}
+.set-pal.is-inline{gap:0}
+.set-pal.is-inline .set-sw{width:38px}
+.set-pal.is-inline .set-sw::before{width:24px;height:24px}
+.set-pal.is-inline .set-sw[aria-checked=true]::after{inset:4px 3px}
+/* the sandbox's sign-in entry, shaped like the account row at the top of a phone's settings */
+.set-acct{display:flex;align-items:center;gap:14px;width:100%;min-height:76px;padding:12px 16px;border:0;background:none;color:inherit;font:inherit;text-align:start;cursor:pointer}
+.set-av{flex:0 0 auto;width:56px;height:56px;border-radius:50%;background:linear-gradient(#c7c7cc,#aeaeb2);display:grid;place-items:center;color:#fff}
+.set-av svg{width:32px;height:32px}
+.set-acct-t{flex:1 1 auto;min-width:0;display:grid;gap:2px}
+.set-acct-t b{font-size:17px;font-weight:700;color:var(--set-act)}
+.set-acct-t small{font-size:13px;line-height:1.35;color:var(--dim);text-wrap:pretty}
+.set-acct.is-small{min-height:60px;margin:0 0 10px;padding:8px 10px;gap:10px;border-radius:12px;background:var(--set-grp)}
+.set-acct.is-small .set-av{width:40px;height:40px}
+.set-acct.is-small .set-av svg{width:24px;height:24px}
+/* pictures: the backdrop's thumbnail, and the default back drawn as the tile it is */
+.set-shot{display:grid;place-items:center;padding:12px 16px 6px}
+.set-shot img{display:block;max-width:100%;max-height:9rem;border-radius:10px}
+.set-backview{display:grid;place-items:center;padding:18px 16px 2px}
+.set-backview .bc-mini,.set-r.is-back .bc-mini{--cw:132px;--ch:184px;cursor:default;flex:0 0 auto}
+.set-r.is-back{padding:12px 16px;gap:16px}
+.set-r.is-back .set-inl{margin-left:auto}
+/* wide: the sidebar of groups, and the chosen group's rows on the right */
+.set-panel[data-layout=wide] .set-pages{display:flex}
+.set-side{flex:0 0 260px;overflow-y:auto;padding:8px 10px 16px;background:color-mix(in srgb,var(--set-grp) 55%,var(--set-bg));border-right:1px solid var(--set-sep)}
+.set-side-top{display:flex;align-items:center;min-height:56px;padding:0 6px}
+.set-side-top h2{margin:0;font:700 22px/1.2 var(--font-body);color:var(--carrier-heading)}
+.set-si{display:flex;align-items:center;width:100%;min-height:var(--hit);margin:0 0 2px;padding:0 12px;border:0;border-radius:10px;background:none;color:var(--carrier-heading);font:inherit;font-size:16px;text-align:start;cursor:pointer}
+.set-si[aria-current=true]{background:var(--accent);color:var(--carrier-accent-ink);font-weight:700}
+@media (hover:hover){.set-si:hover:not([aria-current=true]){background:var(--btn-ghost-hover)}}
+.set-main{position:relative;flex:1 1 auto;min-width:0;overflow-y:auto;padding:0 0 40px}
+.set-main .set-body{max-width:680px}
+.set-ttl{margin:20px 20px 0;font:700 24px/1.2 var(--font-body);color:var(--carrier-heading)}
+/* a destructive action asks first: an action sheet (narrow) or a centred alert (wide), inside the panel */
+.set-confirm{position:absolute;inset:0;z-index:5;background:rgba(0,0,0,.32);animation:glass-in .2s ease both}
+.set-confirm[hidden]{display:none!important}
+.set-confirm.is-sheet{display:flex;flex-direction:column;justify-content:flex-end;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+.set-sheet{animation:set-up .28s cubic-bezier(.2,.8,.2,1) both}
+.set-sheet-box{background:var(--set-grp);border-radius:14px;overflow:hidden;text-align:center}
+.set-sheet-box p{margin:0;padding:14px 16px;font-size:13px;line-height:1.4;color:var(--dim)}
+.set-sheet-go,.set-sheet-no{display:block;width:100%;min-height:56px;border:0;background:none;font:inherit;font-size:19px;cursor:pointer}
+.set-sheet-go{border-top:1px solid var(--set-sep);color:var(--set-red)}
+.set-sheet-no{margin-top:8px;border-radius:14px;background:var(--set-grp);color:var(--set-act);font-weight:700}
+.set-confirm.is-alert{display:grid;place-items:center;padding:16px}
+.set-alert{width:min(300px,100%);overflow:hidden;border-radius:14px;background:var(--set-grp);text-align:center;box-shadow:var(--carrier-shadow)}
+.set-alert p{margin:0;padding:20px 16px;font-size:15px;line-height:1.4;color:var(--carrier-heading)}
+.set-alert-acts{display:flex;border-top:1px solid var(--set-sep)}
+.set-alert-acts button{flex:1 1 0;min-height:var(--hit);border:0;background:none;color:var(--set-act);font:inherit;font-size:16px;cursor:pointer}
+.set-alert-acts button + button{border-left:1px solid var(--set-sep)}
+.set-alert-acts .is-red{color:var(--set-red);font-weight:700}
+/* a confirmation made in here (address changed, default back restored) shows at the panel's bottom edge */
+.set-note{position:absolute!important;left:0;right:0;bottom:0;z-index:4;display:block!important;margin:0!important;padding:0!important;border:0!important;background:none!important}
+.set-note .notice.in-sheet{margin:0!important;padding:8px 16px calc(8px + env(safe-area-inset-bottom))!important}
+@media (prefers-reduced-motion:reduce){
+  .ctw-modal:not([hidden]),.zoom:not([hidden]),.set-layer:not([hidden]),.set-layer.is-closing,.set-panel,.set-layer.is-closing .set-panel,.set-confirm,.set-sheet{animation:none!important}
+  .set-pg{transition:none}
+}
 
 /* the default back as it shows when nobody replaced it: the name and a QR code (lucide qr-code) */
 .printed{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:14px;text-align:center;background:var(--btn-surface);cursor:default}
@@ -243,7 +358,7 @@ main[hidden]{display:none!important}   /* #edit/#layout set display by id, which
 .printed .bc-qr svg{display:block;width:100%;height:100%}
 
 /* ── a tile up close; a pair turns over ── */
-.zoom{position:fixed;inset:0;z-index:40;background:rgba(12,58,68,.32);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:grid;place-items:center;perspective:1400px}
+.zoom{position:fixed;inset:0;z-index:40;display:grid;place-items:center;perspective:1400px}
 .zoom[hidden]{display:none}
 .zoom .flip{position:relative;width:min(390px,calc(100vw - 32px),calc((100dvh - 140px)*343/480));aspect-ratio:343/480;transition:transform .5s cubic-bezier(.3,.7,.2,1);transform-style:preserve-3d;cursor:pointer}
 .zoom .flip.over{transform:rotateY(180deg)}
@@ -284,13 +399,13 @@ body[data-host-waiting] header>:not(.lockup){opacity:.5}
 
 /* ── sheets by size ──
    phone (<768): a tile's sheet is a bottom sheet — square bottom corners, bleeding to the bottom edge (its button
-   row carries the safe area); Cards options is a full-screen sheet.
+   row carries the safe area), and never reaches above the bar (✕ stays on the glass). Cards settings is its own
+   panel (see above).
    tablet and desktop (≥768): a centred panel, at most 560px wide — never a full-width drawer. */
 @media (max-width:767.98px){
   .ctw-modal-panel{border-bottom-left-radius:0!important;border-bottom-right-radius:0!important;padding-bottom:0!important}
   .ctw-modal-foot{bottom:0;margin-bottom:0;padding-bottom:calc(.8rem + env(safe-area-inset-bottom))}
-  .ctw-modal-panel.is-settings{height:100dvh;max-height:100dvh!important;border-radius:0!important;border:0}
-  .ctw-modal-panel.is-settings{padding-bottom:calc(1rem + env(safe-area-inset-bottom))!important}
+  .ctw-modal-panel{max-height:calc(100dvh - var(--bar-bottom,60px) - 8px)!important}
   .ctw-small{align-items:center!important;padding:16px!important}
   .ctw-small .ctw-modal-panel{border-radius:var(--console-radius)!important;padding-bottom:1rem!important}
   /* every text field at least 16px: below that, iOS Safari zooms the page on focus */

@@ -31,7 +31,7 @@ test('every catalogue has a table for every locale (the scan sees all nine)', ()
 });
 
 // 🔴 ONE NAMED EXCEPTION. The editor calls the file itself "Raw content" (and the same in zh-TW): the sheet that edits a
-// tile or the whole card as written, the picker's last choice, and the Cards options row that opens it.
+// tile or the whole card as written, the picker's last choice, and the Cards settings row that opens it.
 // en "raw" and its zh-TW word are on the banned list for the sentences around a form; here they are the name of the
 // one place the file is shown as it is. Exactly these keys, exactly that word — anything else still fails.
 const RAW_CONTENT_KEYS = new Set(['raw', 'openRaw', 'backInRaw', 'free', 'toFree']);
