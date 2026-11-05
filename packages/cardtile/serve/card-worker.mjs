@@ -13,7 +13,7 @@
 // The render path (resolveHandle → renderCardHTML) is pure and node-testable; the fetch handler is
 // the only edge-specific shell. One brain, two runtimes (same pattern as events-worker).
 import { parseCard, serializeCard } from '../card-core.js';
-import { renderPage } from '../card-render.mjs';
+import { renderPage, poolOf } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { resolveChannels, VIDEO_RE } from '../yt.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
@@ -360,6 +360,10 @@ export function renderCardHTML(cardMd, ctx = {}) {
     accent: fm('accent'),
     theme: fm('theme'),                    // `theme: light|dark` pins it; absent follows the reader
     poweredBy: fm('powered-by') === 'on',   // opt-in referral credit; default off (see card-render)
+    // 🔴 CALLER-supplied, never authored: is this Card in the card pool (reef#2913)? Only the
+    // Worker's own call site may set it — no frontmatter key, query or header maps here. true/false
+    // overrides `powered-by` (card-render poolOf); anything else is absent = today's page.
+    pool: poolOf(ctx),
     radius: fm('radius'),                  // `radius: square` keeps a creator's square-corner look
     // `header: left` puts the avatar beside the text instead of above it. Centred is the DEFAULT
     // because 10/10 surveyed platforms centre it — but that evidence justifies a default, not the
