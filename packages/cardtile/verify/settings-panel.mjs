@@ -14,6 +14,8 @@
 //   6. Start over asks first: an action sheet narrow, a centred alert wide. Cancel changes nothing.
 //   7. A change in settings goes into the draft (and the top bar's Save shows the unsaved dot); no Save inside.
 //   8. A downward swipe on the panel's header closes it.
+//  11. One assistant button: drawn in the sandbox; in host mode the page around has the real one, so the
+//      editor draws none and leaves ⌘K alone.
 //   9. Host mode (framed by a http://localhost parent): no sign-in, pool, domain, transfer or Start over; the
 //      address is read-only.
 //  10. No sideways scroll at 390; no console errors anywhere.
@@ -72,6 +74,7 @@ const settle = (page) => page.waitForTimeout(500);
 // ── narrow, sandbox ──
 {
   const { ctx, page, f, errors } = await open(390);
+  check(await f.evaluate(() => document.getElementById('seek').getBoundingClientRect().width > 0), '11. sandbox: the stand-in assistant button is drawn (control for 11 in host mode)');
   check(await hits(f, '#editbtn') === 'self', 'control: with nothing open, a tap on Save hits Save');
   await page.click('#cardset');
   const animating = await page.evaluate(() => document.getElementById('set-panel').getAnimations().length > 0);
@@ -179,6 +182,9 @@ const settle = (page) => page.waitForTimeout(500);
   check(await hits(f, '#editbtn') === 'settings', '1. host mode: the top bar is under the glass');
   await f.click('#close'); await page.waitForTimeout(500);
   check(await f.evaluate(() => document.getElementById('settings').hidden), '2. host mode: ✕ closes');
+  check(await f.evaluate(() => document.getElementById('seek').getBoundingClientRect().width === 0), '11. host mode: no stand-in assistant button (the page around has the real one)');
+  await f.locator('body').press('Meta+k'); await page.waitForTimeout(200);
+  check(await f.evaluate(() => document.getElementById('pal').hidden), '11. host mode: ⌘K does not open the stand-in palette');
   check(errors.length === 0, `10. no console errors (host): ${errors.join(' | ')}`);
   await ctx.close();
 }
