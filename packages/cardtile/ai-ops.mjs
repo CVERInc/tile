@@ -368,3 +368,207 @@ export const OPS = {
 export const DEBT = {
   gaido_card: 'GAIDO has no cardtile-Card capability. Owed from this definition, not re-derived.',
 };
+
+// ── THE WHOLE CARD ───────────────────────────────────────────────────────────────────────────────
+//
+// Everything above is one CELL. What follows belongs to the whole card: its frontmatter keys, its
+// backs, the geometry rules, and the host ↔ editor contract. Same style and the same rule: it is
+// written down HERE, once, for every door, and ai-ops.test.mjs holds it equal to the code that reads
+// it. Plain data, English, no imports — this file is vendored as-is by consumers that have no access
+// to the rest of the package.
+
+/**
+ * Frontmatter: the `---` fence at the top of the file, one `key: value` per line.
+ *
+ * 🔴 A key at its default is written as NO LINE AT ALL — never `theme: auto`, never `views: stack list
+ * wall`. The editor removes a line when its control goes back to the default (w3/card-settings.mjs
+ * fmWrite), so a file that spells a default out is a file the editor will rewrite on its next save.
+ */
+export const FRONTMATTER = {
+  fence: 'The file starts with `---`, then one `key: value` per line, then `---`. Values are one line each.',
+  defaultIsNoLine: 'A key at its default is written as no line at all. Remove the line to go back to the default.',
+  quoting: 'Values are written unquoted, except `back`, which is written in double quotes because a bare `#` starts a YAML comment.',
+  unknown: 'Keys not listed in CARD_SETTINGS are kept in the file and do nothing.',
+};
+
+/**
+ * Every frontmatter key real code reads, and what it accepts. `disposition` as for cell params:
+ * FORM = the editor's Cards settings sheet writes it; RAW = honoured, written by hand only.
+ * `setting` = the name w3/card-settings.mjs applySetting takes for it (absent: applySetting does not
+ * write it). `values` = the exact words when the set is closed, else a description of the shape.
+ * `default` = what happens when the line is absent.
+ *
+ * Readers (cited per key below):
+ *   renderer   serve/card-worker.mjs renderFlat — `fm('<key>')` / cardName, then card-render.mjs
+ *   deck       w3/deck-page.mjs DECK_KEYS → w3/deck.js (`views`, `view`, `back`)
+ *   editor     w3/card-settings.mjs applySetting, w3/edit3.mjs (the default back)
+ */
+export const CARD_SETTINGS = {
+  // serve/card-worker.mjs cardName → <title>, the footer's owner name, share tags; the profile cell's name
+  title: {
+    disposition: DISPOSITION.FORM, setting: 'title',
+    values: 'One line of text, unquoted (the renderer does not strip quotes from `title`).',
+    default: "The card's handle.",
+  },
+  // card-worker fm('accent') → card-render cssColor
+  accent: {
+    disposition: DISPOSITION.FORM, setting: 'accent',
+    values: 'A CSS colour. The editor writes `#rrggbb` in lowercase; the renderer also accepts #rgb, #rgba, #rrggbbaa, rgb()/rgba()/hsl()/hsla() and CSS colour names. Anything else falls back to the default.',
+    default: 'The platform accent, #0a8c8e.',
+  },
+  // card-worker fm('theme') → card-render: only `light` / `dark` pin it
+  theme: {
+    disposition: DISPOSITION.FORM, setting: 'theme',
+    values: ['light', 'dark'],
+    default: "Follows the visitor's system setting.",
+  },
+  // card-worker fm('header') → card-render: `left` (case-insensitive) adds st-card-head-left
+  header: {
+    disposition: DISPOSITION.FORM, setting: 'header',
+    values: ['left'],
+    default: 'The avatar is centred above the name.',
+  },
+  // card-worker fm('icons') → card-render: mono|grey|gray|monochrome greys fetched marks
+  icons: {
+    disposition: DISPOSITION.FORM, setting: 'icons',
+    values: ['mono'],
+    default: 'Fetched brand marks keep their colours.',
+    note: 'The renderer also reads `grey`, `gray` and `monochrome` as `mono`; the editor writes `mono`.',
+  },
+  // card-worker fm('backdrop') → card-render resolveAsset
+  backdrop: {
+    disposition: DISPOSITION.FORM, setting: 'backdrop',
+    values: 'A fixed image behind the whole card: `asset:<id>` (an id in the `## assets` lane) or an image URL.',
+    default: 'No backdrop.',
+  },
+  // card-worker fm('backdrop-dim') → colour.mjs resolveBackdropDim
+  'backdrop-dim': {
+    disposition: DISPOSITION.FORM, setting: 'backdrop-dim',
+    values: 'A number from 0 to 100: how much of a scrim covers the backdrop. No `%`. The editor offers 0, 25, 45 and 65.',
+    default: "Derived from the accent. A value that is not a number also means the default, not 0. Only matters with `backdrop`.",
+  },
+  // w3/deck.js FM.views; w3/card-settings.mjs VIEW_IDS / readViews
+  views: {
+    disposition: DISPOSITION.FORM, setting: 'views',
+    values: ['stack', 'list', 'wall'],
+    shape: 'The views a visitor may switch between, separated by spaces, written in the order stack list wall. One view hides the switcher.',
+    default: 'All three.',
+  },
+  // w3/deck.js FM.view; written by applySetting('views', { on, open })
+  view: {
+    disposition: DISPOSITION.FORM,
+    values: ['stack', 'list', 'wall'],
+    shape: 'The view the card opens on. Must be one of `views`. Written by the `views` setting, not on its own.',
+    default: 'The first view in `views`. A visitor who switched views gets their own last pick, when it is still offered.',
+  },
+  // w3/deck.js FM.back; w3/edit3.mjs defId / addDefault
+  back: {
+    disposition: DISPOSITION.FORM,
+    values: 'A double-quoted pointer to a back lane: `back: "#about"` names `## back: about`. Same pointer as a tile\'s `back=#about`. See BACKS.',
+    default: "The printed business card: the card's name, a QR code and its address.",
+  },
+  // card-worker fm('arrows') → card-render arrowOf: only `on`
+  arrows: {
+    disposition: DISPOSITION.RAW,
+    values: ['on'],
+    default: 'No arrow on link rows and calls to action.',
+  },
+  // card-worker fm('since') → the footer's `© <since>–<this year>`
+  since: {
+    disposition: DISPOSITION.RAW,
+    values: 'A year, shown as the start of the footer copyright range.',
+    default: 'The footer shows this year only.',
+  },
+  // card-worker fm('radius') → card-render: only `square`
+  radius: {
+    disposition: DISPOSITION.RAW,
+    values: ['square'],
+    default: 'Rounded tiles.',
+  },
+  // card-worker fm('lang') → card-render <html lang>, and the deck's own words (w3/deck-i18n.mjs)
+  lang: {
+    disposition: DISPOSITION.RAW,
+    values: 'A BCP 47 language tag, e.g. `zh-TW`. Anything that does not look like one is `en`.',
+    default: 'en',
+  },
+  // card-worker fm('generator') → card-render generatorTag
+  generator: {
+    disposition: DISPOSITION.RAW,
+    values: '`off` (also false/no/none) removes the generator meta tag; any other value replaces its text.',
+    default: '`<meta name="generator" content="feelreef">`.',
+  },
+  // card-worker fm('powered-by') === 'on' → card-render footer
+  'powered-by': {
+    disposition: DISPOSITION.RAW,
+    values: ['on'],
+    default: 'No credit link in the footer.',
+    note: 'Ignored whenever the platform states whether the card is in the card pool; that switch then decides the footer link.',
+  },
+};
+
+/**
+ * Backs: what a tile shows when it turns over. One level deep: a back cannot open another back.
+ * Verified against card-core.js (RE_DRAWER_LANE / splitDrawer), card-render.mjs (backTarget,
+ * DOOR_TYPES), w3/deck.js (DEFB / defBack) and w3/edit3.mjs (defId / addDefault).
+ */
+export const BACKS = {
+  lane: '`## back: <id>` starts a back lane; `## back: <id> | <Title>` gives it a title. The id is lower-cased and spaces become hyphens. The lane holds the cells of that back (the editor writes one). The older spelling `## drawer: <id>` is still read and kept as written.',
+  tile: 'A tile points at a back with the param `back=#<id>`. It counts only when a lane with that id exists, and never inside a back.',
+  tileTypes: 'Honoured on `profile` and `text` (a layer over the whole tile opens the back) and on `link` and `feature` (their own link opens it). `video`, `slides`, `social` and `embed` ignore `back=`.',
+  cardDefault: 'The frontmatter line `back: "#<id>"` names the default back: every tile without a back of its own, and that is not a link or a video, turns over to a copy of it. Write it in double quotes: a bare `#` starts a YAML comment.',
+  none: "With no default back, such tiles turn over to the printed business card (the card's name, a QR code, its address). In the stack and list views a link without a back turns over to its address, and a video to its YouTube page.",
+  inLinks: 'A `link` whose address is `#<id>` (`[About](#about)`) or a `feature` with `href=#<id>` opens that back too. Inside a back, such a cell is dropped.',
+  example:
+    '---\ntitle: Aster\nback: "#about"\n---\n\n## grid\n\n' +
+    '- [ ] %% card: profile w=6 back=#about %% Illustrator.\n' +
+    '- [ ] %% card: link w=3 %% [Shop](https://example.org/shop)\n\n\n' +
+    '## back: about | About me\n\n' +
+    '- [ ] %% card: text %% I draw things.\n',
+};
+
+/**
+ * The geometry rules agents get wrong. Verified against card-core.js (DEFAULT_COLS, clampSpan,
+ * packGrid, setSpan) and card-render.mjs (renderGrid; `.st-cells` / `[data-w]` CSS).
+ */
+export const GEOMETRY = {
+  columns: 'A card is six columns. There is no `cols:` key; it is ignored.',
+  width: '`w=1`…`w=6` is the only size. Values are clamped to 1–6; a cell with no `w` is one column wide.',
+  height: 'There is no height param. Height comes from content: a row is at least one column-width square and grows to fit. `h=` is retired: it is ignored, never offered, and the editor never writes it.',
+  fullWidth: '`text` cells and any cell with `bleed` always span all six columns and break the grid into separate runs; their `w` does nothing.',
+  pictures: 'A picture keeps its own aspect ratio instead of filling a box. An `embed` is as tall as it is wide.',
+  order: 'Cells pack in file order, but a later narrow cell may fill a gap left earlier in the row.',
+  views: 'Width only matters on the wall view. Stack and list show every tile as a card of its own, full width, so in the editor width is set on the wall only.',
+};
+
+/**
+ * The host ↔ editor contract: a page embeds `/edit?host=<its own origin>` in an iframe and talks to
+ * it with postMessage. Exactly what w3/host-bridge.mjs (and its route in serve/card-worker.mjs) does.
+ * Every message carries `v` (EDITOR_PROTOCOL.v) and a `type`; messages without both are ignored.
+ */
+export const EDITOR_PROTOCOL = {
+  v: 1,
+  path: '/edit?host=<parent origin>',
+  origins: {
+    allowed: 'https://feelreef.com, https://staging.feelreef.com, or http://localhost on any port. An exact origin: no path, query, hash or credentials. Anything else is a 400.',
+    rules: 'The editor sends only to that origin (never `*`) and ignores every message from any other origin. The page may be framed only by that origin (CSP frame-ancestors).',
+  },
+  credentials: 'The editor holds no credential. The parent stores the card; the editor only hands it markdown.',
+  /** editor → parent */
+  toParent: {
+    'card:ready': { fields: [], when: 'On start, repeated every 500 ms until the first card:load, for at most 60 s.' },
+    'card:load-failed': { fields: ['message'], when: 'card:load had no `md` string, or `md` does not read as a card (no cells).' },
+    'card:change': { fields: ['md', 'dirty'], when: 'After every edit, debounced 150 ms. `dirty` = differs from what the parent last loaded or confirmed saved.' },
+    'card:save': { fields: ['md'], when: 'The person pressed Save (or Cmd/Ctrl+S). Answer with card:saved or card:save-failed.' },
+    'card:draft': { fields: ['md', 'dirty'], when: 'The answer to card:get-draft. `md` is null and `dirty` false before card:load.' },
+    'card:propose-failed': { fields: ['message'], when: 'card:propose before card:load, or its `md` does not read as a card.' },
+  },
+  /** parent → editor */
+  toEditor: {
+    'card:load': { fields: ['md', 'handle', 'cardUrl', 'locale?', 'version?'], when: 'Loads a card. Answer any card:ready; a second load reloads.' },
+    'card:saved': { fields: ['version'], when: 'The card:save was stored. Ignored unless a save is out.' },
+    'card:save-failed': { fields: ['message'], when: 'The card:save was refused; `message` is shown to the person as written. Ignored unless a save is out.' },
+    'card:get-draft': { fields: [], when: 'Asks for the current draft; answered with card:draft.' },
+    'card:propose': { fields: ['md'], when: 'Puts `md` in the editor as an unsaved draft. It is never saved by itself: the person presses Save. Announced as card:change.' },
+  },
+  md: 'Every `md` is the whole card file, `## assets` lane included. A parent that saves through save_card (which keeps only the stored assets lane) uploads new assets with put_asset first; host-bridge.mjs exports splitCard() for that split.',
+};
