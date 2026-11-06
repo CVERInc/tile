@@ -24,7 +24,7 @@ One word per concept across the Tile family, so code, docs, product copy and AI 
 | A front tile plus the back it opens, in the editor | a **pair** | Pair as front and back |
 | The editor's numbered place | a **slot** (editor only, never stored) | — |
 | The file's leading block | **frontmatter** | — |
-| How a visitor sees a Cards | the **views** `stack`, `list`, `wall` | Stack, List, Wall |
+| How a visitor sees Cards | the **views** `stack`, `list`, `wall` | Stack, List, Wall |
 
 Retired inside Cards (being phased out of code, docs and copy): the singular noun **card**, **cell**, **deck**, **spread**, **face**, **drawer**, and **grid** as a lane name.
 
@@ -41,4 +41,4 @@ Names that are stored, or that cross a deploy boundary, keep their old spelling 
 
 ## Site (sitetile)
 
-Site's own vocabulary is not changed by this file. Today a Site's grid item renders with the classes `st-cell…`, and Site's grid coral is labelled "Tiles". Site keeps those words for now, but reads this file, so it can understand a Cards: a Cards line is a `cardtile` tile, and the namespaced markers let a Site tell a Cards line from its own. Keeping tile kinds compatible is a goal, so that a Cards could later be inherited by a Site.
+Site's own vocabulary is not changed by this file. Today a Site's grid item renders with the classes `st-cell…`, and the platform's Site editor labels its grid coral "Tiles". Site keeps those words for now, but reads this file, so it can understand Cards: a line of Cards is a `cardtile` tile, and the namespaced markers let a Site tell those lines from its own. Keeping tile kinds compatible is a goal, so that Cards could later be inherited by a Site.
