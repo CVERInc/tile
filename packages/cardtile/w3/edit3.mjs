@@ -555,8 +555,12 @@ const CHOICE_NAMES = { theme: L.themeNames, header: L.headerNames, icons: L.icon
 const CHOICE_KEY = { theme: 'theme', header: 'header', icons: 'icons', dim: 'backdrop-dim' };
 const GROUP_NAME = { name: L.secName, look: L.secLook, views: L.secViewsBack, found: L.secFound, more: L.secMore };
 const PAGE_TITLE = { address: L.handleL, domain: L.domainL, theme: L.themeL, accent: L.accentL, backdrop: L.backdrop, header: L.headerL, icons: L.iconsL, views: L.viewsL, back: L.bcL, backup: L.backupL };
-// the main colours on offer: the engine's default first (what Reset gives back), then a spread of hues
-const SWATCHES = [DEFAULT_ACCENT, '#e4572e', '#f3a712', '#29bf12', '#4361ee', '#9b5de5', '#f15bb5', '#222222'];
+// the main colours on offer: the engine's default first (what Reset gives back), then a spread of hues. Thirteen,
+// so that with the custom well at the end a phone shows two full rows of seven. Any colour is safe here: the
+// engine adjusts an accent for legibility on its own (colour.mjs readableAccent).
+const SWATCHES = [DEFAULT_ACCENT, '#2fa4e7', '#4361ee', '#2b4c7e', '#9b5de5', '#f15bb5', '#a4243b',
+  '#e4572e', '#f3a712', '#6a7f2a', '#29bf12', '#6c757d', '#222222'];
+const RAINBOW = 'conic-gradient(from 90deg,#ff3b30,#ff9500,#ffcc00,#34c759,#00c7be,#007aff,#af52de,#ff2d55,#ff3b30)';
 const CHEVL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
 const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 const AVATAR = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4.2"/><path d="M3.5 21c.8-4.4 4.2-6.8 8.5-6.8s7.7 2.4 8.5 6.8z"/></svg>';
@@ -647,14 +651,24 @@ function signInRow(g, { small = false } = {}) {
   g.append(b);
 }
 function swatchRow(g, { inline = false } = {}) {
-  const cur = NOW.accent() || DEFAULT_ACCENT, list = SWATCHES.includes(cur) ? SWATCHES : [cur, ...SWATCHES];
+  const cur = NOW.accent() || DEFAULT_ACCENT, custom = !SWATCHES.includes(cur);
   const pal = node('div', 'set-pal' + (inline ? ' is-inline' : '')); pal.setAttribute('role', 'radiogroup'); pal.setAttribute('aria-label', L.accentL);
-  for (const c of list) {
+  for (const c of SWATCHES) {
     const b = node('button', 'set-sw'); b.type = 'button'; b.style.setProperty('--sw', c);
     b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(c === cur)); b.setAttribute('aria-label', c); b.dataset.c = c;
     b.onclick = () => putSetting('accent', c === DEFAULT_ACCENT ? null : c);
     pal.append(b);
   }
+  // the last well: a rainbow that opens the system colour picker (on a phone, the same sheet the built-in apps
+  // use). Once a colour of its own is chosen, the well wears it and is the ringed one; no extra swatch appears.
+  const w = node('label', 'set-sw is-well'); w.id = 'opt-accent-custom';
+  w.style.setProperty('--sw', custom ? cur : RAINBOW);
+  w.setAttribute('role', 'radio'); w.setAttribute('aria-checked', String(custom)); w.setAttribute('aria-label', L.accentCustom);
+  const fi = document.createElement('input'); fi.type = 'color'; fi.tabIndex = -1;
+  fi.value = /^#[0-9a-f]{6}$/i.test(cur) ? cur.toLowerCase() : DEFAULT_ACCENT;
+  fi.onchange = () => putSetting('accent', fi.value === DEFAULT_ACCENT ? null : fi.value);
+  w.tabIndex = 0; w.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } };
+  w.append(fi); pal.append(w);
   if (inline) { const r = node('div', 'set-r is-pal', `<span class="set-l">${esc(L.accentL)}</span>`); r.append(pal); g.append(r); return r; }
   const r = node('div', 'set-r is-pal'); r.append(pal); g.append(r); return r;
 }
