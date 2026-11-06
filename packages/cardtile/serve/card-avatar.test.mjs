@@ -74,7 +74,40 @@ test('avatar path relays a remote raster avatar and reuses its validated image c
       assert.deepEqual(await bytesOf(res), PNG);
     }
   }
-  assert.equal(upstream.mock.calls.length, URLS.length, 'query strings must reuse the same cached image');
+  assert.equal(upstream.mock.calls.length, 1, 'hosts, paths and query strings must reuse the same cached image');
+});
+
+// reef#2940: the relay cache must follow the picture, not the handle. Cache API entries cannot be
+// purged across colos, so a key built from /<handle>/avatar kept serving the old picture for up to
+// an hour after the holder changed it, or after a retired handle was claimed by someone else.
+test('avatar relay cache follows the avatar URL, not the request path (reef#2940)', async () => {
+  const cached = new Map();
+  globalThis.caches = { default: {
+    match: async (key) => cached.get(key.url)?.clone(),
+    put: async (key, value) => { cached.set(key.url, value); },
+  } };
+  const NEXT = 'https://images.example/new-portrait.webp';
+  const upstream = globalThis.fetch;
+  upstream.mock.mockImplementation(async (url) => {
+    if (url === REMOTE) return new Response(PNG, { headers: { 'Content-Type': 'image/png' } });
+    if (url === NEXT) return new Response(WEBP, { headers: { 'Content-Type': 'image/webp' } });
+    throw new Error(`unexpected upstream ${url}`);
+  });
+  for (const url of URLS) {
+    cached.clear();
+    const before = await get(url, envWith(card({ avatar: REMOTE })));
+    assert.equal(before.status, 200, url);
+    assert.deepEqual(await bytesOf(before), PNG, url);
+    // Same path, same handle: the Card now names another picture (an edit, or a new holder).
+    const after = await get(url, envWith(card({ avatar: NEXT })));
+    assert.equal(after.status, 200, url);
+    assert.equal(after.headers.get('content-type'), 'image/webp', `${url} served the previous avatar from cache`);
+    assert.deepEqual(await bytesOf(after), WEBP, url);
+  }
+  // No cache entry is keyed by the handle's path.
+  for (const key of cached.keys()) {
+    assert.ok(!key.includes(HANDLE) && !key.includes(HOST), `cache key names the request path: ${key}`);
+  }
 });
 
 test('avatar path returns 404 without an avatar while icon routes keep their badge', async () => {

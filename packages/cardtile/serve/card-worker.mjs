@@ -65,13 +65,23 @@ async function relayImage(request, ctx, upstreams, maxAge) {
   return resp;
 }
 const AVATAR_MAX_BYTES = 512 * 1024;
+/** The relay's Cache API key for one upstream picture: a fixed origin and the SHA-256 of its URL.
+ *  🔴 reef#2940: never the request path. /<handle>/avatar (or a vanity host's /avatar) names the
+ *  HOLDER, not the picture, and Cache API entries cannot be purged across colos — a path key kept
+ *  serving the old picture for up to max-age after the holder changed their avatar, or after a
+ *  retired handle was claimed by someone else. A new URL is a new key, so either case is a miss at
+ *  once. The same picture behind several hosts or paths shares one entry. No query: GET only. */
+async function avatarCacheKey(upstreamUrl) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(upstreamUrl));
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return new Request(`https://${CANON_HOST}/_avatar-relay/${hex}`, { method: 'GET' });
+}
 /** Author-supplied avatars must be HTTPS raster images, without redirects or unbounded bodies. */
-async function relayAvatar(request, ctx, upstreamUrl) {
+async function relayAvatar(ctx, upstreamUrl) {
   try { if (new URL(upstreamUrl).protocol !== 'https:') return NOT_RELAYED(); }
   catch { return NOT_RELAYED(); }
   const cache = globalThis.caches && globalThis.caches.default;
-  const at = new URL(request.url);
-  const key = new Request(at.origin + at.pathname, { method: 'GET' });
+  const key = await avatarCacheKey(upstreamUrl);
   if (cache) { const hit = await cache.match(key).catch(() => null); if (hit) return hit; }
   const up = await fetch(upstreamUrl, { redirect: 'manual' }).catch(() => null);
   if (!up) return NOT_RELAYED();
@@ -1059,7 +1069,7 @@ const router = {
     if (want === 'avatar') {
       const avatar = cardMd ? cardAvatar(parseCard(cardMd)) : null;
       const image = !avatar ? NOT_RELAYED()
-        : avatar.url ? await relayAvatar(request, ctx, avatar.url)
+        : avatar.url ? await relayAvatar(ctx, avatar.url)
           : new Response(Uint8Array.from(atob(avatar.b64.replace(/\s+/g, '')), (c) => c.charCodeAt(0)), {
             headers: {
               'Content-Type': avatar.mime,
