@@ -30,6 +30,7 @@ export function attributeReads(source) {
 // These are read from generated content or the document, not embed configuration.
 export const INTERNAL = {
   events: {
+    'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
     'data-loc': 'Location on generated event links.',
     'data-start': 'Timestamp on generated event entries.',
     'data-end': 'Timestamp on generated event entries.',
