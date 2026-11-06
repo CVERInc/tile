@@ -58,7 +58,7 @@ test('the Video sheet says which address it takes — an example in every locale
 });
 
 test('the editor answers the three questions in full in English and Traditional Chinese, with their slots', () => {
-  // what is this (the row, Cards options), what can I do (add, turn over, pair), what happens next (Save)
+  // what is this (the row, Cards settings), what can I do (add, turn over, pair), what happens next (Save)
   for (const l of ['en', 'zh']) {
     assert.deepEqual(EDIT3_KEYS.filter((k) => !(typeof EDIT3_STRINGS[l][k] === 'string' && EDIT3_STRINGS[l][k].trim())), [], l);
   }

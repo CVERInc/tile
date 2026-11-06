@@ -5,7 +5,7 @@
 // Built on the engine's own pieces: the state is the card's Markdown (card-core); the sheet a pencil
 // opens is cell-form-core's, built from CELL_TYPES, with cell-form-dom's pickers; a text tile is
 // written with the family's text editor (editor-core + its web shim, borrowed as they ship). This
-// module owns the row of tiles, the pairing chain, the swap, the numbers, Cards options, and Save.
+// module owns the row of tiles, the pairing chain, the swap, the numbers, Cards settings, and Save.
 //
 // 🔴 NOTHING GOES LIVE UNTIL SAVE. The draft lives in this browser (localStorage) and survives a
 // reload; leaving edit mode with it unsaved asks (Save / Keep editing / Discard, w3/leave-edit.mjs),
@@ -35,6 +35,9 @@ import { leaveStep, resolveLeave } from './leave-edit.mjs';
 import { withRaw, backId, freshBackId, insertCell, removeCell, pair, unpair, canPair } from './pairing.mjs';
 import { VIEW_IDS, fmRead, fmWrite, readViews, toggleView, applySetting } from './card-settings.mjs';
 import { NETWORKS, parseSocial, composeSocial } from './social-rows.mjs';
+import { WIDE_MIN, CHOICES, createPageStack, sidebarGroups, confirmShape, topLayer, closeShows, LAYER_TOP_FIRST, swipeCloses } from './settings-nav.mjs';
+import { encodeImage } from '../w/cell-form-dom.mjs';
+import { DEFAULT_ACCENT } from '../colour.mjs';
 
 // ── the page's options, written by the Worker (card-worker.mjs editorHtml) ──
 const OPTS = window.__CARDTILE_W3_OPTS__ || { sandbox: true };
@@ -133,10 +136,11 @@ function persist() {
 const dirty = () => md !== savedMd;
 addEventListener('beforeunload', (e) => { if (dirty()) e.preventDefault(); });
 function read(text) { const x = parseCard(text); if (!x.blocks.length) x.blocks = [{ label: '', start: 0, count: 0 }]; return x; }
-function commit(next, { quiet = false } = {}) {   // next: a model → it becomes the file
+function commit(next, { quiet = false, settings = true } = {}) {   // next: a model → it becomes the file
   md = serializeCard(next); m = read(md);
   persist();
   draw(); if (!quiet) show();   // quiet: the screen already shows it (the wall moves the tiles itself)
+  if (settings) setPaint();     // Cards settings, when open under this, shows the file as it now is
 }
 const clone = () => structuredClone(m);
 
@@ -259,7 +263,7 @@ function openPicker(at = m.cells.length, opt = {}) {
   const kinds = PALETTE.map((t) => `<button class="ctw-pick-btn" type="button" data-type="${esc(t)}" title="${esc(say(TYPES[t].hint))}">`
     + `<span class="ctw-pick-ico">${typeIconSvg(t)}</span><span class="ctw-pick-name">${esc(say(TYPES[t].title))}</span>`
     + `<span class="ctw-pick-hint">${esc(say(TYPES[t].hint))}</span></button>`).join('');
-  // (raw editing lives in one place only: Cards options → More → Edit raw content)
+  // (raw editing lives in one place only: Cards settings → More → Edit raw content)
   el('picker-row').innerHTML = kinds;
   for (const b of el('picker-row').querySelectorAll('.ctw-pick-btn')) b.onclick = () => { el('picker').hidden = true; if (opt.asDefault) addDefault(b.dataset.type); else add(b.dataset.type, at); };
   el('picker').hidden = false;
@@ -290,7 +294,7 @@ function addDefault(type) {
 function dropDefault(x) { const id = defId(x.pre); x.drawers = x.drawers.filter((d) => d.id !== id); x.pre = fmWrite(x.pre, 'back', null); return x; }
 
 // ── the pencil: cell-form-core's sheet for the tile's kind, or the tile's own line as Markdown ──
-let open = null;   // { i, which, asMd } | { card: true } | { whole: true }
+let open = null;   // { i, which, asMd } | { whole: true }
 const cellAt = (i, which) => (which === 'default' ? defBack().cells[0] : which === 'back' ? m.drawers.find((d) => d.id === backId(m.cells[i])).cells[0] : m.cells[i]);
 function previewSrc(value) {
   const a0 = /^asset:(.+)$/.exec(String(value || '').trim());
@@ -461,11 +465,10 @@ function requiredNames(def) {
   walk(def.form || def.fields || []); return out;
 }
 function closeSheet(kept) {
-  if (open && open.card) flushSetting();   // a title typed a moment ago still lands
   el('modal').hidden = true; open = null; pending = {}; prose = null;
-  el('modal').querySelector('.ctw-modal-panel').classList.remove('is-settings');
   if (!kept && undoTo != null) { const back = undoTo; undoTo = null; md = back; m = read(md); persist(); draw(); }
   undoTo = null;
+  setPaint();   // back to Cards settings when the sheet was opened from there
 }
 function saveSheet() {
   if (!open) return;
@@ -511,213 +514,482 @@ function deleteSheet() {
   if (!fresh) confirmNote('deleted', L.deleted, backTo(was));
 }
 // ── the one notice (w3/notice.mjs): top = status and errors, bottom = confirmations (with Undo) ──
-const LAYER_ORDER = ['leavemodal', 'doormodal', 'modal', 'picker'];
-const openPanel = () => { for (const id of LAYER_ORDER) if (!el(id).hidden) return el(id).querySelector('.ctw-modal-panel'); return null; };
+// the open sheet a bottom notice moves into: the top-most one (Cards settings sits under the sheets it opens)
+const LAYER_ORDER = ['leavemodal', 'doormodal', 'modal', 'picker', 'settings'];
+const openPanel = () => {
+  for (const id of LAYER_ORDER) if (id === 'settings' ? setOpen() : !el(id).hidden) return el(id).querySelector('.ctw-modal-panel, .set-panel');
+  return null;
+};
 const notices = createNotices({ top: el('notice-top'), bottom: el('notice-bottom'), openSheet: openPanel });
 const confirmNote = (kind, words, undo) => notices.show(kind, words, undo ? { label: L.undo, run: undo } : null);
-const backTo = (was) => () => { md = was; m = read(md); cache.clear(); persist(); draw(); show(); };
+const backTo = (was) => () => { md = was; m = read(md); cache.clear(); persist(); draw(); show(); setPaint(); };
 
-// ── Cards options: what belongs to the whole card, not to one tile ──
-// 🔴 A DESIGNED LIST, NOT A FORM: grouped rows, label on the left, its control on the right (a switch, a value,
-// or a two- or three-way choice). Every change goes into the draft the moment it is made (w3/card-settings.mjs):
-// there is no Done, and closing the sheet keeps everything. Nothing is live until Save, as everywhere.
-const P = (label, control, extra = {}) => ({ disposition: DISPOSITION.FORM, label, control, ...extra });
-const CARD_DEF = {
-  title: L.options, hint: '', body: null,
-  params: {
-    backdrop: P(L.backdrop, CONTROL.ASSET, { hint: L.backdropHint }),
-    'backdrop-dim': P(L.dim, CONTROL.SELECT, { options: ['0', '25', '45', '65'], optionLabels: L.dimNames, hint: L.dimHint }),
+// ── Cards settings: what belongs to the whole card, not to one tile ──
+// 🔴 iOS SETTINGS IS THE RULER (w3/settings-nav.mjs holds the shape). A panel that slides up from the bottom of
+// the glass and back down when closed. Narrow: grouped inset lists, one thing per row (label left, its value
+// right, a chevron when it opens a page), pages pushed in from the right with "‹ Settings" at their top-left.
+// Wide: a sidebar of the groups and the chosen group's rows; a 2–3-option choice is a dropdown there.
+// Explanations are grey footnotes under a group, never inside a row. Destructive actions are a red group at
+// the bottom, confirmed first (an action sheet narrow, a centred alert wide).
+// Every change goes into the DRAFT the moment it is made (w3/card-settings.mjs): there is no Save in here;
+// the top bar's Save (and its unsaved dot) is how it is saved, after the panel is closed.
+const setLayer = el('settings'), setPanel = el('set-panel'), setPages = el('set-pages'), setConfirm = el('set-confirm');
+const wideMQ = matchMedia(`(min-width: ${WIDE_MIN}px)`), calm = matchMedia('(prefers-reduced-motion: reduce)');
+let setLayout = 'narrow', wideGroup = 'name', wideSub = null, bdErr = '', bkErr = '';
+const setStack = createPageStack('root');
+const setOpen = () => !setLayer.hidden && !setLayer.classList.contains('is-closing');
+const unq = (v) => String(v || '').replace(/^["']|["']$/g, '');
+const fmNow = () => fmRead(m.pre);
+const NOW = {
+  theme: () => (['light', 'dark'].includes(fmNow().theme) ? fmNow().theme : 'auto'),
+  header: () => (fmNow().header === 'left' ? 'left' : 'centre'),
+  icons: () => (fmNow().icons === 'mono' ? 'mono' : 'colour'),
+  dim: () => (CHOICES.dim.includes(String(fmNow()['backdrop-dim'] || '')) ? String(fmNow()['backdrop-dim'] || '') : ''),
+  accent: () => { const a = unq(fmNow().accent).toLowerCase(); return /^#[0-9a-f]{6}$/.test(a) ? a : ''; },
+  backdrop: () => unq(fmNow().backdrop).trim(),
+};
+// in the order offered: [value, name] pairs (an object would put the numeric keys before Auto's '')
+L.dimAll = CHOICES.dim.map((k) => [k, k ? L.dimNames[k] : L.auto]);
+const pairs = (names) => (Array.isArray(names) ? names : Object.entries(names));
+const CHOICE_NAMES = { theme: L.themeNames, header: L.headerNames, icons: L.iconsNames, dim: L.dimAll };
+const CHOICE_KEY = { theme: 'theme', header: 'header', icons: 'icons', dim: 'backdrop-dim' };
+const GROUP_NAME = { name: L.secName, look: L.secLook, views: L.secViewsBack, found: L.secFound, more: L.secMore };
+const PAGE_TITLE = { address: L.handleL, domain: L.domainL, theme: L.themeL, accent: L.accentL, backdrop: L.backdrop, header: L.headerL, icons: L.iconsL, views: L.viewsL, back: L.bcL, backup: L.backupL };
+// the main colours on offer: the engine's default first (what Reset gives back), then a spread of hues. Thirteen,
+// so that with the custom well at the end a phone shows two full rows of seven. Any colour is safe here: the
+// engine adjusts an accent for legibility on its own (colour.mjs readableAccent).
+const SWATCHES = [DEFAULT_ACCENT, '#2fa4e7', '#4361ee', '#2b4c7e', '#9b5de5', '#f15bb5', '#a4243b',
+  '#e4572e', '#f3a712', '#6a7f2a', '#29bf12', '#6c757d', '#222222'];
+const RAINBOW = 'conic-gradient(from 90deg,#ff3b30,#ff9500,#ffcc00,#34c759,#00c7be,#007aff,#af52de,#ff2d55,#ff3b30)';
+const CHEVL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
+const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+const AVATAR = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8" r="4.2"/><path d="M3.5 21c.8-4.4 4.2-6.8 8.5-6.8s7.7 2.4 8.5 6.8z"/></svg>';
+
+// ── the rows: one thing per row ──
+const node = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
+/** a group: an optional header, the inset list, and at most one grey footnote under it */
+function sGroup(body, title, foot = '', { err = false, id = '' } = {}) {
+  if (title) body.append(node('h3', 'set-gh', esc(title)));
+  const g = node('div', 'set-g'); body.append(g);
+  if (foot) { const f = node('p', 'set-foot' + (err ? ' is-err' : '')); f.textContent = foot; if (id) f.id = id; if (err) f.setAttribute('role', 'alert'); body.append(f); }
+  return g;
+}
+function rowBtn(g, label, { value = '', valueHtml = '', chevron = false, tone = '', id = '', disabled = false, onClick = null } = {}) {
+  const r = node('button', 'set-r' + (tone ? ` is-${tone}` : '')); r.type = 'button'; if (id) r.id = id; r.disabled = disabled;
+  r.innerHTML = `<span class="set-l">${esc(label)}</span>${valueHtml || (value ? `<span class="set-v">${esc(value)}</span>` : '')}${chevron ? `<span class="set-chev">${CHEV}</span>` : ''}`;
+  if (onClick) r.onclick = onClick;
+  g.append(r); return r;
+}
+function rowStatic(g, label, value = '', { id = '' } = {}) {
+  const r = node('div', 'set-r', `<span class="set-l">${esc(label)}</span>${value ? `<span class="set-v">${esc(value)}</span>` : ''}`); if (id) r.id = id;
+  g.append(r); return r;
+}
+function rowField(g, label, input, { prefix = '' } = {}) {
+  const r = node('label', 'set-r is-field', `${label ? `<span class="set-l">${esc(label)}</span>` : ''}${prefix ? `<span class="set-pre">${esc(prefix)}</span>` : ''}`);
+  r.append(input); g.append(r); return r;
+}
+function textInput(id, value, { placeholder = '', type = 'text', mode = '' } = {}) {
+  const i = document.createElement('input'); i.type = type; i.id = id; i.value = value; i.placeholder = placeholder;
+  i.autocomplete = 'off'; i.spellcheck = false; if (mode) { i.inputMode = mode; i.setAttribute('autocapitalize', 'off'); }
+  return i;
+}
+// a switch row is one <label>: tapping the words toggles it too. A row may carry ONE short second line (iOS's
+// subtitle cell) when it names a thing — never an explanation; those are the group's footnote.
+function rowSwitch(g, label, sub, on, onChange, { disabled = false, id = '' } = {}) {
+  const r = node('label', 'set-r is-switch', `<span class="set-l">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>`);
+  const sw = document.createElement('input'); sw.type = 'checkbox'; sw.className = 'switch'; sw.setAttribute('role', 'switch');
+  if (id) sw.id = id; sw.checked = on; sw.disabled = disabled; sw.onchange = () => onChange(sw.checked);
+  r.append(sw); g.append(r); return r;
+}
+// a 2–3-option choice on the narrow shape: a checkmark list (never a segmented control, never a native select)
+function rowChecks(g, names, value, onPick, label) {
+  g.setAttribute('role', 'radiogroup'); if (label) g.setAttribute('aria-label', label);
+  for (const [k, n] of pairs(names)) {
+    const r = rowBtn(g, n, { valueHtml: `<span class="set-ck">${k === value ? CHECK : ''}</span>`, onClick: () => onPick(k) });
+    r.setAttribute('role', 'radio'); r.setAttribute('aria-checked', String(k === value)); r.dataset.v = k;
+  }
+}
+// …and on the wide shape: an inline dropdown
+function rowSelect(g, label, names, value, onPick, id) {
+  const r = node('label', 'set-r is-select', `<span class="set-l">${esc(label)}</span>`);
+  const s = document.createElement('select'); s.className = 'set-sel'; s.id = id;
+  s.innerHTML = pairs(names).map(([k, n]) => `<option value="${esc(k)}"${k === value ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  s.onchange = () => onPick(s.value);
+  r.append(s); g.append(r); return r;
+}
+const inlineBtn = (label, { id = '', disabled = false, title = '', onClick = null } = {}) => {
+  const b = node('button', 'set-inl'); b.type = 'button'; b.textContent = label; if (id) b.id = id; b.disabled = disabled; if (title) b.title = title;
+  if (onClick) b.onclick = onClick; return b;
+};
+
+// ── the rows that are the same on both shapes ──
+function titleRow(g) {
+  const inp = textInput('opt-title', unq(fmNow().title), { placeholder: L.untitled });
+  inp.oninput = () => putSoon('title', inp.value);
+  inp.onchange = () => { settingNext = ['title', inp.value]; flushSetting(); };
+  rowField(g, L.titleL, inp);
+}
+const addr = (h) => `reef.cards/${h}`;
+function addressRow(g) {
+  // 🔴 a real Card's address is the platform's: read-only here
+  if (!SANDBOX) { rowStatic(g, L.handleL, addr(getHandle()), { id: 'opt-handle' }); return; }
+  rowBtn(g, L.handleL, { value: addr(getHandle()), chevron: true, id: 'opt-hchange', onClick: () => setPush('address') });
+}
+const nameFoot = () => (!SANDBOX ? L.handleHere : profileAt() >= 0 ? L.titleFromProfile : '');
+const viewsValue = () => readViews(m.pre).on.map((v) => L.views[v]).join(L.listSep);
+const backValue = () => { const d = defBack(); return d && d.cells[0] ? kindName(d.cells[0]) : L.bcValue; };
+const dot = (c) => `<span class="set-dot" style="background:${esc(c)}" aria-hidden="true"></span>`;
+function poolGroup(body) {
+  const on = poolOn();
+  rowSwitch(sGroup(body, '', on ? L.poolOn : L.poolOff), L.poolL, '', on, (want) => { lsSet(PKEY, want ? null : 'off'); show(); setPaint(); }, { id: 'opt-pool' });
+}
+function signInRow(g, { small = false } = {}) {
+  // the sandbox's first row, shaped like the account row at the top of a phone's settings. It opens the SAME
+  // door Save opens: the draft is parked and the creation flow takes it from there.
+  const b = node('button', 'set-acct' + (small ? ' is-small' : ''), `<span class="set-av">${AVATAR}</span><span class="set-acct-t"><b>${esc(L.signIn)}</b><small>${esc(small ? L.sbxStatus : L.signInSays)}</small></span>${small ? '' : `<span class="set-chev">${CHEV}</span>`}`);
+  b.type = 'button'; b.id = 'opt-signin'; b.onclick = () => openDoor();
+  g.append(b);
+}
+function swatchRow(g, { inline = false } = {}) {
+  const cur = NOW.accent() || DEFAULT_ACCENT, custom = !SWATCHES.includes(cur);
+  const pal = node('div', 'set-pal' + (inline ? ' is-inline' : '')); pal.setAttribute('role', 'radiogroup'); pal.setAttribute('aria-label', L.accentL);
+  for (const c of SWATCHES) {
+    const b = node('button', 'set-sw'); b.type = 'button'; b.style.setProperty('--sw', c);
+    b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(c === cur)); b.setAttribute('aria-label', c); b.dataset.c = c;
+    b.onclick = () => putSetting('accent', c === DEFAULT_ACCENT ? null : c);
+    pal.append(b);
+  }
+  // the last well: a rainbow that opens the system colour picker (on a phone, the same sheet the built-in apps
+  // use). Once a colour of its own is chosen, the well wears it and is the ringed one; no extra swatch appears.
+  const w = node('label', 'set-sw is-well'); w.id = 'opt-accent-custom';
+  w.style.setProperty('--sw', custom ? cur : RAINBOW);
+  w.setAttribute('role', 'radio'); w.setAttribute('aria-checked', String(custom)); w.setAttribute('aria-label', L.accentCustom);
+  const fi = document.createElement('input'); fi.type = 'color'; fi.tabIndex = -1;
+  fi.value = /^#[0-9a-f]{6}$/i.test(cur) ? cur.toLowerCase() : DEFAULT_ACCENT;
+  fi.onchange = () => putSetting('accent', fi.value === DEFAULT_ACCENT ? null : fi.value);
+  w.tabIndex = 0; w.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } };
+  w.append(fi); pal.append(w);
+  if (inline) { const r = node('div', 'set-r is-pal', `<span class="set-l">${esc(L.accentL)}</span>`); r.append(pal); g.append(r); return r; }
+  const r = node('div', 'set-r is-pal'); r.append(pal); g.append(r); return r;
+}
+const accentReset = (g) => rowBtn(g, L.accentReset, { tone: 'act', id: 'opt-accent-0', disabled: !NOW.accent(), onClick: () => putSetting('accent', null) });
+// the backdrop: a picture from the phone's library or an address, and taking it away
+function backdropRows(g) {
+  const v = NOW.backdrop(), src = v ? previewSrc(v) : '';
+  if (src) g.append(node('div', 'set-shot', `<img src="${esc(src)}" alt="">`));
+  const pick = node('label', 'set-r is-act', `<span class="set-l">${esc(L.bdPick)}</span>`);
+  const fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.hidden = true; fi.id = 'opt-bdfile';
+  fi.onchange = async () => {
+    const f = fi.files[0]; if (!f) return;
+    try {
+      const a = await encodeImage(f);
+      if (!a) { bdErr = T.assetTooBig; setPaint(); return; }
+      bdErr = ''; pending[a.id] = { mime: a.mime, b64: a.b64 }; putSetting('backdrop', `asset:${a.id}`);
+    } catch { bdErr = T.assetUnreadable; setPaint(); }
+  };
+  pick.append(fi); g.append(pick);
+  const url = textInput('opt-bdurl', /^asset:/.test(v) ? '' : v, { type: 'url', mode: 'url', placeholder: 'https://…' });
+  url.onchange = () => { bdErr = ''; putSetting('backdrop', url.value.trim() || null); };
+  rowField(g, L.bdUrl, url);
+  if (v) rowBtn(g, L.bdRemove, { tone: 'red', id: 'opt-bdoff', onClick: () => { bdErr = ''; putSetting('backdrop', null); } });
+}
+function viewsSwitches(g, vs) {
+  for (const v of VIEW_IDS) {
+    const on = vs.on.includes(v);
+    rowSwitch(g, L.views[v], L.viewSays[v], on, (want) => putSetting('views', toggleView(vs, v, want)), { disabled: on && vs.on.length === 1, id: `opt-view-${v}` });
+  }
+}
+// the default back — drawn, not described: the default back is a tile, so it shows as one. Out of the box it
+// shows your name and a QR code; Replace puts any one tile there.
+function backMini() {
+  const d = defBack();
+  const mini = d ? cardEl(d.cells.slice(0, 1), L.bcL, () => edit(-1, 'default'))
+    : node('div', 'card printed', `<div class="bc-name"></div><div class="bc-qr" aria-hidden="true">${QRICO}</div>`);
+  mini.classList.add('bc-mini');
+  const n = mini.querySelector('.bc-name'); if (n) n.textContent = unq(fmNow().title).trim() || L.untitled;
+  return mini;
+}
+function backAction() {
+  if (defBack()) { const was = md; commit(dropDefault(clone())); confirmNote('done', L.toBcDone, backTo(was)); }
+  else openPicker(0, { asDefault: true });   // the picker, then the new back's own sheet, open ABOVE settings
+}
+const backActLabel = () => (defBack() ? L.toBc : L.replaceBack);
+function downloadMd() { const u = URL.createObjectURL(new Blob([md], { type: 'text/markdown' })); const x = document.createElement('a'); x.href = u; x.download = `${getHandle()}.md`; x.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); }
+const askReplace = () => confirmDanger({ ask: L.replaceAsk, act: L.replaceGo, run: () => el('opt-file').click() });
+const askReset = () => confirmDanger({ ask: L.resetAsk, act: PERSONA.reset, run: resetSandbox });
+
+// ── the narrow shape's pages ──
+const PAGES = {
+  root(body) {
+    if (SANDBOX) signInRow(sGroup(body, '', L.sbxStatus));
+    { const g = sGroup(body, L.secName, nameFoot()); titleRow(g); addressRow(g);
+      if (SANDBOX) rowBtn(g, L.domainL, { value: L.domainNone, chevron: true, id: 'opt-domain', onClick: () => setPush('domain') }); }
+    { const g = sGroup(body, L.secLook);
+      rowBtn(g, L.themeL, { value: L.themeNames[NOW.theme()], chevron: true, id: 'opt-theme', onClick: () => setPush('theme') });
+      rowBtn(g, L.accentL, { valueHtml: dot(NOW.accent() || DEFAULT_ACCENT), chevron: true, id: 'opt-accent', onClick: () => setPush('accent') });
+      rowBtn(g, L.backdrop, { value: NOW.backdrop() ? L.bdSet : L.bdNone, chevron: true, id: 'opt-backdrop', onClick: () => setPush('backdrop') });
+      rowBtn(g, L.headerL, { value: L.headerNames[NOW.header()], chevron: true, id: 'opt-header', onClick: () => setPush('header') });
+      rowBtn(g, L.iconsL, { value: L.iconsNames[NOW.icons()], chevron: true, id: 'opt-icons', onClick: () => setPush('icons') }); }
+    { const g = sGroup(body, L.secViewsBack);
+      rowBtn(g, L.viewsL, { value: viewsValue(), chevron: true, id: 'opt-views', onClick: () => setPush('views') });
+      rowBtn(g, L.bcL, { value: backValue(), chevron: true, id: 'opt-back', onClick: () => setPush('back') }); }
+    if (SANDBOX) { body.append(node('h3', 'set-gh', esc(L.secFound))); poolGroup(body); }
+    { const g = sGroup(body, L.secMore);
+      rowBtn(g, L.openRaw, { chevron: true, id: 'opt-raw', onClick: () => openRaw() });
+      rowBtn(g, L.backupL, { chevron: true, id: 'opt-backup', onClick: () => setPush('backup') });
+      if (SANDBOX) rowStatic(g, L.transferL, L.notYet, { id: 'opt-transfer' }); }
+    if (SANDBOX) rowBtn(sGroup(body, '', L.resetSays), PERSONA.reset, { tone: 'red', id: 'opt-reset', onClick: askReset });
+  },
+  // The handle is the platform's (create_card reserves it; nothing in the file). The sandbox keeps a stand-in in
+  // this browser so the change can be felt: the old address is let go at once, so the gate is the warning, and
+  // the owner types the OLD address to let it go.
+  address(body) {
+    const h = getHandle();
+    const nw = textInput('opt-hnew', h, { mode: 'url' });
+    const g1 = sGroup(body, L.newHandle, L.handleSays, { id: 'opt-herr' }), foot = g1.nextElementSibling;
+    rowField(g1, '', nw, { prefix: 'reef.cards/' });
+    const old = textInput('opt-hold', '', { mode: 'url', placeholder: h });
+    rowField(sGroup(body, fmt(L.typeOld, { o: h }), fmt(L.handleWarn, { o: h })), '', old);
+    const go = rowBtn(sGroup(body, ''), L.doChange, { tone: 'act', id: 'opt-hgo', disabled: true });
+    // what you type is what is saved: the address is lowercase, so the box is lowercased as you type
+    const lower = (inp) => { const a = inp.selectionStart, b = inp.selectionEnd, v = inp.value.toLowerCase(); if (v !== inp.value) { inp.value = v; inp.setSelectionRange(a, b); } };
+    const check = () => {
+      lower(nw);
+      // the box opens on the address you have: that is not a mistake yet, just nothing to change
+      const v = nw.value.trim(), why = !v || v === h ? '' : !HANDLE_SHAPE.test(v) ? L.hShape : RESERVED.has(v.replace(/-/g, '')) ? L.hReserved : '';
+      foot.textContent = why || L.handleSays; foot.classList.toggle('is-err', !!why);
+      if (why) foot.setAttribute('role', 'alert'); else foot.removeAttribute('role');
+      go.disabled = !v || v === h || !!why || old.value.trim().toLowerCase() !== h;
+    };
+    nw.oninput = old.oninput = check; check();
+    go.onclick = () => {
+      const v = nw.value.trim(); lsSet(HANDLE_KEY, v); setPop();
+      confirmNote('done', fmt(L.handleDone, { h: v }), () => { lsSet(HANDLE_KEY, h); setPaint(); });
+    };
+  },
+  domain(body) { rowBtn(sGroup(body, '', L.domainSays), L.connect, { tone: 'act', value: L.notYet, disabled: true, id: 'opt-connect' }); },
+  theme(body) { choicePage(body, 'theme', L.themeAutoSays); },
+  header(body) { choicePage(body, 'header'); },
+  icons(body) { choicePage(body, 'icons'); },
+  accent(body) { const g = sGroup(body, '', L.accentSays); swatchRow(g); accentReset(g); },
+  backdrop(body) {
+    backdropRows(sGroup(body, '', bdErr || L.backdropHint, { err: !!bdErr }));
+    rowChecks(sGroup(body, L.dim, L.dimHint), L.dimAll, NOW.dim(), (v) => putSetting('backdrop-dim', v), L.dim);
+  },
+  views(body) {
+    const vs = readViews(m.pre);
+    viewsSwitches(sGroup(body, L.viewsLabel, L.viewsKeepOne), vs);
+    if (vs.on.length > 1) rowChecks(sGroup(body, L.opensAs), Object.fromEntries(vs.on.map((v) => [v, L.views[v]])), vs.open, (v) => putSetting('views', { ...vs, open: v }), L.opensAs);
+  },
+  back(body) {
+    const p = node('div', 'set-backview'); p.append(backMini()); body.append(p);
+    body.append(node('p', 'set-foot is-centre', esc(L.dfSays)));
+    rowBtn(sGroup(body, ''), backActLabel(), { tone: 'act', id: 'opt-df', onClick: backAction });
+  },
+  backup(body) {
+    rowBtn(sGroup(body, '', L.backupSays), L.download, { tone: 'act', id: 'opt-dl', onClick: downloadMd });
+    rowBtn(sGroup(body, '', bkErr || L.replaceSays, { err: !!bkErr, id: 'opt-bkerr' }), L.replaceFile, { tone: 'red', id: 'opt-up', onClick: askReplace });
   },
 };
-CARD_DEF.fields = Object.entries(CARD_DEF.params).map(([name, p]) => ({ name, ...p }));
+function choicePage(body, key, foot = '') {
+  rowChecks(sGroup(body, '', foot), CHOICE_NAMES[key], NOW[key](), (v) => putSetting(CHOICE_KEY[key], v), PAGE_TITLE[key]);
+}
+
+// ── the wide shape's groups: the same rows, the simple choices inline ──
+const GROUPS = {
+  name(body) {
+    const g = sGroup(body, '', SANDBOX ? L.handleSays : nameFoot()); titleRow(g); addressRow(g);
+    if (SANDBOX) { const r = rowStatic(g, L.domainL); r.append(inlineBtn(L.connect, { disabled: true, title: L.notYet, id: 'opt-connect' })); }
+  },
+  look(body) {
+    const g = sGroup(body, '');
+    rowSelect(g, L.themeL, L.themeNames, NOW.theme(), (v) => putSetting('theme', v), 'opt-theme');
+    const r = swatchRow(g, { inline: true });
+    if (NOW.accent()) r.append(inlineBtn(L.accentReset, { id: 'opt-accent-0', onClick: () => putSetting('accent', null) }));
+    rowSelect(g, L.headerL, L.headerNames, NOW.header(), (v) => putSetting('header', v), 'opt-header');
+    rowSelect(g, L.iconsL, L.iconsNames, NOW.icons(), (v) => putSetting('icons', v), 'opt-icons');
+    const b = sGroup(body, L.backdrop, bdErr || L.backdropHint, { err: !!bdErr });
+    backdropRows(b);
+    rowSelect(b, L.dim, L.dimAll, NOW.dim(), (v) => putSetting('backdrop-dim', v), 'opt-dim');
+  },
+  views(body) {
+    const vs = readViews(m.pre), g = sGroup(body, L.viewsLabel, L.viewsKeepOne);
+    viewsSwitches(g, vs);
+    if (vs.on.length > 1) rowSelect(g, L.opensAs, Object.fromEntries(vs.on.map((v) => [v, L.views[v]])), vs.open, (v) => putSetting('views', { ...vs, open: v }), 'opt-opens');
+    const b = sGroup(body, L.bcL, L.dfSays), r = node('div', 'set-r is-back');
+    r.append(backMini(), inlineBtn(backActLabel(), { id: 'opt-df', onClick: backAction })); b.append(r);
+  },
+  found(body) { poolGroup(body); },
+  more(body) {
+    const g = sGroup(body, '');
+    rowBtn(g, L.openRaw, { chevron: true, id: 'opt-raw', onClick: () => openRaw() });
+    const r = rowStatic(g, L.backupL); r.append(inlineBtn(L.download, { id: 'opt-dl', onClick: downloadMd }));
+    if (SANDBOX) rowStatic(g, L.transferL, L.notYet, { id: 'opt-transfer' });
+    const d = sGroup(body, '', bkErr || (SANDBOX ? L.dangerSays : L.replaceSays), { err: !!bkErr, id: 'opt-bkerr' });
+    rowBtn(d, L.replaceFile, { tone: 'red', id: 'opt-up', onClick: askReplace });
+    if (SANDBOX) rowBtn(d, PERSONA.reset, { tone: 'red', id: 'opt-reset', onClick: askReset });
+  },
+};
+
+// ── drawing ──
+function navBar(backLabel, title) {
+  const n = node('div', 'set-head set-nav', `<button type="button" class="set-back" id="set-back">${CHEVL}<span>${esc(backLabel)}</span></button><h2 class="set-nt">${esc(title)}</h2>`);
+  n.querySelector('.set-back').onclick = setPop;
+  return n;
+}
+function renderPage(pg, id) {
+  const y = pg.scrollTop;
+  pg.textContent = '';
+  const head = id === 'root' ? node('div', 'set-head set-big', `<h2 id="set-title">${esc(L.options)}</h2>`) : navBar(L.settingsBack, PAGE_TITLE[id]);
+  const body = node('div', 'set-body');
+  pg.append(head, body); PAGES[id](body);
+  swipeToClose(head);
+  pg.scrollTop = y;
+}
+const livePages = () => [...setPages.children].filter((p) => p.classList.contains('set-pg') && !p.classList.contains('is-leaving'));
+function paintNarrow() {
+  let pages = livePages();
+  if (pages.length !== setStack.depth || setPages.querySelector('.set-side')) {   // a fresh panel, or the shape changed
+    setPages.textContent = '';
+    pages = setStack.pages.map((id, k, all) => { const p = node('div', 'set-pg' + (k < all.length - 1 ? ' is-under' : '')); p.inert = k < all.length - 1; setPages.append(p); return p; });
+    setStack.pages.forEach((id, k) => renderPage(pages[k], id));
+    return;
+  }
+  renderPage(pages[pages.length - 1], setStack.top);
+}
+function paintWide() {
+  const y = setPages.querySelector('.set-main')?.scrollTop || 0;
+  setPages.textContent = '';
+  const side = node('nav', 'set-side', `<div class="set-head set-side-top"><h2 id="set-title">${esc(L.options)}</h2></div>`);
+  side.setAttribute('aria-labelledby', 'set-title');
+  if (SANDBOX) signInRow(side, { small: true });
+  for (const g of sidebarGroups({ sandbox: SANDBOX })) {
+    const b = node('button', 'set-si'); b.type = 'button'; b.textContent = GROUP_NAME[g]; b.dataset.g = g;
+    if (g === wideGroup) b.setAttribute('aria-current', 'true');
+    b.onclick = () => { wideGroup = g; wideSub = null; paintWide(); setPages.querySelector(`.set-si[data-g="${g}"]`)?.focus(); };
+    side.append(b);
+  }
+  const main = node('div', 'set-main'), body = node('div', 'set-body');
+  setPages.append(side, main);   // in the document before the rows are built: a row may look its neighbours up
+  if (wideSub) { main.append(navBar(GROUP_NAME[wideGroup], PAGE_TITLE[wideSub]), body); PAGES[wideSub](body); }
+  else { main.append(node('h2', 'set-ttl', esc(GROUP_NAME[wideGroup])), body); GROUPS[wideGroup](body); }
+  main.scrollTop = y;
+}
+// a repaint keeps the field that had focus (a value written while you type must not take the caret away)
+function setPaint() {
+  if (setLayer.hidden) return;
+  const a = document.activeElement, fid = a && setPanel.contains(a) && a.id, sel = fid && 'selectionStart' in a ? [a.selectionStart, a.selectionEnd] : null;
+  const was = setLayout; setLayout = wideMQ.matches ? 'wide' : 'narrow';
+  if (was !== setLayout) { setStack.reset('root'); wideSub = null; }
+  setPanel.dataset.layout = setLayout;
+  if (setLayout === 'wide') paintWide(); else paintNarrow();
+  if (fid) { const n = el(fid); if (n && setPanel.contains(n)) { n.focus({ preventScroll: true }); if (sel && n.setSelectionRange) try { n.setSelectionRange(sel[0], sel[1]); } catch { /* not a text field */ } } }
+}
+wideMQ.addEventListener('change', () => { closeConfirm(); setPaint(); });
+const slideDone = (fn) => (calm.matches ? fn() : requestAnimationFrame(() => requestAnimationFrame(fn)));
+// narrow: a page slides in from the right over the one it came from; wide: it replaces the group's rows
+function setPush(id) {
+  if (setLayout === 'wide') { wideSub = id; paintWide(); el('set-back')?.focus({ preventScroll: true }); return; }
+  const cur = livePages().at(-1); setStack.push(id);
+  const pg = node('div', 'set-pg is-off'); setPages.append(pg); renderPage(pg, id);
+  if (cur) cur.inert = true;   // the page underneath is out of reach until Back
+  slideDone(() => { pg.classList.remove('is-off'); cur?.classList.add('is-under'); });
+  pg.querySelector('.set-back')?.focus({ preventScroll: true });
+}
+function setPop() {
+  if (setLayout === 'wide') { wideSub = null; paintWide(); return; }
+  if (setStack.depth < 2) return;
+  const pages = livePages(), top = pages.at(-1), prev = pages.at(-2);
+  setStack.pop(); renderPage(prev, setStack.top);
+  top.classList.add('is-leaving', 'is-off'); top.inert = true; prev.inert = false; prev.classList.remove('is-under');
+  setTimeout(() => top.remove(), calm.matches ? 0 : 360);
+}
+function openSettings() {
+  pending = {}; bdErr = ''; bkErr = ''; wideGroup = 'name'; wideSub = null; setStack.reset('root');
+  setLayer.classList.remove('is-closing'); setPanel.style.removeProperty('--set-from');
+  setPages.textContent = ''; setLayer.hidden = false;
+  setPaint(); setPanel.focus({ preventScroll: true });
+  notices.place();
+}
+// slides back down (and the glass fades) before the layer goes; at once when motion is reduced
+function closeSettings({ from = 0 } = {}) {
+  if (setLayer.hidden || setLayer.classList.contains('is-closing')) return;
+  flushSetting(); closeConfirm();
+  const done = () => { clearTimeout(t); setLayer.removeEventListener('animationend', onEnd); setLayer.classList.remove('is-closing'); setLayer.hidden = true; setPanel.style.transform = ''; notices.place(); el('cardset').focus({ preventScroll: true }); };
+  const onEnd = (e) => { if (e.target === setPanel) done(); };
+  let t = 0;
+  if (calm.matches) { done(); return; }
+  setPanel.style.setProperty('--set-from', `${from}px`); setPanel.style.transform = '';
+  setLayer.classList.add('is-closing');
+  setLayer.addEventListener('animationend', onEnd); t = setTimeout(done, 450);
+  notices.place();
+}
+// a downward swipe on the panel's header closes it, the same as ✕ (the header follows the finger meanwhile)
+function swipeToClose(head) {
+  let s = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (setLayout !== 'narrow' || e.button > 0 || e.target.closest('button,input,select,a')) return;
+    s = { x: e.clientX, y: e.clientY, id: e.pointerId }; try { head.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+  });
+  head.addEventListener('pointermove', (e) => { if (!s || e.pointerId !== s.id) return; const dy = Math.max(0, e.clientY - s.y); setPanel.style.transform = dy ? `translateY(${dy}px)` : ''; });
+  head.addEventListener('pointerup', (e) => {
+    if (!s || e.pointerId !== s.id) return;
+    const dx = e.clientX - s.x, dy = e.clientY - s.y; s = null;
+    if (swipeCloses(dx, dy)) closeSettings({ from: Math.max(0, dy) }); else setPanel.style.transform = '';
+  });
+  head.addEventListener('pointercancel', () => { s = null; setPanel.style.transform = ''; });
+}
+// a destructive action asks first: an action sheet from the bottom of the panel (narrow), a centred alert (wide)
+function confirmDanger({ ask, act, run }) {
+  const shape = confirmShape(setLayout);
+  setConfirm.className = `set-confirm is-${shape}`;
+  setConfirm.innerHTML = shape === 'sheet'
+    ? `<div class="set-sheet" role="alertdialog" aria-modal="true" aria-labelledby="set-ask"><div class="set-sheet-box"><p id="set-ask">${esc(ask)}</p><button type="button" class="set-sheet-go" id="set-go">${esc(act)}</button></div><button type="button" class="set-sheet-no" id="set-no">${esc(L.cancel)}</button></div>`
+    : `<div class="set-alert" role="alertdialog" aria-modal="true" aria-labelledby="set-ask"><p id="set-ask">${esc(ask)}</p><div class="set-alert-acts"><button type="button" id="set-no">${esc(L.cancel)}</button><button type="button" class="is-red" id="set-go">${esc(act)}</button></div></div>`;
+  setConfirm.hidden = false;
+  el('set-no').onclick = closeConfirm;
+  el('set-go').onclick = () => { closeConfirm(); run(); };
+  el('set-no').focus();
+}
+function closeConfirm() { if (setConfirm.hidden) return; setConfirm.hidden = true; setConfirm.textContent = ''; }
+setConfirm.addEventListener('click', (e) => { if (e.target === setConfirm) closeConfirm(); });
+setLayer.addEventListener('click', (e) => { if (e.target === setLayer) closeSettings(); });   // the glass beside a wide panel
+// a file replaces the DRAFT, never what is saved: it still needs Save, like any other change
+el('opt-file').onchange = async () => {
+  const f = el('opt-file').files[0]; if (!f) return; let t = await f.text(); el('opt-file').value = '';
+  const wrong = whatIsWrong(t);
+  if (wrong) { bkErr = fmt(L.badFile, { n: wrong.line }); setPaint(); return; }
+  bkErr = '';
+  if (!t.endsWith('\n')) t += '\n';
+  const was = md, before = m.cells.length;
+  closeSettings();
+  md = t; m = read(md); persist(); cache.clear(); draw(); show();
+  confirmNote('replaced', fmt(L.replaced, { a: before, b: m.cells.length }), backTo(was));
+};
 // one setting → the draft, at once
-function putSetting(name, value) {
+function putSetting(name, value, { repaint = true } = {}) {
   const x = clone(); x.pre = applySetting(x.pre, name, value);
-  if (Object.keys(pending).length) x.assets = { ...(x.assets || {}), ...pending };
-  cache.clear(); commit(x);
+  if (Object.keys(pending).length) { x.assets = { ...(x.assets || {}), ...pending }; pending = {}; }
+  cache.clear(); commit(x, { settings: repaint });
 }
 let settingTimer = 0, settingNext = null;
 const putSoon = (name, value) => { clearTimeout(settingTimer); settingNext = [name, value]; settingTimer = setTimeout(flushSetting, 450); };
-function flushSetting() { clearTimeout(settingTimer); const n = settingNext; settingNext = null; if (n) putSetting(n[0], n[1]); }
-function openCard() {
-  open = { card: true }; pending = {};
-  const fm = fmRead(m.pre);
-  el('modal-title').textContent = L.options; el('modal-hint').textContent = '';
-  el('modal-foot').hidden = true;
-  el('modal').querySelector('.ctw-modal-panel').classList.add('is-settings');
-  const body = el('modal-body');
-  body.oninput = body.onchange = null; body.textContent = '';
-  const group = (title) => {
-    const sec = document.createElement('section'); sec.className = 'set-group';
-    if (title) sec.innerHTML = `<h3>${esc(title)}</h3>`;
-    const list = document.createElement('div'); list.className = 'set-list'; sec.appendChild(list); body.appendChild(sec); return list;
-  };
-  // a row: what it is on the left (with a line under it when it needs one), its control on the right
-  const row = (list, label, sub = '', { tag = 'div', cls = '' } = {}) => {
-    const r = document.createElement(tag); r.className = 'set-row' + (cls ? ' ' + cls : '');
-    r.innerHTML = `<span class="set-label"><span class="set-name">${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="set-ctl"></span>`;
-    list.appendChild(r); return r;
-  };
-  // a switch row is one <label>: tapping the words toggles it too
-  const switchRow = (list, label, sub, on, onChange, { disabled = false } = {}) => {
-    const r = row(list, label, sub, { tag: 'label', cls: 'is-switch' });
-    const sw = document.createElement('input'); sw.type = 'checkbox'; sw.className = 'switch'; sw.setAttribute('role', 'switch');
-    sw.checked = on; sw.disabled = disabled; sw.onchange = () => onChange(sw.checked, sw, r);
-    r.querySelector('.set-ctl').appendChild(sw); return r;
-  };
-  const segRow = (list, label, names, value, onPick) => {
-    const r = row(list, label);
-    const seg = document.createElement('div'); seg.className = 'open-seg'; seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', label);
-    seg.innerHTML = Object.entries(names).map(([k, n]) => `<button type="button" data-v="${k}" aria-pressed="${k === value}">${esc(n)}</button>`).join('');
-    for (const b of seg.querySelectorAll('button')) b.onclick = () => { for (const x of seg.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); onPick(b.dataset.v); };
-    r.querySelector('.set-ctl').appendChild(seg); return r;
-  };
-
-  // 0 · the sandbox: where these Cards are kept, and the one way to empty that (it used to be a banner)
-  if (SANDBOX) {
-    const r = row(group(''), L.sbxStatus, '', { cls: 'is-status' });
-    const b = document.createElement('button'); b.type = 'button'; b.className = 'ctw-btn'; b.id = 'opt-reset'; b.textContent = PERSONA.reset;
-    b.onclick = resetSandbox; r.querySelector('.set-ctl').appendChild(b);
-  }
-  // 1 · name and address
-  const g1 = group(L.secName), pi = profileAt();
-  { const r = row(g1, L.titleL, pi >= 0 ? L.titleFromProfile : '', { tag: 'label', cls: 'is-input' });
-    const inp = document.createElement('input'); inp.id = 'opt-title'; inp.type = 'text'; inp.autocomplete = 'off'; inp.value = fm.title || ''; inp.placeholder = L.untitled;
-    inp.oninput = () => { putSoon('title', inp.value); reprint(); }; inp.onchange = () => { settingNext = ['title', inp.value]; flushSetting(); };
-    r.querySelector('.set-ctl').appendChild(inp); }
-  handleRow(g1, row);
-  // 🔴 the address, the domain, the pool and the transfer belong to the PLATFORM, not the file. In host
-  // mode they are a real Card's, and this editor cannot change them yet: shown read-only, or not at all.
-  if (SANDBOX) { const r = row(g1, L.domainL, L.domainSays); r.querySelector('.set-ctl').innerHTML = `<button type="button" class="ctw-btn" disabled title="${esc(L.notYet)}">${esc(L.connect)}</button>`; }
-  // 2 · look: the backdrop (the engine's picture picker) and its dim, then the arrangements the engine reads
-  const g2 = group(L.secLook);
-  { const blk = document.createElement('div'); blk.className = 'set-block';
-    blk.innerHTML = formBodyHtml(CARD_DEF, { type: 'card', params: { backdrop: fm.backdrop || '', 'backdrop-dim': fm['backdrop-dim'] || '' }, rawParams: '', body: '' }, { ...formCtx(), T: { ...T, selectDefaultOption: L.auto } });
-    g2.appendChild(blk);
-    wireForm(blk, CARD_DEF, { T, previewSrc, stage: (id, a) => { pending[id] = a; } });
-    // the picker writes its hidden input without an event: watch the value instead
-    const bd = blk.querySelector('#f-backdrop');
-    let lastBd = bd.value; const poll = setInterval(() => { if (!bd.isConnected) { clearInterval(poll); return; } if (bd.value !== lastBd) { lastBd = bd.value; putSetting('backdrop', bd.value); } }, 300);
-    blk.querySelector('#f-backdrop-dim').onchange = (e) => putSetting('backdrop-dim', e.target.value);
-    tidyHints(blk); }
-  segRow(g2, L.headerL, L.headerNames, fm.header === 'left' ? 'left' : 'centre', (v) => putSetting('header', v));
-  segRow(g2, L.iconsL, L.iconsNames, fm.icons === 'mono' ? 'mono' : 'colour', (v) => putSetting('icons', v));
-  { const a = String(fm.accent || '').replace(/^["']|["']$/g, ''), ok = /^#[0-9a-f]{6}$/i.test(a);
-    const r = row(g2, L.accentL, L.accentSays);
-    r.querySelector('.set-ctl').innerHTML = `<input type="color" id="opt-accent" aria-label="${esc(L.accentL)}" value="${ok ? a : '#14a3b3'}"><button type="button" class="ctw-btn" id="opt-accent-0">${esc(L.accentReset)}</button>`;
-    const inp = r.querySelector('#opt-accent'), b0 = r.querySelector('#opt-accent-0');
-    b0.disabled = !ok;
-    inp.oninput = () => { b0.disabled = false; putSoon('accent', inp.value); };
-    b0.onclick = () => { b0.disabled = true; putSetting('accent', null); }; }
-  segRow(g2, L.themeL, L.themeNames, ['light', 'dark'].includes(fm.theme) ? fm.theme : 'auto', (v) => putSetting('theme', v));
-  // 3 · views: one switch per view (the last one on stays on), then which one opens
-  const g3 = group(L.secViews);
-  let vs = readViews(m.pre);
-  const opensRow = document.createElement('div');
-  const paintViewsRows = () => {
-    g3.textContent = '';
-    for (const v of VIEW_IDS) {
-      const on = vs.on.includes(v);
-      switchRow(g3, L.views[v], L.viewSays[v], on, (want) => { vs = toggleView(vs, v, want); putSetting('views', vs); paintViewsRows(); }, { disabled: on && vs.on.length === 1 });
-    }
-    if (vs.on.length > 1) segRow(g3, L.opensAs, Object.fromEntries(vs.on.map((v) => [v, L.views[v]])), vs.open, (v) => { vs = { ...vs, open: v }; putSetting('views', vs); });
-  };
-  paintViewsRows(); void opensRow;
-  // 4 · back — drawn, not described: the default back is a tile, so it shows as one. Out of the box it shows
-  // your name (the title above, so typing there re-prints it) and a QR code; Replace puts any one tile there.
-  const g4 = group(L.secBack), dfl = defBack();
-  const bc = row(g4, L.bcL, dfl ? L.dfSays : L.bcSays, { cls: 'is-back' });
-  const act = document.createElement('button'); act.type = 'button'; act.className = 'ctw-btn'; act.id = 'opt-df'; act.textContent = dfl ? L.toBc : L.replaceBack;
-  bc.querySelector('.set-ctl').appendChild(act);
-  const mini = dfl ? cardEl(dfl.cells.slice(0, 1), L.bcL, () => edit(-1, 'default'))
-    : Object.assign(document.createElement('div'), { className: 'card printed', innerHTML: `<div class="bc-name"></div><div class="bc-qr" aria-hidden="true">${QRICO}</div>` });
-  mini.classList.add('bc-mini'); bc.querySelector('.set-label').appendChild(mini);
-  function reprint() { const n = bc.querySelector('.bc-name'); if (n) n.textContent = (el('opt-title') && el('opt-title').value.trim()) || L.untitled; }
-  reprint();
-  act.onclick = () => { if (dfl) { const was = md; commit(dropDefault(clone())); openCard(); confirmNote('done', L.toBcDone, () => { backTo(was)(); if (open && open.card) openCard(); }); } else openPicker(0, { asDefault: true }); };
-  // 5 · being found — one switch: listed at reef.cards (drawn there, and on the home page) ⇔ the reef.cards card
-  // and footer link. The platform's switch (reef#2913), never the file's: kept in this browser in the sandbox,
-  // and not offered in host mode until the platform side exists.
-  if (SANDBOX) {
-    switchRow(group(L.secFound), L.poolL, poolOn() ? L.poolOn : L.poolOff, poolOn(), (on, sw, r) => {
-      lsSet(PKEY, on ? null : 'off'); r.querySelector('small').textContent = on ? L.poolOn : L.poolOff; show();
-    });
-  }
-  // 6 · more — the file itself, a backup, and (sandbox only, set apart, last) giving it away
-  const g6 = group(L.secMore);
-  { const r = row(g6, L.openRaw, L.rawSays, { tag: 'button', cls: 'is-link' }); r.type = 'button'; r.id = 'opt-raw';
-    r.querySelector('.set-ctl').innerHTML = CHEV; r.onclick = () => openRaw(); }
-  { const r = row(g6, L.backupL, L.backupSays, { cls: 'is-backup' });
-    r.querySelector('.set-ctl').innerHTML = `<button type="button" class="ctw-btn" id="opt-dl">${esc(L.download)}</button><button type="button" class="ctw-btn" id="opt-up">${esc(L.replaceFile)}</button><input type="file" id="opt-file" accept=".md,text/markdown,text/plain" hidden>`;
-    r.querySelector('.set-label').insertAdjacentHTML('beforeend', '<p class="ctw-err" id="opt-bkerr" role="alert"></p>'); }
-  el('opt-dl').onclick = () => { const u = URL.createObjectURL(new Blob([md], { type: 'text/markdown' })); const x = document.createElement('a'); x.href = u; x.download = `${getHandle()}.md`; x.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); };
-  el('opt-up').onclick = () => el('opt-file').click();
-  // a file replaces the DRAFT, never what is saved: it still needs Save, like any other change
-  el('opt-file').onchange = async () => {
-    const f = el('opt-file').files[0]; if (!f) return; let t = await f.text(); el('opt-file').value = '';
-    const wrong = whatIsWrong(t);
-    if (wrong) { el('opt-bkerr').textContent = fmt(L.badFile, { n: wrong.line }); return; }
-    el('opt-bkerr').textContent = '';
-    if (!t.endsWith('\n')) t += '\n';
-    const was = md, before = m.cells.length;
-    closeSheet(true);
-    md = t; m = read(md); persist(); cache.clear(); draw(); show();
-    confirmNote('replaced', fmt(L.replaced, { a: before, b: m.cells.length }), backTo(was));
-  };
-  if (SANDBOX) { const r = row(g6, L.transferL, L.transferSays, { cls: 'optlast' }); r.querySelector('.set-ctl').innerHTML = `<button type="button" class="ctw-btn" disabled title="${esc(L.notYet)}">${esc(L.transferL)}</button>`; }
-  el('modal').hidden = false;
-  notices.place();
-}
+function flushSetting() { clearTimeout(settingTimer); const n = settingNext; settingNext = null; if (n) putSetting(n[0], n[1], { repaint: false }); }
 // the sandbox's stand-in for the platform's pool switch: this browser only, never the file
 const PKEY = 'cardtile:w3:pool', poolOn = () => lsGet(PKEY) !== 'off';
 // The handle is the platform's (create_card reserves it; nothing in the file). In host mode it is the real Card's
-// and is shown as it is. The sandbox keeps a stand-in in this browser so the change can be felt: the old address is
-// let go at once, so the gate is the warning, and the owner types the OLD address to let it go.
+// and is shown as it is; the sandbox keeps a stand-in in this browser (see PAGES.address).
 const HANDLE_KEY = 'cardtile:w3:handle', HANDLE_SHAPE = /^[a-z0-9][a-z0-9-]{0,38}$/;
 // a sample of the platform's reserved names, so the sandbox's stand-in can say no the way the real one does
 const RESERVED = new Set('cards card reef feelreef cver try edit draw pool random www api mcp admin support help login signup dashboard about terms privacy official security billing account settings static assets'.split(' '));
 const getHandle = () => (SANDBOX ? lsGet(HANDLE_KEY) || 'yourname' : handle || 'card');
-function handleRow(list, row) {
-  const r = row(list, L.handleL, SANDBOX ? L.handleSays : `${L.handleSays} ${L.handleHere}`, { cls: 'is-handle' });
-  const ctl = r.querySelector('.set-ctl');
-  const value = (h) => `<span class="addr"><small>reef.cards/</small>${esc(h)}</span>`;
-  if (!SANDBOX) { ctl.innerHTML = value(getHandle()); return; }   // a real Card's address: read-only here
-  const paint = () => {
-    const h = getHandle();
-    ctl.innerHTML = `<button type="button" class="set-val" id="opt-hchange" aria-label="${esc(L.change)} · reef.cards/${esc(h)}">${value(h)}${CHEV}</button>`;
-    r.nextElementSibling?.classList.contains('hd-change') && r.nextElementSibling.remove();
-    el('opt-hchange').onclick = () => {
-      if (r.nextElementSibling?.classList.contains('hd-change')) { paint(); return; }
-      const box = document.createElement('div'); box.className = 'hd-change';
-      box.innerHTML = `<label>${esc(L.newHandle)}<input id="opt-hnew" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" value="${esc(h)}"></label>`
-        + `<p class="ctw-err" id="opt-herr" role="alert"></p><p class="warn">${esc(fmt(L.handleWarn, { o: h }))}</p>`
-        + `<label>${esc(fmt(L.typeOld, { o: h }))}<input id="opt-hold" type="text" autocomplete="off" spellcheck="false" autocapitalize="off"></label>`
-        + `<div class="acts"><button type="button" class="ctw-btn" id="opt-hno">${esc(L.cancel)}</button><button type="button" class="ctw-btn ctw-btn-go" id="opt-hgo" disabled>${esc(L.doChange)}</button></div>`;
-      r.after(box);
-      // what you type is what is saved: the address is lowercase, so the box is lowercased as you type
-      const lower = (inp) => { const a = inp.selectionStart, b = inp.selectionEnd, v = inp.value.toLowerCase(); if (v !== inp.value) { inp.value = v; inp.setSelectionRange(a, b); } };
-      const check = () => {
-        lower(el('opt-hnew'));
-        const v = el('opt-hnew').value.trim();
-        const why = v === h ? L.hSame : !HANDLE_SHAPE.test(v) ? L.hShape : RESERVED.has(v.replace(/-/g, '')) ? L.hReserved : '';
-        el('opt-herr').textContent = v ? why : '';
-        el('opt-hgo').disabled = !!why || el('opt-hold').value.trim().toLowerCase() !== h;
-      };
-      el('opt-hnew').oninput = el('opt-hold').oninput = check; check();
-      el('opt-hno').onclick = paint;
-      el('opt-hgo').onclick = () => { const v = el('opt-hnew').value.trim(); lsSet(HANDLE_KEY, v); paint(); confirmNote('done', fmt(L.handleDone, { h: v }), () => { lsSet(HANDLE_KEY, h); if (el('opt-hchange')) paint(); }); };
-      el('opt-hnew').focus(); el('opt-hnew').select();
-    };
-  };
-  paint();
-}
 function resetSandbox() {
-  settingNext = null; closeSheet(true);   // first: a title typed a moment ago must not land on the empty card
+  settingNext = null; closeSettings();   // first: a title typed a moment ago must not land on the empty card
   lsSet(KEY, null); lsSet(DKEY, null); lsSet(W2_DRAFT_KEY, null);
   savedMd = SANDBOX_START; md = SANDBOX_START; m = read(md); cache.clear();
   persist(); draw(); show();
 }
-el('cardset').onclick = openCard;
+el('cardset').onclick = openSettings;
 el('modal-save').onclick = () => (open && open.whole ? saveRaw() : saveSheet());
 el('modal-delete').onclick = deleteSheet;
 
@@ -739,37 +1011,48 @@ function zoomPair(it, startBack = false) {
   if (startBack && backCells) flip.classList.add('over');
 }
 
-// ── one way out of every layer: the frosted button at the top left (and Escape, and the backdrop) ──
-const LAYERS = ['zoom', 'modal', 'picker', 'doormodal', 'leavemodal'];
+// ── ONE GLASS LAYER for anything opened: the whole screen, the top bar included, goes under frosted glass, and
+// only the glass's ✕ floats above it — at the top-left, where the logo is, whichever layer is open (a tile's sheet,
+// the picker, Cards settings, the door, a tile up close). ✕, Escape and a tap on the bare glass close the TOP-MOST
+// layer first (w3/settings-nav.mjs topLayer). The small leave dialog has its own three answers and no ✕.
+const isOpen = (id) => (id === 'settings' ? setOpen() : !el(id).hidden);
+const openNow = () => Object.fromEntries(LAYER_TOP_FIRST.map((id) => [id, isOpen(id)]));
 function dismiss() {
-  if (!el('leavemodal').hidden) el('leavemodal').hidden = true;   // Escape there is Keep editing
-  else if (!zoom.hidden) zoom.hidden = true;
-  else if (!el('modal').hidden) closeSheet(false);
-  else if (!el('picker').hidden) el('picker').hidden = true;
-  else if (!el('doormodal').hidden) el('doormodal').hidden = true;
+  switch (topLayer(openNow())) {
+    case 'leavemodal': el('leavemodal').hidden = true; break;   // Escape there is Keep editing
+    case 'zoom': zoom.hidden = true; break;
+    case 'modal': closeSheet(false); break;
+    case 'picker': el('picker').hidden = true; break;
+    case 'doormodal': el('doormodal').hidden = true; break;
+    case 'set-confirm': closeConfirm(); break;
+    case 'settings': closeSettings(); break;
+    default: break;
+  }
 }
 el('close').onclick = dismiss;
 addEventListener('keydown', (e) => { if (e.key === 'Escape') dismiss(); });
 zoom.onclick = (e) => { if (e.target === zoom) dismiss(); };
 for (const id of ['modal', 'picker', 'doormodal', 'leavemodal']) el(id).addEventListener('click', (e) => { if (e.target === el(id)) dismiss(); });
-// ONE close, one style, at the top left — of the open sheet when there is one (a bottom sheet's close is on the
-// sheet, within reach of the thumb holding it), of the screen for the close-up. The small leave dialog has
-// its own three answers and no ✕.
+// ✕ sits where the logo is: the bar's own row, the lockup's left edge (the top notice, when shown, moves both down).
+// --bar-bottom is where the bar ends: a sheet or the settings panel never reaches above it, so ✕ is never covered.
+const bar = document.querySelector('header');
 function placeClose() {
-  const c = el('close'), panel = el('leavemodal').hidden ? openPanel() : null;
-  if (panel) { const r = panel.getBoundingClientRect(); c.style.top = `${Math.max(8, r.top + 10)}px`; c.style.left = `${r.left + 10}px`; c.classList.add('on-sheet'); }
-  else { c.style.top = ''; c.style.left = ''; c.classList.remove('on-sheet'); }
+  const c = el('close'), hd = bar.getBoundingClientRect(), lk = el('lockup').getBoundingClientRect();
+  c.style.top = `${Math.max(0, hd.top) + Math.max(0, (hd.height - 44) / 2)}px`;
+  c.style.left = `${Math.max(8, lk.left)}px`;
+  document.documentElement.style.setProperty('--bar-bottom', `${Math.max(0, Math.round(hd.bottom))}px`);
 }
-const panelSize = new ResizeObserver(placeClose);
-for (const id of LAYER_ORDER) panelSize.observe(el(id).querySelector('.ctw-modal-panel'));
+new ResizeObserver(placeClose).observe(bar);
+new ResizeObserver(placeClose).observe(el('notice-top'));
 addEventListener('resize', placeClose);
 // watch the layers only (the button's own `hidden` is a mutation too — watching the body loops forever)
 const closeObs = new MutationObserver(() => {
-  const none = LAYERS.every((id) => id === 'leavemodal' || el(id).hidden) || !el('leavemodal').hidden;
+  const none = !closeShows(openNow());
   if (el('close').hidden !== none) el('close').hidden = none;
   placeClose(); notices.place();
 });
-for (const id of LAYERS) closeObs.observe(el(id), { attributes: true, attributeFilter: ['hidden'] });
+for (const id of LAYER_TOP_FIRST) closeObs.observe(el(id), { attributes: true, attributeFilter: ['hidden', 'class'] });
+placeClose();
 
 // ── the row: a mouse wheel scrolls it sideways; a trackpad's own sideways swipe is left alone ──
 function edges() {
@@ -956,7 +1239,6 @@ function paintViews() {
 function openRaw() {
   el('modal-title').textContent = L.raw;
   el('modal-hint').textContent = L.rawSays;
-  if (open && open.card) closeSheet(true);
   open = { whole: true }; pending = {};
   el('modal-title').textContent = L.raw;
   el('modal-hint').textContent = L.rawSays;
@@ -977,7 +1259,7 @@ function saveRaw() {
     cache.clear();
   }
   closeSheet(true);
-  draw(); show();
+  draw(); show(); setPaint();
 }
 function show() {
   if (!hostWaiting && !m.cells.length && view !== 'wall') editing = true;   // nothing to look at yet: the row's one big "+"
@@ -1019,9 +1301,12 @@ let saving = false;
 function paintMain() {
   const b = el('editbtn'); if (!b) return;
   const inEdit = editing || view === 'wall';
-  b.innerHTML = inEdit ? SAVE_ICO + esc(L.save) : PEN + esc(L.editBtn);
+  const unsaved = !hostWaiting && dirty();
+  // the unsaved dot: something in the draft is not saved yet (a change made in Cards settings shows here too)
+  b.innerHTML = (inEdit ? SAVE_ICO + esc(L.save) : PEN + esc(L.editBtn)) + (unsaved ? `<span class="hd-dot"><span class="sr">${esc(L.leaveTitle)}</span></span>` : '');
   b.disabled = hostWaiting || saving || (inEdit && !dirty());
   b.classList.toggle('is-save', inEdit);
+  b.classList.toggle('is-dirty', unsaved);
 }
 // sandbox: there is no account behind /try/edit, so Save keeps the draft in this browser and opens the door to
 // the real thing (the creation flow explains the account; the editor does not). host: the parent saves it.
@@ -1120,7 +1405,7 @@ function bootHost() {
       el('picker').hidden = true; zoom.hidden = true;
       md = next.endsWith('\n') ? next : next + '\n'; m = read(md);
       cache.clear(); undoTo = null;
-      persist(); draw(); show();
+      persist(); draw(); show(); setPaint();
       confirmNote('proposed', L.proposed);
     },
   });
