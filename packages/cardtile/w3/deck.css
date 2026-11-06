@@ -437,6 +437,9 @@ html.deck .deck-card.is-top.can-flip{cursor:pointer}
 @media (hover:none){ html.deck .deck-snap{scroll-snap-stop:always} }   /* 🔴 why touch only: iOS Safari's address bar keeps growing and shrinking during a free scroll, and the deck jittered with it; stopping at every card is what keeps it still. Not a UX preference. On desktop a hard fling passing several cards is deliberate, and snap-stop would also stop End/Home/thumb-drag at the next card */
 html.deck{--cardw:min(88vw,calc((100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 76px - 72px) * 3 / 4.2))}   /* room above for the bar, below for the footer — both layouts share this */
 html.deck .deck-stack{width:var(--cardw)}
+/* the list on a phone is zoomed OUT: a smaller card, so the next one shows a good part of itself and the list reads
+   as a list, not as the stack with an edge showing (editor review P47) */
+@media (max-width:600px){html.deck.list{--cardw:min(62vw,calc((100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 76px - 72px) * 3 / 4.2))}}
 
 /* ---- list: the same cards on one horizontal snap track; the wheel's vertical motion becomes sideways travel, fingers swipe ---- */
 /* list: the same vertical rail and scrollbar as stack; the row of cards slides sideways by the scroll position (--tx, set per scroll) */

@@ -51,7 +51,8 @@ test('every field with a helper line has it in all nine (none is blank anywhere)
 
 test('the Video sheet says which address it takes — an example in every locale', () => {
   for (const l of NINE) {
-    assert.match(CELL_STRINGS_BY_KEY['type.video.yt.hint'][l], /watch\?v=dQw4w9WgXcQ/, l);
+    // an example address, not a real id: examples end in an ellipsis (youtube.com/watch?v=…)
+    assert.match(CELL_STRINGS_BY_KEY['type.video.yt.hint'][l], /youtube\.com\/watch\?v=/, l);
     assert.match(CELL_STRINGS_BY_KEY['type.video.channel.hint'][l], /youtube\.com\/channel\//, l);
   }
 });

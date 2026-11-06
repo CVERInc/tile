@@ -121,9 +121,12 @@ if (PORCH_FONTS_CSS.includes('url(./')) throw new Error('gen-edit3-assets: porch
 
 // ── 4. the stylesheets, in cascade order ─────────────────────────────────────────────────────────
 // before the family editor's two stylesheets: the shared sheet chrome, the porch tokens and faces,
-// and the porch skin; after them (so it wins where they overlap): the editor's own layout
+// and the porch skin; after them (so it wins where they overlap): the editor's own layout.
+// bleedblend is the repo's own edge-bar classes (the notice wears .bleedblend-top / -bottom, -push) so iOS
+// Safari tints its chrome to the bar — read from where sitetile ships it, never copied.
 const EDIT3_BASE_CSS = [
   rd(join(DIR, '../w/editor.css'), 'utf8'),
+  rd(join(ROOT, 'packages/sitetile/astro/src/packages/bleedblend/style.css'), 'utf8'),
   rd(join(W3, 'porch-tokens.css'), 'utf8'),
   PORCH_FONTS_CSS,
   rd(join(W3, 'porch.css'), 'utf8'),
@@ -136,8 +139,8 @@ for (const [name, css] of [['the base stylesheet', EDIT3_BASE_CSS], ['edit3.css'
 // ── 5. the markup ────────────────────────────────────────────────────────────────────────────────
 // w3/index.html is the <body> only; its leading comment is for whoever reads the file, not the page.
 const BODY = rd(join(W3, 'index.html'), 'utf8').replace(/^\s*<!--[\s\S]*?-->\s*/, '');
-for (const id of ['sandbox-banner', 'sandbox-banner-text', 'sandbox-banner-status', 'editbtn', 'row', 'deckframe', 'gridframe', 'modal', 'doormodal', 'host-status']) {
-  if (!BODY.includes(`id="${id}"`)) throw new Error(`gen-edit3-assets: w3/index.html has no #${id} — the editor or the server-written banner would miss it`);
+for (const id of ['editbtn', 'row', 'deckframe', 'gridframe', 'modal', 'doormodal', 'leavemodal', 'notice-top', 'notice-bottom']) {
+  if (!BODY.includes(`id="${id}"`)) throw new Error(`gen-edit3-assets: w3/index.html has no #${id} — the editor would miss it`);
 }
 
 // 🔴 the generator and the stamp's own module are inputs too — they decide what is emitted

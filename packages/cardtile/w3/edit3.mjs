@@ -8,9 +8,10 @@
 // module owns the row of tiles, the pairing chain, the swap, the numbers, Cards options, and Save.
 //
 // 🔴 NOTHING GOES LIVE UNTIL SAVE. The draft lives in this browser (localStorage) and survives a
-// reload; leaving with it unsaved asks first. Save is the only door out:
-//   sandbox  Save keeps it in this browser (there is no account behind /try/edit). The way to the
-//            real thing is the banner's door: it parks the card and opens the creation flow.
+// reload; leaving edit mode with it unsaved asks (Save / Keep editing / Discard, w3/leave-edit.mjs),
+// and closing the tab asks the browser's own question. Save is the only door out:
+//   sandbox  there is no account behind /try/edit, so Save keeps the draft in this browser and opens
+//            the door to the real thing: it parks the card and opens the creation flow.
 //   host     Save posts `card:save {md}` to the parent (w3/host-bridge.mjs, schema in its header);
 //            the parent stores it and answers `card:saved` / `card:save-failed`.
 //
@@ -22,13 +23,18 @@ import { formBodyHtml, composeCell } from '../w/cell-form-core.mjs';
 import { whatIsWrong } from '../w/md-guard.mjs';
 import { wireForm } from '../w/cell-form-dom.mjs';
 import { cellStrings, text as cellText } from '../w/cell-i18n.mjs';
-import { chromeStrings, primaryLocale, SANDBOX_LOCALES, buildSandboxCard } from '../w/sandbox-i18n.mjs';
+import { chromeStrings, primaryLocale, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
 import { sandboxDoorHref, parkSandboxCard } from '../w/sandbox-door.mjs';
 import { renderCardHTML } from '../serve/card-worker.mjs';
 import { cardTitle } from './card-title.mjs';
 import { typeIconSvg } from './type-icons.mjs';
 import { createHostBridge, validHostOrigin, readsAsCard } from './host-bridge.mjs';
 import { editStrings, fmt } from './edit3-i18n.mjs';
+import { createNotices } from './notice.mjs';
+import { leaveStep, resolveLeave } from './leave-edit.mjs';
+import { withRaw, backId, freshBackId, insertCell, removeCell, pair, unpair, canPair } from './pairing.mjs';
+import { VIEW_IDS, fmRead, fmWrite, readViews, toggleView, applySetting } from './card-settings.mjs';
+import { NETWORKS, parseSocial, composeSocial } from './social-rows.mjs';
 
 // ── the page's options, written by the Worker (card-worker.mjs editorHtml) ──
 const OPTS = window.__CARDTILE_W3_OPTS__ || { sandbox: true };
@@ -47,10 +53,21 @@ const { mountEditor } = await import(ASSET['editor-core.js']);
 const { makeWebHost } = await import(ASSET['web-host.js']);
 
 const PEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
-const LINK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
-const PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
-const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></svg>';
-const MDICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>';
+// lucide link-2 / unlink-2: the control between two tiles pairs them, or takes a pair apart
+const LINK2 = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg>';
+const UNLINK2 = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7h2a5 5 0 0 1 0 10h-2m-6 0H7A5 5 0 0 1 7 7h2"/></svg>';
+const PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+const CHEV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+const XICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const ELLIPSIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>';
+// lucide qr-code: the default back's placeholder for the code the deck draws on the live page
+const QRICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>';
+// the views, in the glyphs the live deck's own switch uses (w3/deck.js: deck, list, grid)
+const VIEW_ICO = {
+  stack: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.65 7.65a2 2 0 012.629-1.046l5.51 2.374a2 2 0 011.046 2.628l-3.957 9.184a2 2 0 01-2.628 1.046l-5.51-2.374a2 2 0 01-1.046-2.628z"/><path d="M18 7.777V4a2 2 0 00-2-2h-6a2 2 0 00-2 2v10a2 2 0 001.137 1.805"/><path d="m8 4.389-4.364.809a2 2 0 00-1.602 2.33l1.822 9.833a2 2 0 002.331 1.602l2.542-.47"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3v18"/><rect width="12" height="18" x="6" y="3" rx="2"/><path d="M22 3v18"/></svg>',
+  wall: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 9v6"/><path d="M16 15v6"/><path d="M16 3v6"/><path d="M3 15h18"/><path d="M3 9h18"/><path d="M8 15v6"/><path d="M8 3v6"/></svg>',
+};
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -67,12 +84,12 @@ const TYPES = Object.fromEntries(Object.entries(CELL_TYPES).map(([type, def]) =>
 // ── words: this editor's own (edit3-i18n.mjs), the shared chrome, and the sheets' ──
 const L = editStrings(LOCALE);
 L.views = { stack: L.viewStack, list: L.viewList, wall: L.viewWall };
+L.netNames = Object.fromEntries(NETWORKS.map((n) => [n.id, n.id === 'web' ? L.socialWeb : n.id === 'email' ? L.socialEmail : n.label]));
 L.viewSays = { stack: L.viewSaysStack, list: L.viewSaysList, wall: L.viewSaysWall };
 L.dimNames = { 0: L.dim0, 25: L.dim25, 45: L.dim45, 65: L.dim65 };
 L.themeNames = { auto: L.themeAuto, light: L.themeLight, dark: L.themeDark };
 L.headerNames = { centre: L.headerCentre, left: L.headerLeft };
 L.iconsNames = { colour: L.iconsColour, mono: L.iconsMono };
-L.poolNames = { on: L.poolNameOn, off: L.poolNameOff };
 const T = chromeStrings(LOCALE), TX = cellStrings(LOCALE);
 const PERSONA = SANDBOX_LOCALES[LOCALE] || SANDBOX_LOCALES.en;
 document.documentElement.lang = PERSONA.lang;
@@ -80,7 +97,8 @@ for (const n of document.querySelectorAll('[data-l]')) n.textContent = L[n.datas
 for (const n of document.querySelectorAll('[data-l-label]')) n.setAttribute('aria-label', L[n.dataset.lLabel]);
 for (const n of document.querySelectorAll('[data-l-title]')) n.title = L[n.dataset.lTitle];
 el('cardset').title = L.options;
-const say = (key) => cellText(TX, key);
+// the views are icons only; their names are the buttons' accessible names (and a pointer's tooltip)
+for (const b of document.querySelectorAll('.modes button')) { b.innerHTML = VIEW_ICO[b.dataset.view]; b.setAttribute('aria-label', L.views[b.dataset.view]); b.title = L.views[b.dataset.view]; }const say = (key) => cellText(TX, key);
 
 // ── state: the card's Markdown is the truth; the model is re-read from it on every change ──
 // sandbox: KEY = what Save kept, DKEY = the draft being edited. host: the parent holds what is saved,
@@ -89,6 +107,8 @@ const KEY = 'cardtile:w3:saved', DKEY = 'cardtile:w3:draft';
 const W2_DRAFT_KEY = 'cardtile:try:draft:v1';   // the previous sandbox kept every edit here, unasked
 const hostDraftKey = () => `cardtile:w3:host-draft:${handle || 'card'}`;
 const EMPTY = '## cards\n\n';
+// 🔴 the sandbox starts from a NEW, EMPTY card: one big "add" on the canvas, nobody else's sample to clear first
+const SANDBOX_START = EMPTY;
 let handle = '', cardUrl = '';
 let savedMd = SANDBOX ? loadSaved() : EMPTY, md = SANDBOX ? loadDraft() : EMPTY, m = read(md), view = 'stack', editing = false, pending = {};
 let bridge = null, hostWaiting = !SANDBOX;
@@ -100,7 +120,7 @@ function loadSaved() {
   // a visitor who used the previous sandbox finds their card again, as the thing they last kept
   const w2 = lsGet(W2_DRAFT_KEY);
   if (w2 && readsAsCard(w2)) return w2;
-  return buildSandboxCard(LOCALE);
+  return SANDBOX_START;
 }
 function loadDraft() { return lsGet(DKEY) ?? savedMd; }
 // Nothing goes live until Save; the draft lives in this browser; leaving with it unsaved asks first.
@@ -121,26 +141,12 @@ function commit(next, { quiet = false } = {}) {   // next: a model → it become
 const clone = () => structuredClone(m);
 
 // one row of tiles: every face cell in order; a face cell whose `back=#id` names a back lane is a pair
-const backId = (cell) => String((cell.params || {}).back || '').replace(/^#/, '');
 const items = () => m.cells.map((cell, i) => ({ i, cell, back: (backId(cell) && m.drawers.find((d) => d.id === backId(cell))) || null }));
-const withRaw = (cell, rawParams) => normalizeCell({ ...cell, rawParams });
 
-// the face's block ranges, kept true when a cell comes or goes
-function insertCell(x, at, cell) {
-  x.cells.splice(at, 0, cell);
-  let bi = x.blocks.findIndex((b) => at >= b.start && at <= b.start + b.count); if (bi < 0) bi = x.blocks.length - 1;
-  x.blocks = x.blocks.map((b, k) => (k === bi ? { ...b, count: b.count + 1 } : (b.start >= at && k > bi ? { ...b, start: b.start + 1 } : b)));
-}
-function removeCell(x, at) {
-  x.cells.splice(at, 1);
-  const bi = x.blocks.findIndex((b) => at >= b.start && at < b.start + b.count);
-  x.blocks = x.blocks.map((b, k) => (k === bi ? { ...b, count: b.count - 1 } : (b.start > at ? { ...b, start: b.start - 1 } : b)));
-}
 // the default back: the frontmatter's `back: "#id"` names one back lane, the same pointer a tile's `back=#id` is, at
 // the scope of the whole Cards. Quoted, because a bare # starts a YAML comment. None → the printed business card.
 const defId = (pre = m.pre) => String(fmRead(pre).back || '').replace(/^["']|["']$/g, '').replace(/^#/, '');
 const defBack = () => { const id = defId(); return (id && m.drawers.find((d) => d.id === id)) || null; };
-const freshBackId = (x) => { let n = 1; while (x.drawers.some((d) => d.id === 'b' + n)) n++; return 'b' + n; };
 
 // ── one tile on its own: the card with only that tile on its face, rendered by the engine in the page ──
 function soloMd(cells) {
@@ -164,7 +170,14 @@ function render(text) {
   }
   return cache.get(text);
 }
-function fit(frame, box) { frame.style.transform = `scale(${box.clientWidth / 390})`; frame.style.opacity = 1; }
+// The tile is laid out at its REAL width (300–390px) and only scaled by what is left, so on a phone its words
+// are their real size instead of a 390px page shrunk to a third (the row is the phone's main screen).
+function fit(frame, box) {
+  const w = box.clientWidth, h = box.clientHeight; if (!w) return;
+  const lay = Math.max(300, Math.min(390, w)), k = w / lay;
+  frame.style.width = `${lay}px`; frame.style.height = `${h / k}px`;
+  frame.style.transform = `scale(${k})`; frame.style.opacity = 1;
+}
 
 // ── the row ──
 const row = el('row');
@@ -176,134 +189,69 @@ function cardEl(cells, label, onPen, multi) {
   f.srcdoc = render(soloMd(cells));
   new ResizeObserver(() => fit(f, c)).observe(c);
   if (multi) {   // a back of several tiles is the file's to edit, not the sheet's (backs are 1:1 here)
-    const n = document.createElement('button'); n.className = 'note'; n.textContent = L.backInRaw;
+    const n = document.createElement('button'); n.type = 'button'; n.className = 'note'; n.textContent = L.backInRaw;
     n.onclick = (e) => { e.stopPropagation(); openRaw(); };
     c.appendChild(n);
-  } else {
-    const pen = document.createElement('button'); pen.className = 'pen'; pen.innerHTML = PEN; pen.setAttribute('aria-label', L.editTile);
+  } else {   // 🔴 the pencil is ALWAYS at a tile's top-left, one style — here and on the wall
+    const pen = document.createElement('button'); pen.type = 'button'; pen.className = 'pen'; pen.innerHTML = PEN; pen.setAttribute('aria-label', `${L.editTile} · ${label}`);
     pen.onclick = (e) => { e.stopPropagation(); onPen(); };
     c.appendChild(pen);
   }
   return c;
 }
-function chainBtn(on, onClick, label, disabled) {
+// the control between two tiles: pair them (link-2), or — inside a pair — take them apart (unlink-2)
+function pairBtn(on, onClick) {
+  const b = document.createElement('button'); b.type = 'button';
+  b.className = 'chain' + (on ? ' on' : ''); b.innerHTML = on ? UNLINK2 : LINK2;
+  const label = on ? L.pairOff : L.pairOn; b.title = label; b.setAttribute('aria-label', label);
+  b.onclick = onClick; return b;
+}
+// every gap BETWEEN tiles takes a new one, on the same axis as the pair control and clear of it
+function gapEl(it, next) {
   const g = document.createElement('div'); g.className = 'gapbtn';
-  const b = document.createElement('button');
-  b.className = 'chain' + (on ? ' on' : ''); b.innerHTML = LINK; b.title = label; b.setAttribute('aria-label', label);
-  if (disabled) b.disabled = true; else b.onclick = onClick;
+  if (canPair(m, it.i)) g.appendChild(pairBtn(false, () => commit(pair(clone(), it.i))));
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'ins'; b.innerHTML = PLUS;
+  b.title = fmt(L.addBetween, { a: it.i + 1, b: it.i + 2 }); b.setAttribute('aria-label', b.title);
+  b.onclick = () => openPicker(next.i);
   g.appendChild(b); return g;
 }
-const spacer = () => { const g = document.createElement('div'); g.className = 'gapbtn'; return g; };
-// every gap BETWEEN tiles takes a new one; the gap inside a pair has none, so a pair cannot be split by adding
-function insBtn(gap, at) {
-  const b = document.createElement('button'); b.className = 'ins'; b.innerHTML = PLUS;
-  b.title = b.ariaLabel = fmt(L.addBetween, { a: at, b: at + 1 });
-  b.onclick = () => openPicker(at);
-  gap.appendChild(b); return gap;
-}
 const kindName = (cell) => (TYPES[cell.type] ? say(TYPES[cell.type].title) : cell.type);
-const flipped = new Set();   // tiles turned over here — the author's hand: a visitor turns only what has a back
-const TURN_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
-// what a visitor turns over to when the tile has no back of its own (deck.js decides the same way: a
-// link's address, a video's page on YouTube, everything else the owner's business card). The printed
-// business card here is a likeness of the deck's; the deck draws the real one on the page.
-function printedBack(i, frontFrame) {
-  const box = document.createElement('div'); box.className = 'card printed';
-  const d = frontFrame && frontFrame.contentDocument;
-  const a = d && d.querySelector('a.st-gal-link, a.st-cell-link'), href = (a && a.getAttribute('href')) || '';
-  const yt = d && d.querySelector('.st-embed-video-btn[data-yt]');
-  const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
-  if (yt) box.innerHTML = `<span class="pill">${esc(L.ytPill)} ↗</span><small>${esc(L.ytSays)}</small>`;
-  else if (/^https?:/.test(href)) box.innerHTML = `<span class="pill">${esc(host(href))} ↗</span><small>${esc(L.linkSays)}</small>`;
-  else if (defBack()) {   // the default back, as every visitor gets it; its pencil edits the one all of them share
-    const c = cardEl(defBack().cells.slice(0, 1), L.bcL, () => edit(-1, 'default'));
-    const w = document.createElement('button'); w.type = 'button'; w.className = 'ctw-btn dflt'; w.textContent = L.writeBack;
-    w.onclick = (e) => { e.stopPropagation(); openPicker(i, { backOf: i }); };
-    // it looks like any written back, but its pencil changes the one every such tile shares — so it says whose it is
-    const tag = document.createElement('span'); tag.className = 'dflt-tag'; tag.textContent = L.bcL;
-    c.append(tag, w); return c;
-  }
-  else box.innerHTML = `<div class="bc-name">${esc(ownerName())}</div><div class="bc-qr" aria-hidden="true"></div><small>${esc(L.bcCard)}</small>`;
-  const w = document.createElement('button'); w.type = 'button'; w.className = 'ctw-btn'; w.textContent = L.writeBack;
-  w.onclick = (e) => { e.stopPropagation(); openPicker(i, { backOf: i }); };
-  box.appendChild(w);
-  return box;
-}
 const profileAt = () => m.cells.findIndex((c) => c.type === 'profile');
-// the profile's name IS the title (composeCell renames the card when the profile is renamed): one value, two doors
-const ownerName = () => cardTitle(md) || L.untitled;
 function draw() {
   document.title = fmt(L.docTitle, { t: cardTitle(md) || L.untitled });
   row.textContent = '';
   const list = items();
+  row.classList.toggle('is-empty', !list.length);
   list.forEach((it, k) => {
     const slot = document.createElement('div'); slot.className = 'slot'; slot.dataset.i = String(it.i);
     const num = document.createElement('div'); num.className = 'num'; num.textContent = String(k + 1);
     const front = cardEl([it.cell], kindName(it.cell), () => edit(it.i, 'front'));
     front.classList.add('front'); front.onclick = () => zoomPair(it);
-    const foot = document.createElement('div'); foot.className = 'slot-foot';
-    const turn = document.createElement('button'); turn.type = 'button'; turn.className = 'turnbtn' + (it.back ? ' has' : '');
-    turn.innerHTML = TURN_ICO + esc(L.turn); turn.setAttribute('aria-pressed', String(flipped.has(it.i)));
-    foot.appendChild(turn);
-    slot.append(num, front, foot);
-    const paint = (animate) => {
-      const over = flipped.has(it.i), shown = slot.querySelector('.card');
-      let next;
-      if (!over) next = front;
-      else if (it.back) {
-        const multi = it.back.cells.length !== 1;
-        next = cardEl(it.back.cells.slice(0, 1), L.back, () => edit(it.i, 'back'), multi);
-        next.onclick = () => zoomPair(it);
-      } else next = printedBack(it.i, front.querySelector('iframe'));
-      foot.querySelectorAll('.sidebtn').forEach((b) => b.remove());
-      if (over && it.back) {
-        const peel = document.createElement('button'); peel.type = 'button'; peel.className = 'sidebtn'; peel.textContent = L.peel; peel.onclick = () => { flipped.delete(it.i); unlink(it.i); };
-        const up = document.createElement('button'); up.type = 'button'; up.className = 'sidebtn'; up.textContent = L.sideUp; up.onclick = () => { flipped.delete(it.i); commit(swapped(it.i)); };
-        foot.append(peel, up);
-      }
-      if (shown !== next) shown.replaceWith(next);
-      if (animate) { next.classList.remove('turning'); void next.offsetWidth; next.classList.add('turning'); }
-      turn.setAttribute('aria-pressed', String(over));
-    };
-    turn.onclick = () => { if (flipped.has(it.i)) flipped.delete(it.i); else flipped.add(it.i); paint(true); };
-    if (flipped.has(it.i)) front.querySelector('iframe').addEventListener('load', () => paint(false), { once: true });
+    if (it.back) {
+      // 🔴 A PAIR IS SHOWN, NOT HIDDEN: both faces side by side, front on the left, in one shared frame,
+      // with the control that takes them apart between them
+      slot.classList.add('paired');
+      const back = cardEl(it.back.cells.slice(0, 1), L.back, () => edit(it.i, 'back'), it.back.cells.length !== 1);
+      back.classList.add('backface'); back.onclick = () => zoomPair(it, true);
+      const faces = document.createElement('div'); faces.className = 'faces';
+      const side = (card, words) => { const s = document.createElement('div'); s.className = 'side'; const t = document.createElement('small'); t.textContent = words; s.append(card, t); return s; };
+      const mid = document.createElement('div'); mid.className = 'gapbtn in-pair'; mid.appendChild(pairBtn(true, () => commit(unpair(clone(), it.i))));
+      faces.append(side(front, L.front), mid, side(back, L.back));
+      slot.append(num, faces);
+    } else slot.append(num, front);
     row.appendChild(slot);
     const next = list[k + 1];
-    const g = next && !it.back && !next.back ? chainBtn(false, () => link(it.i), L.pair) : spacer();
-    row.appendChild(next ? insBtn(g, it.i + 1) : g);
+    if (next) row.appendChild(gapEl(it, next));
   });
-  const slot = document.createElement('div'); slot.className = 'slot';
+  // the end of the row: one more. With nothing yet it IS the canvas — one big "add", no words needed.
+  const slot = document.createElement('div'); slot.className = 'slot add';
   const num = document.createElement('div'); num.className = 'num';
-  const nb = document.createElement('button'); nb.className = 'new'; nb.innerHTML = PLUS; nb.setAttribute('aria-label', L.addTile);
+  const nb = document.createElement('button'); nb.type = 'button'; nb.className = 'new'; nb.innerHTML = PLUS; nb.setAttribute('aria-label', L.addTile);
   nb.onclick = () => openPicker();
   slot.append(num, nb);
   row.appendChild(slot);
   edges();
-  if (!list.length) { const h = document.createElement('p'); h.className = 'empty-hint'; h.textContent = L.firstTile; slot.appendChild(h); }
   paintViews();
-}
-
-// ── chain, unchain, swap: card-core's own param primitives on the back token ──
-function link(i) {
-  const x = clone(), id = freshBackId(x), backCell = withRaw(x.cells[i + 1], removeToken(x.cells[i + 1].rawParams || '', 'back'));
-  x.cells[i] = withRaw(x.cells[i], setToken(x.cells[i].rawParams || '', 'back', '#' + id));
-  removeCell(x, i + 1);
-  x.drawers.push({ id, title: '', cells: [backCell] });
-  commit(x);
-}
-function unlink(i) {
-  const x = clone(), id = backId(x.cells[i]), d = x.drawers.find((y) => y.id === id);
-  x.cells[i] = withRaw(x.cells[i], removeToken(x.cells[i].rawParams || '', 'back'));
-  x.drawers = x.drawers.filter((y) => y !== d);
-  insertCell(x, i + 1, d.cells[0]);
-  commit(x);
-}
-function swapped(i) {
-  const x = clone(), id = backId(x.cells[i]), d = x.drawers.find((y) => y.id === id);
-  const front = x.cells[i], back = d.cells[0];
-  x.cells[i] = withRaw(back, setToken(back.rawParams || '', 'back', '#' + id));
-  d.cells = [withRaw(front, removeToken(front.rawParams || '', 'back'))];
-  return x;
 }
 
 // ── "+" ──
@@ -311,9 +259,9 @@ function openPicker(at = m.cells.length, opt = {}) {
   const kinds = PALETTE.map((t) => `<button class="ctw-pick-btn" type="button" data-type="${esc(t)}" title="${esc(say(TYPES[t].hint))}">`
     + `<span class="ctw-pick-ico">${typeIconSvg(t)}</span><span class="ctw-pick-name">${esc(say(TYPES[t].title))}</span>`
     + `<span class="ctw-pick-hint">${esc(say(TYPES[t].hint))}</span></button>`).join('');
-  const raw = `<button class="ctw-pick-btn" type="button" data-type=""><span class="ctw-pick-ico">${MDICO}</span><span class="ctw-pick-name">${esc(L.free)}</span><span class="ctw-pick-hint">${esc(L.freeHint)}</span></button>`;
-  el('picker-row').innerHTML = kinds + raw;
-  for (const b of el('picker-row').querySelectorAll('.ctw-pick-btn')) b.onclick = () => { el('picker').hidden = true; if (opt.asDefault) addDefault(b.dataset.type); else if (opt.backOf != null) addBack(b.dataset.type, opt.backOf); else add(b.dataset.type, at); };
+  // (raw editing lives in one place only: Cards options → More → Edit raw content)
+  el('picker-row').innerHTML = kinds;
+  for (const b of el('picker-row').querySelectorAll('.ctw-pick-btn')) b.onclick = () => { el('picker').hidden = true; if (opt.asDefault) addDefault(b.dataset.type); else add(b.dataset.type, at); };
   el('picker').hidden = false;
 }
 
@@ -329,17 +277,6 @@ function add(type, at = m.cells.length) {
   edit(at, 'front', !type);
   const s = row.querySelectorAll('.slot')[at];
   requestAnimationFrame(() => (last ? row.scrollTo({ left: row.scrollWidth, behavior: 'smooth' }) : s && s.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })));
-}
-
-// one back per tile (a card has one other side), and it starts the same way a tile does
-function addBack(type, i) {
-  const before = md, x = clone(), id = freshBackId(x);
-  x.cells[i] = withRaw(x.cells[i], setToken(x.cells[i].rawParams || '', 'back', '#' + id));
-  x.drawers.push({ id, title: '', cells: [blank(type)] });
-  flipped.add(i);
-  commit(x);
-  undoTo = before;
-  edit(i, 'back', !type);
 }
 
 function addDefault(type) {
@@ -365,22 +302,22 @@ const formCtx = () => ({ T, say, targetOptions: () => null, previewSrc, cardTitl
 function edit(i, which, asMd = false) {
   open = { i, which, asMd }; pending = {}; prose = null;
   const cell = cellAt(i, which), def = TYPES[cell.type];
-  const paired = !!(items()[i] && items()[i].back);
+  const paired = which !== 'default' && !!(items()[i] && items()[i].back);
   const body = el('modal-body');
-  if (asMd || !def) {
-    el('modal-title').textContent = L.free;
-    el('modal-hint').textContent = L.freeModal;
-    body.innerHTML = `<div class="ctw-field" data-field="__raw"><textarea id="f-__raw" class="ctw-md" spellcheck="false" style="min-height:180px;font:13px/1.45 ui-monospace,Menlo,monospace"></textarea><p class="ctw-err" id="e-__raw"></p></div>`;
+  el('modal-foot').hidden = false;
+  if (asMd || !def) {   // a kind this editor has no form for: its own line, as written
+    el('modal-title').textContent = L.raw;
+    el('modal-hint').textContent = '';
+    body.innerHTML = `<div class="ctw-field" data-field="__raw"><textarea id="f-__raw" class="ctw-md" spellcheck="false"></textarea><p class="ctw-err" id="e-__raw" role="alert"></p></div>`;
     el('f-__raw').value = cell.body || '';
   } else {
     el('modal-title').textContent = say(def.title);
     el('modal-hint').textContent = say(def.hint || '');
-    // only where the text IS the tile and the form does not already show it as it is
-    const mdOk = def.body && cell.type !== 'text';
-    body.innerHTML = (mdOk ? `<button class="ctw-btn mdsw" type="button" id="to-md">${esc(L.toFree)}</button>` : '') + formBodyHtml(def, cell, formCtx());
+    body.innerHTML = formBodyHtml(def, cell, formCtx());
     wireForm(body, def, { T, previewSrc, stage: (id, a) => { pending[id] = a; } });
-    if (mdOk) el('to-md').onclick = () => edit(i, which, true);
     if (cell.type === 'text') proseEditor(document.getElementById('f-__body'));
+    if (cell.type === 'social') socialForm(document.getElementById('f-__body'));
+    tidyHints(body);
   }
   if (paired) {   // switching sides keeps what was typed: it is Done on this side, then the other side opens
     const seg = document.createElement('div'); seg.className = 'open-seg side-seg';
@@ -388,14 +325,82 @@ function edit(i, which, asMd = false) {
     seg.onclick = (e) => { const b = e.target.closest('[data-s]'); if (!b || b.dataset.s === which || el('modal-save').disabled) return; saveSheet(); if (el('modal').hidden) edit(i, b.dataset.s); };
     body.prepend(seg);
   }
+  // 🔴 a tile that is not there yet (just added, not Done) has nothing to delete: the way out is Cancel
+  const fresh = undoTo != null, del = el('modal-delete');
+  del.hidden = false; del.textContent = fresh ? L.cancel : L.deleteTile;
+  del.classList.toggle('ctw-btn-danger', !fresh);
   el('modal').hidden = false;
-  // a field the tile cannot go without: Done waits for it instead of refusing afterwards, and the
-  // sheet opens on it when it is still empty
+  // a field the tile cannot go without: Done waits for it instead of refusing afterwards, the field says
+  // so, the line beside Done says which, and the sheet opens on it when it is still empty
   const need = asMd || !def ? [] : requiredNames(def);
-  const empty = () => need.map((n) => document.getElementById(`f-${n}`)).filter((f) => f && f.closest('[data-field]') && !f.closest('[data-field]').hidden && !f.value.trim());
-  const gate = () => { el('modal-save').disabled = empty().length > 0; };
+  const fieldOf = (n) => { const f = document.getElementById(`f-${n}`); return f && f.closest('[data-field]'); };
+  for (const n of need) {
+    const box = fieldOf(n); if (!box || box.querySelector('.ctw-need')) continue;
+    const tag = document.createElement('em'); tag.className = 'ctw-need'; tag.textContent = L.required;
+    (box.querySelector(':scope > span') || box).appendChild(tag);
+  }
+  const empty = () => need.map((n) => document.getElementById(`f-${n}`)).filter((f) => f && fieldOf(f.id.slice(2)) && !fieldOf(f.id.slice(2)).hidden && !f.value.trim());
+  const gate = () => {
+    const gaps = empty();
+    el('modal-save').disabled = gaps.length > 0;
+    for (const n of need) { const box = fieldOf(n); if (box) box.classList.toggle('is-missing', gaps.some((f) => f.id === `f-${n}`)); }
+    const first = gaps[0] && fieldOf(gaps[0].id.slice(2));
+    el('modal-why').textContent = first ? fmt(L.needs, { f: (first.querySelector(':scope > span')?.firstChild?.textContent || '').trim() }) : '';
+  };
   body.oninput = body.onchange = gate; gate();
-  const first = empty()[0] || body.querySelector('.prose-ed [contenteditable]') || body.querySelector('input,textarea,select'); if (first) first.focus();
+  const first = empty()[0] || body.querySelector('.prose-ed [contenteditable]') || body.querySelector('input:not([type=hidden]),textarea:not([hidden]),select'); if (first) first.focus({ preventScroll: true });
+  notices.place();
+}
+// Help text stays short on screen: a long explanation goes behind a "?" by its label, shown on tap. An
+// address in a hint never breaks in the middle, and a hint's last line never holds one lonely character.
+const LONG_HINT = 64;
+function tidyHints(body) {
+  for (const em of body.querySelectorAll('.ctw-field > em:not(.ctw-err):not(.ctw-need)')) {
+    const t = em.textContent;
+    em.innerHTML = esc(t).replace(/((?:https?:\/\/)?(?:[\w-]+\.)+[a-z]{2,}\/[^\s，。、)）]*)/gi, '<span class="nw">$1</span>');
+    em.classList.add('hint');
+    if (t.length <= LONG_HINT) continue;
+    const label = em.parentElement.querySelector(':scope > span'); if (!label) continue;
+    const id = `h-${em.parentElement.dataset.field}`; em.id = id; em.hidden = true;
+    const q = document.createElement('button'); q.type = 'button'; q.className = 'qhelp'; q.textContent = '?';
+    q.setAttribute('aria-label', L.help); q.setAttribute('aria-expanded', 'false'); q.setAttribute('aria-controls', id);
+    q.onclick = (e) => { e.preventDefault(); e.stopPropagation(); em.hidden = !em.hidden; q.setAttribute('aria-expanded', String(!em.hidden)); };
+    label.appendChild(q);
+  }
+}
+// ── the social-icons tile: one row per account (w3/social-rows.mjs). The textarea stays the field the
+// form reads (like the text editor's); the rows only write into it. No Markdown, %20 or icon= by hand.
+function socialForm(ta) {
+  if (!ta) return;
+  const box = ta.closest('[data-field]'); ta.hidden = true;
+  for (const em of box.querySelectorAll(':scope > em:not(.ctw-err)')) em.remove();
+  let rows = parseSocial(ta.value);
+  if (!rows.some((r) => r.raw == null)) rows.push({ net: 'instagram', url: '', label: '', extra: '' });
+  const list = document.createElement('div'); list.className = 'soc-rows'; ta.after(list);
+  const write = () => { ta.value = composeSocial(rows); ta.dispatchEvent(new Event('input', { bubbles: true })); };
+  const opts = (sel) => NETWORKS.map((n) => `<option value="${n.id}"${n.id === sel ? ' selected' : ''}>${esc(L.netNames[n.id])}</option>`).join('');
+  const paint = () => {
+    list.textContent = '';
+    rows.forEach((r, k) => {
+      if (r.raw != null) return;   // a line the form cannot show is kept as written, out of the way
+      const line = document.createElement('div'); line.className = 'soc-row';
+      // a new row's starting address is the network's front page: show it empty, so the person types theirs
+      if (r.net !== 'web' && /^https?:\/\/(www\.)?[^/]+\/?$/.test(r.url)) r.url = '';
+      line.innerHTML = `<select aria-label="${esc(L.socialNet)}">${opts(r.net)}</select>`
+        + `<input type="text" inputmode="${r.net === 'email' ? 'email' : 'url'}" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="${esc(L.socialLink)}" placeholder="${esc(L.socialLink)}" value="${esc(r.url)}">`
+        + `<button type="button" class="soc-x" aria-label="${esc(L.socialRemove)}">${XICO}</button>`;
+      const [sel, inp, x] = line.children;
+      sel.onchange = () => { r.net = sel.value; r.label = ''; inp.inputMode = r.net === 'email' ? 'email' : 'url'; write(); };
+      inp.oninput = () => { r.url = inp.value; write(); };
+      x.onclick = () => { rows.splice(k, 1); if (!rows.some((y) => y.raw == null)) rows.push({ net: 'instagram', url: '', label: '', extra: '' }); paint(); write(); };
+      list.appendChild(line);
+    });
+    const more = document.createElement('button'); more.type = 'button'; more.className = 'ctw-btn soc-add'; more.innerHTML = PLUS + esc(L.socialAdd);
+    more.onclick = () => { rows.push({ net: 'instagram', url: '', label: '', extra: '' }); paint(); list.querySelector('.soc-row:last-of-type input')?.focus(); };
+    list.appendChild(more);
+  };
+  paint();
+  if (composeSocial(rows) !== ta.value) write();   // a front-page placeholder shown empty is empty in the tile too
 }
 // A text tile's words are written with the family editor, holding only the tools whose marks a card
 // actually draws (card-render.mjs mdInline/mdBlock: bold, italic, # to ###, `- ` lists, links, ---).
@@ -417,14 +422,48 @@ function proseEditor(ta) {
   ta.hidden = true; ta.after(box);
   const ctl = mountEditor(box, { text: ta.value, onChange: () => { ta.value = ctl.rawValue(); ta.dispatchEvent(new Event('input', { bubbles: true })); } }, host);
   prose = { ctl, ta };
-  const ed = box.querySelector('[contenteditable]'); if (ed) ed.setAttribute('aria-label', ta.closest('[data-field]')?.querySelector('label')?.textContent || L.text);
+  const ed = box.querySelector('[contenteditable]'); if (ed) ed.setAttribute('aria-label', ta.closest('[data-field]')?.querySelector('span')?.textContent || L.text);
+  fitToolbar(box);
+}
+// 🔴 The toolbar NEVER WRAPS (P44): it is one row; the tools that do not fit go, from the end, into a "more"
+// menu (lucide ellipsis). Search stays in the row. The editor's own buttons are moved, never copied, so each
+// keeps its own wiring.
+function fitToolbar(box) {
+  const tools = box.querySelector('.tugtile-ed-tools'); if (!tools) return;
+  const all = [...tools.children];
+  const more = document.createElement('div'); more.className = 'tb-more';
+  more.innerHTML = `<button type="button" class="tugtile-iconbtn tugtile-ed-tool tb-more-btn" aria-label="${esc(L.more)}" aria-haspopup="true" aria-expanded="false">${ELLIPSIS}</button><div class="tb-more-menu" hidden></div>`;
+  const btn = more.firstChild, menu = more.lastChild;
+  const shut = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+  btn.addEventListener('mousedown', (e) => e.preventDefault());   // keep the text's selection for the tool picked next
+  btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); });
+  menu.addEventListener('click', () => setTimeout(shut, 0));
+  box.ownerDocument.addEventListener('click', (e) => { if (!more.contains(e.target)) shut(); });
+  let lastW = -1;
+  const layout = () => {
+    const w = tools.clientWidth; if (!w || w === lastW) return; lastW = w;   // not on screen yet: wait for the size
+    shut(); more.remove();
+    for (const n of all) tools.appendChild(n);
+    // measured by the boxes, not scrollWidth: each tool's enlarged hit area overhangs it by a few pixels
+    const over = () => { const l = tools.lastElementChild; return !!l && l.getBoundingClientRect().right > tools.getBoundingClientRect().right + 0.5; };
+    if (!over()) return;
+    tools.appendChild(more);
+    const movable = all.slice(1);   // the first tool is search: it stays
+    for (let k = movable.length - 1; k >= 0 && over(); k--) menu.prepend(movable[k]);
+    // a divider never ends the row
+    const last = more.previousElementSibling; if (last && last.classList.contains('tugtile-ed-sep')) menu.prepend(last);
+  };
+  new ResizeObserver(layout).observe(tools);
+  layout();
 }
 function requiredNames(def) {
   const out = [], walk = (rows) => rows.forEach((r) => (r.group ? walk(r.rows) : r.required && out.push(r.name)));
   walk(def.form || def.fields || []); return out;
 }
 function closeSheet(kept) {
+  if (open && open.card) flushSetting();   // a title typed a moment ago still lands
   el('modal').hidden = true; open = null; pending = {}; prose = null;
+  el('modal').querySelector('.ctw-modal-panel').classList.remove('is-settings');
   if (!kept && undoTo != null) { const back = undoTo; undoTo = null; md = back; m = read(md); persist(); draw(); }
   undoTo = null;
 }
@@ -469,159 +508,168 @@ function deleteSheet() {
   // 🔴 no "are you sure?" first: the question blocks every time to save the rare mistake. Gone at once,
   // and back with one tap. (A tile that was never kept is just the add taken back — nothing to offer.)
   // Undo puts the file back and repaints whatever screen you are on — the row alone was not enough on the wall
-  if (!fresh) toast(L.deleted, () => { md = was; m = read(md); persist(); draw(); show(); });
+  if (!fresh) confirmNote('deleted', L.deleted, backTo(was));
 }
-let toastTimer = 0;
-function toast(textValue, undo) {
-  el('toast-text').textContent = textValue; el('toast').hidden = false;
-  el('toast-undo').hidden = !undo; el('toast-undo').onclick = () => { el('toast').hidden = true; undo && undo(); };
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el('toast').hidden = true; }, 6000);
-}
+// ── the one notice (w3/notice.mjs): top = status and errors, bottom = confirmations (with Undo) ──
+const LAYER_ORDER = ['leavemodal', 'doormodal', 'modal', 'picker'];
+const openPanel = () => { for (const id of LAYER_ORDER) if (!el(id).hidden) return el(id).querySelector('.ctw-modal-panel'); return null; };
+const notices = createNotices({ top: el('notice-top'), bottom: el('notice-bottom'), openSheet: openPanel });
+const confirmNote = (kind, words, undo) => notices.show(kind, words, undo ? { label: L.undo, run: undo } : null);
+const backTo = (was) => () => { md = was; m = read(md); cache.clear(); persist(); draw(); show(); };
+
 // ── Cards options: what belongs to the whole card, not to one tile ──
-// the frontmatter keys the renderer (backdrop, backdrop-dim, accent, theme, header, icons) and the deck (views, view, back) read
-const VIEW_IDS = ['stack', 'list', 'wall'], VIEW_NAMES = L.views;
+// 🔴 A DESIGNED LIST, NOT A FORM: grouped rows, label on the left, its control on the right (a switch, a value,
+// or a two- or three-way choice). Every change goes into the draft the moment it is made (w3/card-settings.mjs):
+// there is no Done, and closing the sheet keeps everything. Nothing is live until Save, as everywhere.
 const P = (label, control, extra = {}) => ({ disposition: DISPOSITION.FORM, label, control, ...extra });
 const CARD_DEF = {
-  title: L.options, hint: L.setHint, body: null,
+  title: L.options, hint: '', body: null,
   params: {
     backdrop: P(L.backdrop, CONTROL.ASSET, { hint: L.backdropHint }),
     'backdrop-dim': P(L.dim, CONTROL.SELECT, { options: ['0', '25', '45', '65'], optionLabels: L.dimNames, hint: L.dimHint }),
   },
 };
 CARD_DEF.fields = Object.entries(CARD_DEF.params).map(([name, p]) => ({ name, ...p }));
-function fmRead(pre) {
-  const o = {}, f = /^---\n([\s\S]*?)\n---/.exec(pre || '');
-  if (f) for (const l of f[1].split('\n')) { const k = /^([\w-]+):\s*(.*)$/.exec(l); if (k) o[k[1]] = k[2].trim(); }
-  return o;
+// one setting → the draft, at once
+function putSetting(name, value) {
+  const x = clone(); x.pre = applySetting(x.pre, name, value);
+  if (Object.keys(pending).length) x.assets = { ...(x.assets || {}), ...pending };
+  cache.clear(); commit(x);
 }
-// one `key: value` line inside the frontmatter fence; null removes it
-function fmWrite(pre, key, value) {
-  const f = /^---\n([\s\S]*?)\n---/.exec(pre || '');
-  const lines = f ? f[1].split('\n') : [];
-  const at = lines.findIndex((l) => new RegExp(`^${key}:`).test(l));
-  if (value == null || value === '') { if (at >= 0) lines.splice(at, 1); }
-  else if (at >= 0) lines[at] = `${key}: ${value}`; else lines.push(`${key}: ${value}`);
-  const fence = `---\n${lines.join('\n')}\n---`;
-  return f ? pre.replace(f[0], () => fence) : `${fence}\n${pre || ''}`;
-}
+let settingTimer = 0, settingNext = null;
+const putSoon = (name, value) => { clearTimeout(settingTimer); settingNext = [name, value]; settingTimer = setTimeout(flushSetting, 450); };
+function flushSetting() { clearTimeout(settingTimer); const n = settingNext; settingNext = null; if (n) putSetting(n[0], n[1]); }
 function openCard() {
   open = { card: true }; pending = {};
-  const fm = fmRead(m.pre), views = String(fm.views || VIEW_IDS.join(' ')).split(/[\s,]+/);
-  const params = { backdrop: fm.backdrop || '', 'backdrop-dim': fm['backdrop-dim'] || '' };
-  el('modal-title').textContent = CARD_DEF.title;
-  el('modal-hint').textContent = CARD_DEF.hint;
+  const fm = fmRead(m.pre);
+  el('modal-title').textContent = L.options; el('modal-hint').textContent = '';
+  el('modal-foot').hidden = true;
+  el('modal').querySelector('.ctw-modal-panel').classList.add('is-settings');
   const body = el('modal-body');
-  body.oninput = body.onchange = null; el('modal-save').disabled = false;
-  // the empty choice of the backdrop dim is the renderer's own dim, so it says Auto rather than (default)
-  body.innerHTML = formBodyHtml(CARD_DEF, { type: 'card', params, rawParams: '', body: '' }, { ...formCtx(), T: { ...T, selectDefaultOption: L.auto } });
-  // six groups, each under its own small heading, with air between them
-  const look = [...body.childNodes]; body.textContent = '';
-  const sec = (title) => { const x = document.createElement('section'); x.className = 'optsec'; x.innerHTML = `<h3>${esc(title)}</h3>`; body.appendChild(x); return x; };
-  const optRow = (into, html, cls = '') => { const r = document.createElement('div'); r.className = 'optrow' + (cls ? ' ' + cls : ''); r.innerHTML = html; into.appendChild(r); return r; };
+  body.oninput = body.onchange = null; body.textContent = '';
+  const group = (title) => {
+    const sec = document.createElement('section'); sec.className = 'set-group';
+    if (title) sec.innerHTML = `<h3>${esc(title)}</h3>`;
+    const list = document.createElement('div'); list.className = 'set-list'; sec.appendChild(list); body.appendChild(sec); return list;
+  };
+  // a row: what it is on the left (with a line under it when it needs one), its control on the right
+  const row = (list, label, sub = '', { tag = 'div', cls = '' } = {}) => {
+    const r = document.createElement(tag); r.className = 'set-row' + (cls ? ' ' + cls : '');
+    r.innerHTML = `<span class="set-label"><span class="set-name">${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</span><span class="set-ctl"></span>`;
+    list.appendChild(r); return r;
+  };
+  // a switch row is one <label>: tapping the words toggles it too
+  const switchRow = (list, label, sub, on, onChange, { disabled = false } = {}) => {
+    const r = row(list, label, sub, { tag: 'label', cls: 'is-switch' });
+    const sw = document.createElement('input'); sw.type = 'checkbox'; sw.className = 'switch'; sw.setAttribute('role', 'switch');
+    sw.checked = on; sw.disabled = disabled; sw.onchange = () => onChange(sw.checked, sw, r);
+    r.querySelector('.set-ctl').appendChild(sw); return r;
+  };
+  const segRow = (list, label, names, value, onPick) => {
+    const r = row(list, label);
+    const seg = document.createElement('div'); seg.className = 'open-seg'; seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', label);
+    seg.innerHTML = Object.entries(names).map(([k, n]) => `<button type="button" data-v="${k}" aria-pressed="${k === value}">${esc(n)}</button>`).join('');
+    for (const b of seg.querySelectorAll('button')) b.onclick = () => { for (const x of seg.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); onPick(b.dataset.v); };
+    r.querySelector('.set-ctl').appendChild(seg); return r;
+  };
+
+  // 0 · the sandbox: where these Cards are kept, and the one way to empty that (it used to be a banner)
+  if (SANDBOX) {
+    const r = row(group(''), L.sbxStatus, '', { cls: 'is-status' });
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'ctw-btn'; b.id = 'opt-reset'; b.textContent = PERSONA.reset;
+    b.onclick = resetSandbox; r.querySelector('.set-ctl').appendChild(b);
+  }
   // 1 · name and address
-  const s1 = sec(L.secName), pi = profileAt();
-  optRow(s1, `<span>${esc(L.titleL)}</span><input id="opt-title" type="text" autocomplete="off" value="${esc(fm.title || '')}" placeholder="${esc(L.untitled)}">`
-    + (pi >= 0 ? `<p>${esc(L.titleFromProfile)}</p>` : ''));
-  handleRow(optRow(s1, ''));
+  const g1 = group(L.secName), pi = profileAt();
+  { const r = row(g1, L.titleL, pi >= 0 ? L.titleFromProfile : '', { tag: 'label', cls: 'is-input' });
+    const inp = document.createElement('input'); inp.id = 'opt-title'; inp.type = 'text'; inp.autocomplete = 'off'; inp.value = fm.title || ''; inp.placeholder = L.untitled;
+    inp.oninput = () => { putSoon('title', inp.value); reprint(); }; inp.onchange = () => { settingNext = ['title', inp.value]; flushSetting(); };
+    r.querySelector('.set-ctl').appendChild(inp); }
+  handleRow(g1, row);
   // 🔴 the address, the domain, the pool and the transfer belong to the PLATFORM, not the file. In host
   // mode they are a real Card's, and this editor cannot change them yet: shown read-only, or not at all.
-  if (SANDBOX) optRow(s1, `<span>${esc(L.domainL)}</span><p>${esc(L.domainSays)}</p><button type="button" class="ctw-btn" disabled title="${esc(L.notYet)}">${esc(L.connect)}</button>`);
-  // 2 · look: the backdrop form, then the arrangements the engine already reads (header: left, icons: mono)
-  const s2 = sec(L.secLook); s2.append(...look);
-  segRow(s2, 'opt-header', L.headerL, L.headerNames, fm.header === 'left' ? 'left' : 'centre');
-  segRow(s2, 'opt-icons', L.iconsL, L.iconsNames, fm.icons === 'mono' ? 'mono' : 'colour');
+  if (SANDBOX) { const r = row(g1, L.domainL, L.domainSays); r.querySelector('.set-ctl').innerHTML = `<button type="button" class="ctw-btn" disabled title="${esc(L.notYet)}">${esc(L.connect)}</button>`; }
+  // 2 · look: the backdrop (the engine's picture picker) and its dim, then the arrangements the engine reads
+  const g2 = group(L.secLook);
+  { const blk = document.createElement('div'); blk.className = 'set-block';
+    blk.innerHTML = formBodyHtml(CARD_DEF, { type: 'card', params: { backdrop: fm.backdrop || '', 'backdrop-dim': fm['backdrop-dim'] || '' }, rawParams: '', body: '' }, { ...formCtx(), T: { ...T, selectDefaultOption: L.auto } });
+    g2.appendChild(blk);
+    wireForm(blk, CARD_DEF, { T, previewSrc, stage: (id, a) => { pending[id] = a; } });
+    // the picker writes its hidden input without an event: watch the value instead
+    const bd = blk.querySelector('#f-backdrop');
+    let lastBd = bd.value; const poll = setInterval(() => { if (!bd.isConnected) { clearInterval(poll); return; } if (bd.value !== lastBd) { lastBd = bd.value; putSetting('backdrop', bd.value); } }, 300);
+    blk.querySelector('#f-backdrop-dim').onchange = (e) => putSetting('backdrop-dim', e.target.value);
+    tidyHints(blk); }
+  segRow(g2, L.headerL, L.headerNames, fm.header === 'left' ? 'left' : 'centre', (v) => putSetting('header', v));
+  segRow(g2, L.iconsL, L.iconsNames, fm.icons === 'mono' ? 'mono' : 'colour', (v) => putSetting('icons', v));
   { const a = String(fm.accent || '').replace(/^["']|["']$/g, ''), ok = /^#[0-9a-f]{6}$/i.test(a);
-    const r = optRow(s2, `<span>${esc(L.accentL)}</span><div class="seg-line"><input type="color" id="opt-accent" value="${ok ? a : '#14a3b3'}"${ok ? '' : ' data-unset'}><button type="button" class="ctw-btn" id="opt-accent-0">${esc(L.accentReset)}</button></div><p>${esc(L.accentSays)}</p>`);
+    const r = row(g2, L.accentL, L.accentSays);
+    r.querySelector('.set-ctl').innerHTML = `<input type="color" id="opt-accent" aria-label="${esc(L.accentL)}" value="${ok ? a : '#14a3b3'}"><button type="button" class="ctw-btn" id="opt-accent-0">${esc(L.accentReset)}</button>`;
     const inp = r.querySelector('#opt-accent'), b0 = r.querySelector('#opt-accent-0');
-    const paintA = () => { b0.disabled = inp.hasAttribute('data-unset'); }; paintA();
-    inp.addEventListener('input', () => { inp.removeAttribute('data-unset'); paintA(); });
-    b0.onclick = () => { inp.setAttribute('data-unset', ''); paintA(); }; }
-  segRow(s2, 'opt-theme', L.themeL, L.themeNames, ['light', 'dark'].includes(fm.theme) ? fm.theme : 'auto');
-  // 3 · views
-  sec(L.secViews).appendChild(viewsControl(views.filter((v) => VIEW_IDS.includes(v)), fm.view));
-  // 4 · back — drawn, not described: the default back is a card, so it shows as one. Out of the box it is the printed
-  // business card (its name is the title above, so typing there re-prints it); Replace puts any one tile there instead.
-  const dfl = defBack();
-  const bc = optRow(sec(L.secBack), `<span>${esc(L.bcL)}</span>` + (dfl ? '' : `<div class="card printed bc-mini" aria-hidden="true"><div class="bc-name"></div><div class="bc-qr"></div></div>`)
-    + `<p>${esc(dfl ? L.dfSays : L.bcSays)}</p><button type="button" class="ctw-btn" id="opt-df">${esc(dfl ? L.toBc : L.replaceBack)}</button>`);
-  if (dfl) { const c = cardEl(dfl.cells.slice(0, 1), L.bcL, () => { saveCard(); edit(-1, 'default'); }); c.classList.add('bc-mini'); bc.querySelector('span').after(c); }
-  if (!dfl) { const reprint = () => { bc.querySelector('.bc-name').textContent = el('opt-title').value.trim() || L.untitled; }; reprint(); el('opt-title').addEventListener('input', reprint); }
-  el('opt-df').onclick = () => { saveCard(); if (dfl) { const was = md; commit(dropDefault(clone())); toast(L.toBcDone, () => { md = was; m = read(md); persist(); draw(); show(); }); } else openPicker(0, { asDefault: true }); };
-  // 5 · being found — one switch: in the pool (drawn at reef.cards, on the home page) ⇔ the reef.cards card and footer
-  // link. The platform's switch (reef#2913), never the file's: kept in this browser in the sandbox, and
-  // not offered in host mode until the platform side exists.
+    b0.disabled = !ok;
+    inp.oninput = () => { b0.disabled = false; putSoon('accent', inp.value); };
+    b0.onclick = () => { b0.disabled = true; putSetting('accent', null); }; }
+  segRow(g2, L.themeL, L.themeNames, ['light', 'dark'].includes(fm.theme) ? fm.theme : 'auto', (v) => putSetting('theme', v));
+  // 3 · views: one switch per view (the last one on stays on), then which one opens
+  const g3 = group(L.secViews);
+  let vs = readViews(m.pre);
+  const opensRow = document.createElement('div');
+  const paintViewsRows = () => {
+    g3.textContent = '';
+    for (const v of VIEW_IDS) {
+      const on = vs.on.includes(v);
+      switchRow(g3, L.views[v], L.viewSays[v], on, (want) => { vs = toggleView(vs, v, want); putSetting('views', vs); paintViewsRows(); }, { disabled: on && vs.on.length === 1 });
+    }
+    if (vs.on.length > 1) segRow(g3, L.opensAs, Object.fromEntries(vs.on.map((v) => [v, L.views[v]])), vs.open, (v) => { vs = { ...vs, open: v }; putSetting('views', vs); });
+  };
+  paintViewsRows(); void opensRow;
+  // 4 · back — drawn, not described: the default back is a tile, so it shows as one. Out of the box it shows
+  // your name (the title above, so typing there re-prints it) and a QR code; Replace puts any one tile there.
+  const g4 = group(L.secBack), dfl = defBack();
+  const bc = row(g4, L.bcL, dfl ? L.dfSays : L.bcSays, { cls: 'is-back' });
+  const act = document.createElement('button'); act.type = 'button'; act.className = 'ctw-btn'; act.id = 'opt-df'; act.textContent = dfl ? L.toBc : L.replaceBack;
+  bc.querySelector('.set-ctl').appendChild(act);
+  const mini = dfl ? cardEl(dfl.cells.slice(0, 1), L.bcL, () => edit(-1, 'default'))
+    : Object.assign(document.createElement('div'), { className: 'card printed', innerHTML: `<div class="bc-name"></div><div class="bc-qr" aria-hidden="true">${QRICO}</div>` });
+  mini.classList.add('bc-mini'); bc.querySelector('.set-label').appendChild(mini);
+  function reprint() { const n = bc.querySelector('.bc-name'); if (n) n.textContent = (el('opt-title') && el('opt-title').value.trim()) || L.untitled; }
+  reprint();
+  act.onclick = () => { if (dfl) { const was = md; commit(dropDefault(clone())); openCard(); confirmNote('done', L.toBcDone, () => { backTo(was)(); if (open && open.card) openCard(); }); } else openPicker(0, { asDefault: true }); };
+  // 5 · being found — one switch: listed at reef.cards (drawn there, and on the home page) ⇔ the reef.cards card
+  // and footer link. The platform's switch (reef#2913), never the file's: kept in this browser in the sandbox,
+  // and not offered in host mode until the platform side exists.
   if (SANDBOX) {
-    const pool = segRow(sec(L.secFound), 'opt-pool', L.poolL, L.poolNames, poolOn() ? 'on' : 'off');
-    const poolSays = document.createElement('p'); pool.appendChild(poolSays);
-    const sayPool = () => { poolSays.textContent = segVal('opt-pool') === 'off' ? L.poolOff : L.poolOn; }; sayPool();
-    pool.addEventListener('click', sayPool);
+    switchRow(group(L.secFound), L.poolL, poolOn() ? L.poolOn : L.poolOff, poolOn(), (on, sw, r) => {
+      lsSet(PKEY, on ? null : 'off'); r.querySelector('small').textContent = on ? L.poolOn : L.poolOff; show();
+    });
   }
   // 6 · more — the file itself, a backup, and (sandbox only, set apart, last) giving it away
-  const s6 = sec(L.secMore);
-  optRow(s6, `<span>${esc(L.raw)}</span><p>${esc(L.rawSays)}</p><button type="button" class="ctw-btn" id="opt-raw">${esc(L.openRaw)}</button>`);
-  optRow(s6, `<span>${esc(L.backupL)}</span><p>${esc(L.backupSays)}</p><div class="bk-acts"><button type="button" class="ctw-btn" id="opt-dl">${esc(L.download)}</button><button type="button" class="ctw-btn" id="opt-up">${esc(L.replaceFile)}</button><input type="file" id="opt-file" accept=".md,text/markdown,text/plain" hidden></div><p class="err" id="opt-bkerr" hidden></p>`);
+  const g6 = group(L.secMore);
+  { const r = row(g6, L.openRaw, L.rawSays, { tag: 'button', cls: 'is-link' }); r.type = 'button'; r.id = 'opt-raw';
+    r.querySelector('.set-ctl').innerHTML = CHEV; r.onclick = () => openRaw(); }
+  { const r = row(g6, L.backupL, L.backupSays, { cls: 'is-backup' });
+    r.querySelector('.set-ctl').innerHTML = `<button type="button" class="ctw-btn" id="opt-dl">${esc(L.download)}</button><button type="button" class="ctw-btn" id="opt-up">${esc(L.replaceFile)}</button><input type="file" id="opt-file" accept=".md,text/markdown,text/plain" hidden>`;
+    r.querySelector('.set-label').insertAdjacentHTML('beforeend', '<p class="ctw-err" id="opt-bkerr" role="alert"></p>'); }
   el('opt-dl').onclick = () => { const u = URL.createObjectURL(new Blob([md], { type: 'text/markdown' })); const x = document.createElement('a'); x.href = u; x.download = `${getHandle()}.md`; x.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); };
   el('opt-up').onclick = () => el('opt-file').click();
   // a file replaces the DRAFT, never what is saved: it still needs Save, like any other change
   el('opt-file').onchange = async () => {
     const f = el('opt-file').files[0]; if (!f) return; let t = await f.text(); el('opt-file').value = '';
     const wrong = whatIsWrong(t);
-    if (wrong) { el('opt-bkerr').hidden = false; el('opt-bkerr').textContent = fmt(L.badFile, { n: wrong.line }); return; }
+    if (wrong) { el('opt-bkerr').textContent = fmt(L.badFile, { n: wrong.line }); return; }
+    el('opt-bkerr').textContent = '';
     if (!t.endsWith('\n')) t += '\n';
     const was = md, before = m.cells.length;
-    closeSheet(true); el('modal-delete').hidden = false;
-    md = t; m = read(md); persist(); cache.clear(); flipped.clear(); draw(); show();
-    toast(fmt(L.replaced, { a: before, b: m.cells.length }), () => { md = was; m = read(md); persist(); cache.clear(); draw(); show(); });
+    closeSheet(true);
+    md = t; m = read(md); persist(); cache.clear(); draw(); show();
+    confirmNote('replaced', fmt(L.replaced, { a: before, b: m.cells.length }), backTo(was));
   };
-  if (SANDBOX) optRow(s6, `<span>${esc(L.transferL)}</span><p>${esc(L.transferSays)}</p><button type="button" class="ctw-btn" disabled title="${esc(L.notYet)}">${esc(L.transferL)}</button>`, 'optlast');
-  el('opt-raw').onclick = () => { saveCard(); openRaw(); };
-  wireForm(body, CARD_DEF, { T, previewSrc, stage: (id, a) => { pending[id] = a; } });
-  el('modal-delete').hidden = true;
+  if (SANDBOX) { const r = row(g6, L.transferL, L.transferSays, { cls: 'optlast' }); r.querySelector('.set-ctl').innerHTML = `<button type="button" class="ctw-btn" disabled title="${esc(L.notYet)}">${esc(L.transferL)}</button>`; }
   el('modal').hidden = false;
-}
-// 🔴 THE WRONG ANSWER IS NOT ON OFFER. Three tiles say which views a visitor gets; the row under them
-// says which one opens, and holds only the views that are on. Turning off the one that opens moves the
-// opening to the first one left; the last one on cannot be turned off. Nothing to check on Done.
-const VIEW_SAYS = L.viewSays;
-let viewState = null;
-function viewsControl(on, first) {
-  viewState = { on: new Set(on.length ? on : VIEW_IDS), open: null };
-  viewState.open = viewState.on.has(first) ? first : VIEW_IDS.find((v) => viewState.on.has(v));
-  const box = document.createElement('div'); box.className = 'ctw-field views';
-  box.innerHTML = `<span>${esc(L.viewsLabel)}</span><div class="vw-row">`
-    + VIEW_IDS.map((v) => `<button type="button" class="vw" data-v="${v}"><span class="tick">${TICK}</span><b>${esc(VIEW_NAMES[v])}</b><small>${esc(VIEW_SAYS[v])}</small></button>`).join('')
-    + `</div><div class="open-row"><span>${esc(L.opensAs)}</span><div class="open-seg">`
-    + VIEW_IDS.map((v) => `<button type="button" data-v="${v}">${esc(VIEW_NAMES[v])}</button>`).join('') + '</div></div>';
-  const paint = () => {
-    for (const b of box.querySelectorAll('.vw')) {
-      const isOn = viewState.on.has(b.dataset.v);
-      b.setAttribute('aria-pressed', String(isOn));
-      b.disabled = isOn && viewState.on.size === 1;   // the last one stays
-    }
-    for (const b of box.querySelectorAll('.open-seg button')) { b.hidden = !viewState.on.has(b.dataset.v); b.setAttribute('aria-pressed', String(b.dataset.v === viewState.open)); }
-    box.querySelector('.open-row').hidden = viewState.on.size < 2;   // one view: nothing to choose
-  };
-  for (const b of box.querySelectorAll('.vw')) b.onclick = () => {
-    const v = b.dataset.v;
-    if (viewState.on.has(v)) { if (viewState.on.size === 1) return; viewState.on.delete(v); } else viewState.on.add(v);
-    if (!viewState.on.has(viewState.open)) viewState.open = VIEW_IDS.find((x) => viewState.on.has(x));
-    paint();
-  };
-  for (const b of box.querySelectorAll('.open-seg button')) b.onclick = () => { viewState.open = b.dataset.v; paint(); };
-  paint();
-  return box;
-}
-// a two- or three-way choice in Cards options, drawn like "Opens as"
-function segRow(into, id, label, names, value) {
-  const r = document.createElement('div'); r.className = 'optrow';
-  r.innerHTML = `<span>${esc(label)}</span><div class="seg-line"><div class="open-seg" id="${id}">`
-    + Object.entries(names).map(([k, n]) => `<button type="button" data-v="${k}" aria-pressed="${k === value}">${esc(n)}</button>`).join('') + '</div></div>';
-  for (const b of r.querySelectorAll('button')) b.onclick = () => { for (const x of r.querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); };
-  into.appendChild(r); return r;
+  notices.place();
 }
 // the sandbox's stand-in for the platform's pool switch: this browser only, never the file
 const PKEY = 'cardtile:w3:pool', poolOn = () => lsGet(PKEY) !== 'off';
-const segVal = (id) => { const b = el(id) && el(id).querySelector('[aria-pressed=true]'); return b ? b.dataset.v : null; };
 // The handle is the platform's (create_card reserves it; nothing in the file). In host mode it is the real Card's
 // and is shown as it is. The sandbox keeps a stand-in in this browser so the change can be felt: the old address is
 // let go at once, so the gate is the warning, and the owner types the OLD address to let it go.
@@ -629,62 +677,55 @@ const HANDLE_KEY = 'cardtile:w3:handle', HANDLE_SHAPE = /^[a-z0-9][a-z0-9-]{0,38
 // a sample of the platform's reserved names, so the sandbox's stand-in can say no the way the real one does
 const RESERVED = new Set('cards card reef feelreef cver try edit draw pool random www api mcp admin support help login signup dashboard about terms privacy official security billing account settings static assets'.split(' '));
 const getHandle = () => (SANDBOX ? lsGet(HANDLE_KEY) || 'yourname' : handle || 'card');
-function handleRow(r) {
-  if (!SANDBOX) {   // a real Card's address: read-only here
-    r.innerHTML = `<span>${esc(L.handleL)}</span><div class="seg-line"><span class="addr"><small>reef.cards/</small>${esc(getHandle())}</span></div><p>${esc(L.handleSays)} ${esc(L.handleHere)}</p>`;
-    return;
-  }
+function handleRow(list, row) {
+  const r = row(list, L.handleL, SANDBOX ? L.handleSays : `${L.handleSays} ${L.handleHere}`, { cls: 'is-handle' });
+  const ctl = r.querySelector('.set-ctl');
+  const value = (h) => `<span class="addr"><small>reef.cards/</small>${esc(h)}</span>`;
+  if (!SANDBOX) { ctl.innerHTML = value(getHandle()); return; }   // a real Card's address: read-only here
   const paint = () => {
     const h = getHandle();
-    r.innerHTML = `<span>${esc(L.handleL)}</span><div class="seg-line"><span class="addr"><small>reef.cards/</small>${esc(h)}</span><button type="button" class="ctw-btn" id="opt-hchange">${esc(L.change)}</button></div><p>${esc(L.handleSays)}</p>`;
+    ctl.innerHTML = `<button type="button" class="set-val" id="opt-hchange" aria-label="${esc(L.change)} · reef.cards/${esc(h)}">${value(h)}${CHEV}</button>`;
+    r.nextElementSibling?.classList.contains('hd-change') && r.nextElementSibling.remove();
     el('opt-hchange').onclick = () => {
-      r.innerHTML = `<span>${esc(L.handleL)}</span><div class="hd-change"><label>${esc(L.newHandle)}<input id="opt-hnew" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" value="${esc(h)}"></label>`
-        + `<p class="err" id="opt-herr" hidden></p><p class="warn">${esc(fmt(L.handleWarn, { o: h }))}</p>`
+      if (r.nextElementSibling?.classList.contains('hd-change')) { paint(); return; }
+      const box = document.createElement('div'); box.className = 'hd-change';
+      box.innerHTML = `<label>${esc(L.newHandle)}<input id="opt-hnew" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" value="${esc(h)}"></label>`
+        + `<p class="ctw-err" id="opt-herr" role="alert"></p><p class="warn">${esc(fmt(L.handleWarn, { o: h }))}</p>`
         + `<label>${esc(fmt(L.typeOld, { o: h }))}<input id="opt-hold" type="text" autocomplete="off" spellcheck="false" autocapitalize="off"></label>`
-        + `<div class="acts"><button type="button" class="ctw-btn" id="opt-hgo" disabled>${esc(L.doChange)}</button><button type="button" class="ctw-btn" id="opt-hno">${esc(L.cancel)}</button></div></div>`;
+        + `<div class="acts"><button type="button" class="ctw-btn" id="opt-hno">${esc(L.cancel)}</button><button type="button" class="ctw-btn ctw-btn-go" id="opt-hgo" disabled>${esc(L.doChange)}</button></div>`;
+      r.after(box);
+      // what you type is what is saved: the address is lowercase, so the box is lowercased as you type
+      const lower = (inp) => { const a = inp.selectionStart, b = inp.selectionEnd, v = inp.value.toLowerCase(); if (v !== inp.value) { inp.value = v; inp.setSelectionRange(a, b); } };
       const check = () => {
-        const v = el('opt-hnew').value.trim().toLowerCase();
+        lower(el('opt-hnew'));
+        const v = el('opt-hnew').value.trim();
         const why = v === h ? L.hSame : !HANDLE_SHAPE.test(v) ? L.hShape : RESERVED.has(v.replace(/-/g, '')) ? L.hReserved : '';
-        el('opt-herr').hidden = !why || !v; el('opt-herr').textContent = why;
-        el('opt-hgo').disabled = !!why || el('opt-hold').value.trim() !== h;
+        el('opt-herr').textContent = v ? why : '';
+        el('opt-hgo').disabled = !!why || el('opt-hold').value.trim().toLowerCase() !== h;
       };
       el('opt-hnew').oninput = el('opt-hold').oninput = check; check();
       el('opt-hno').onclick = paint;
-      el('opt-hgo').onclick = () => { const v = el('opt-hnew').value.trim().toLowerCase(); lsSet(HANDLE_KEY, v); paint(); toast(fmt(L.handleDone, { h: v }), () => { lsSet(HANDLE_KEY, h); if (el('opt-hchange')) paint(); }); };
+      el('opt-hgo').onclick = () => { const v = el('opt-hnew').value.trim(); lsSet(HANDLE_KEY, v); paint(); confirmNote('done', fmt(L.handleDone, { h: v }), () => { lsSet(HANDLE_KEY, h); if (el('opt-hchange')) paint(); }); };
       el('opt-hnew').focus(); el('opt-hnew').select();
     };
   };
   paint();
 }
-function saveCard() {
-  const on = VIEW_IDS.filter((v) => viewState.on.has(v));
-  const opens = viewState.open === on[0] ? '' : viewState.open;   // the first one on opens anyway: say nothing
-  const x = clone();
-  let pre = x.pre;
-  pre = fmWrite(pre, 'backdrop', el('f-backdrop').value.trim() || null);
-  pre = fmWrite(pre, 'backdrop-dim', el('f-backdrop-dim').value || null);
-  pre = fmWrite(pre, 'views', on.length === VIEW_IDS.length ? null : on.join(' '));
-  pre = fmWrite(pre, 'view', opens || null);
-  if (el('opt-title')) pre = fmWrite(pre, 'title', el('opt-title').value.trim() || null);
-  if (el('opt-header')) pre = fmWrite(pre, 'header', segVal('opt-header') === 'left' ? 'left' : null);
-  if (el('opt-icons')) pre = fmWrite(pre, 'icons', segVal('opt-icons') === 'mono' ? 'mono' : null);
-  if (el('opt-pool')) lsSet(PKEY, segVal('opt-pool') === 'off' ? 'off' : null);   // platform side, never the file
-  if (el('opt-accent')) pre = fmWrite(pre, 'accent', el('opt-accent').hasAttribute('data-unset') ? null : el('opt-accent').value);
-  if (el('opt-theme')) pre = fmWrite(pre, 'theme', segVal('opt-theme') === 'auto' ? null : segVal('opt-theme'));
-  x.pre = pre;
-  if (Object.keys(pending).length) x.assets = { ...(x.assets || {}), ...pending };
-  closeSheet(true); el('modal-delete').hidden = false;
-  cache.clear(); commit(x);
+function resetSandbox() {
+  settingNext = null; closeSheet(true);   // first: a title typed a moment ago must not land on the empty card
+  lsSet(KEY, null); lsSet(DKEY, null); lsSet(W2_DRAFT_KEY, null);
+  savedMd = SANDBOX_START; md = SANDBOX_START; m = read(md); cache.clear();
+  persist(); draw(); show();
 }
 el('cardset').onclick = openCard;
-el('modal-save').onclick = () => (open && open.whole ? saveRaw() : open && open.card ? saveCard() : saveSheet());
+el('modal-save').onclick = () => (open && open.whole ? saveRaw() : saveSheet());
 el('modal-delete').onclick = deleteSheet;
 
 // ── a tile up close ──
 const zoom = el('zoom');
 // a link or a video turns over to its address, not to the default back (deck.js decides the same way)
 const isAddress = (cell) => cell.type === 'link' || cell.type === 'video' || (cell.type === 'feature' && /^https?:/.test(String((cell.params || {}).href || '')));
-function zoomPair(it) {
+function zoomPair(it, startBack = false) {
   const backCells = it.back ? it.back.cells : defBack() && !isAddress(it.cell) ? defBack().cells : null;   // what this tile turns over to
   zoom.innerHTML = `<div class="flip"><div class="face front"><iframe></iframe></div>${backCells ? '<div class="face back"><iframe></iframe></div>' : ''}</div>`;
   const flip = zoom.querySelector('.flip'), fr = zoom.querySelectorAll('iframe');
@@ -695,22 +736,39 @@ function zoomPair(it) {
   // up close the tile itself turns over, as it does in a visitor's hand: no separate button (the row has Turn over)
   flip.onclick = (e) => { e.stopPropagation(); if (backCells) flip.classList.toggle('over'); };
   flip.style.cursor = backCells ? 'pointer' : 'default';
+  if (startBack && backCells) flip.classList.add('over');
 }
 
 // ── one way out of every layer: the frosted button at the top left (and Escape, and the backdrop) ──
-const LAYERS = ['zoom', 'modal', 'picker', 'doormodal'];
+const LAYERS = ['zoom', 'modal', 'picker', 'doormodal', 'leavemodal'];
 function dismiss() {
-  if (!zoom.hidden) zoom.hidden = true;
-  else if (!el('modal').hidden) { el('modal-delete').hidden = false; closeSheet(false); }
+  if (!el('leavemodal').hidden) el('leavemodal').hidden = true;   // Escape there is Keep editing
+  else if (!zoom.hidden) zoom.hidden = true;
+  else if (!el('modal').hidden) closeSheet(false);
   else if (!el('picker').hidden) el('picker').hidden = true;
   else if (!el('doormodal').hidden) el('doormodal').hidden = true;
 }
 el('close').onclick = dismiss;
 addEventListener('keydown', (e) => { if (e.key === 'Escape') dismiss(); });
 zoom.onclick = (e) => { if (e.target === zoom) dismiss(); };
-for (const id of ['modal', 'picker', 'doormodal']) el(id).addEventListener('click', (e) => { if (e.target === el(id)) dismiss(); });
+for (const id of ['modal', 'picker', 'doormodal', 'leavemodal']) el(id).addEventListener('click', (e) => { if (e.target === el(id)) dismiss(); });
+// ONE close, one style, at the top left — of the open sheet when there is one (a bottom sheet's close is on the
+// sheet, within reach of the thumb holding it), of the screen for the close-up. The small leave dialog has
+// its own three answers and no ✕.
+function placeClose() {
+  const c = el('close'), panel = el('leavemodal').hidden ? openPanel() : null;
+  if (panel) { const r = panel.getBoundingClientRect(); c.style.top = `${Math.max(8, r.top + 10)}px`; c.style.left = `${r.left + 10}px`; c.classList.add('on-sheet'); }
+  else { c.style.top = ''; c.style.left = ''; c.classList.remove('on-sheet'); }
+}
+const panelSize = new ResizeObserver(placeClose);
+for (const id of LAYER_ORDER) panelSize.observe(el(id).querySelector('.ctw-modal-panel'));
+addEventListener('resize', placeClose);
 // watch the layers only (the button's own `hidden` is a mutation too — watching the body loops forever)
-const closeObs = new MutationObserver(() => { const none = LAYERS.every((id) => el(id).hidden); if (el('close').hidden !== none) el('close').hidden = none; });
+const closeObs = new MutationObserver(() => {
+  const none = LAYERS.every((id) => id === 'leavemodal' || el(id).hidden) || !el('leavemodal').hidden;
+  if (el('close').hidden !== none) el('close').hidden = none;
+  placeClose(); notices.place();
+});
 for (const id of LAYERS) closeObs.observe(el(id), { attributes: true, attributeFilter: ['hidden'] });
 
 // ── the row: a mouse wheel scrolls it sideways; a trackpad's own sideways swipe is left alone ──
@@ -755,17 +813,22 @@ const widthSays = (w, cols) => {
 function paintLayout() {
   const f = el('gridframe'), ac = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#0a8c8e';
   const css = `<style>html{scrollbar-width:none}::-webkit-scrollbar{display:none}.st-footer{display:none}
+    /* outlines sit INSIDE each tile, so two neighbours' frames never overlap */
     .lay-mv{cursor:grab;touch-action:pan-y}html.lay-dragging,html.lay-dragging *{cursor:grabbing!important}
-    .lay-ok{outline:2px dashed color-mix(in srgb,${ac} 50%,transparent);outline-offset:3px;transition:outline-color .12s}
-    .lay-ok:hover{outline-color:${ac}}.lay-mv.lay-on{outline:3px solid ${ac};outline-offset:3px}
-    .lay-p{display:none;position:absolute;z-index:2147483000;transform:translate(-50%,-50%);width:32px;height:32px;box-sizing:border-box;align-items:center;justify-content:center;border-radius:999px;background:#fff;border:2px solid ${ac};color:${ac};cursor:pointer;padding:0;box-shadow:0 2px 8px rgba(0,0,0,.15)}.lay-p svg{width:15px;height:15px}.lay-p.lay-show{display:flex}.lay-p::after{content:"";position:absolute;inset:-8px}
-    .lay-ghost{opacity:.35}.lay-chosen{box-shadow:0 18px 40px rgba(0,0,0,.18)}
-    .lay-h{display:none;position:absolute;transform:translate(-50%,-50%);min-width:30px;height:30px;padding:0 8px;box-sizing:border-box;align-items:center;justify-content:center;border-radius:999px;background:#fff;border:2px solid ${ac};color:${ac};font:700 15px/1 system-ui,-apple-system,sans-serif;white-space:nowrap;cursor:ew-resize;z-index:2147483000;touch-action:none;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-    .lay-h::after{content:"";position:absolute;inset:-10px -12px}html .lay-h:focus{outline:none;border-radius:999px}html .lay-h:focus-visible{box-shadow:0 0 0 3px color-mix(in srgb,${ac} 35%,transparent)}
+    .lay-mv{outline:2px dashed ${ac};outline-offset:-2px;transition:outline-color .12s}
+    @media (hover:hover){.lay-mv:hover{outline-style:solid}}.lay-mv.lay-on{outline:3px solid ${ac};outline-offset:-3px}
+    .lay-p{display:none;position:absolute;z-index:2147483000;transform:translate(-50%,-50%);width:34px;height:34px;box-sizing:border-box;align-items:center;justify-content:center;border-radius:999px;background:#fff;border:2px solid ${ac};color:${ac};cursor:pointer;padding:0;box-shadow:0 2px 8px rgba(0,0,0,.15)}.lay-p svg{width:15px;height:15px}.lay-p.lay-show{display:flex}.lay-p::after{content:"";position:absolute;inset:-5px}
+    .lay-ghost{opacity:1!important;outline:2px dashed ${ac}!important}.lay-ghost>*{visibility:hidden!important}
+    .sortable-fallback{opacity:1!important;background:var(--lay-bg,#fff)!important;overflow:hidden!important;box-shadow:0 18px 40px rgba(0,0,0,.22)!important}
+    .lay-h{display:none;position:absolute;transform:translate(-50%,-50%);min-width:34px;height:30px;padding:0 8px;box-sizing:border-box;align-items:center;justify-content:center;border-radius:999px;background:#fff;border:2px solid ${ac};color:${ac};font:700 15px/1 system-ui,-apple-system,sans-serif;white-space:nowrap;cursor:ew-resize;z-index:2147483000;touch-action:none;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+    .lay-h::after{content:"";position:absolute;inset:-7px 0 -7px -6px}html .lay-h:focus{outline:none;border-radius:999px}html .lay-h:focus-visible{box-shadow:0 0 0 3px color-mix(in srgb,${ac} 35%,transparent)}
     .lay-h.lay-show{display:flex}html.lay-sizing .lay-h{background:${ac};color:#fff}html.lay-sizing,html.lay-sizing *{cursor:ew-resize!important;user-select:none}</style>
     <script src="${esc(ASSET['Sortable.min.js'] || '')}"><\/script>`;
   f.onload = () => {
     const w = f.contentWindow, d = f.contentDocument; if (!d) return;
+    // the tile being dragged is drawn on the page's own ground, opaque: its words never overprint another's
+    { const bg = (n) => getComputedStyle(n).backgroundColor, clear = (c) => !c || /rgba\(0, 0, 0, 0\)|transparent/.test(c);
+      const g = [d.body, d.documentElement].map(bg).find((c) => !clear(c)) || '#fff'; d.documentElement.style.setProperty('--lay-bg', g); }
     for (const c of faceCells(d)) {
       c.classList.add('lay-mv');
       c.classList.toggle('lay-on', +c.dataset.cell === picked);
@@ -856,11 +919,14 @@ function placeHandle() {
   const c = d.querySelector('.lay-on');
   h.classList.toggle('lay-show', !!c && c.classList.contains('lay-ok')); p.classList.toggle('lay-show', !!c); if (!c) return;
   const r = c.getBoundingClientRect(), v = d.defaultView;
-  // the pencil sits on the top edge, clear of the handle on the right edge (a short tile has room for both)
-  p.style.left = `${Math.max(r.left + 18, r.right - 34) + v.scrollX}px`; p.style.top = `${r.top + v.scrollY}px`;
+  // 🔴 the pencil is at the tile's TOP-LEFT, as on the row; the width handle sits just inside the RIGHT edge, so
+  // it never lies over the pencil or over the neighbour (its hit area grows outward only along the edge)
+  p.style.left = `${r.left + 6 + v.scrollX}px`; p.style.top = `${r.top + 6 + v.scrollY}px`;   // on the corner, clear of the words
   if (!c.classList.contains('lay-ok')) return;
-  h.style.left = `${r.right + v.scrollX}px`; h.style.top = `${r.top + r.height / 2 + v.scrollY}px`;
   labelWidth(c, h);
+  const hw = h.offsetWidth || 34;
+  h.style.left = `${Math.max(r.left + 30 + hw / 2, r.right - hw / 2 - 4) + v.scrollX}px`;
+  h.style.top = `${r.top + Math.max(r.height / 2, Math.min(r.height - 15, 54)) + v.scrollY}px`;
 }
 // the tile takes the width on screen at once; the handle says it
 function showWidth(c, h, k) {
@@ -881,19 +947,23 @@ function paintViews() {
   const on = viewsOn();
   if (!on.includes(view)) view = on[0];
   for (const b of document.querySelectorAll('.modes button')) {
-    b.textContent = L.views[b.dataset.view]; b.hidden = !on.includes(b.dataset.view);
+    b.hidden = !on.includes(b.dataset.view);
     b.setAttribute('aria-pressed', String(b.dataset.view === view));
   }
 }
 // the whole file's raw content is the same sheet as one tile's (one idea at two scopes): Done keeps it if the
 // engine can still read every tile, Close leaves the file as it was, and either way you are back where you were
 function openRaw() {
+  el('modal-title').textContent = L.raw;
+  el('modal-hint').textContent = L.rawSays;
+  if (open && open.card) closeSheet(true);
   open = { whole: true }; pending = {};
   el('modal-title').textContent = L.raw;
   el('modal-hint').textContent = L.rawSays;
-  el('modal-body').innerHTML = `<div class="ctw-field" data-field="__raw"><textarea id="f-__raw" class="ctw-md" spellcheck="false" style="min-height:min(56vh,520px);font:13px/1.45 ui-monospace,Menlo,monospace"></textarea><p class="ctw-err" id="e-__raw"></p></div>`;
+  el('modal-body').innerHTML = `<div class="ctw-field" data-field="__raw"><textarea id="f-__raw" class="ctw-md whole" spellcheck="false"></textarea><p class="ctw-err" id="e-__raw" role="alert"></p></div>`;
   el('modal-body').oninput = el('modal-body').onchange = null;
   el('f-__raw').value = md;
+  el('modal-foot').hidden = false; el('modal-why').textContent = '';
   el('modal-delete').hidden = true; el('modal-save').disabled = false;
   el('modal').hidden = false; el('f-__raw').focus();
 }
@@ -901,18 +971,18 @@ function saveRaw() {
   const t = el('f-__raw').value;
   if (t !== md) {
     const wrong = whatIsWrong(t);   // the engine's own guard: no way out of here having quietly lost a tile
-    if (wrong) { el('e-__raw').textContent = T.mdBroken.replace('{n}', String(wrong.line)); el('f-__raw').focus(); return; }
+    if (wrong) { el('e-__raw').textContent = fmt(L.badFile, { n: wrong.line }); el('f-__raw').focus(); return; }
     md = t.endsWith('\n') ? t : t + '\n'; m = read(md);
     persist();
-    cache.clear(); flipped.clear();
+    cache.clear();
   }
-  closeSheet(true); el('modal-delete').hidden = false;
+  closeSheet(true);
   draw(); show();
 }
 function show() {
+  if (!hostWaiting && !m.cells.length && view !== 'wall') editing = true;   // nothing to look at yet: the row's one big "+"
   paintViews(); paintMain();
   if (hostWaiting) return;
-  if (!m.cells.length && view !== 'wall') editing = true;   // nothing to look at yet: the row with its "+"
   const pane = view === 'wall' ? 'layout' : editing ? 'edit' : 'preview';
   for (const id of ['preview', 'edit', 'layout']) el(id).hidden = id !== pane;
   if (pane === 'edit') edges();
@@ -924,27 +994,46 @@ function show() {
     el('deckframe').srcdoc = renderCardHTML(md, { handle, deck: { view, ...(SANDBOX ? { pool: poolOn() } : {}) } });
   }
 }
-for (const b of document.querySelectorAll('.modes button')) b.onclick = () => {
-  editing = false; view = b.dataset.view; show();
-};
-// the main action, far right: Edit while looking; Save while editing (and on the wall, which is always editable)
+// The row and the wall are edit mode. Going from either to a view a visitor gets, with something unsaved, asks
+// first — Save / Keep editing / Discard (w3/leave-edit.mjs). Row ⇄ wall is not leaving.
+function goView(v) {
+  const go = () => { editing = false; view = v; show(); };
+  if (leaveStep({ dirty: dirty(), editing: editing || view === 'wall', toEditing: v === 'wall' }) === 'go') { go(); return; }
+  const answer = (choice) => {
+    el('leavemodal').hidden = true;
+    const r = resolveLeave(choice, { md, savedMd });
+    if (choice === 'discard') { md = r.md; m = read(md); cache.clear(); persist(); draw(); }
+    if (r.save) doSave();
+    if (r.leave) go();
+  };
+  el('leave-save').onclick = () => answer('save');
+  el('leave-keep').onclick = () => answer('keep');
+  el('leave-discard').onclick = () => answer('discard');
+  el('leavemodal').hidden = false; el('leave-save').focus();
+}
+for (const b of document.querySelectorAll('.modes button')) b.onclick = () => goView(b.dataset.view);
+// the main action, far right: Edit while looking; Save while editing (and on the wall, which is always editable).
+// 🔴 ONE RULE for Save, everywhere: it can be pressed only when there is something to save.
 const SAVE_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 let saving = false;
 function paintMain() {
   const b = el('editbtn'); if (!b) return;
   const inEdit = editing || view === 'wall';
-  b.innerHTML = (inEdit ? SAVE_ICO + esc(L.save) : PEN + esc(L.editBtn)) + (!inEdit && dirty() ? `<span class="dot" title="${esc(L.unsaved)}"></span>` : '');
-  b.disabled = hostWaiting || saving || (view === 'wall' && !dirty());
-  b.title = !inEdit && dirty() ? L.unsaved : '';
+  b.innerHTML = inEdit ? SAVE_ICO + esc(L.save) : PEN + esc(L.editBtn);
+  b.disabled = hostWaiting || saving || (inEdit && !dirty());
+  b.classList.toggle('is-save', inEdit);
 }
+// sandbox: there is no account behind /try/edit, so Save keeps the draft in this browser and opens the door to
+// the real thing (the creation flow explains the account; the editor does not). host: the parent saves it.
 function doSave() {
-  if (SANDBOX) { savedMd = md; lsSet(KEY, md); persist(); toast(L.savedLocal); return; }
+  if (SANDBOX) { savedMd = md; lsSet(KEY, md); persist(); openDoor(); return; }
   if (bridge && bridge.save()) { saving = true; paintMain(); }
 }
 el('editbtn').onclick = () => {
   if (editing || view === 'wall') {
-    if (dirty()) doSave();
-    if (m.cells.length) editing = false;
+    if (!dirty()) return;
+    doSave();
+    if (m.cells.length && view !== 'wall') editing = false;
     show(); return;
   }
   let at = 0; try { at = el('deckframe').contentWindow.__deckCur?.() || 0; } catch { /* the frame is not ready */ }
@@ -952,7 +1041,7 @@ el('editbtn').onclick = () => {
   const s = row.querySelectorAll('.slot')[Math.min(at, m.cells.length)];
   requestAnimationFrame(() => s && s.scrollIntoView({ inline: 'center', block: 'nearest' }));
 };
-// the assistant palette behind ⌘K and the magnifier: a stand-in that changes nothing
+// the assistant palette behind ⌘K and the sparkle button: a stand-in that changes nothing
 el('seek').setAttribute('aria-label', L.seek); el('seek').title = L.seek + ' (⌘K)';
 el('pal-q').placeholder = L.palPh; el('pal-say').textContent = L.palSays;
 const palOpen = () => { el('pal').hidden = false; el('pal-ans').hidden = true; el('pal-q').value = ''; el('pal-q').focus(); };
@@ -965,25 +1054,11 @@ addEventListener('keydown', (e) => {
   else if (e.key === 'Escape' && !el('pal').hidden) { e.stopImmediatePropagation(); palClose(); }
 }, true);
 
-// ── the sandbox: the banner, and its doors toward the real creation flow ──
-// The server already wrote the banner's sentences into the markup (a visitor without JavaScript reads
-// them too); these are the same strings from the same table.
+// ── the sandbox: Save's door toward the real creation flow ──
+// The card is parked (the WHOLE card travels) and the creation flow opens with it. 🔴 Nothing clears the draft
+// here: a visitor who does not finish signing up comes back to it.
+function openDoor() { el('doormodal').hidden = false; el('door-go').disabled = false; el('door-go').focus(); }
 function bootSandbox() {
-  el('sandbox-banner').hidden = false;
-  el('sandbox-banner-text').textContent = PERSONA.bannerText;
-  el('sandbox-banner-status').textContent = PERSONA.bannerStatus;
-  // Start over: the one exit that empties this browser's copy, and it says so
-  el('sandbox-reset').textContent = PERSONA.reset;
-  el('sandbox-reset').onclick = () => {
-    const seed = buildSandboxCard(LOCALE);
-    lsSet(KEY, null); lsSet(DKEY, null); lsSet(W2_DRAFT_KEY, null);
-    savedMd = seed; md = seed; m = read(md); cache.clear(); flipped.clear(); persist(); draw(); show();
-  };
-  // Make this card real: the sentence first, then the card is parked (the WHOLE card travels) and the
-  // creation flow opens with it. 🔴 Nothing clears the draft here: a visitor who does not finish signing up
-  // comes back to it.
-  const doorBtn = el('publish');
-  doorBtn.textContent = PERSONA.doorCta;
   el('door-title').textContent = PERSONA.doorCta;
   el('door-note').textContent = PERSONA.doorNote;
   el('door-go').textContent = PERSONA.doorContinue;
@@ -994,28 +1069,31 @@ function bootSandbox() {
     const draft = await parkSandboxCard(md, { origin: location.origin });
     location.href = sandboxDoorHref(md, { draft });
   };
-  doorBtn.onclick = () => { el('doormodal').hidden = false; el('door-go').disabled = false; el('door-go').focus(); };
 }
 
 // ── host mode: the card arrives from the parent and Save goes back to it (w3/host-bridge.mjs) ──
-function paintHostStatus(status, message) {
-  const n = el('host-status');
-  n.dataset.status = status;
-  const words = { waiting: L.hostWaiting, saving: L.hostSaving, failed: message ? `${L.hostFailed}: ${message}` : L.hostFailed }[status] || '';
-  n.textContent = words; n.hidden = !words;
+// Until `card:load` the editor's controls are inert and the top notice says what it is waiting for; a page
+// that never answers gets a sentence and a Reload, not a blank screen.
+const INERT = () => [el('cardset'), document.querySelector('.modes'), el('editbtn'), el('seek'), el('preview'), el('edit'), el('layout')];
+function hostStatus(status, message) {
+  if (status === 'waiting') notices.show(bridge && bridge.gaveUp ? 'loadFailed' : 'waiting', bridge && bridge.gaveUp ? L.hostLoadFailed : L.hostWaiting,
+    bridge && bridge.gaveUp ? { label: L.reload, run: () => location.reload() } : null);
+  else if (status === 'saving') notices.show('saving', L.hostSaving);
+  else if (status === 'failed') notices.show('failed', message ? `${L.hostFailed}${L.colon}${message}` : L.hostFailed);
+  else notices.clear('top');
 }
 function bootHost() {
   el('lockup').target = '_top';
   document.body.dataset.hostWaiting = '1';   // nothing to edit until the parent hands a card over
+  for (const n of INERT()) n.inert = true;
   bridge = createHostBridge({
     host: HOST,
     post: (msg, origin) => window.parent.postMessage(msg, origin),
     onStatus: (status, message) => {
-      paintHostStatus(status, message);
+      hostStatus(status, message);
       if (status === 'saved' || status === 'unsaved' || status === 'failed') {
         const wasSaving = saving; saving = false;
-        if (wasSaving && status !== 'failed') { savedMd = bridge.savedMd; persist(); toast(L.savedLive); }
-        if (wasSaving && status === 'failed') toast(message ? `${L.hostFailed}: ${message}` : L.hostFailed);
+        if (wasSaving && status !== 'failed') { savedMd = bridge.savedMd; persist(); confirmNote('saved', L.savedLive); }
         paintMain();
       }
     },
@@ -1030,7 +1108,9 @@ function bootHost() {
         if (kept && kept.base === x.md && typeof kept.md === 'string' && readsAsCard(kept.md)) md = kept.md;
       } catch { /* an unreadable draft is no draft */ }
       hostWaiting = false; delete document.body.dataset.hostWaiting;
-      m = read(md); cache.clear(); flipped.clear(); undoTo = null; editing = false;
+      for (const n of INERT()) n.inert = false;
+      notices.clear('top');
+      m = read(md); cache.clear(); undoTo = null; editing = false;
       { const fm = fmRead(m.pre); if (VIEW_IDS.includes(fm.view)) view = fm.view; }
       persist(); draw(); show();
     },
@@ -1039,9 +1119,9 @@ function bootHost() {
       if (!el('modal').hidden) closeSheet(true);
       el('picker').hidden = true; zoom.hidden = true;
       md = next.endsWith('\n') ? next : next + '\n'; m = read(md);
-      cache.clear(); flipped.clear(); undoTo = null;
+      cache.clear(); undoTo = null;
       persist(); draw(); show();
-      toast(L.proposed);
+      confirmNote('proposed', L.proposed);
     },
   });
   window.addEventListener('message', (e) => bridge.receive(e));
