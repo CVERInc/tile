@@ -389,6 +389,7 @@ button.set-r:active:not(:disabled),label.set-r:active,.set-acct:active{backgroun
 /* the assistant: under every overlay (zoom 40, sheets 50), so an open layer's backdrop blurs it with the page */
 .seek{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));z-index:30;width:52px;height:52px;border-radius:50%;border:0;background:var(--accent);color:var(--carrier-accent-ink);box-shadow:var(--carrier-shadow);display:grid;place-items:center;cursor:pointer}
 .seek svg{width:22px;height:22px}
+.seek[hidden]{display:none}
 body:has(#notice-bottom:not([hidden]):not(.in-sheet)) .seek{bottom:calc(max(20px,env(safe-area-inset-bottom)) + 60px)}
 .pal{position:fixed;inset:0;z-index:80;display:flex;justify-content:center;align-items:flex-start;padding:12vh 16px 16px;background:rgb(8 40 48 / .28)}
 .pal[hidden]{display:none}

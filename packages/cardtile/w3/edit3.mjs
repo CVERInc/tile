@@ -1326,7 +1326,10 @@ el('editbtn').onclick = () => {
   const s = row.querySelectorAll('.slot')[Math.min(at, m.cells.length)];
   requestAnimationFrame(() => s && s.scrollIntoView({ inline: 'center', block: 'nearest' }));
 };
-// the assistant palette behind ⌘K and the sparkle button: a stand-in that changes nothing
+// the assistant palette behind ⌘K and the sparkle button: a stand-in that changes nothing. In host mode the page
+// around the editor has the real button in this same corner, so the stand-in is not drawn and ⌘K is not taken:
+// one button, and it is the real one.
+if (HOST) el('seek').hidden = true;
 el('seek').setAttribute('aria-label', L.seek); el('seek').title = L.seek + ' (⌘K)';
 el('pal-q').placeholder = L.palPh; el('pal-say').textContent = L.palSays;
 const palOpen = () => { el('pal').hidden = false; el('pal-ans').hidden = true; el('pal-q').value = ''; el('pal-q').focus(); };
@@ -1334,7 +1337,7 @@ const palClose = () => { el('pal').hidden = true; };
 el('seek').onclick = palOpen;
 el('pal').onclick = (e) => { if (e.target === el('pal')) palClose(); };
 el('pal-q').onkeydown = (e) => { if (e.key === 'Enter' && el('pal-q').value.trim()) { el('pal-ans').hidden = false; el('pal-ans').textContent = fmt(L.palEcho, { q: el('pal-q').value.trim() }); } };
-addEventListener('keydown', (e) => {
+if (!HOST) addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); if (el('pal').hidden) palOpen(); else palClose(); }
   else if (e.key === 'Escape' && !el('pal').hidden) { e.stopImmediatePropagation(); palClose(); }
 }, true);
