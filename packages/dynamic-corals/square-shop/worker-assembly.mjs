@@ -81,7 +81,7 @@ function workerEntrypointsOnly(source) {
 	return source
 		.replace(/^export (?=(?:const|let|var)\b)/gm, '')
 		.replace(/^export \{([^}]*)\};/gm, (_, names) => {
-			const data = new Set(['COMPLETE_COPY', 'YT_POSTER_PATH', 'NOT_FOUND_EVENTS_BINDING']);
+			const data = new Set(['COMPLETE_COPY', 'YT_POSTER_PATH', 'NOT_FOUND_EVENTS_BINDING', 'PLATFORM_CAPABILITY_READ_BINDING']);
 			const kept = names.split(',').map((name) => name.trim()).filter((name) => name && !data.has(name));
 			return 'export {\n\t' + kept.join(', ') + '\n};';
 		});

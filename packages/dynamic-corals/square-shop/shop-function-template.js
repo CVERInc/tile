@@ -95,6 +95,11 @@ function shopLocatorParam(cfg) {
 // visitor's own request — cookies, body, Origin — must not ride a read capability.
 const PLATFORM_READ_STUB_PROP = 'CONNECTOR';
 const PLATFORM_READ_TOKEN_HEADER = 'x-site-read-token';
+// Optional second binding for the native catalog read only. site.platform Serving topology: read
+// routes never include a route rate-limited per visitor, and on Pages env.RSP also forwards the
+// browser's /api/*, so it cannot be repointed; a Site that holds this binding gets the native read
+// over it instead. Absent → the read uses the tier-1 binding exactly as before.
+const PLATFORM_CAPABILITY_READ_BINDING = 'RSP_CAPABILITY';
 const PLATFORM_READ_TOKEN_PATHS = ['/api/membership/plans', '/api/account/surface', '/api/subscribe/result', '/seam/site-verdict-v2', '/api/v2/storefront/native'];
 function platformReader(env, ctx, cfg) {
 	const transport = cfg && cfg.apiTransport;
@@ -1219,8 +1224,18 @@ async function fetchNativeProjection(request, env, cfg, slug, ctx) {
 	const url = new URL('/api/v2/storefront/native', new URL(request.url).origin);
 	url.searchParams.set('site_id', cfg.siteId);
 	if (slug) url.searchParams.set('slug', slug);
+	const cap = env ? env[PLATFORM_CAPABILITY_READ_BINDING] : null;
+	const tier1 = cfg.apiTransport && cfg.apiTransport.bindingName ? env[cfg.apiTransport.bindingName] : null;
+	const viaCapability = binding === tier1 && cap && typeof cap.fetch === 'function';
+	const send = target => target.fetch(new Request(url.toString(), { method: 'GET', headers: request.headers }));
 	try {
-		const response = await binding.fetch(new Request(url.toString(), { method: 'GET', headers: request.headers }));
+		let response;
+		if (viaCapability) {
+			// A throw (not a status) retries once on the tier-1 binding.
+			try { response = await send(cap); } catch (e) { response = await send(binding); }
+		} else {
+			response = await send(binding);
+		}
 		const body = await response.json().catch(() => null);
 		if (response.ok && body && body.ok === true && body.source === 'native') return { kind: 'ok', body };
 		return { kind: response.status === 404 ? 'not_found' : 'unavailable' };
@@ -2820,5 +2835,6 @@ export {
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse,
 	YT_POSTER_PATH, relayYoutubePoster,
 	platformReader,
+	PLATFORM_CAPABILITY_READ_BINDING,
 	NOT_FOUND_EVENTS_BINDING
 };
