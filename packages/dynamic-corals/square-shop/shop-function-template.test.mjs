@@ -4,6 +4,8 @@ import {
 	isSiteRelativePath, resolveInboxReturnPath,
 } from './shop-function-template.js';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { (c ? pass++ : fail++); console.log((c ? 'PASS' : 'FAIL'), '-', n); };
@@ -14,6 +16,33 @@ const cfgAt = templateSource.indexOf('const CFG = __SHOP_CONFIG__', fetchStart);
 const canonicalAt = templateSource.indexOf('__CANONICAL_FETCH__', fetchStart);
 const shopsAt = templateSource.indexOf('const shops =', fetchStart);
 ok('canonical-host hook is first fetch action after baked config', fetchStart >= 0 && cfgAt < canonicalAt && canonicalAt < shopsAt);
+
+// Exercise the hook through the emitted template, before any route can handle A.
+{
+	const source = execFileSync('node', [fileURLToPath(new URL('./emit-shop-function.mjs', import.meta.url)),
+		'--canonical-host', 'b.example', '--platform-origin', 'https://platform.example',
+		'--api', 'https://api.example',
+		'--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'square' }]),
+	], { encoding: 'utf8', env: { ...process.env, INBOX_FORWARD_SITE_KEY: '' } });
+	const { default: worker } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+	let assetCalls = 0, productCalls = 0;
+	const env = { ASSETS: { fetch: async () => { assetCalls++; return new Response('STATIC'); } } };
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => { productCalls++; return Response.json({ item: null }); };
+	try {
+		for (const path of ['/__reef/inbox?x=1', '/shop/riso-poster?x=1', '/faq/?x=1']) {
+			for (const method of ['GET', 'HEAD']) {
+				const response = await worker.fetch(new Request('https://a.example' + path, { method }), env);
+				ok(`other customer host ${method} ${path} redirects before route handling`,
+					response.status === 301 && response.headers.get('location') === 'https://b.example' + path);
+			}
+		}
+		ok('other customer host redirects never fetch static assets', assetCalls === 0);
+		ok('other customer host redirects never fetch product data', productCalls === 0);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+}
 
 // dynamic-coral-css: both Worker-emitted CSS points are wired to the baked per-site mode.
 // product-page-core.js's helper only CONSUMES `config.dynamicCoralCss`/`cfg.dynamicCoralCss`

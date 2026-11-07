@@ -72,6 +72,39 @@ ok('canonical GET is not redirected', (await canonicalMod.default.fetch(new Requ
 ok('pages.dev preview GET is not redirected', (await canonicalMod.default.fetch(new Request('https://abc.northwind-preview.pages.dev/faq/'), canonicalEnv)).status === 200);
 ok('www POST is not redirected', (await canonicalMod.default.fetch(new Request('https://www.northwind.example/faq/', { method: 'POST' }), canonicalEnv)).status === 200);
 
+// An earlier customer domain need not be an alias of the current canonical host.
+{
+	const path = '/catalog/item%20one/?ref=a%2Fb&tag=one&tag=two';
+	for (const method of ['GET', 'HEAD']) {
+		const response = await canonicalMod.default.fetch(new Request('http://example.net' + path, { method }), canonicalEnv);
+		ok(`other customer host ${method} → canonical 301 with exact path/query`,
+			response.status === 301 && response.headers.get('location') === 'https://northwind.example' + path);
+		for (const host of ['www.northwind.example', 'shop.northwind.example']) {
+			const alias = await canonicalMod.default.fetch(new Request('https://' + host + path, { method }), canonicalEnv);
+			ok(`${host} ${method} keeps its canonical 301 with path/query`,
+				alias.status === 301 && alias.headers.get('location') === 'https://northwind.example' + path);
+		}
+	}
+	const post = await canonicalMod.default.fetch(new Request('https://example.net' + path, { method: 'POST' }), canonicalEnv);
+	ok('other customer host POST passes through without a redirect', post.status === 200 && post.headers.get('location') === null);
+}
+
+// Preview and platform service hosts, including the dispatch-served <name>.feelreef.net address,
+// and the canonical host itself are never redirected.
+{
+	for (const host of [
+		'northwind.example', 'example.pages.dev', 'abc.northwind-preview.pages.dev', 'example.workers.dev',
+		'northwind-preview.example', 'acme.feelreef.net', 'ACME.FEELREEF.NET:443',
+		'localhost:8787', '127.0.0.1:8787',
+	]) {
+		for (const method of ['GET', 'HEAD']) {
+			const response = await canonicalMod.default.fetch(new Request('http://' + host + '/faq/?x=1', { method }), canonicalEnv);
+			ok(`${host} ${method} passes through without a canonical redirect`,
+				response.status === 200 && response.headers.get('location') === null);
+		}
+	}
+}
+
 // product slug → rendered product page in the shell
 const res = await mod.default.fetch(new Request('https://example.com/shop/riso-poster'), env);
 const html = await res.text();

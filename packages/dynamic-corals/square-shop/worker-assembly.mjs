@@ -21,16 +21,18 @@ export const SITE_CONFIG_KIND = 'tile.square-shop.site-config';
 
 // Keep flagless output byte-for-byte unchanged: both placeholders disappear.
 // The redirect implementation only enters workers explicitly emitted with the flag.
+// A Site has one canonical host; every other customer host (www/subdomain aliases and earlier
+// customer domains alike) answers GET/HEAD with a 301 to it. Preview and platform service hosts
+// (Pages, Workers, `*-preview`, the dispatch-served `<name>.feelreef.net` address) are never redirected.
 const CANONICAL_HELPERS = `function canonicalRedirect(request, canonicalHost) {
 \tif (request.method !== 'GET' && request.method !== 'HEAD') return null;
 \tconst url = new URL(request.url);
 \tconst normalize = (value) => String(value || '').trim().toLowerCase().split(':')[0];
 \tconst host = normalize(request.headers.get('host') || url.hostname);
 \tconst canonical = normalize(canonicalHost);
-\tconst preview = (value) => value.endsWith('.pages.dev') || value.endsWith('.workers.dev') || value.includes('-preview.') || value.endsWith('-preview');
+\tconst preview = (value) => value.endsWith('.pages.dev') || value.endsWith('.workers.dev') || value.includes('-preview.') || value.endsWith('-preview') || value.endsWith('.feelreef.net');
 \tif (!host || !canonical || preview(host) || preview(canonical) || host === 'localhost' || host === '127.0.0.1') return null;
 \tif (host === canonical) return null;
-\tif (host !== 'www.' + canonical && !host.endsWith('.' + canonical)) return null;
 \treturn new Response(null, { status: 301, headers: { location: 'https://' + canonical + url.pathname + url.search } });
 }
 

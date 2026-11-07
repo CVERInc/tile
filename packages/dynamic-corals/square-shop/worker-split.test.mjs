@@ -87,10 +87,22 @@ function run(emitter, args, env = {}) {
 		{ encoding: 'utf8', env: { ...process.env, INBOX_FORWARD_SITE_KEY: '', ...env } });
 	return { ...r, dist, worker: r.status === 0 ? readFileSync(join(dist, '_worker.js'), 'utf8') : null };
 }
+// The canonical-host redirect moved on purpose after the reference was frozen: every non-canonical
+// customer host now answers 301 (not only www/subdomain aliases), and the dispatch-served
+// `<name>.feelreef.net` address joined the never-redirected service hosts. Exactly that move is
+// applied to the reference's output, and only where it bakes the redirect; any other byte still fails.
+function withCanonicalRuleMove(worker) {
+	if (worker === null || !worker.includes('function canonicalRedirect(')) return worker;
+	const aliasOnly = "\tif (host !== 'www.' + canonical && !host.endsWith('.' + canonical)) return null;\n";
+	const previewEnd = "value.endsWith('-preview');";
+	assert.equal(worker.split(aliasOnly).length, 2, 'reference canonical rule: alias-only line not found once');
+	assert.equal(worker.split(previewEnd).length, 2, 'reference canonical rule: preview predicate not found once');
+	return worker.replace(aliasOnly, '').replace(previewEnd, "value.endsWith('-preview') || value.endsWith('.feelreef.net');");
+}
 function ok(emitter, args, env) {
 	const r = run(emitter, args, env);
 	assert.equal(r.status, 0, 'emitter failed: ' + r.stderr);
-	return r;
+	return emitter === REFERENCE ? { ...r, worker: withCanonicalRuleMove(r.worker) } : r;
 }
 
 test('golden: _worker.js differs from the pre-split emitter only in named exports', () => {
@@ -105,7 +117,7 @@ test('golden: _worker.js differs from the pre-split emitter only in named export
 	assert.equal(withoutNamedExports(ok(CURRENT, FULL, env).worker), withoutNamedExports(ok(REFERENCE, FULL, env).worker));
 	// stdout mode (no --out) as well.
 	const stdout = (emitter) => execFileSync('node', [emitter, ...FULL], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, INBOX_FORWARD_SITE_KEY: '' } });
-	assert.equal(withoutNamedExports(stdout(CURRENT)), withoutNamedExports(stdout(REFERENCE)));
+	assert.equal(withoutNamedExports(stdout(CURRENT)), withoutNamedExports(withCanonicalRuleMove(stdout(REFERENCE))));
 });
 
 test('golden holds with --split-out too, and the default call writes nothing but _worker.js', () => {
