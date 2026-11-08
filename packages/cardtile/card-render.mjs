@@ -30,6 +30,7 @@ import { linkOf, hostLabel, hostOf, iconDomains, socialLineOf, overrideMark, def
 // because a `:target` drawer must open for a reader whose JavaScript never runs.
 import { DRAWER_CSS } from '../dynamic-corals/drawer/drawer-style.mjs';
 import { escHtml } from '../cssmd/cssmd.js';
+import { hrefAllowed, imageSrcAllowed } from '../sitetile/site-core.js';
 // The cells' markup is the shared section emitters' (tile-lab#52 phase 3): each is called with
 // `params.cell` (the bento layout attributes) and this renderer's own dialect — see `dialect` below.
 import { emitProse } from '../emit/prose.mjs';
@@ -106,8 +107,54 @@ const registerDestination = (ctx, raw) => {
   } catch { return; }
   ctx.onDestination(u.href);
 };
-/** register `raw` and hand it back unchanged (the caller escapes it for its own context). */
-const attrUrl = (ctx, raw) => { registerDestination(ctx, raw); return raw; };
+// ── which schemes a Card may write: the URL policy ─────────────────────────────────────────────
+//
+// 🔴 Card link destinations accept only safe URL schemes. A destination is a live `href` on a host
+// every card shares, so `javascript:` (or `data:text/html`) there would run as that host. The policy
+// is sitetile's own (`hrefAllowed` / `imageSrcAllowed` in site-core.js — the same allowlist behind
+// its safeHref / safeSrc): resolved with the WHATWG parser, never a prefix test, so case, tabs,
+// newlines and leading control characters are judged the way the browser will read them.
+// Links: http(s), mailto, tel (and site-core's sms / ftp(s)), plus scheme-less `#id` and paths.
+// Pictures: the same, plus raster `data:image/*;base64`.
+//
+// Both READINGS of the value are judged: site-core decodes HTML entities once (so `java&#x09;script:`
+// is caught), and the Card writes the value itself escaped, so the browser follows the literal
+// string — checked by handing site-core that string with its `&` pre-escaped. Refused ⇒ null, the
+// caller writes no `<a>` / `<img>` (a link's label stays as plain text), and `ctx.onRefusedDestination`
+// hears the value, so a save can refuse it by name instead of storing it (card-destinations.mjs).
+const bothReadings = (allowed, s) => allowed(s) && allowed(s.replace(/&/g, '&amp;'));
+const refuse = (ctx, raw, kind) => {
+  if (ctx && typeof ctx.onRefusedDestination === 'function') ctx.onRefusedDestination(String(raw), kind);
+  return null;
+};
+/** an author's link destination, or null when its scheme is not allowed */
+const cardHref = (ctx, raw) => {
+  const s = String(raw == null ? '' : raw);
+  return bothReadings(hrefAllowed, s) ? s : refuse(ctx, s, 'link');
+};
+/**
+ * an author's picture, resolved: a card asset (`asset:<id>`) becomes its stored data: URI — the store
+ * picked the bytes and the MIME, and it only ever lands in `<img>` / `url()` — while anything the author
+ * typed is judged by the picture policy. '' for an asset that does not resolve (as before); null when refused.
+ */
+const cardImg = (ctx, raw) => {
+  if (ASSET_RE.test(String(raw == null ? '' : raw).trim())) return resolveAsset(raw, ctx);
+  const s = String(raw == null ? '' : raw);
+  return bothReadings(imageSrcAllowed, s) ? s : refuse(ctx, s, 'image');
+};
+// a resolved card asset (cardImg's pass-through) — the one data: shape a link policy does not cover
+const isAssetData = (s) => /^data:image\/[\w.+-]+;base64,/i.test(s);
+/**
+ * register `raw` and hand it back unchanged (the caller escapes it for its own context).
+ * The callers gate first (cardHref / cardImg); this is the floor for one that forgets: a value no
+ * policy admits is written as '' rather than as itself.
+ */
+const attrUrl = (ctx, raw) => {
+  const s = String(raw == null ? '' : raw);
+  if (s && !bothReadings(imageSrcAllowed, s) && !isAssetData(s.trim())) return '';
+  registerDestination(ctx, raw);
+  return raw;
+};
 // CSS reads `\<1-6 hex>[ws]` as that code point and `\<char>` as the char itself. A url('…') that
 // lives in a style="" ATTRIBUTE has only been HTML-escaped, so the browser fetches the DECODED
 // string — register both spellings. (cssUrl()'d values have no backslashes left: nothing to decode.)
@@ -325,7 +372,9 @@ function linkIcon(p, url, ctx) {
   // It survived because until today NO card pointed `iconimg` at its own assets — every one was an
   // external URL, which happens to work. The importer started emitting `asset:` refs this afternoon
   // and the gap became visible the same hour.
-  if (p.iconimg) return IMG_ICON(attrUrl(ctx, resolveAsset(p.iconimg, ctx)), [], 'st-cell-icon-art');
+  // A refused picture (cardImg → null) falls through to the mark below, as if none was set.
+  const art = p.iconimg ? cardImg(ctx, p.iconimg) : null;
+  if (art != null) return IMG_ICON(attrUrl(ctx, art), [], 'st-cell-icon-art');
   return markHtml(overrideMark({ icon: p.icon, iconhost: p.iconhost }, hasIcon(ctx)) || defaultMark(hostOf(url)), ctx)
     || (ctx.icons && ctx.icons._default) || '';
 }
@@ -389,7 +438,7 @@ function renderSlides(p, size, ctx = {}, legacy = false) {
     // spliced its body into the page UNESCAPED; HTML is `embed` now, and it goes in a sandbox (below).
     return '';
   }
-  const images = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => resolveAsset(u, ctx));
+  const images = (p.images ? String(p.images).split(/\s*,\s*/) : []).filter(Boolean).map((u) => cardImg(ctx, u)).filter((u) => u != null);
   const cell = { attrs: size };
   if (kind === 'slider') {
     const labels = { prev: label(ctx, 'prev'), next: label(ctx, 'next'), slide: (n) => label(ctx, 'slide', n) };
@@ -401,7 +450,7 @@ function renderSlides(p, size, ctx = {}, legacy = false) {
     // #1929: `narrow=` (the name) beats the legacy `origin-narrow=` by NAME, not by order on the line — deliberate.
     originNarrow: cssPos(p.narrow || p['origin-narrow'], '53% 33%'),
     // `bg=` present but unresolvable still writes its (empty) url(), as it always did
-    bg: p.bg ? resolveAsset(p.bg, ctx) : null,
+    bg: p.bg ? (cardImg(ctx, p.bg) || '') : null,
   }, dialect(ctx));
 }
 
@@ -451,7 +500,8 @@ function renderEmbedHtml(body, size, ctx = {}) {
 }
 
 // How a cell's target becomes anchor attributes. A `#id` target opens a DRAWER (an overlay on this
-// same card) rather than navigating; everything else leaves in a new tab.
+// same card) rather than navigating; everything else leaves in a new tab — when its scheme is allowed
+// (cardHref). A refused one returns '': the cell renders without an anchor.
 // 🔴 Depth 1: inside a drawer a `#id` target is REFUSED (returns null, the cell is dropped) — a
 // drawer cannot open another drawer, so a card has no navigation graph and structurally cannot
 // become a site. Enforced here rather than left to convention.
@@ -462,6 +512,8 @@ function anchorFor(url, ctx) {
     const id = esc(d[1]);
     return `href="#${id}" data-drawer="${id}" aria-haspopup="dialog"`;
   }
+  // '' (not null): a destination whose scheme is refused keeps its cell, as text with no `<a>`
+  if (cardHref(ctx, url) == null) return '';
   return `href="${esc(attrUrl(ctx, url))}" target="_blank" rel="${relFor(url, ctx)}"`;
 }
 
@@ -500,7 +552,7 @@ function renderCell(cell, place, ctx) {
 }
 // the link a cell with a back keeps: where it went, so the back can offer the way out (the drawer coral adds it)
 const backAnchor = (id, url, ctx) => anchorFor('#' + id, ctx)
-  + (url ? ` data-back-url="${esc(attrUrl(ctx, url))}" data-back-rel="${relFor(url, ctx)}"` : '');
+  + (url && cardHref(ctx, url) != null ? ` data-back-url="${esc(attrUrl(ctx, url))}" data-back-rel="${relFor(url, ctx)}"` : '');
 
 function renderCellBody(cell, place, ctx) {
   const p = cell.params || {};
@@ -532,7 +584,7 @@ function renderCellBody(cell, place, ctx) {
       //
       // Same shape as the feature-with-no-picture fixed the same day: emit nothing when there is
       // nothing. The .st-figure mount stays, so the QR coral still has its anchor.
-      const avatar = resolveAsset(p.avatar, ctx);
+      const avatar = cardImg(ctx, p.avatar) || '';
       // 🔴 QR dynamic coral mount: the avatar-morph popup installs here unmodified (same widget a
       // Site would use). data-url is the card's public URL; data-version=4 pins the live 33×33 density.
       // The mount's markup is packages/emit/hero.mjs's `heroCell`, byte-identical (tile-lab#52).
@@ -549,12 +601,12 @@ function renderCellBody(cell, place, ctx) {
       const backId = backTarget(p, ctx);
       const hasHref = !!String(p.href == null ? '' : p.href).trim() || !!backId;
       const fa = backId ? backAnchor(backId, String(p.href == null ? '' : p.href).trim(), ctx) : hasHref ? anchorFor(p.href, ctx) : '';
-      if (hasHref && !fa) return '';                 // a drawer target inside a drawer — refused, as before
+      if (hasHref && fa == null) return '';          // a drawer target inside a drawer — refused, as before ('' = scheme refused: the picture stays, unlinked)
       const cell = { attrs: size };
       // 🔴 An empty `img=` is not "a small picture", it is NO picture — and `<img src="">` is the
       // same current-document trap as the href above, drawn as a broken-image glyph on a stranger's
       // first card. Live: nothing. Editing: a tappable outline that says what is missing.
-      const featureImg = resolveAsset(p.img, ctx);
+      const featureImg = cardImg(ctx, p.img) || '';
       if (!featureImg && !p.title && !p.cta && !b) {
         if (!ctx.editIndex) return '';
         // 🔴 SAME GEOMETRY AS A FILLED LABELLED PICTURE: `.st-gal-link` → picture slot → label. The slot
@@ -621,7 +673,7 @@ function renderCellBody(cell, place, ctx) {
       }
       const backId = backTarget(p, ctx);
       const a = backId ? backAnchor(backId, /^#/.test(url) ? '' : url, ctx) : anchorFor(url, ctx);
-      if (!a) return '';
+      if (a == null) return '';                      // a drawer target inside a drawer; '' = scheme refused, the label stays as text
       const icon = linkIcon(p, url, ctx);
       return gridCell({ cell: { attrs: size }, anchor: a, icon, arrow: arrowOf(ctx, 17), title: linkText, sub: p.sub }, false, dialect(ctx));
     }
@@ -661,7 +713,7 @@ function renderCellBody(cell, place, ctx) {
       // 🔴 Our own path, never i.ytimg.com. A Google-hosted poster in the markup means the visitor's
       // browser reports to Google on page load — which is the exact thing the click-to-load design
       // exists to prevent, reintroduced through an <img>. The Worker proxies it (see /_yt/ there).
-      const poster = p.poster || (vid ? posterPath(vid) : '');
+      const poster = (p.poster ? cardImg(ctx, p.poster) : null) || (vid ? posterPath(vid) : '');
       const label = b || p.title || (hit && hit.title) || 'YouTube';
       const source = vid ? ['data-yt', vid] : chanIsId ? ['data-yt-channel', chanId] : ['data-yt-handle', chan];
       // the poster + play button markup is packages/emit/embed.mjs's Card branch (tile-lab#52)
@@ -674,7 +726,8 @@ function renderCellBody(cell, place, ctx) {
       // link cell takes, for a mark the table below gets wrong (reef#2011). Before this the row had no
       // override at all, and one bad mark meant giving up the whole row.
       // (`socialLineOf`, shared with the editing table — reef#2015)
-      const items = (b || '').split('\n').map(socialLineOf).filter((x) => x.url && x.url !== '#');
+      // a refused scheme drops that one button: a social mark has no label to leave behind as text
+      const items = (b || '').split('\n').map(socialLineOf).filter((x) => x.url && x.url !== '#' && cardHref(ctx, x.url) != null);
       if (!items.length) return '';
       // 🔴 A link to the creator's OWN site gets a drawn mark, not a favicon.
       //
@@ -1484,7 +1537,7 @@ export function renderPage(model, ctx = {}) {
   // stack showed .st-backdrop sitting above the drawer body. Computed style cannot see this.
   // the one place the author's `accent:` is read: a colour, or the default (see cssColor)
   const accentC = ctx.accent ? cssColor(ctx.accent) : '';
-  const backdropUrl = resolveAsset(ctx.backdrop, ctx);
+  const backdropUrl = cardImg(ctx, ctx.backdrop) || '';
   const backdrop = backdropUrl
     ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, accentC))}</style>`
     : '';

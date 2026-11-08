@@ -1097,12 +1097,16 @@ function recordDrop(rawDest, schemeOverride) {
   else try { scheme = new URL(decodeEntitiesOnce(rawDest), SAFE_HREF_BASE).protocol || '(none)'; } catch { /* keep '(unparseable)' */ }
   _dropWarnings.push({ scheme, dest: String(rawDest == null ? '' : rawDest) });
 }
-function isSafeHref(dest) {
+// hrefAllowed: the policy itself, with no side effect — isSafeHref is this plus the drop record. A
+// host that renders outside a site build (cardtile's Card Worker) asks THIS, so the one allowlist is
+// shared without the build-time queue growing for the life of a Worker isolate.
+function hrefAllowed(dest) {
   const raw = decodeEntitiesOnce(dest);
   if (raw === '') return true;
-  let u;
-  try { u = new URL(raw, SAFE_HREF_BASE); } catch { recordDrop(dest); return false; }
-  const ok = SAFE_HREF_SCHEMES.has(u.protocol);
+  try { return SAFE_HREF_SCHEMES.has(new URL(raw, SAFE_HREF_BASE).protocol); } catch { return false; }
+}
+function isSafeHref(dest) {
+  const ok = hrefAllowed(dest);
   if (!ok) recordDrop(dest);
   return ok;
 }
@@ -1114,12 +1118,18 @@ function isSafeHref(dest) {
 // — this is an allowlist of raster formats, not "any data: URI whose MIME starts with image/".
 // Never used for `href` — an anchor never gets the `data:` exception, only src does.
 const SAFE_IMAGE_DATA_RE = /^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,/i;
-function isSafeImageSrc(dest) {
+// imageSrcAllowed: isSafeImageSrc's policy with no side effect (see hrefAllowed).
+function imageSrcAllowed(dest) {
   const raw = decodeEntitiesOnce(dest);
   if (raw === '') return true;
   const stripped = raw.replace(/[\u0009\u000a\u000d]/g, '').replace(/^[\u0000-\u0020]+/, '');
   if (SAFE_IMAGE_DATA_RE.test(stripped)) return true;
-  return isSafeHref(raw);
+  return hrefAllowed(raw);
+}
+function isSafeImageSrc(dest) {
+  const ok = imageSrcAllowed(dest);
+  if (!ok) recordDrop(decodeEntitiesOnce(dest));
+  return ok;
 }
 
 // safeHref / safeSrc — the Astro layer's front door to this file's ONE allowlist policy (round 3,
@@ -3435,6 +3445,8 @@ export {
   takeDropWarnings,
   // round 3: the Astro layer's front door to the same policy — see safeHref's own comment.
   safeHref, safeSrc,
+  // the same policy without the build-time drop record (cardtile's Card links and images)
+  hrefAllowed, imageSrcAllowed,
   // reef#2857: the text-free hero predicate and the page-h1 owner both renderers share.
   heroHeadingless, pageH1Index,
   // reef#2857 r2: the hero variant selection (Hero.astro) and the h1-capable type test (Section.astro).

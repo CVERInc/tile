@@ -22,7 +22,7 @@
 // ANY card. It is an infrastructure credential, not a user credential, and it is scoped by being
 // held only by the hosted Worker.
 import { parseCard, serializeCard, CARD_MAX_BYTES, embedsOverCeiling } from '../card-core.js';
-import { cardDestinations } from './card-destinations.mjs';
+import { cardDestinations, cardLinkReport } from './card-destinations.mjs';
 import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
 import { handleVanity } from './card-vanity.mjs';
@@ -1778,7 +1778,15 @@ export async function handleApi(request, env, url) {
       // a separate extractor drifts from what the visitor actually gets. Fail-open lives in url-risk.
       // (Assembled on this KV read; the object checks it still links the same way if its card differs.)
       const { md } = assembleSave(body.markdown, current && current.md);
-      const dests = cardDestinations(md, { base: `${url.origin}/${handle}/` });
+      const { destinations: dests, refused } = cardLinkReport(md, { base: `${url.origin}/${handle}/` });
+      // Card link destinations accept only safe URL schemes: a link or picture the renderer would not
+      // write (it would show as plain text, or not at all) is refused by name, not stored silently.
+      if (refused.length) {
+        return json({
+          error: 'card_url_scheme', url: refused[0], refused,
+          message: `Card link destinations accept only safe URL schemes (http, https, mailto, tel; pictures also a raster data:image). ${JSON.stringify(refused[0])} is not one of them. Change or remove it and save again.`,
+        }, 422);
+      }
       const many = tooManyLinks(dests, env);
       if (many) return json(many, 422);
       const unsafe = await checkUrls(dests, env);
