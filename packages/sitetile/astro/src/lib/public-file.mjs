@@ -8,7 +8,7 @@
 // a symlink, so public/brand/mark.png → a PNG anywhere on the build host was served at
 // /apple-touch-icon.png and listed in the manifest. A path counts only when its REAL path is a
 // regular file inside public/'s real path.
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
 export const PUBLIC_DIR = join(typeof process !== 'undefined' ? process.cwd() : '.', 'public');
@@ -31,4 +31,18 @@ export function readPublic(rel) {
 
 export function publicHas(rel) {
   return shippedFile(rel) !== null;
+}
+
+/** The first `n` bytes of `rel` (fewer when the file is shorter), under the same real-path rule as
+ *  readPublic — for a header read that must not pull a 2 MB photo into memory to learn its size. */
+export function readPublicHead(rel, n) {
+  const real = shippedFile(rel);
+  if (!real) return null;
+  let fd = null;
+  try {
+    fd = openSync(real, 'r');
+    const buf = Buffer.alloc(n);
+    const got = readSync(fd, buf, 0, n, 0);
+    return buf.subarray(0, got);
+  } catch { return null; } finally { if (fd !== null) try { closeSync(fd); } catch { /* already closed */ } }
 }

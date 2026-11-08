@@ -9,6 +9,7 @@
 //
 // Markdown is the CALLER's dialect (tile-lab#52 ruling 2026-10-31): `ctx.inline` / `ctx.block`.
 import { firstImage, imgTag, safeHref } from '../sitetile/site-core.js';
+import { cardImg } from './card-img.mjs';
 import { attr, text, when } from './html.mjs';
 import { cellFrame } from './cell.mjs';
 
@@ -22,7 +23,7 @@ function navArrow(left) {
 /**
  * @param {{ eyebrow?: unknown, cols?: unknown, more: { label: string, href: string } | null, start?: unknown,
  *           isBlogFull: boolean, cells: Array<{ title: string, href?: string, badge?: string, cta?: string,
- *           date?: string, body: string }> }} params
+ *           date?: string, body: string, image?: { src: string, width?: number, height?: number } }> }} params
  *   `cells` is the section's own `### ` cells, or (sitetile `posts=N`) cells the host built from its blog.
  * @param {{ inline: (md: string) => string, block: (md: string, opts?: object) => string }} ctx
  */
@@ -45,10 +46,14 @@ export function emitCarousel(section, params, ctx) {
     + '<div class="st-car-viewport"> <button class="st-car-nav st-car-prev" type="button" aria-label="Previous"><span class="st-sr-only">Previous</span>' + navArrow(true) + '</button> '
     + '<div class="st-car-track"' + attr('data-start', start || '') + '> '
     + cells.map((c) => {
-      const fi = firstImage(c.body);
+      // A `posts=N` cell (sitetile) arrives with its post's image as `image`: a post card, so it is
+      // written by the shared card-image helper. A hand-authored cell keeps its own `![](…)` line.
+      const fi = c.image ? { img: null, rest: c.body || '' } : firstImage(c.body);
       const hrefOk = c.href ? safeHref(c.href) : null;
       // Built in the component's order: figure, badge, cta, then the rest as the cell renders.
-      const fig = fi.img ? `<figure class="st-gal-fig">${imgTag(fi.img.alt, fi.img.src)}</figure>` : '';
+      const fig = c.image
+        ? `<figure class="st-gal-fig">${cardImg({ src: c.image.src, cls: 'st-img', layout: 'carousel', cols, width: c.image.width, height: c.image.height })}</figure>`
+        : fi.img ? `<figure class="st-gal-fig">${imgTag(fi.img.alt, fi.img.src)}</figure>` : '';
       const badge = c.badge ? '<span class="st-cell-badge"' + attr('data-badge', String(c.badge).toLowerCase()) + '>' + ctx.inline(c.badge) + '</span>' : '';
       const cta = c.cta ? '<span class="st-cell-cta st-cell-cta-labeled"><span class="st-cta-label">' + ctx.inline(c.cta) + '</span></span>' : '';
       const inner = badge + fig + ' '
