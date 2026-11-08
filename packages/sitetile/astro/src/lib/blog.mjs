@@ -11,7 +11,13 @@ export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts, indexDateLang } 
 import { indexDateLang, badgeMonths } from './chrome-copy.mjs';
 import { dateText } from '../../../../emit/entry-date.mjs';
 export { entryDateHtml } from '../../../../emit/entry-date.mjs';
-import { parseFragment } from 'parse5';
+import { createRequire } from 'node:module';
+// parse5 is loaded on first use, by the excerpt's visible-text path, never at import. A consumer
+// imports this file for routing, dates and feeds from a checkout with no node_modules, and a
+// top-level import made all of that fail on a package only the excerpt needs (clean-import.test.mjs).
+// require, not import(): the excerpt path is synchronous, and parse5's exports map has a CJS build.
+let parse5;
+const parseFragment = (html) => (parse5 ||= createRequire(import.meta.url)('parse5')).parseFragment(html);
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
@@ -302,7 +308,7 @@ const collapse = (s) => s.replace(/[ \t\n\r\f]+/g, ' ').replace(/^ | $/g, '');
 // RFC 5322 dot-atom characters in the local part. `www.support@example.com` is an address someone is
 // meant to write to, not a web address with words around it. It is found in the VISIBLE text across
 // inline boundaries (`help@[www.example.com](/contact)` shows one address). Part of a web address
-// that STARTED EARLIER in the same run is not an email — its path (`https://example.com/a@b.co`) or
+// that STARTED EARLIER in the same run is not an email — its path (`https://example.com/a@b.example`) or
 // its user info (`https://user:pass@example.com`) — but a colon or a slash on its own is
 // punctuation: `Contact:www.support@example.com` is an address, not a URL (rounds 7–8).
 const EMAIL = /(?<![A-Za-z0-9!#$%&'*+=?^_`{|}~.-])[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+/g;
