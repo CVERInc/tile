@@ -20,9 +20,25 @@ const effective = (raw) => {
 
 const PLACEHOLDER_BASE = 'https://card.invalid/card/';
 
-/** card markdown (+ the card's real address as `base`, `<origin>/<handle>/`) → the unique outbound http(s) destinations the served page contains, in render order. */
-export function cardDestinations(cardMd, { base = PLACEHOLDER_BASE } = {}) {
+/**
+ * card markdown (+ the card's real address as `base`, `<origin>/<handle>/`) → one render's report:
+ * `destinations`, the unique outbound http(s) destinations the served page contains, in render order;
+ * `refused`, the unique author values the renderer would NOT write because their scheme is not allowed
+ * (card-render's cardHref / cardImg — Card link destinations accept only safe URL schemes). A save
+ * refuses a card with any `refused` entry rather than storing a link that silently renders as text.
+ */
+export function cardLinkReport(cardMd, { base = PLACEHOLDER_BASE } = {}) {
   const out = new Set();
-  renderCardHTML(cardMd, { destinationBase: base, onDestination: (u) => out.add(effective(u)) });
-  return [...out];
+  const refused = new Set();
+  renderCardHTML(cardMd, {
+    destinationBase: base,
+    onDestination: (u) => out.add(effective(u)),
+    onRefusedDestination: (u) => refused.add(u),
+  });
+  return { destinations: [...out], refused: [...refused] };
+}
+
+/** card markdown (+ the card's real address as `base`, `<origin>/<handle>/`) → the unique outbound http(s) destinations the served page contains, in render order. */
+export function cardDestinations(cardMd, opts) {
+  return cardLinkReport(cardMd, opts).destinations;
 }
