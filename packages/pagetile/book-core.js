@@ -54,6 +54,22 @@
 // what it was before this vocabulary existed. The spec's other two kinds (`duo`, `text`) and the
 // cover/back pages are not here yet — `kind: duo` stays caption text rather than being guessed at.
 
+// ── Flow pages (reef#2279; reef docs/SPEC-pagetile-vision.md "fixed vs flow") ──────────────────
+// Every page above is FIXED: the source is the page. A FLOW page is reflowable text whose pages are
+// computed at view time from the font size and the viewport (flow-core.js). Any book may hold one;
+// it opens with `kind: flow` as its first line, before any image or text:
+//
+//   ## The crossing
+//   kind: flow
+//   The ferry left before dawn …
+//   ### A heading inside the post      ← `#`/`##` would open a chapter/page, so headings are ###+
+//
+// Its body (`caption`) is the text, verbatim — image lines stay in place in the text instead of
+// moving to `images`. `kind: flow` anywhere else is caption text, so no fixed book's model changes:
+// a comic page still has no `kind` key at all.
+const FLOW_KIND = 'flow';
+const RE_FLOW_HEAD = /^kind:\s*flow\s*$/;
+
 const FRONTMATTER_KEY = 'pagetile-book';
 const PHOTOBOOK_SOURCE = 'photobook';
 const LAYOUT_KINDS = ['full', 'mat'];
@@ -160,7 +176,10 @@ function parseBook(text) {
     if (!fence) {
       const hc = /^#\s+(.*)$/.exec(line);   if (hc) { newChapter(hc[1].trim()); continue; }
       const hp = /^##\s+(.*)$/.exec(line);  if (hp) { newPage(hp[1].trim()); continue; }
-      const img = parseImageLine(line);     if (img && page) { page.images.push(img); continue; }
+      // a flow page opens with `kind: flow`, before any image or text (reef#2279; see FLOW below)
+      if (page && !page.kind && !page.images.length && inPageHead() && RE_FLOW_HEAD.test(line)) { page.kind = FLOW_KIND; continue; }
+      // a flow page's body is reflowable text, verbatim: an image line stays where the author put it
+      const img = parseImageLine(line);     if (img && page && page.kind !== FLOW_KIND) { page.images.push(img); continue; }
       if (photobook && page && inPageHead()) {
         // a key the page already has is not read twice — the repeat stays caption, so nothing is lost
         const lay = parseLayoutLine(line);
@@ -256,10 +275,16 @@ function allImageSrcs(book) {
   return srcs;
 }
 
+// ── Flow pages (the engine is flow-core.js, loaded lazily through flow-loader.js) ──────────
+// Cheap, library-free questions a fixed reader can ask without pulling the flow engine in.
+function isFlowPage(page) { return !!(page && page.kind === FLOW_KIND); }
+function hasFlowPages(book) { return flattenPages(book || {}).some((e) => isFlowPage(e.page)); }
+
 export {
+  isFlowPage, hasFlowPages,
   parseBook, serializeBook, isBookFile,
   flattenPages, pageById, allImageSrcs,
   parseImageLine, serializeImage, slugify,
   isPhotobook, defaultKind, resolveLayout, parseFocus, parseLayoutLine,
-  FRONTMATTER_KEY, PHOTOBOOK_SOURCE, LAYOUT_KINDS, DEFAULT_FOCUS,
+  FRONTMATTER_KEY, PHOTOBOOK_SOURCE, LAYOUT_KINDS, DEFAULT_FOCUS, FLOW_KIND,
 };
