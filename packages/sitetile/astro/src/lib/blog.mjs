@@ -222,25 +222,49 @@ function unusedMarks(text, n) {
   }
   return marks.length === n ? marks : null;
 }
-// excerptSource: the post body with the lines an excerpt never reads blanked out, BEFORE rendering —
+// excerptSource: the post body with the lines an excerpt never reads REPLACED, before rendering —
 // the same lines the excerpt has always skipped: a heading or hashtag line (a leading `#`: a heading
-// repeats the title, a hashtag run is noise), a blockquote (`>`), a link-list line (`[`), and a bare
-// YouTube address (a player, not words — tile#148).
-// Outside fenced code only: inside a fence such a line is code the page shows. A blanked line stays
-// a line, so every block boundary the renderer draws is still where it was.
-export function excerptSource(body) {
+// repeats the title, a hashtag run is noise), a blockquote (`>`), and a link-list line (`[`).
+// Outside fenced code only: inside a fence such a line is code the page shows.
+// 🔴 Replaced, never blanked: a skipped line keeps its own structural prefix (`## `, `> `, its
+// indentation) and only its words become `sentinel`, so the renderer draws exactly the blocks the
+// page draws — a heading still splits the body there, which is what keeps a `<!--` above it from
+// pairing with a `-->` below it. The caller drops the sentinel's text after rendering
+// (excerptPlainText's `drop`). A bare YouTube address is left as it is: the page renders it as a
+// player, which has no text to read.
+const HEADING_PREFIX = /^(\s*#{1,4}\s+)/;   // flowingHtml's own heading split
+const QUOTE_PREFIX = /^(\s*(?:>\s?)+)/;
+export function excerptSource(body, sentinel = '') {
   let inFence = false;
   return String(body || '').split('\n').map((line) => {
     if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return line; }
     if (inFence) return line;
     const t = line.trim();
-    return t.startsWith('#') || t.startsWith('>') || t.startsWith('[') || youtubeLine(t) ? '' : line;
+    if (!(t.startsWith('#') || t.startsWith('>') || t.startsWith('['))) return line;
+    const indent = /^\s*/.exec(line)[0];
+    const prefix = (HEADING_PREFIX.exec(line) || QUOTE_PREFIX.exec(line) || [indent])[0];
+    return prefix + sentinel;
   }).join('\n');
+}
+// excerptOfBody: a post body → its excerpt text. The skipped lines are marked with a private-use
+// character the body does not contain (chosen per call, so no author text is ever read as the mark),
+// rendered in place, and their text dropped.
+export function excerptOfBody(body) {
+  const src = String(body || '');
+  const [sentinel] = unusedMarks(src, 1) || [''];
+  return excerptPlainText(excerptSource(src, sentinel), { drop: sentinel });
 }
 // HTML collapses ASCII whitespace only: a no-break or ideographic space is shown as typed, so it stays.
 const collapse = (s) => s.replace(/[ \t\n\r\f]+/g, ' ').replace(/^ | $/g, '');
-export function excerptPlainText(markdown) {
-  const segs = visibleSegments(parseFragment(flowingHtml(String(markdown || ''), { br: true })));
+// An email is one atom, found BEFORE any web address is looked for: a pragmatic local@domain with
+// RFC 5322 dot-atom characters in the local part. `www.support@example.com` is an address someone is
+// meant to write to, not a web address with words around it. It is found in the VISIBLE text across
+// inline boundaries (`help@[www.example.com](/contact)` shows one address), and never starts right
+// after `/` or `:`, so the path of a web address (`https://example.com/a@b.co`) is not read as one.
+const EMAIL = /(?<![A-Za-z0-9!#$%&'*+\/=?^_`{|}~.:-])[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+/g;
+export function excerptPlainText(markdown, { drop = '' } = {}) {
+  let segs = visibleSegments(parseFragment(flowingHtml(String(markdown || ''), { br: true })));
+  if (drop) segs = segs.map((seg) => ({ ...seg, s: seg.s.split(drop).join('') }));
   // runs: consecutive segments of one kind — the same link, plain prose, or code
   const runs = [];
   for (const seg of segs) {
@@ -255,10 +279,25 @@ export function excerptPlainText(markdown) {
   const [GONE, OPEN, CLOSE] = marks;
   const codes = [];
   let text = '';
+  const slot = (literal) => { codes.push(literal); return OPEN + (codes.length - 1) + CLOSE; };
+  // emails, over the visible text with code blanked (an address never runs into or out of code)
+  const flat = runs.map((r) => (r.code ? ' '.repeat(r.s.length) : r.s)).join('');
+  const kept = new Uint8Array(flat.length);
+  for (const m of flat.matchAll(EMAIL)) kept.fill(1, m.index, m.index + m[0].length);
+  let offset = 0;
   for (const r of runs) {
-    if (r.code) { text += OPEN + codes.length + CLOSE; codes.push(r.s); continue; }
-    if (r.anchor && WHOLE_URL.test(r.s)) { text += GONE; continue; }
-    text += r.s.replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1]);
+    const start = offset;
+    offset += r.s.length;
+    if (r.code) { text += slot(r.s); continue; }
+    const pieces = [];
+    for (let i = 0; i < r.s.length;) {
+      let j = i;
+      while (j < r.s.length && kept[start + j] === kept[start + i]) j++;
+      pieces.push({ email: kept[start + i] === 1, s: r.s.slice(i, j) });
+      i = j;
+    }
+    if (r.anchor && !pieces.some((p) => p.email) && WHOLE_URL.test(r.s)) { text += GONE; continue; }
+    for (const p of pieces) text += p.email ? slot(p.s) : p.s.replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1]);
   }
   // an emptied bracket pair goes with its address — repeated, so `((url))` empties both
   const emptied = new RegExp('[(\\[{<（【「][ \\t\\n\\r\\f]*' + GONE + '[ \\t\\n\\r\\f]*[)\\]}>）】」]', 'g');
@@ -335,7 +374,7 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // imported from a social feed — a paragraph of `[#tag](https://…/hashtag/…?…)` links — listed its
   // raw markdown, and the cut could land mid-URL: one unbreakable 180-character string that pushed
   // a 390px index 427px wide.
-  const fullText = excerptPlainText(excerptSource(replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '')));
+  const fullText = excerptOfBody(replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => ''));
   const excerpt = capExcerpt(fullText, excerptMax);
   // `slug:` in frontmatter OVERRIDES the one derived from the filename. Normally the filename IS
   // the slug (and stays the single source of truth for every site that doesn't set this), but a

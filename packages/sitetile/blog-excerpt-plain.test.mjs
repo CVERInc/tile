@@ -156,6 +156,17 @@ const REVIEW_CASES = [
   ['~~~sh\n# install\n> out.txt\n~~~', '# install > out.txt'],
   ['一行目\n二行目', '一行目 二行目'],
   ['[#a](https://x.example/a) [#b](https://x.example/b)\nprose line', 'prose line'],
+  // round 5: an email is found whole, before any web address is looked for
+  ['Contact www.support@example.com today.', 'Contact www.support@example.com today.'],
+  ['Contact a!www.support@example.com today.', 'Contact a!www.support@example.com today.'],
+  ['Contact help@[www.example.com](/contact) today.', 'Contact help@www.example.com today.'],
+  ['See https://example.com/a@b.example.com today.', 'See today.'],
+  // round 5: a mailto: link's text is left whole even when it reads like a web address
+  ['Contact [www.example.com](mailto:help@example.com) today.', 'Contact www.example.com today.'],
+  // round 5: a skipped heading still splits the body where the page splits it, so a comment above
+  // it does not pair with a `-->` below it
+  ['<!--\n# Heading\nImportant visible instruction\n-->\nEnd', '<!-- Important visible instruction --> End'],
+  ['Keep <!--\n> quoted\n--> today.', 'Keep <!-- --> today.'],
 ];
 for (const [input, want] of REVIEW_CASES) {
   test(`review fixture: ${JSON.stringify(input)}`, () => assert.equal(excerptOf(input), want));
@@ -166,6 +177,31 @@ test('deeply nested markup the page renders does not abort loading posts (round 
   const posts = blog.allPosts({ '/blog/deep.md': raw });
   assert.equal(posts.length, 1);
   assert.equal(posts[0].excerptText, 'Start visible end.');
+});
+
+// round 5: an email grid. The expected text is the address exactly as written — every shape below
+// shows the whole address on the page — built by string templates, not by the code under test.
+test('email grid: every address the page shows survives whole', () => {
+  const locals = ['help', 'www.support', 'a!www.support', 'first.last', 'x+tag', "o'brien", 'www'];
+  const domains = ['example.com', 'www.example.com', 'mail.example.co.uk', 'www.ex-ample.org'];
+  const shapes = [
+    (e) => [`Contact ${e} today.`, `Contact ${e} today.`],
+    (e) => [`Contact \`${e}\` today.`, `Contact ${e} today.`],
+    (e) => [`Contact [${e}](mailto:${e}) today.`, `Contact ${e} today.`],
+    (e) => [`Contact [${e}](/contact) today.`, `Contact ${e} today.`],
+    (e) => [`Email (${e}).`, `Email (${e}).`],
+    (e) => [`Mail ${e}, then wait.`, `Mail ${e}, then wait.`],
+    (e) => [`「${e}」まで`, `「${e}」まで`],
+  ];
+  let n = 0;
+  const bad = [];
+  for (const l of locals) for (const d of domains) for (const shape of shapes) {
+    const [input, want] = shape(`${l}@${d}`);
+    n++;
+    const got = excerptOf(input);
+    if (got !== want) bad.push(`${JSON.stringify(input)} → ${JSON.stringify(got)}`);
+  }
+  assert.equal(bad.length, 0, `${bad.length} of ${n} lost text:\n    ` + bad.slice(0, 5).join('\n    '));
 });
 
 test('a plain excerpt is unchanged (no site whose posts are prose moves)', () => {

@@ -164,10 +164,10 @@ const refFeatured = (b) => {
 const refExcerptText = (b) => b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
   .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
   .join(' ');
-// …and the same body as parsePost reads it now: the excerpt's line skips, then the visible text of
-// the page's own rendering (blog.mjs's excerptSource + excerptPlainText, used here as is). This
-// ruler is about how IMAGES are found and stripped, which that stage does not touch.
-const refExcerptPlainText = (b) => blog.excerptPlainText(blog.excerptSource(b.replace(/!\[[^\]]*\]\([^)]*\)/g, '')));
+// …and the same body as parsePost reads it now: blog.mjs's excerptOfBody (the excerpt's line skips,
+// then the visible text of the page's own rendering), used here as is. This ruler is about how IMAGES
+// are found and stripped, which that stage does not touch.
+const refExcerptPlainText = (b) => blog.excerptOfBody(b.replace(/!\[[^\]]*\]\([^)]*\)/g, ''));
 
 // parseBlurb, as it was.
 function refParseBlurb(raw) {
