@@ -164,6 +164,10 @@ const refFeatured = (b) => {
 const refExcerptText = (b) => b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
   .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
   .join(' ');
+// …and the same body as parsePost reads it now: blog.mjs's excerptOfBody (the excerpt's line skips,
+// then the visible text of the page's own rendering), used here as is. This ruler is about how IMAGES
+// are found and stripped, which that stage does not touch.
+const refExcerptPlainText = (b) => blog.excerptOfBody(b.replace(/!\[[^\]]*\]\([^)]*\)/g, ''));
 
 // parseBlurb, as it was.
 function refParseBlurb(raw) {
@@ -319,7 +323,7 @@ test("parsePost finds a post's featured image and excerpt exactly as before", ()
     const post = parsePost('p', raw);
     const img = refFeatured(body);
     assert.equal(post.image, core.safeSrc(img) || '', 'image of ' + JSON.stringify(b));
-    assert.equal(post.excerptText, refExcerptText(body), 'excerpt of ' + JSON.stringify(b));
+    assert.equal(post.excerptText, refExcerptPlainText(body), 'excerpt of ' + JSON.stringify(b));
     if (img) images++;
     if (/!\[[^\]]*\]\([^)\s]+\.(mp4|webm|mov)/i.test(body)) videos++;
     if (post.excerptText) text++;

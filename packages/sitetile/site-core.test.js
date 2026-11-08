@@ -2588,4 +2588,39 @@ test('#1933 S4b inbox: locales en-US, zh-TW, path /zh-tw/contact/, no zh-tw home
   assert.match(renderSiteToHtml(parseSite(md)), /name="return_to" value="\/"/, 'no path → "/" (callers of a non-root page must pass one)');
 });
 
+// tile#267 — a code span is literal. inlineHtml's promotion passes (link destinations, images, links,
+// the <small>/<br> allowlist) ran over the whole string, inside the code span markCode had already
+// built. Expected values are written by hand from what a code span means: its text, escaped.
+const CODE = (inner) => '<span class="st-code"><span class="st-mk">`</span>' + inner + '<span class="st-mk">`</span></span>';
+test('🔴 #267: a code span shows `<br>` literally, not a line break', () => {
+  assert.equal(inlineHtml('Use `<br>` between lines.'), 'Use ' + CODE('&lt;br&gt;') + ' between lines.');
+});
+test('🔴 #267: a code span shows `<small>text</small>` literally, not small text', () => {
+  assert.equal(inlineHtml('Use `<small>text</small>` here.'), 'Use ' + CODE('&lt;small&gt;text&lt;/small&gt;') + ' here.');
+});
+test('🔴 #267: a code span shows `[label](/path)` literally, not a link', () => {
+  assert.equal(inlineHtml('Write `[label](/path)` here.'), 'Write ' + CODE('[label](/path)') + ' here.');
+  // the destination is code, not a URL: it is escaped, never entity-decoded
+  assert.equal(inlineHtml('`[a](?x&amp;y)`'), CODE('[a](?x&amp;amp;y)'));
+  assert.equal(inlineHtml('`![i](/a.png)`'), CODE('![i](/a.png)'));
+  // an image and a link either side still form; only the one in code stays text
+  assert.equal(inlineHtml('![a](b.png) `[c](d)` [e](f)'),
+    '<img class="st-img" src="b.png" alt="a" loading="lazy" decoding="async"> ' + CODE('[c](d)') + ' <a href="f">e</a>');
+  // the same through the block renderer the post page uses
+  assert.equal(bodyHtml('Use `<br>` and `[l](/p)`.'), '<p>Use ' + CODE('&lt;br&gt;') + ' and ' + CODE('[l](/p)') + '.</p>');
+});
+test('#267 control: outside a code span nothing changed — <br>, <small>, links, images still promote', () => {
+  assert.equal(inlineHtml('a<br>b <small>s</small> [l](/p?a&amp;b) `c`'),
+    'a<br>b <small>s</small> <a href="/p?a&amp;b">l</a> ' + CODE('c'));
+  assert.equal(inlineHtml('[`x`](/p)'), '<a href="/p">' + CODE('x') + '</a>', 'a code span inside a link label stays inside the link');
+  // a code span in an image's alt goes back BEFORE the attribute is quoted, so its `"` stays inside it
+  const img = inlineHtml('![`x`](a.png)');
+  assert.ok(!/alt="<span class="/.test(img), img);
+  assert.match(img, /^<img class="st-img" src="a\.png" alt="[^"]*" loading="lazy" decoding="async">$/);
+});
+test('#267: authored entities in prose are shown as typed (deliberate: author text is escaped)', () => {
+  assert.equal(inlineHtml('Bread &amp; butter'), 'Bread &amp;amp; butter');
+  assert.equal(inlineHtml('[go](/p?a=1&amp;b=2)'), '<a href="/p?a=1&amp;b=2">go</a>', 'a destination is the one exception: decoded once');
+});
+
 console.log('\nsitetile: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

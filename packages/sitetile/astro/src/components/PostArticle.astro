@@ -7,6 +7,7 @@
 // pages stay identical. The only additions over the extracted original are two OPT-IN, absent-safe
 // touches: a configurable byline label and a breadcrumb trail (both default to the prior output).
 import Arrow from '@cvernet/signet/Arrow.astro';
+import { cardImgAttrs } from '@emit/card-img.mjs';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the back-link / comments / post-nav Arrows
 import { flowingHtml, fmtDate, postUrl, blogBase, dialogueAuthorRight } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
@@ -154,7 +155,7 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
         {keepReadingCards.map((p) => (
           <li>
               <a href={p.href}>
-              {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
+              {p.image && <img {...cardImgAttrs({ src: p.image, cls: 'bl-keep-img', layout: 'list', width: p.imageWidth, height: p.imageHeight })} />}
               {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat, dateOpts.lang)}</time>}
               <h3>{p.title}</h3>
               {p.description && <p>{p.description}</p>}
@@ -171,7 +172,7 @@ const crumbBlog = String(meta['blog-title'] || 'Blog').trim();
         {relatedCards.map((p) => (
           <li>
               <a href={p.href}>
-              {p.image && <img class="bl-keep-img" src={p.image} alt="" loading="lazy" />}
+              {p.image && <img {...cardImgAttrs({ src: p.image, cls: 'bl-keep-img', layout: 'list', width: p.imageWidth, height: p.imageHeight })} />}
               {p.date && <time datetime={p.date}>{fmtDate(p.date, dateFormat, dateOpts.lang)}</time>}
               <h3>{p.title}</h3>
               {p.description && <p>{p.description}</p>}

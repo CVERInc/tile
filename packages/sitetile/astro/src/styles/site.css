@@ -1041,6 +1041,11 @@ html[data-search-open] .st-search { display: block; }
 /* An <a> wrapping <img>/<time>/<h2>/<p> — block children in an inline box. */
 :where(.bl-entry-link) { display: block; }
 
+/* A card excerpt may never widen the page. The excerpt is plain text now (parsePost), but a long
+   unspaced run can still arrive — a pasted token, a frontmatter `description:` written by hand — and
+   one such run in a listing card pushed a 390px page sideways. A floor, not a look. */
+:where(.bl-desc) { overflow-wrap: anywhere; }
+
 /* Adjacent-inline runs. .bl-tag-filter carries `hidden` as a progressive-enhancement gate:
    :where() is zero-specificity but still an AUTHOR rule, and author beats the UA sheet's
    [hidden]{display:none} regardless of specificity — so without :not([hidden]) this would
