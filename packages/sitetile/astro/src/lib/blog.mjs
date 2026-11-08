@@ -8,7 +8,9 @@ import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, d
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
 export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts, indexDateLang } from './chrome-copy.mjs';
-import { indexDateLang } from './chrome-copy.mjs';
+import { indexDateLang, badgeMonths } from './chrome-copy.mjs';
+import { dateText } from '../../../../emit/entry-date.mjs';
+export { entryDateHtml } from '../../../../emit/entry-date.mjs';
 import { parseFragment } from 'parse5';
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
@@ -985,7 +987,7 @@ const CJK_DATE_FORMATS = new Set(['cjk-full', 'cjk-badge', 'cjk-md']);
 // `ja-JP`, `zh-Hant`, `zh-TW`, bare `zh`…) rather than routing it through toBcp47() first, so a
 // tag toBcp47 cannot canonicalise (an unrecognised or malformed value) still gets a straight answer
 // here instead of silently reading as non-CJK.
-// Known, recorded disagreement (tile#36 item 3): Intl in localeDefaultDate reads toBcp47(lang), so on
+// Known, recorded disagreement (tile#36 item 3): Intl (intlTag) reads toBcp47(lang), so on
 // malformed or ISO 639-2/3 spellings the two can differ — `ja_JP` is CJK here but Intl rejects it
 // (English default), and `jpn`/`zho`/`yue` are not CJK here while Intl's default renders them in
 // CJK. Neither throws nor renders blank; a well-formed BCP-47 `lang:` gets one consistent answer.
@@ -994,20 +996,20 @@ function isCJKLang(lang) {
   return primary === 'ja' || primary === 'ko' || primary === 'zh';
 }
 
-// The shared "no named format" renderer: the page's own locale via Intl, falling back to en-US
+// The Intl tag for the shared "no named format" renderer: the page's own locale, falling back to en-US
 // when no locale is known (byte-identical historic output) AND when the locale IS known but is not
 // a tag Intl accepts — a site's `lang:` is free text (a typo, an underscore instead of a hyphen, a
 // value nobody ever validated against BCP-47), and `new Intl.DateTimeFormat()` throws a RangeError
 // on anything it cannot parse rather than degrading gracefully. Before this guard that RangeError
 // crashed the whole build on the very first date it tried to render (github.com/CVERInc/tile#34
 // review round 1, P1-1) — the safe fallback is worse-looking dates, never a build that cannot ship.
-function localeDefaultDate(d, lang) {
-  const opts = { year: 'numeric', month: 'long', day: 'numeric' };
+function intlTag(lang) {
   const tag = lang ? toBcp47(lang) : 'en-US';
   try {
-    return new Intl.DateTimeFormat(tag, opts).format(d);
+    new Intl.DateTimeFormat(tag);
+    return tag;
   } catch {
-    return new Intl.DateTimeFormat('en-US', opts).format(d);
+    return 'en-US';
   }
 }
 
@@ -1054,22 +1056,38 @@ export function carouselPostDate(s, meta = {}, viewLang) {
 export function fmtDate(s, format, lang) {
   const d = new Date(s);
   if (isNaN(d)) return s;
+  return dateText(d, dateTextSpec(format, lang));
+}
+
+// dateTextSpec: the decision half of fmtDate — which format, and for the locale default which Intl
+// tag — as a JSON-safe spec emit/entry-date.mjs formats with. Split out so the archive island,
+// which re-renders cards in the browser, formats with the spec the server used instead of a second
+// copy of these rules (and of the locale tables) compiled into its bundle.
+export function dateTextSpec(format, lang) {
   const fmt = format === 'cjk' ? 'cjk-full' : format;
   if (CJK_DATE_FORMATS.has(fmt) && lang && !isCJKLang(lang)) {
-    return localeDefaultDate(d, lang);
+    return { format: 'intl', tag: intlTag(lang) };
   }
   switch (fmt) {
     case 'ymd-slash': // 2026/05/20
-      return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
     case 'cjk-full': // 2025 年 11 月 11 日
-    case 'cjk-badge': // an index badge uses dateBadgeParts() instead; post detail falls back to cjk-full here
-      return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`;
     case 'cjk-md': // 4月8日
-      return `${d.getMonth() + 1}月${d.getDate()}日`;
+      return { format: fmt };
+    case 'cjk-badge': // an index badge uses entryDateSpec() instead; post detail falls back to cjk-full here
+      return { format: 'cjk-full' };
     default:
       warnUnknownDateFormat(fmt);
-      return localeDefaultDate(d, lang);
+      return { format: 'intl', tag: intlTag(lang) };
   }
+}
+
+// entryDateSpec: the spec a blog LIST card's date renders with (emit/entry-date.mjs), resolved once
+// per page. `cjk-badge` is the three-span badge whatever the page language, with its month labels
+// from `badgeLang` (meta.lang, as the badge always used); everything else is fmtDate's text. The
+// views write it with entryDateHtml and hand the same spec to the archive island (`data-bl-date`).
+export function entryDateSpec(format, lang, badgeLang) {
+  if (format === 'cjk-badge') return { badge: true, months: badgeMonths(badgeLang) };
+  return dateTextSpec(format, lang);
 }
 
 // footerWidgets: the repeating "popular posts + category cloud" widgets a WP/Blogger footer

@@ -40,7 +40,11 @@ for (const f of VIEWS) {
   test(`${f}: card date is formatted with the view's date language, not bare meta.lang`, () => {
     const s = read(f);
     assert.match(s, /const lang = indexDateLang\(dateFormat, meta, (blogViewLang\(meta, viewFiles\)|systemPageLang\(meta, sysFiles\))\);/);
-    assert.match(s, /\{fmtDate\(p\.date, dateFormat, lang\)\}/);
+    // The card's text date resolves its format with `lang` (the badge alone keeps meta.lang for its
+    // month labels), once per page, and is written by the shared emitter (emit/entry-date.mjs).
+    assert.match(s, /const dateSpec = entryDateSpec\(dateFormat, lang, meta\.lang\);/);
+    assert.match(s, /\{p\.date && <Fragment set:html=\{entryDateHtml\(p\.date, dateSpec\)\} \/>\}/);
+    assert.doesNotMatch(s, /entryDateSpec\(dateFormat, meta\.lang/);
     assert.doesNotMatch(s, /fmtDate\([^)]*meta\.lang\)/);
   });
 }

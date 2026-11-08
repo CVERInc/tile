@@ -8,7 +8,7 @@
 import SiteLayout from '../layouts/SiteLayout.astro';
 import { cardImgAttrs } from '@emit/card-img.mjs';
 import Section from './Section.astro';
-import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang, blogAlternates, indexDateLang } from '../lib/blog.mjs';
+import { buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang, blogAlternates, indexDateLang, entryDateSpec, entryDateHtml } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';
 // reef#2874: this page's markdown twin — what it lists, recorded for the post-build pass.
@@ -37,6 +37,9 @@ const {
   pagePosts, tags, tagCounts, totalPages, currentPage, pager, showSidebar, archiveSidebar, categories, recentPosts, archive, dateFormat, readMore,
 } = buildIndexView(posts, meta, pageNum);
 const lang = indexDateLang(dateFormat, meta, blogViewLang(meta, viewFiles));
+// The list card's date: resolved once, written by the shared emitter, and handed to the archive island
+// so a filtered list re-renders it identically (emit/entry-date.mjs).
+const dateSpec = entryDateSpec(dateFormat, lang, meta.lang);
 const pageHref = (n) => indexUrl(meta, n);
 // Root-mounted blog index (blog-path:"") page 1 IS the site home. A live root-mount home
 // (a root-mounted blog) shows the post grid with NO archive heading and the site's own
@@ -91,20 +94,12 @@ const twinMark = recordListTwin({
       </div>
     )}
 
-    <ul class="bl-list">
+    <ul class="bl-list" data-bl-date={JSON.stringify(dateSpec)}>
       {pagePosts.map((p) => (
         <li class="bl-entry" data-tags={p.tags.join('|')} data-ym={p.date ? p.date.slice(0, 7) : ''}>
           <a class="bl-entry-link" href={postUrl(p, meta)}>
             {p.image && <img {...cardImgAttrs({ src: p.image, cls: 'bl-entry-img', layout: 'list', width: p.imageWidth, height: p.imageHeight })} />}
-            {p.date && (dateFormat === 'cjk-badge' ? (
-              <time class="bl-date bl-date-badge">
-                <span class="bl-date-month">{dateBadgeParts(p.date, meta.lang).month}</span>
-                <span class="bl-date-day">{dateBadgeParts(p.date, meta.lang).day}</span>
-                <span class="bl-date-year">{dateBadgeParts(p.date, meta.lang).year}</span>
-              </time>
-            ) : (
-              <time class="bl-date">{fmtDate(p.date, dateFormat, lang)}</time>
-            ))}
+            {p.date && <Fragment set:html={entryDateHtml(p.date, dateSpec)} />}
             <h2 class="bl-title">{p.title}</h2>
             {(p.description || p.excerpt) && <p class="bl-desc">{p.description || p.excerpt}</p>}
             {readMore && <span class="bl-read-more">{readMore}</span>}
