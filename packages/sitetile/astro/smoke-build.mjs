@@ -239,6 +239,12 @@ const ALLOWED_INLINE = [
 ];
 const ALLOWED_CHUNKS = [
   ['pagetile reader', 'ptr-mode:'],
+  // reef#2279: the reader's flow half, two lazy chunks Vite emits for reader.js's import() — the
+  // flow view (its resume key) and the engine it opens through flow-loader (its heading rule, a regex
+  // literal the minifier keeps). Emitted on every pagetile build, FETCHED only on a chapter that has
+  // a `kind: flow` page; a fixed chapter never requests either.
+  ['pagetile flow reader view (import()ed only for a flow chapter)', 'ptr-flow:'],
+  ['pagetile flow engine (import()ed only for a flow chapter)', '^#{1,6}\\s/'],
   ['pkg-runtimes (bleedblend canvas)', 'willReadFrequently'],
   // reef#2790: the appbar switch with the corner dock base it imports (see ALLOWED_INLINE above).
   ['installed-app bottom bar (standalone only; pwa + nav sites only)', 'data-st-appbar'],
