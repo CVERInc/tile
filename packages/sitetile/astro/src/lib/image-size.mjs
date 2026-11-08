@@ -6,10 +6,12 @@
 // fetched at build), SVG/AVIF/anything not listed below, a truncated header, and a JPEG whose
 // frame header sits past HEAD_BYTES.
 //
-// Formats: PNG (IHDR), GIF (logical screen), WebP (VP8 / VP8L / VP8X), JPEG (first SOFn). A JPEG's
-// EXIF orientation 5–8 is a quarter turn, and browsers apply it (`image-orientation: from-image`
-// is the default), so the displayed box is the stored one swapped — the size reported here is the
-// DISPLAYED one, because that is the box the browser has to reserve.
+// Formats: PNG (IHDR), GIF (logical screen), WebP (VP8 / VP8L / VP8X), JPEG (8-bit SOF0/1/2 only;
+// every other frame type is declined — this is a layout hint, and declining costs only the hint).
+// A declared length is checked against the file's real size, and every field read must lie in
+// the bytes actually read. A JPEG's EXIF orientation 5–8 is a quarter turn, and browsers apply it
+// (`image-orientation: from-image` is the default), so the displayed box is the stored one
+// swapped — the size reported here is the DISPLAYED one, the box the browser has to reserve.
 import { publicFilePath } from '../../../icon-core.mjs';
 import { readPublicHead } from './public-file.mjs';
 
@@ -62,13 +64,16 @@ function gifSize(b) {
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
-// WebP: the RIFF size must hold the first chunk, the chunk's declared size must be the size its
-// kind requires, and every field read must be inside that chunk.
-function webpSize(b) {
+// WebP: the declared RIFF must end within the FILE (its real size, not the bounded read), the first
+// chunk's declared payload must end within that RIFF, and every field read must lie in the bytes
+// actually read. A large VP8/VP8L bitstream runs past the bounded read; that is fine, because its
+// end is checked against the file's size, which the reader knows without reading it.
+function webpSize(b, fileSize) {
   if (b.length < 12 || ascii(b, 0, 4) !== 'RIFF' || ascii(b, 8, 4) !== 'WEBP') return null;
   if (b.length < 20) return null;
   const riff = u32le(b, 4), chunk = ascii(b, 12, 4), size = u32le(b, 16);
-  if (riff % 2 || riff < 4 + 8 + size + (size % 2)) return null;    // chunk does not fit the RIFF
+  if (riff % 2 || 8 + riff > fileSize) return null;                  // RIFF claims bytes the file lacks
+  if (20 + size + (size % 2) > 8 + riff) return null;                 // chunk does not fit the RIFF
   const body = 20;
   if (chunk === 'VP8X') {
     if (size !== 10 || b.length < body + 10) return null;
@@ -110,7 +115,7 @@ function exifOrientation(b, start, end) {
   const ifd = r32(4);
   if (ifd < 8 || ifd + 2 > len) return NaN;
   const n = r16(ifd);
-  if (ifd + 2 + n * 12 > len) return NaN;                           // entries run past the segment
+  if (ifd + 2 + n * 12 + 4 > len) return NaN;                       // entries + 4-byte next-IFD offset (RFC 1314 §3.A)
   let found;
   for (let i = 0; i < n; i++) {
     const e = ifd + 2 + i * 12;
@@ -125,7 +130,7 @@ function exifOrientation(b, start, end) {
 }
 
 // JPEG: walk the marker segments; a segment is used only when its whole declared length is present.
-function jpegSize(b) {
+function jpegSize(b, fileSize) {
   if (b.length < 2 || b[0] !== 0xff || b[1] !== 0xd8) return null;
   let o = 2, orientation;
   while (o + 2 <= b.length) {
@@ -136,7 +141,8 @@ function jpegSize(b) {
     if (m === 0x00 || m === 0xd8 || m === 0xd9 || m === 0xda) return null;  // no frame before scan/end
     if (o + 4 > b.length) return null;
     const len = u16be(b, o + 2);
-    if (len < 2 || o + 2 + len > b.length) return null;              // segment not wholly present
+    if (len < 2 || o + 2 + len > fileSize) return null;              // declared past the end of file
+    if (o + 2 + len > b.length) return null;                         // not wholly inside what was read
     const seg = o + 4, end = o + 2 + len;
     if (m === 0xe1) {
       const v = exifOrientation(b, seg, end);
@@ -146,12 +152,21 @@ function jpegSize(b) {
         orientation = v;
       }
     }
-    // SOF0–SOF15, except DHT (C4), JPG (C8) and DAC (CC), which share the range.
-    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+    // Any other frame type (lossless, hierarchical, arithmetic: SOF3, SOF5–7, SOF9–11, SOF13–15) is
+    // declined, not parsed: these are a layout hint, and a card does not need them to be right.
+    if (m === 0xc3 || (m >= 0xc5 && m <= 0xc7) || (m >= 0xc9 && m <= 0xcb) || (m >= 0xcd && m <= 0xcf)) return null;
+    // SOF0 (baseline), SOF1 (extended), SOF2 (progressive), 8-bit only, every component record
+    // valid (ITU-T T.81 §B.2.2): 1–4 components, distinct ids, sampling 1–4, table selector 0–3.
+    if (m === 0xc0 || m === 0xc1 || m === 0xc2) {
       if (len < 8) return null;
       const precision = b[seg], height = u16be(b, seg + 1), width = u16be(b, seg + 3), comps = b[seg + 5];
-      if (comps < 1 || len !== 8 + 3 * comps) return null;
-      if (precision !== 8 && precision !== 12 && precision !== 16) return null;
+      if (precision !== 8 || comps < 1 || comps > 4 || len !== 8 + 3 * comps) return null;
+      const ids = new Set();
+      for (let i = 0; i < comps; i++) {
+        const c = seg + 6 + i * 3, h = b[c + 1] >> 4, v = b[c + 1] & 15;
+        if (ids.has(b[c]) || h < 1 || h > 4 || v < 1 || v > 4 || b[c + 2] > 3) return null;
+        ids.add(b[c]);
+      }
       if (width < 1 || height < 1) return null;                      // 0 height = DNL-defined: unknown here
       return (orientation || 1) >= 5 ? { width: height, height: width } : { width, height };
     }
@@ -160,11 +175,14 @@ function jpegSize(b) {
   return null;                                                       // frame header beyond what was read
 }
 
-/** The displayed pixel size encoded in these leading bytes, or null. */
-export function imageSizeFromBytes(bytes) {
+/** The displayed pixel size encoded in these leading bytes of a file `fileSize` bytes long, or null.
+ *  `fileSize` defaults to the bytes given (a whole file); a declared length is checked against it. */
+export function imageSizeFromBytes(bytes, fileSize) {
   if (!bytes || !bytes.length) return null;
   const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  return pngSize(b) || jpegSize(b) || gifSize(b) || webpSize(b);
+  const total = fileSize === undefined ? b.length : fileSize;
+  if (!Number.isSafeInteger(total) || total < b.length) return null;
+  return pngSize(b) || jpegSize(b, total) || gifSize(b) || webpSize(b, total);
 }
 
 const cache = new Map();
@@ -179,7 +197,7 @@ export function localImageSize(src, readHead = readPublicHead) {
   try { const d = decodeURIComponent(rel); if (publicFilePath('/' + d) === d) rel = d; } catch { /* keep the raw path */ }
   if (readHead === readPublicHead && cache.has(rel)) return cache.get(rel);
   let size = null;
-  try { size = imageSizeFromBytes(readHead(rel, HEAD_BYTES)); } catch { size = null; }
+  try { const r = readHead(rel, HEAD_BYTES); size = r ? imageSizeFromBytes(r.bytes, r.size) : null; } catch { size = null; }
   if (readHead === readPublicHead) cache.set(rel, size);
   return size;
 }

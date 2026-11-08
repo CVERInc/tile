@@ -80,7 +80,7 @@ test('anything it cannot read with certainty is null — never a guess', () => {
 
 test('a remote image is never read and gets no size', () => {
   let calls = 0;
-  const reader = () => { calls++; return png(10, 10); };
+  const reader = () => { calls++; const b = png(10, 10); return { bytes: b, size: b.length }; };
   for (const src of ['https://cdn.example.com/a.png', '//cdn.example.com/a.png', 'data:image/png;base64,AAAA', '', '/../etc/a.png']) {
     assert.equal(localImageSize(src, reader), null, src);
   }
@@ -170,4 +170,70 @@ test('the same rules, one boundary further: CRC, RIFF size, EXIF count/value/bou
   const noOrientation = exifPayload(6); noOrientation[16] = 0x01; noOrientation[17] = 0x10;   // tag 0x0110 (Model)
   assert.deepEqual(imageSizeFromBytes(jpegWith(segment(0xe1, noOrientation))), LANDSCAPE);
   assert.deepEqual(imageSizeFromBytes(jpegWith(exif(6), exif(6))), PORTRAIT);
+});
+
+// ── tile#269 review round 2: the reviewer's boundary inputs, built here byte-for-byte ──────────────
+// Ruling for this round: dimensions are a layout hint, so the reader declines rather than parses
+// more — 8-bit SOF0/1/2 with valid component records only, and every structure complete.
+const sofVariant = (marker = 0xc0, precision = 8, sampling = 0x22, id2 = 2, table = 0) =>
+  segment(marker, [precision, ...be16(1365), ...be16(2048), 3, 1, sampling, table, id2, 0x11, 1, 3, 0x11, 1]);
+const riffDeclared = (fourcc, payload, declared) => bytes(ascii('RIFF'), le32(12 + declared + declared % 2), ascii('WEBP' + fourcc), le32(declared), payload);
+const VP8_PREFIX = [0x10, 0, 0, 0x9d, 1, 0x2a, 0, 4, 0, 3];               // key frame, 1024×768
+const VP8L_PREFIX = [0x2f, ...le32((1599 | (899 << 14)) >>> 0)];          // 1600×900
+
+test('🔴 review round 2, P2-1: an EXIF IFD missing any byte of its 4-byte next-IFD offset is null', () => {
+  assert.deepEqual(imageSizeFromBytes(bytes([0xff, 0xd8], segment(0xe1, exifPayload(6)), sofVariant())), PORTRAIT, 'the complete IFD reads');
+  for (const missing of [1, 2, 3, 4]) {
+    assert.equal(imageSizeFromBytes(bytes([0xff, 0xd8], segment(0xe1, exifPayload(6).slice(0, -missing)), sofVariant())), null, `missing ${missing}`);
+  }
+});
+
+test('🔴 review round 2, P2-2: a VP8/VP8L chunk declared longer than the file is null', () => {
+  assert.equal(imageSizeFromBytes(riffDeclared('VP8 ', VP8_PREFIX, 100)), null);
+  assert.equal(imageSizeFromBytes(riffDeclared('VP8L', VP8L_PREFIX, 100)), null);
+  // The same prefixes, declaring exactly what they hold, read.
+  assert.deepEqual(imageSizeFromBytes(riffDeclared('VP8 ', VP8_PREFIX, 10)), { width: 1024, height: 768 });
+  assert.deepEqual(imageSizeFromBytes(Uint8Array.from([...riffDeclared('VP8L', VP8L_PREFIX, 5), 0])), { width: 1600, height: 900 }, 'odd payload + its pad byte');
+  assert.equal(imageSizeFromBytes(riffDeclared('VP8L', VP8L_PREFIX, 5)), null, 'the odd payload\'s pad byte is missing from the file');
+});
+
+test('a big WebP is checked against the FILE size, not the bounded read — so it still reads', () => {
+  // 600 KB of bitstream: far past the 256 KB head, but the file really has it.
+  const big = 600 * 1024;
+  const head = riffDeclared('VP8 ', VP8_PREFIX, big);                     // only the prefix is in hand
+  assert.deepEqual(imageSizeFromBytes(head, 20 + big), { width: 1024, height: 768 });
+  assert.equal(imageSizeFromBytes(head, 20 + big - 1), null, 'one byte short of the declared chunk');
+  assert.equal(imageSizeFromBytes(head, head.length - 1), null, 'a file size below the bytes read is nonsense');
+  // …end to end, through a real file in public/ and the bounded read.
+  const file = new Uint8Array(20 + big); file.set(head);
+  writeFileSync(join(SITE, 'public/images/2024/big.webp'), file);
+  assert.deepEqual(localImageSize('/images/2024/big.webp'), { width: 1024, height: 768 });
+  writeFileSync(join(SITE, 'public/images/2024/cut.webp'), file.subarray(0, 300 * 1024));
+  assert.equal(localImageSize('/images/2024/cut.webp'), null, 'a file cut short of its declared chunk');
+});
+
+test('a JPEG segment declared past the end of the file is null', () => {
+  const whole = jpeg(2048, 1365);
+  assert.deepEqual(imageSizeFromBytes(whole), LANDSCAPE);
+  assert.equal(imageSizeFromBytes(whole, whole.length - 1), null, 'the SOF ends one byte past EOF');
+});
+
+test('🔴 review round 2, P2-3: only an 8-bit SOF0/1/2 with valid component records is read', () => {
+  const jp = (...x) => bytes([0xff, 0xd8], ...x);
+  assert.deepEqual(imageSizeFromBytes(jp(sofVariant())), LANDSCAPE, 'baseline');
+  assert.deepEqual(imageSizeFromBytes(jp(sofVariant(0xc1))), LANDSCAPE, 'extended sequential');
+  assert.deepEqual(imageSizeFromBytes(jp(sofVariant(0xc2))), LANDSCAPE, 'progressive');
+  const cases = {
+    'SOF0 precision 12': sofVariant(0xc0, 12),
+    'SOF0 precision 16': sofVariant(0xc0, 16),
+    'sampling factors 0': sofVariant(0xc0, 8, 0x00),
+    'sampling factor 5': sofVariant(0xc0, 8, 0x51),
+    'duplicate component id': sofVariant(0xc0, 8, 0x22, 1),
+    'quantisation table 4': sofVariant(0xc0, 8, 0x22, 2, 4),
+    'SOF3 (lossless)': sofVariant(0xc3),
+    'SOF9 (arithmetic)': sofVariant(0xc9),
+    'SOF15': sofVariant(0xcf),
+    'five components': segment(0xc0, [8, ...be16(1365), ...be16(2048), 5, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0, 4, 0x11, 0, 5, 0x11, 0]),
+  };
+  for (const [name, seg] of Object.entries(cases)) assert.equal(imageSizeFromBytes(jp(seg)), null, name);
 });
