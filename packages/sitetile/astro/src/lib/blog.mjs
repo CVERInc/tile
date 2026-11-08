@@ -308,7 +308,7 @@ const collapse = (s) => s.replace(/[ \t\n\r\f]+/g, ' ').replace(/^ | $/g, '');
 // RFC 5322 dot-atom characters in the local part. `www.support@example.com` is an address someone is
 // meant to write to, not a web address with words around it. It is found in the VISIBLE text across
 // inline boundaries (`help@[www.example.com](/contact)` shows one address). Part of a web address
-// that STARTED EARLIER in the same run is not an email — its path (`https://example.com/a@b.co`) or
+// that STARTED EARLIER in the same run is not an email — its path (`https://example.com/a@b.example`) or
 // its user info (`https://user:pass@example.com`) — but a colon or a slash on its own is
 // punctuation: `Contact:www.support@example.com` is an address, not a URL (rounds 7–8).
 const EMAIL = /(?<![A-Za-z0-9!#$%&'*+=?^_`{|}~.-])[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+/g;
