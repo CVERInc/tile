@@ -29,7 +29,11 @@ const postCount = pm.posts ? parseInt(pm.posts, 10) : 0;
 // Only posts WITH a featured image — this is an image-first carousel, and a card with no
 // thumbnail (a text-only announcement post) reads as broken. `parsePost` exposes it as `image`.
 const cells = (postCount > 0 && blogPosts.length)
-  ? blogPosts.filter((p) => p.image).slice(0, postCount).map((p) => ({ title: p.title, href: postUrl(p, meta), date: carouselPostDate(p.date, meta, lang), body: `![](${p.image})` }))
+  ? blogPosts.filter((p) => p.image).slice(0, postCount).map((p) => ({ title: p.title, href: postUrl(p, meta), date: carouselPostDate(p.date, meta, lang), body: '',
+      // The post's image goes through the shared card-image helper (emit/card-img.mjs) — sizes for
+      // this carousel's columns, and width/height when the build read the file — instead of being
+      // re-parsed out of a `![](…)` line as a hand-authored cell's image is.
+      image: { src: p.image, width: p.imageWidth, height: p.imageHeight } }))
   : (section.cells || []);
 // `more="LABEL=/href"` — OPT-IN "view all" link rendered top-right of the heading row (a section
 // that also links to a full listing). General — any carousel fronting a longer collection.

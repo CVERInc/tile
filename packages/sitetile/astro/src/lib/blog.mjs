@@ -16,6 +16,7 @@ import { parseFragment } from 'parse5';
 import { DEFAULT_LANG, toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale, tagLocalesSource, localesSourceOf, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 // The one site-level key that must NOT take part in loadSite's locale merge — see loadSite below.
 import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from './dynamic-coral-css.mjs';
+import { localImageSize } from './image-size.mjs';
 
 const FM_LIST_RE = /^\[(.*)\]$/;
 const PRIVACY_FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -159,7 +160,7 @@ const isMailto = (node) => node.tagName === 'a'
 // inside a code element, `anchor` = which link it sits in (0 = none). An explicit stack, not
 // recursion: nesting depth is author-controlled (thousands of `<small>` render fine on the page),
 // and one call frame per level would let one post abort loading every post.
-function visibleSegments(fragment) {
+function visibleSegments(fragment, skip = null) {
   const segs = [];
   let anchors = 0;
   const stack = [];
@@ -173,7 +174,7 @@ function visibleSegments(fragment) {
     if (f.space) { segs.push({ s: ' ', code: f.code, anchor: f.anchor }); continue; }
     const { node, code, anchor } = f;
     if (node.nodeName === '#text') { segs.push({ s: node.value, code, anchor }); continue; }
-    if (!node.tagName || SKIPPED_ELEMENTS.has(node.tagName) || isHidden(node)) continue;
+    if (!node.tagName || SKIPPED_ELEMENTS.has(node.tagName) || (skip && skip.has(node.tagName)) || isHidden(node)) continue;
     if (node.tagName === 'br') { segs.push({ s: ' ', code, anchor }); continue; }
     const inCode = code || isCode(node) || isMailto(node);
     const inAnchor = !inCode && node.tagName === 'a' ? ++anchors : anchor;
@@ -222,25 +223,91 @@ function unusedMarks(text, n) {
   }
   return marks.length === n ? marks : null;
 }
-// excerptSource: the post body with the lines an excerpt never reads blanked out, BEFORE rendering —
-// the same lines the excerpt has always skipped: a heading or hashtag line (a leading `#`: a heading
-// repeats the title, a hashtag run is noise), a blockquote (`>`), a link-list line (`[`), and a bare
-// YouTube address (a player, not words — tile#148).
-// Outside fenced code only: inside a fence such a line is code the page shows. A blanked line stays
-// a line, so every block boundary the renderer draws is still where it was.
-export function excerptSource(body) {
+// excerptSource: the post body with the lines an excerpt never reads MARKED, before rendering — the
+// same lines the excerpt has always skipped: a heading or hashtag line (a leading `#`: a heading
+// repeats the title, a hashtag run is noise), a blockquote (`>`), and a link-list line (`[`).
+// Outside fenced code only: inside a fence such a line is code the page shows.
+// 🔴 Marked, never rewritten (round 7). Rounds 5–6 replaced a skipped line's words before rendering,
+// and every replacement was a guess at what the renderer would have done with them: the words
+// removed could be a comment's `-->`, so a later comment swallowed the public text between them.
+// Now every word stays where the author wrote it, so the renderer draws exactly the page — comment
+// boundaries, code and links included — and the marks only say WHERE each visible character came
+// from: `open` after the line's structural prefix, `close` at its end. excerptOfBody trusts them only
+// when the page shows every one of them, in order (excerptMarkedText): a mark the page hid — in a
+// comment, a link's destination, an attribute — no longer says where a line ends.
+const HEADING_PREFIX = /^(\s*#{1,4}\s+)/;   // flowingHtml's own heading split
+const QUOTE_PREFIX = /^(\s*(?:>\s?)+)/;
+export function excerptSource(body, { open, close }) {
   let inFence = false;
   return String(body || '').split('\n').map((line) => {
-    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return line; }
-    if (inFence) return line;
+    const fence = /^\s*(```|~~~)/.test(line);
     const t = line.trim();
-    return t.startsWith('#') || t.startsWith('>') || t.startsWith('[') || youtubeLine(t) ? '' : line;
+    const skipped = !fence && !inFence && (t.startsWith('#') || t.startsWith('>') || t.startsWith('['));
+    if (fence) inFence = !inFence;
+    if (!skipped) return line;
+    const prefix = (HEADING_PREFIX.exec(line) || QUOTE_PREFIX.exec(line) || /^\s*/.exec(line))[0];
+    return prefix + open + line.slice(prefix.length) + close;
   }).join('\n');
+}
+// What the excerpt drops when the marks cannot be trusted: the page's own heading and quote
+// elements, read from the unmarked page (a hashtag or link-list line then stays, as the page shows it).
+const SKIPPED_BLOCK_ELEMENTS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote']);
+const pageSegments = (markdown, skip) => visibleSegments(parseFragment(flowingHtml(String(markdown || ''), { br: true })), skip);
+// The visible text of segments, the way a check compares them: all of it, and its code.
+const segText = (segs) => [collapse(segs.map((x) => x.s).join('')), collapse(segs.filter((x) => x.code).map((x) => x.s).join(''))].join('\u0000');
+// excerptMarkedText: the marked page's segments with the skipped lines' text dropped, or null when
+// the marks cannot be trusted. Two checks, both on what the page shows:
+//  · the marks moved nothing — without them, the marked page's visible text (and its code) is the
+//    page's (a mark is not a word, but the renderer reads lines, and a line that starts with a mark
+//    is not always the line it was);
+//  · every mark is visible, in source order — open, close, open, close… — so each skipped line's
+//    text is exactly what lies between its own pair. A mark the page did not show (swallowed by a
+//    link's destination, an attribute, a comment) would leave a line without its end, and the
+//    dropping would run on into the prose after it (round 8).
+function excerptMarkedText(body, page) {
+  const marks = unusedMarks(body, 2);
+  if (!marks) return null;
+  const [open, close] = marks;
+  const source = excerptSource(body, { open, close });
+  const segs = pageSegments(source);
+  const strip = (s) => s.split(open).join('').split(close).join('');
+  if (segText(segs.map((x) => ({ ...x, s: strip(x.s) }))) !== segText(page)) return null;
+  const want = source.replace(new RegExp('[^' + open + close + ']', 'g'), '');
+  const seen = segs.map((x) => x.s).join('').replace(new RegExp('[^' + open + close + ']', 'g'), '');
+  if (seen !== want) return null;
+  let dropping = false;
+  const out = [];
+  for (const seg of segs) {
+    let s = '';
+    for (const c of seg.s) {
+      if (c === open) dropping = true;
+      else if (c === close) dropping = false;
+      else if (!dropping) s += c;
+    }
+    out.push({ ...seg, s });
+  }
+  return out;
+}
+// excerptOfBody: a post body → its excerpt text: the page's visible text, less the skipped lines.
+export function excerptOfBody(body) {
+  const src = String(body || '');
+  const segs = excerptMarkedText(src, pageSegments(src)) || pageSegments(src, SKIPPED_BLOCK_ELEMENTS);
+  return excerptTextOf(segs);
 }
 // HTML collapses ASCII whitespace only: a no-break or ideographic space is shown as typed, so it stays.
 const collapse = (s) => s.replace(/[ \t\n\r\f]+/g, ' ').replace(/^ | $/g, '');
+// An email is one atom, found BEFORE any web address is looked for: a pragmatic local@domain with
+// RFC 5322 dot-atom characters in the local part. `www.support@example.com` is an address someone is
+// meant to write to, not a web address with words around it. It is found in the VISIBLE text across
+// inline boundaries (`help@[www.example.com](/contact)` shows one address). Part of a web address
+// that STARTED EARLIER in the same run is not an email — its path (`https://example.com/a@b.co`) or
+// its user info (`https://user:pass@example.com`) — but a colon or a slash on its own is
+// punctuation: `Contact:www.support@example.com` is an address, not a URL (rounds 7–8).
+const EMAIL = /(?<![A-Za-z0-9!#$%&'*+=?^_`{|}~.-])[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+/g;
 export function excerptPlainText(markdown) {
-  const segs = visibleSegments(parseFragment(flowingHtml(String(markdown || ''), { br: true })));
+  return excerptTextOf(pageSegments(markdown));
+}
+function excerptTextOf(segs) {
   // runs: consecutive segments of one kind — the same link, plain prose, or code
   const runs = [];
   for (const seg of segs) {
@@ -255,10 +322,44 @@ export function excerptPlainText(markdown) {
   const [GONE, OPEN, CLOSE] = marks;
   const codes = [];
   let text = '';
+  const slot = (literal) => { codes.push(literal); return OPEN + (codes.length - 1) + CLOSE; };
+  // emails, over the visible text with code blanked (an address never runs into or out of code)
+  const flat = runs.map((r) => (r.code ? ' '.repeat(r.s.length) : r.s)).join('');
+  const kept = new Uint8Array(flat.length);
+  // where the web address covering i began — looked for inside each run, the same boundaries the
+  // removal below uses, so an address in a link's text never reaches past the link (round 8)
+  const urlStarts = new Int32Array(flat.length).fill(-1);
+  const urlEnds = new Int32Array(flat.length);
+  for (let i = 0, at = 0; i < runs.length; at += runs[i].s.length, i++) {
+    if (runs[i].code) continue;
+    for (const m of runs[i].s.matchAll(URL_RUN)) {
+      urlStarts.fill(at + m.index, at + m.index, at + m.index + m[0].length);
+      urlEnds.fill(at + m.index + m[0].length, at + m.index, at + m.index + m[0].length);
+    }
+  }
+  // An email that starts inside an earlier address is not one; the search resumes where that address
+  // ends (every start inside it would be refused the same way), so an email right after a link whose
+  // text is an address is still found — and each character is looked at a bounded number of times.
+  const email = new RegExp(EMAIL.source, 'g');
+  for (let m; (m = email.exec(flat));) {
+    const u = urlStarts[m.index];
+    if (u === -1 || u === m.index) kept.fill(1, m.index, m.index + m[0].length);
+    else email.lastIndex = urlEnds[m.index];
+  }
+  let offset = 0;
   for (const r of runs) {
-    if (r.code) { text += OPEN + codes.length + CLOSE; codes.push(r.s); continue; }
-    if (r.anchor && WHOLE_URL.test(r.s)) { text += GONE; continue; }
-    text += r.s.replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1]);
+    const start = offset;
+    offset += r.s.length;
+    if (r.code) { text += slot(r.s); continue; }
+    const pieces = [];
+    for (let i = 0; i < r.s.length;) {
+      let j = i;
+      while (j < r.s.length && kept[start + j] === kept[start + i]) j++;
+      pieces.push({ email: kept[start + i] === 1, s: r.s.slice(i, j) });
+      i = j;
+    }
+    if (r.anchor && !pieces.some((p) => p.email) && WHOLE_URL.test(r.s)) { text += GONE; continue; }
+    for (const p of pieces) text += p.email ? slot(p.s) : p.s.replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1]);
   }
   // an emptied bracket pair goes with its address — repeated, so `((url))` empties both
   const emptied = new RegExp('[(\\[{<（【「][ \\t\\n\\r\\f]*' + GONE + '[ \\t\\n\\r\\f]*[)\\]}>）】」]', 'g');
@@ -335,7 +436,7 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // imported from a social feed — a paragraph of `[#tag](https://…/hashtag/…?…)` links — listed its
   // raw markdown, and the cut could land mid-URL: one unbreakable 180-character string that pushed
   // a 390px index 427px wide.
-  const fullText = excerptPlainText(excerptSource(replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '')));
+  const fullText = excerptOfBody(replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => ''));
   const excerpt = capExcerpt(fullText, excerptMax);
   // `slug:` in frontmatter OVERRIDES the one derived from the filename. Normally the filename IS
   // the slug (and stays the single source of truth for every site that doesn't set this), but a
@@ -417,6 +518,12 @@ export function publicFacing(post) {
   return { ...post, body: '', description: '', excerpt: '', excerptText: '' };
 }
 
+// The featured image's size keys, present only when allPosts read them — so a view-model of a post
+// whose size is unknown keeps exactly the shape it had (the private-artifacts allowlists pin it).
+function imageSizeOf(p) {
+  return p.imageWidth && p.imageHeight ? { imageWidth: p.imageWidth, imageHeight: p.imageHeight } : {};
+}
+
 export function publicFacingPosts(posts) {
   return (posts || []).map((p) => publicFacing(p));
 }
@@ -427,6 +534,7 @@ export function postCards(posts, meta) {
     href: postUrl(p, meta),
     date: p.date,
     image: p.image,
+    ...imageSizeOf(p),
     description: p.description,
   }));
 }
@@ -437,7 +545,13 @@ export function allPosts(glob, excerptMax) {
   const posts = [];
   for (const [path, raw] of Object.entries(glob)) {
     const slug = path.split('/').pop().replace(/\.md$/, '');
-    posts.push(parsePost(slug, raw, excerptMax)); // undefined → parsePost default 180 (unchanged)
+    const post = parsePost(slug, raw, excerptMax); // undefined → parsePost default 180 (unchanged)
+    // The featured image's intrinsic size, when it is a file this build ships (public/) and its
+    // header reads cleanly — so every card can reserve its box (emit/card-img.mjs). A remote image
+    // gets no size at all: it is never fetched, and a guessed box is worse than none.
+    const size = post.image ? localImageSize(post.image) : null;
+    if (size) { post.imageWidth = size.width; post.imageHeight = size.height; }
+    posts.push(post);
   }
   return posts.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
@@ -824,6 +938,7 @@ function archivePostView(post) {
     date: post.date,
     tags: post.tags,
     image: post.image,
+    ...imageSizeOf(post),
     author: post.author,
     permalink: post.permalink,
   };
@@ -1610,7 +1725,7 @@ export function termLocaleMap(kind, contentFiles, blogLocaleFiles, meta, basePos
 }
 
 // searchIndex: the lean, all-in-one JSON payload the blog-search AND blog-archive islands
-// fetch ONCE (lazily). One post → { t:title, u:url, g:tags, d:date, i:image } — short keys
+// fetch ONCE (lazily). One post → { t:title, u:url, g:tags, d:date, i:image, iw/ih:its size when known } — short keys
 // keep the corpus small over the wire. `i` (the featured-image URL, '' when none) lets the
 // blog-archive island's ?tag=/?ym= filtered listing render the SAME image-card the server
 // renders for the recent set (the archive spans the FULL corpus, not the ~10 posts in the
@@ -1629,6 +1744,9 @@ export function searchIndex(posts, meta) {
     const p = publicFacing(post);
     const row = { t: p.title, u: postUrl(p, meta), g: p.tags || [], d: p.date || '', i: p.image || '' };
     if (withBody) row.e = String(p.excerptText || '').slice(0, bodyChars);
+    // `iw`/`ih`: the featured image's intrinsic size, only when the build read it (allPosts), so
+    // the archive island's cards reserve the same box the server's do. Absent, never guessed.
+    if (p.imageWidth && p.imageHeight) { row.iw = p.imageWidth; row.ih = p.imageHeight; }
     return row;
   });
 }

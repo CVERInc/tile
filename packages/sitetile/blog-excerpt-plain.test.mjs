@@ -156,6 +156,48 @@ const REVIEW_CASES = [
   ['~~~sh\n# install\n> out.txt\n~~~', '# install > out.txt'],
   ['一行目\n二行目', '一行目 二行目'],
   ['[#a](https://x.example/a) [#b](https://x.example/b)\nprose line', 'prose line'],
+  // round 5: an email is found whole, before any web address is looked for
+  ['Contact www.support@example.com today.', 'Contact www.support@example.com today.'],
+  ['Contact a!www.support@example.com today.', 'Contact a!www.support@example.com today.'],
+  ['Contact help@[www.example.com](/contact) today.', 'Contact help@www.example.com today.'],
+  ['See https://example.com/a@b.example.com today.', 'See today.'],
+  // round 5: a mailto: link's text is left whole even when it reads like a web address
+  ['Contact [www.example.com](mailto:help@example.com) today.', 'Contact www.example.com today.'],
+  // round 5: a skipped heading still splits the body where the page splits it, so a comment above
+  // it does not pair with a `-->` below it
+  ['<!--\n# Heading\nImportant visible instruction\n-->\nEnd', '<!-- Important visible instruction --> End'],
+  ['Keep <!--\n> quoted\n--> today.', 'Keep <!-- --> today.'],
+  // round 7: a skipped line keeps every word it has for the renderer — only its visible text is
+  // dropped — so a comment closer on it still closes the comment, and the public text after it stays
+  ['<!-- Draft notes\n> -->\nDo not enter the closed trail.\n<!-- End notes -->\nOpen trails are listed below.',
+    'Do not enter the closed trail. Open trails are listed below.'],
+  ['<!--\n[ends -->\nImportant visible instruction\n<!-- private\n-->\nEnd', 'Important visible instruction End'],
+  // round 8: the marks are trusted only when the page shows every one of them, in order. When a
+  // comment hides one, the excerpt falls back to the page's own blocks — the unmarked page less its
+  // heading and quote elements — so these keep a skipped line's visible remnant, as the page shows it
+  ['<!-- open\n> q --> quote tail\nafter', 'quote tail after'],
+  ['Intro\n[<!-- x\nstill hidden --> visible tail', 'Intro [ visible tail'],
+  // a line whose mark would change what the page shows (a quoted comment opener) falls back too
+  ['> <!-- start\nhidden\n-->\nvisible', 'visible'],
+  // round 8: a close mark swallowed by a link destination (https, mailto, a destination that starts
+  // on the next line) must not leave the prose after it dropped — the fallback keeps the page's text
+  ['[label](https://example.com\n/path)\nDo not enter the closed trail.', 'label Do not enter the closed trail.'],
+  ['[label](mailto:help@example.com/-->\nrest)\nKeep this.', 'label Keep this.'],
+  ['[label](\nhttps://example.com)\nKeep this.', 'label Keep this.'],
+  // …while a link-list line the page shows whole is still skipped
+  ['[a](/x)\nKeep this.', 'Keep this.'],
+  // round 7: a colon alone is label punctuation — the address after it is an email, not a URL…
+  ['Contact:www.support@example.com today.', 'Contact:www.support@example.com today.'],
+  ['Contact:help@example.com today.', 'Contact:help@example.com today.'],
+  // …while the user info of a web address that started earlier is still part of that address
+  ['See https://user:www.pass@example.com/x today.', 'See today.'],
+  ['See https://user:pass@example.com/x today.', 'See today.'],
+  // round 8: a web address is looked for inside one run (a link's text, or the prose around it), so a
+  // URL-labelled link never reaches past its own anchor into an email after it
+  ['See [https://example.com](/go):www.support@example.com today.', 'See:www.support@example.com today.'],
+  ['See [https://example.com](/go),www.support@example.com today.', 'See,www.support@example.com today.'],
+  ['See [https://example.com](/go)/www.support@example.com today.', 'See /www.support@example.com today.'],
+  ['See [https://example.com](/go),[www.support@example.com](/contact) today.', 'See,www.support@example.com today.'],
 ];
 for (const [input, want] of REVIEW_CASES) {
   test(`review fixture: ${JSON.stringify(input)}`, () => assert.equal(excerptOf(input), want));
@@ -166,6 +208,31 @@ test('deeply nested markup the page renders does not abort loading posts (round 
   const posts = blog.allPosts({ '/blog/deep.md': raw });
   assert.equal(posts.length, 1);
   assert.equal(posts[0].excerptText, 'Start visible end.');
+});
+
+// round 5: an email grid. The expected text is the address exactly as written — every shape below
+// shows the whole address on the page — built by string templates, not by the code under test.
+test('email grid: every address the page shows survives whole', () => {
+  const locals = ['help', 'www.support', 'a!www.support', 'first.last', 'x+tag', "o'brien", 'www'];
+  const domains = ['example.com', 'www.example.com', 'mail.example.co.uk', 'www.ex-ample.org'];
+  const shapes = [
+    (e) => [`Contact ${e} today.`, `Contact ${e} today.`],
+    (e) => [`Contact \`${e}\` today.`, `Contact ${e} today.`],
+    (e) => [`Contact [${e}](mailto:${e}) today.`, `Contact ${e} today.`],
+    (e) => [`Contact [${e}](/contact) today.`, `Contact ${e} today.`],
+    (e) => [`Email (${e}).`, `Email (${e}).`],
+    (e) => [`Mail ${e}, then wait.`, `Mail ${e}, then wait.`],
+    (e) => [`「${e}」まで`, `「${e}」まで`],
+  ];
+  let n = 0;
+  const bad = [];
+  for (const l of locals) for (const d of domains) for (const shape of shapes) {
+    const [input, want] = shape(`${l}@${d}`);
+    n++;
+    const got = excerptOf(input);
+    if (got !== want) bad.push(`${JSON.stringify(input)} → ${JSON.stringify(got)}`);
+  }
+  assert.equal(bad.length, 0, `${bad.length} of ${n} lost text:\n    ` + bad.slice(0, 5).join('\n    '));
 });
 
 test('a plain excerpt is unchanged (no site whose posts are prose moves)', () => {
