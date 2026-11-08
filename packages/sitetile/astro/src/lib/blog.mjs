@@ -8,6 +8,7 @@ import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, d
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
 export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts, indexDateLang } from './chrome-copy.mjs';
+import { indexDateLang } from './chrome-copy.mjs';
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
@@ -118,6 +119,33 @@ function capExcerpt(text, max) {
   return text.length > n ? text.slice(0, n).trim() + ' […]' : text;
 }
 
+// excerptPlainText: one markdown line → the words a reader sees, for an excerpt.
+// The line goes through inlineHtml — the SAME inline parser the post body uses — so a link is cut
+// where the post page cuts it (a `]` or `[0]` inside a URL included), and the excerpt keeps exactly
+// the link TEXT the post shows. Then: emphasis/code markers (inlineHtml keeps them as .st-mk spans)
+// and every tag are dropped, entities decoded (the template escapes the result again), and URLs
+// removed outright — an autolink `<https://…>`, a bare address, or a link whose text IS its address.
+// A URL in an excerpt is never words, and it is the one string a narrow card cannot wrap.
+const EXCERPT_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+const decodeEntity = (whole, name) => {
+  if (name[0] === '#') {
+    const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+    return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+  }
+  return Object.prototype.hasOwnProperty.call(EXCERPT_ENTITIES, name) ? EXCERPT_ENTITIES[name] : whole;
+};
+export function excerptPlainText(line) {
+  return inlineHtml(String(line || ''))
+    .replace(/<span class="st-mk">[^<]*<\/span>/g, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, decodeEntity)
+    .replace(/<(?:https?:\/\/|mailto:)[^>\s]*>/gi, '')
+    .replace(/\b(?:https?:\/\/|www\.)[^\s<>]+/gi, '')
+    .replace(/~~/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // The first YouTube line's poster path, or '' (tile#148 — see parsePost's featured image).
 const youtubePoster = (body) => { const v = youtubeLines(body)[0]; return v ? v.poster : ''; };
 
@@ -178,9 +206,14 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // capped via capExcerpt(excerptMax) — excerptMax defaults to 180 so this is unchanged, and the
   // full un-truncated join is kept as excerptText so buildIndexView can re-cap per-site (e.g.
   // a site with shorter cards) without re-parsing the body.
+  // 🩸 Each surviving line is turned into PLAIN TEXT before the join and the cut (excerptPlainText
+  // below). Images were stripped here and links were not, so a post imported from a social feed —
+  // a paragraph of `[#tag](https://…/hashtag/…?…)` links — listed its raw markdown, and the cut
+  // could land mid-URL: one unbreakable 180-character string that pushed a 390px index 427px wide.
   const fullText = replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '').split('\n')
     // (a bare YouTube address on its own line is a player now, not words — tile#148)
     .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>') && !youtubeLine(s))
+    .map(excerptPlainText).filter(Boolean)
     .join(' ');
   const excerpt = capExcerpt(fullText, excerptMax);
   // `slug:` in frontmatter OVERRIDES the one derived from the filename. Normally the filename IS
@@ -768,6 +801,20 @@ function warnUnknownDateFormat(format) {
 // same as an unrecognised format would (see CJK_DATE_FORMATS above). `lang` absent keeps the
 // historic behaviour of always rendering the named format, since there is no page locale to gate
 // on. `ymd-slash` has no script and is never gated.
+// carouselPostDate: the date on a `posts=N` carousel card. With `blog-date-format` set it is
+// fmtDate with the blog index's own language rule (indexDateLang), so the home strip and the index
+// print one date the same way; without it, the carousel's historic short form (YY/M/D) is kept,
+// so no site that never asked moves.
+export function carouselPostDate(s, meta = {}, viewLang) {
+  const format = meta['blog-date-format'];
+  if (format) {
+    const d = new Date(s);
+    return isNaN(d) ? '' : fmtDate(s, format, indexDateLang(format, meta, viewLang));
+  }
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(s || ''));
+  return m ? `${m[1].slice(2)}/${Number(m[2])}/${Number(m[3])}` : '';
+}
+
 export function fmtDate(s, format, lang) {
   const d = new Date(s);
   if (isNaN(d)) return s;
