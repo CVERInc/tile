@@ -1259,6 +1259,9 @@ function imgTag(alt, src) {
 // comment — because the code path that decides that (this file) runs BEFORE markCode ever re-finds
 // the same backticks in the escaped output and wraps them.
 const RE_CODE_SPAN = /(?<!\\)`[^`\n]+`/g;
+// The finished span markCode builds from one of those ranges (prefix 'st'): two hidden marker spans
+// around escaped, `<`-free content. inlineHtml lifts these out before its promotion passes (tile#267).
+const CODE_SPAN_HTML = /<span class="st-code"><span class="st-mk">`<\/span>[^<]*<span class="st-mk">`<\/span><\/span>/g;
 function codeSpanRanges(s) {
   const ranges = [];
   RE_CODE_SPAN.lastIndex = 0;
@@ -1348,6 +1351,19 @@ function commentTerminatorEnd(s, from, n) {
 // opens and no closer anywhere (`<!--`.repeat(N), or an `inTag`-resetting shape like `<!--x>`.repeat(N)
 // where a real `>` periodically re-arms the `!inTag` check) would call commentTerminatorEnd — itself an
 // O(remaining length) scan — at EVERY open, which is exactly R2-P1-01's quadratic shape one level up.
+//
+// AUTHOR TEXT IS SHOWN AS TYPED, entities included (tile#267 asked whether this is intended; it is).
+// `&` is escaped like `<` and `>`, so an authored `&amp;` renders as the visible text `&amp;`, and
+// `&lt;b&gt;` as `&lt;b&gt;`, never as `&` or `<b>`. This is the same contract as every other
+// authored tag: escaped to visible text, with only the attribute-free <small>/<br> re-emitted (see
+// inlineHtml). It is what lets a page write ABOUT HTML, and it keeps the page's text equal to the
+// source minus hidden markers, which the editor's highlighter and the blog excerpt both rely on.
+// The one exception is deliberate and narrow: a link/image DESTINATION is decoded once before it is
+// re-escaped (round 2, P2-1 in inlineHtml), because a URL is not text a reader sees and an imported
+// `?a=1&amp;b=2` must still request the right address. Do not decode entities here: that would turn
+// `&lt;script&gt;` in a page that documents HTML into the text `<script>` and change every page
+// written that way. (cssmd's header line "escaping is idempotent for the entities we emit" is not
+// true of escHtml: `&amp;` → `&amp;amp;`. The behaviour, not that sentence, is the contract.)
 function escapeInline(text, opts) {
   const s = String(text == null ? '' : text);
   if (opts && opts.stripComments === false) return escHtml(s);   // P2-04: indented paragraph, verbatim
@@ -1438,6 +1454,23 @@ function inlineHtml(text, opts) {
   // different escape step — which is this one (escapeInline instead of plain escHtml, so an HTML
   // comment is consumed at the same point the raw text is examined for '<', see escapeInline above).
   let s = markEscapes(markEmphasis(markCode(escapeInline(stashed, opts), 'st'), 'st'), 'st');
+  // tile#267: a code span is LITERAL. Every pass below (destination restore, images, links, the
+  // <small>/<br> allowlist) runs over the whole string, so before this stash it reached inside the
+  // `span.st-code` markCode had just built: `` `<br>` `` became a real line break, `` `<small>x</small>` ``
+  // small text and `` `[label](/path)` `` a live link. Same remedy as cssmd's markEscapes, which
+  // skips the finished span for the same reason: lift each finished code span out under a
+  // placeholder, run the promotions on the prose around it, put it back last. Its content is
+  // already escaped (escapeInline) and holds no `<`, so the span's shape is exact. A link
+  // destination stashed from INSIDE the span (the `](…)` shape matched before code spans were
+  // known) goes back verbatim — escaped, never entity-decoded, since it is code and not a URL.
+  // A code span inside a link label (`` [`x`](/p) ``) still ends up inside the link: the
+  // placeholder rides along in the label and is restored after the <a> forms.
+  const codes = [];
+  s = s.replace(CODE_SPAN_HTML, (m) => {
+    codes.push(m.replace(/\u0001(\d+)\u0001/g, (mm, i) => escHtml(hrefs[+i])));
+    return '\u0001c' + (codes.length - 1) + '\u0001';
+  });
+  const unstashCode = (t) => t.replace(/\u0001c(\d+)\u0001/g, (m, i) => codes[+i]);
   // round 2, P2-1: this used to escHtml the RAW captured href unconditionally. An author whose
   // destination already carried an entity (`?a=1&amp;b=2` from an HTML-to-Markdown import, or a
   // hand-typed `&amp;`) got escaped a SECOND time (`&amp;amp;b=2`), corrupting the URL a browser
@@ -1450,12 +1483,14 @@ function inlineHtml(text, opts) {
   // above already ran over it like any other text. round 2, P2-2: that answers the ESCAPING
   // question only — it never checked the SCHEME, so `![[javascript:alert(1)]]` reached a live
   // `<img src>` untouched. Same guard as the sibling markdown-image line two rows below.
-  s = replaceMatches(s, WIKI_IMAGE, (mm, inner) => (isSafeImageSrc(inner) ? imgTag(inner.split('/').pop(), inner) : inner.split('/').pop()));
+  // An image's alt/src is an ATTRIBUTE: a code placeholder in it is restored here, before attrq
+  // quotes it, so the restored span's own `"` can never close the attribute.
+  s = replaceMatches(s, WIKI_IMAGE, (mm, inner) => (inner = unstashCode(inner), isSafeImageSrc(inner) ? imgTag(inner.split('/').pop(), inner) : inner.split('/').pop()));
   // markdown image: `src` here is the (now escaped) restored destination. A disallowed scheme
   // renders no <img> at all — just the (already-escaped) alt text, same shape as a broken image's
   // fallback text, per isSafeImageSrc above (round 2, P1-2: images additionally allow a small
   // raster `data:` allowlist that a plain href never does).
-  s = replaceMatches(s, MD_IMAGE, (mm, alt, src) => (isSafeImageSrc(src) ? imgTag(alt, src) : alt));
+  s = replaceMatches(s, MD_IMAGE, (mm, alt, src) => (alt = unstashCode(alt), isSafeImageSrc(src) ? imgTag(alt, src) : alt));
   // External inline links open in a new tab too (design 2026-07-13, extended from affordances to
   // prose at the maintainer's call): an external link is external wherever it appears.
   s = replaceMatches(s, MD_LINK, (mm, lab, href) => {
@@ -1472,7 +1507,7 @@ function inlineHtml(text, opts) {
   // escape→re-emit trick as <small>. General: any inlineHtml call site (h1, eyebrow, prose spans)
   // gets real line breaks for free. script-injection-safe: no attrs, no other tag.
   s = s.replace(/&lt;br\s*\/?&gt;/g, '<br>');
-  return s;
+  return unstashCode(s);
 }
 
 // True if a block is ONLY image(s) (markdown or wikilink) + whitespace — a block-level figure, not a
