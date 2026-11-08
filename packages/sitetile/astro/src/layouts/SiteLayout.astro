@@ -1231,10 +1231,10 @@ const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
       {headerActions.length > 0 && (
         <div class="rf-header-actions" data-cart-guild={cartWired ? cartGuild : undefined} data-cart-href={cartWired && cartHref ? cartHref : undefined}>
           {headerActions.map((a) => a.type === 'link'
-            ? <a class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} href={safeHref(a.target) || '#'} aria-label={a.label} set:html={a.icon}></a>
+            ? <a class={a.mobile ? 'rf-ha-btn rf-ha-btn--mobile' : 'rf-ha-btn'} href={safeHref(a.target) || '#'} aria-label={a.label} set:html={a.icon}></a>
             : <Fragment>
                 <input type="checkbox" id={a.id} class="rf-ha-check" hidden data-ha-toggle />
-                <label class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
+                <label class={a.mobile ? 'rf-ha-btn rf-ha-btn--mobile' : 'rf-ha-btn'} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
                   <span class="rf-ha-icon" set:html={a.icon}></span>
                   {a.badge != null && <span class="rf-ha-badge" data-count={a.badge}>{a.badge}</span>}
                 </label>

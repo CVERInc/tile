@@ -44,28 +44,29 @@ const walk = (dir) => readdirSync(dir).flatMap((n) => {
   return statSync(p).isDirectory() ? walk(p) : (p.endsWith('.astro') ? [p] : []);
 });
 
-// Conservative census. For every `<style` in a source, take the text from it up to the next
-// `</style` (or the next `<style`, or end of file) and find EVERY `set:html` token in that text, as
-// plain text: quotes, template literals, comments and nesting cannot hide one. Each must be exactly
-// `set:html={styleText(<identifier or member path>)}` (whitespace allowed). Any other shape fails,
-// including a safe prefix followed by more expression. A false alarm is fixed by writing the sink in
-// the one allowed shape, never by teaching this scanner a new syntax.
+// Conservative census. Every `set:html` token in a template (found as plain text, so quotes,
+// template literals and comments cannot hide one) is classified by the opening tag it sits in: the
+// text from the nearest preceding `<` up to the token must be a SIMPLE opening tag, meaning a tag name
+// followed only by bare attributes, quoted values without `<`, or brace values without `{`, `}` or `<`.
+// Anything else (a closer-like string, a nested expression, a comment, a stray quote) cannot be
+// classified and FAILS. A `<style>` sink must be exactly
+// `set:html={styleText(<identifier or member path>)}`. A false alarm is fixed by writing the sink in
+// that simple shape, never by teaching this scanner more syntax.
 const ALLOWED_SINK = /^set:html\s*=\s*\{\s*styleText\(\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\)\s*\}/;
+const SIMPLE_OPEN = /^<([A-Za-z][\w.:-]*)((?:\s+[A-Za-z_:@][\w.:@-]*(?:\s*=\s*(?:"[^"<]*"|'[^'<]*'|\{[^{}<]*\}))?|\s+\{\.\.\.[^{}<]*\})*)\s+$/;
 function styleSinks(src) {
   const out = [];
-  const starts = [...src.matchAll(/<style\b/g)].map((m) => m.index);
-  starts.forEach((at, k) => {
-    const close = src.indexOf('</style', at);
-    const next = starts[k + 1] ?? src.length;
-    const end = close === -1 ? next : Math.min(close, next);
-    const region = src.slice(at, end);
-    for (const m of region.matchAll(/set:html/g)) {
-      out.push({ index: at, value: region.slice(m.index) });
-    }
-  });
+  for (const m of src.matchAll(/set:html/g)) {
+    const lt = src.lastIndexOf('<', m.index);
+    const head = lt === -1 ? '' : src.slice(lt, m.index);
+    const open = SIMPLE_OPEN.exec(head);
+    const value = src.slice(m.index);
+    if (!open) { out.push({ index: m.index, value, tag: null }); continue; }
+    if (open[1].toLowerCase() === 'style') out.push({ index: m.index, value, tag: 'style' });
+  }
   return out;
 }
-const wrapped = (value) => ALLOWED_SINK.test(value);
+const wrapped = (hit) => hit.tag === 'style' && ALLOWED_SINK.test(hit.value);
 
 test('census scanner: every non-canonical sink shape is found and rejected', () => {
   const unsafe = [
@@ -76,14 +77,18 @@ test('census scanner: every non-canonical sink shape is found and rejected', () 
     '<style is:inline data-x={x /* } " */} set:html={authorCss}/>',
     '<style is:inline set:html={styleText("") + authorCss}/>',
     '<style is:inline set:html={styleText(a)(b)}/>',
+    '<style is:inline data-label="</style>" set:html={authorCss}></style>',
+    '<style is:inline data-x={"</style>"} set:html={authorCss}></style>',
+    '<style is:inline data-x={x /* </style */} set:html={authorCss}></style>',
+    '<style data-x="<i" set:html={authorCss}></style>',
   ];
   for (const src of unsafe) {
     const hits = styleSinks(src);
     assert.ok(hits.length >= 1, `no sink found in ${src}`);
-    assert.ok(hits.some((h) => !wrapped(h.value)), `unsafe sink accepted: ${src}`);
+    assert.ok(hits.some((h) => !wrapped(h)), `unsafe sink accepted: ${src}`);
   }
-  const safe = '<style is:inline set:html = { styleText(a) }></style><style data-x="}>" set:html={styleText(theme.css)}></style>';
-  assert.deepEqual(styleSinks(safe).map((h) => wrapped(h.value)), [true, true]);
+  const safe = '<style is:inline set:html = { styleText(a) }></style><style data-x="ok" set:html={styleText(theme.css)}></style><div set:html={x}></div>';
+  assert.deepEqual(styleSinks(safe).map((h) => wrapped(h)), [true, true]);
 });
 
 test('every <style set:html> sink in astro/src goes through styleText', () => {
@@ -99,7 +104,7 @@ test('every <style set:html> sink in astro/src goes through styleText', () => {
     for (const hit of styleSinks(body).map((h) => ({ ...h, index: h.index + offset }))) {
       const at = `${relative(SRC, file)}:${src.slice(0, hit.index).split('\n').length}`;
       sinks.push(at);
-      if (!wrapped(hit.value)) bare.push(at);
+      if (!wrapped(hit)) bare.push(at);
     }
   }
   assert.ok(sinks.length >= 5, `the census found only ${sinks.length} sinks; the scanner no longer matches the layout`);
