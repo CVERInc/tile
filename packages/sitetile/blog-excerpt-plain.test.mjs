@@ -81,6 +81,33 @@ test('links with brackets inside the URL, emphasis, code, autolinks and bare URL
   assert.equal(s, 'Thanks to A Channel for the feature and code old see or a < b & c');
 });
 
+// Review findings on the first version, each with the reviewer's own input as the fixture and an
+// expected output written by hand (not produced by any parser under test).
+const excerptOf = (line) => parsePost('t', `---\ntitle: t\n---\n${line}\n`).excerptText;
+const REVIEW_CASES = [
+  // 1. a line break the parser renders is a word boundary, not nothing
+  ['Contact<br>Support', 'Contact Support'],
+  ['line<br/>two<br />three', 'line two three'],
+  // 2. a code span's content is literal: its `~~` stays; a paired strike in prose loses its delimiters
+  ['Use `~~` as the operator.', 'Use ~~ as the operator.'],
+  ['Use `<b>text</b>` and `&amp;` here, ~~not this~~.', 'Use <b>text</b> and &amp; here, not this.'],
+  // 3. authored entities are decoded and authored tags dropped, in prose and in link text
+  ['Bread &amp; butter &#38; jam &#x26; tea', 'Bread & butter & jam & tea'],
+  ['&copy; 2026 &mdash; all&nbsp;rights &bogus; kept', '© 2026 — all rights &bogus; kept'],
+  ['Read <b>this</b> and <em>that</em>.', 'Read this and that.'],
+  ['Read [Bread &amp; butter](/post) today.', 'Read Bread & butter today.'],
+  ['a < b and c > d, x<y', 'a < b and c > d, x<y'],
+  // 4. removing an address keeps the sentence around it, and an emptied parenthetical goes too
+  ['See (https://example.com/page). Next sentence.', 'See. Next sentence.'],
+  ['See https://example.com/page. Next sentence.', 'See. Next sentence.'],
+  ['Wiki (https://en.example.org/wiki/Foo_(bar)), then more.', 'Wiki, then more.'],
+  ['見（https://example.com/a）。下一句', '見。下一句'],
+  ['Visit <https://example.com/my_long_path> today.', 'Visit today.'],
+];
+for (const [input, want] of REVIEW_CASES) {
+  test(`review fixture: ${JSON.stringify(input)}`, () => assert.equal(excerptOf(input), want));
+}
+
 test('a plain excerpt is unchanged (no site whose posts are prose moves)', () => {
   const post = `---\ntitle: t\n---\nFirst line of prose.\nSecond line, still prose.\n`;
   assert.equal(parsePost('t', post).excerpt, 'First line of prose. Second line, still prose.');
@@ -101,6 +128,13 @@ test('carousel cards use blog-date-format, with the blog index formatter and lan
   }
   assert.equal(carouselPostDate('2026-11-01', { 'blog-date-format': 'ymd-slash' }), '2026/11/01');
   assert.equal(carouselPostDate('2026-11-01', { 'blog-date-format': 'cjk-full', lang: 'zh-TW' }), '2026 年 11 月 1 日');
+});
+
+test('carousel date language is the blog index rule, not the view language, when a format is set', () => {
+  // indexDateLang: an explicit format keeps meta.lang. With meta.lang and the view language apart,
+  // passing the view language straight through would print the other language.
+  assert.equal(blog.carouselPostDate('2026-11-01', { 'blog-date-format': 'cjk-full', lang: 'zh-TW' }, 'en'), '2026 年 11 月 1 日');
+  assert.equal(blog.carouselPostDate('2026-11-01', { 'blog-date-format': 'cjk-full', lang: 'en' }, 'zh-TW'), 'November 1, 2026');
 });
 
 test('a site with no blog-date-format keeps the historic YY/M/D carousel date', () => {
