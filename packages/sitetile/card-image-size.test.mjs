@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { registerHooks } from 'node:module';
+import { crc32 as zlibCrc32 } from 'node:zlib';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // public-file.mjs fixes public/ at import time from the cwd (as Astro does), so the fixture site
@@ -25,22 +26,33 @@ registerHooks({
 });
 const { allPosts, searchIndex, postCards } = await import(join(HERE, 'astro/src/lib/blog.mjs'));
 
-const be16 = (n) => [n >> 8 & 255, n & 255];
-const le16 = (n) => [n & 255, n >> 8 & 255];
-const le24 = (n) => [n & 255, n >> 8 & 255, n >> 16 & 255];
-const be32 = (n) => [n >>> 24 & 255, n >> 16 & 255, n >> 8 & 255, n & 255];
+const be16 = (n) => [n >>> 8 & 255, n & 255];
+const le16 = (n) => [n & 255, n >>> 8 & 255];
+const le24 = (n) => [n & 255, n >>> 8 & 255, n >>> 16 & 255];
+const be32 = (n) => [n >>> 24 & 255, n >>> 16 & 255, n >>> 8 & 255, n & 255];
+const le32 = (n) => be32(n).reverse();
 const ascii = (s) => [...s].map((c) => c.charCodeAt(0));
-const bytes = (...parts) => Uint8Array.from(parts.flat());
+const bytes = (...parts) => Uint8Array.from(parts.flat(Infinity));
 
-const png = (w, h) => bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], be32(13), ascii('IHDR'), be32(w), be32(h), [8, 6, 0, 0, 0], [0, 0, 0, 0]);
+// Fixtures are built to the formats' own rules, so a reader that validates them can pass: the IHDR
+// carries its real CRC (node:zlib's, not the reader's), and the RIFF size holds the chunk.
+const ihdr = (w, h, rest = [8, 6, 0, 0, 0]) => { const d = [...ascii('IHDR'), ...be32(w), ...be32(h), ...rest]; return [...be32(13), ...d, ...be32(zlibCrc32(Uint8Array.from(d)))]; };
+const png = (w, h) => bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], ihdr(w, h));
 const gif = (w, h) => bytes(ascii('GIF89a'), le16(w), le16(h), [0, 0, 0]);
-const webpX = (w, h) => bytes(ascii('RIFF'), [0, 0, 0, 0], ascii('WEBP'), ascii('VP8X'), [10, 0, 0, 0], [0, 0, 0, 0], le24(w - 1), le24(h - 1));
-const webpL = (w, h) => { const v = ((w - 1) | ((h - 1) << 14)) >>> 0; return bytes(ascii('RIFF'), [0, 0, 0, 0], ascii('WEBP'), ascii('VP8L'), [5, 0, 0, 0], [0x2f], [v & 255, v >> 8 & 255, v >> 16 & 255, v >>> 24 & 255], [0, 0, 0, 0, 0]); };
-const webp = (w, h) => bytes(ascii('RIFF'), [0, 0, 0, 0], ascii('WEBP'), ascii('VP8 '), [10, 0, 0, 0], [0, 0, 0], [0x9d, 0x01, 0x2a], le16(w), le16(h), [0, 0]);
+const riff = (fourcc, payload) => bytes(ascii('RIFF'), le32(4 + 8 + payload.length + (payload.length % 2)), ascii('WEBP'), ascii(fourcc), le32(payload.length), payload, payload.length % 2 ? [0] : []);
+const webpX = (w, h) => riff('VP8X', [0, 0, 0, 0, ...le24(w - 1), ...le24(h - 1)]);
+const webpL = (w, h) => { const v = ((w - 1) | ((h - 1) << 14)) >>> 0; return riff('VP8L', [0x2f, ...le32(v)]); };
+const webp = (w, h) => riff('VP8 ', [0, 0, 0, 0x9d, 0x01, 0x2a, ...le16(w), ...le16(h)]);
 // SOI, APP0 (JFIF), [APP1 EXIF orientation], DHT (C4 — inside the SOF range, must be skipped), SOF0.
-const exif = (o) => { const p = [...ascii('Exif\0\0'), ...ascii('MM'), 0, 42, ...be32(8), ...be16(1), ...be16(0x0112), ...be16(3), ...be32(1), ...be16(o), 0, 0, ...be32(0)]; return [0xff, 0xe1, ...be16(p.length + 2), ...p]; };
-const jpeg = (w, h, orientation) => bytes([0xff, 0xd8], [0xff, 0xe0], be16(16), ascii('JFIF\0'), [1, 1, 0, 0, 1, 0, 1, 0, 0],
-  orientation ? exif(orientation) : [], [0xff, 0xc4], be16(5), [0, 0, 0], [0xff, 0xc0], be16(17), [8], be16(h), be16(w), [3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+const segment = (m, p) => [0xff, m, ...be16(p.length + 2), ...p];
+const exifPayload = (o, le = false) => { const r16 = le ? le16 : be16, r32 = le ? le32 : be32; return [...ascii('Exif\0\0'), ...ascii(le ? 'II' : 'MM'), ...r16(42), ...r32(8), ...r16(1), ...r16(0x0112), ...r16(3), ...r32(1), ...r16(o), 0, 0, ...r32(0)]; };
+const exif = (o, le = false) => segment(0xe1, exifPayload(o, le));
+const xmp = segment(0xe1, ascii('http://ns.adobe.com/xap/1.0/\0<x:xmpmeta xmlns:x="adobe:ns:meta/"/>'));
+const sof = (w, h) => segment(0xc0, [8, ...be16(h), ...be16(w), 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+const jpeg = (w, h, orientation) => bytes([0xff, 0xd8], segment(0xe0, [...ascii('JFIF\0'), 1, 1, 0, 0, 1, 0, 1, 0, 0]),
+  orientation ? exif(orientation) : [], segment(0xc4, [0, 0, 0]), sof(w, h));
+const jpegWith = (...metadata) => bytes([0xff, 0xd8], ...metadata, sof(2048, 1365));
+const LANDSCAPE = { width: 2048, height: 1365 }, PORTRAIT = { width: 1365, height: 2048 };
 
 test('reads the pixel size from PNG, GIF, WebP (all three kinds) and JPEG headers', () => {
   assert.deepEqual(imageSizeFromBytes(png(1280, 1810)), { width: 1280, height: 1810 });
@@ -108,4 +120,54 @@ test('the size travels with the post: allPosts reads it, cards and the archive i
   assert.equal(li.iw, 1280);
   assert.equal(li.ih, 1810);
   assert.ok(!('iw' in ri) && !('ih' in ri), 'the index row carries no size it does not know');
+});
+
+// ── tile#269 review: the reviewer's own inputs, built here byte-for-byte as their probe built them ──
+
+test('🔴 review P2-1: an XMP APP1 after the EXIF one does not reset the orientation (both byte orders, 1–8)', () => {
+  for (const le of [false, true]) for (let o = 1; o <= 8; o++) {
+    const want = o >= 5 ? PORTRAIT : LANDSCAPE;
+    assert.deepEqual(imageSizeFromBytes(jpegWith(exif(o, le), xmp)), want, `${le ? 'II' : 'MM'} o${o} + XMP`);
+    assert.deepEqual(imageSizeFromBytes(jpegWith(xmp, exif(o, le))), want, `${le ? 'II' : 'MM'} XMP + o${o}`);
+    assert.deepEqual(imageSizeFromBytes(jpegWith(exif(o, le))), want, `${le ? 'II' : 'MM'} o${o}`);
+  }
+});
+
+test('🔴 review P2-2: a structure cut short, empty, out of range or mistyped yields null, not a size', () => {
+  const badType = exif(6); badType[22] = 0; badType[23] = 0;              // Orientation type 0, not SHORT
+  const cases = {
+    'PNG ending inside IHDR': png(1280, 1810).subarray(0, 24),
+    'PNG width 0xffffffff (valid CRC)': png(0xffffffff, 10),
+    'GIF missing the rest of its screen descriptor': bytes(ascii('GIF89a'), le16(640), le16(480)),
+    'JPEG SOF declaring length 2': bytes([0xff, 0xd8, 0xff, 0xc0, 0, 2, 8], be16(1365), be16(2048)),
+    'JPEG SOF declaring 17 with 7 present': bytes([0xff, 0xd8], sof(2048, 1365).slice(0, 9)),
+    'VP8X declaring zero payload bytes': bytes(ascii('RIFF'), le32(22), ascii('WEBPVP8X'), le32(0), [0, 0, 0, 0, 255, 255, 255, 255, 255, 255]),
+    'EXIF Orientation of TIFF type 0': jpegWith(badType),
+  };
+  for (const [name, input] of Object.entries(cases)) assert.equal(imageSizeFromBytes(input), null, name);
+});
+
+test('the same rules, one boundary further: CRC, RIFF size, EXIF count/value/bounds, SOF component count', () => {
+  const crcFlipped = png(1280, 1810); crcFlipped[32] ^= 1;
+  const riffShort = webpX(2048, 1536); riffShort[4] = 4;                  // RIFF smaller than its chunk
+  const count2 = exif(6); count2[27] = 2;                                 // Orientation count 2
+  const nine = exifPayload(9);
+  const entriesPastEnd = exifPayload(6); entriesPastEnd[15] = 2;           // claims 2 entries, holds 1
+  const sofBadComps = segment(0xc0, [8, ...be16(1365), ...be16(2048), 2, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+  const cases = {
+    'PNG with a bad IHDR CRC': crcFlipped,
+    'PNG with colour type 6 at depth 4': bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], ihdr(10, 10, [4, 6, 0, 0, 0])),
+    'WebP whose RIFF size cannot hold the chunk': riffShort,
+    'EXIF Orientation with count 2': jpegWith(count2),
+    'EXIF Orientation value 9': jpegWith(segment(0xe1, nine)),
+    'EXIF IFD entries running past the segment': jpegWith(segment(0xe1, entriesPastEnd)),
+    'two EXIF segments that disagree': jpegWith(exif(6), exif(1)),
+    'SOF whose length does not match its component count': bytes([0xff, 0xd8], sofBadComps),
+    'SOF with height 0 (defined later by DNL)': bytes([0xff, 0xd8], sof(2048, 0)),
+  };
+  for (const [name, input] of Object.entries(cases)) assert.equal(imageSizeFromBytes(input), null, name);
+  // …and an EXIF with no Orientation entry, or a repeated one that agrees, still reads.
+  const noOrientation = exifPayload(6); noOrientation[16] = 0x01; noOrientation[17] = 0x10;   // tag 0x0110 (Model)
+  assert.deepEqual(imageSizeFromBytes(jpegWith(segment(0xe1, noOrientation))), LANDSCAPE);
+  assert.deepEqual(imageSizeFromBytes(jpegWith(exif(6), exif(6))), PORTRAIT);
 });
