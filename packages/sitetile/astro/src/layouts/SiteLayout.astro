@@ -866,6 +866,12 @@ const siteEmbed = typeof siteEmbedRaw === 'string' && siteEmbedRaw.trim() !== ''
 const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
   ? '@layer reef.base, reef.corals, reef.theme, reef.responsive;'
   : '@layer reef.base, reef.theme, reef.responsive;';
+// Inline-style bodies, computed here so every <style set:html> below is the one census-allowed
+// shape `set:html={styleText(<identifier>)}` (packages/sitetile/style-text.test.mjs).
+const pkgCssBlock = pkgCss ? `@layer reef.theme {\n${pkgCss}\n}` : '';
+const localeBannerBlock = localeBannerCss ? `@layer reef.theme {\n${localeBannerCss}\n}` : '';
+const routeCssText = routeCss ? (typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss)) : '';
+const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
 ---
 <!doctype html>
 <html lang={htmlLang} data-lingo-root data-dynamic-coral-css={dynamicCoralCss || undefined} class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
@@ -1021,20 +1027,20 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         enough: while these sheets were still unlayered, they outranked the theme regardless of
         order or specificity once the theme itself moved into a layer. The intent was always this;
         the mechanism now matches it. */}
-    {pkgCss && <style is:inline set:html={styleText(`@layer reef.theme {\n${pkgCss}\n}`)}></style>}{appbar && <style is:inline set:html={styleText(APPBAR_CSS)}></style>}{appbar && <script is:inline set:html={APPBAR_HEAD_SCRIPT}></script>}
-    {localeBannerCss && <style is:inline set:html={styleText(`@layer reef.theme {\n${localeBannerCss}\n}`)}></style>}
+    {pkgCss && <style is:inline set:html={styleText(pkgCssBlock)}></style>}{appbar && <style is:inline set:html={styleText(APPBAR_CSS)}></style>}{appbar && <script is:inline set:html={APPBAR_HEAD_SCRIPT}></script>}
+    {localeBannerCss && <style is:inline set:html={styleText(localeBannerBlock)}></style>}
     {/* A platform-drawn route's own sheet (the language chooser). It names its layers itself: the
         look in `reef.theme` — here, ahead of the theme, so the theme wins ties like it does against
         every package above — and the box in `reef.responsive`, except for the heading block or
         the list when this site's theme names it; the page's own box never moves (`themeCss` is all
         the CSS a site's author supplies: the one theme file, compiled tokens and hand-written rules
         together). See lingo/language-page.css. */}
-    {routeCss && <style is:inline set:html={styleText(typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss))}></style>}
+    {routeCss && <style is:inline set:html={styleText(routeCssText)}></style>}
     {/* The site's own CSS. It wins over the renderer because `reef.theme` is the later LAYER —
         not because of where this tag sits. The previous comment here claimed it won by being last
         in <head>; the served HTML disagreed (theme at ~1.3k, Astro's site.css <link> at ~12.8k),
         and that wrong-but-confident comment is part of how the trap survived being looked at. */}
-    {themeCss && <style is:inline set:html={styleText(`@layer reef.theme {\n${themeCss}\n}`)}></style>}
+    {themeCss && <style is:inline set:html={styleText(themeCssBlock)}></style>}
     {themeToggle && (
       <script is:inline define:vars={{ storageKey: 'rf-theme' }}>
         (function () {
