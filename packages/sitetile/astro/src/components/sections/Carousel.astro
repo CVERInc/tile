@@ -9,8 +9,8 @@
 // the `posts=N` cells from the site's blog, and hands the values over.
 import { parseParams, inlineHtml, bodyHtml } from '@sitetile';
 import { emitCarousel } from '@emit/carousel.mjs';
-import { postUrl } from '../../lib/blog.mjs';
-const { section, blogPosts = [], meta = {} } = Astro.props;
+import { postUrl, carouselPostDate } from '../../lib/blog.mjs';
+const { section, blogPosts = [], meta = {}, lang } = Astro.props;
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam Hero/Prose/Collection
 // already had. 🩸 It was on those three and not on the rest, with nothing in the grammar
@@ -21,17 +21,15 @@ const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label 
 // `posts=N` — OPT-IN: auto-source cells from the site's N newest blog posts (a home "recent
 // posts / NEWS" strip) instead of hand-listed ### cells. Needs `packages: blog` — PageView passes
 // the already-loaded, newest-first `blogPosts` down; absent (no blog / param off) → hand-listed
-// cells render byte-identically. Each post → an image-first cell: featured image + date (YY/M/D) +
-// title, linking to the post's real URL (postUrl expands the site's blog-url-pattern).
+// cells render byte-identically. Each post → an image-first cell: featured image + date + title,
+// linking to the post's real URL (postUrl expands the site's blog-url-pattern). The date follows the
+// site's `blog-date-format` exactly as the blog index prints it (carouselPostDate); a site that sets
+// none keeps the short YY/M/D form.
 const postCount = pm.posts ? parseInt(pm.posts, 10) : 0;
-const newsDate = (s) => {
-  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(s || ''));
-  return m ? `${m[1].slice(2)}/${Number(m[2])}/${Number(m[3])}` : '';
-};
 // Only posts WITH a featured image — this is an image-first carousel, and a card with no
 // thumbnail (a text-only announcement post) reads as broken. `parsePost` exposes it as `image`.
 const cells = (postCount > 0 && blogPosts.length)
-  ? blogPosts.filter((p) => p.image).slice(0, postCount).map((p) => ({ title: p.title, href: postUrl(p, meta), date: newsDate(p.date), body: '',
+  ? blogPosts.filter((p) => p.image).slice(0, postCount).map((p) => ({ title: p.title, href: postUrl(p, meta), date: carouselPostDate(p.date, meta, lang), body: '',
       // The post's image goes through the shared card-image helper (emit/card-img.mjs) — sizes for
       // this carousel's columns, and width/height when the build read the file — instead of being
       // re-parsed out of a `![](…)` line as a hand-authored cell's image is.

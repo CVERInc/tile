@@ -8,6 +8,8 @@ import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, d
 // it. Re-exported here because every component already imports these from blog.mjs — the seam
 // moved, the call sites did not.
 export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts, indexDateLang } from './chrome-copy.mjs';
+import { indexDateLang } from './chrome-copy.mjs';
+import { parseFragment } from 'parse5';
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
@@ -119,6 +121,256 @@ function capExcerpt(text, max) {
   return text.length > n ? text.slice(0, n).trim() + ' […]' : text;
 }
 
+// excerptPlainText: markdown → the words a reader sees, for an excerpt.
+// The oracle is the post page itself: the text goes through flowingHtml — the SAME full-body renderer
+// the post page uses (bodyHtml's blocks: paragraphs, lists, quotes, fenced code, comments, an indented
+// paragraph's literal comments; headings layered on top) — and the excerpt is the VISIBLE TEXT of that
+// HTML, read by a real HTML parser (parse5) in document order, not by a hand-written stripper. So a
+// link reads as its text; entities decode with the full HTML table; whatever the page shows literally
+// (an authored `<b>`, `x<y`, `&frac12;`, an unterminated `<!--`) the excerpt shows literally too; text
+// the page hides (.st-mk markers — `**`, `` ` ``, an escape's backslash — are `display: none`) is not
+// read; and a `<br>` or a block boundary is one space. It renders in the renderer's line-break mode
+// (`br`), so consecutive lines stay a space apart in the excerpt — CJK lines included — as they always
+// were.
+// One rule is the excerpt's own: URLs go — a bare address, an autolink, a link whose text IS its
+// address — because a URL in a card is never words, and it is the one string a narrow card cannot
+// wrap. The sentence punctuation around one is kept, and an emptied `( )` goes with it. Boundaries
+// the page draws are kept while that happens: a LINK's text is matched on its own (so the rule never
+// runs on into the prose after the anchor); CODE (a code span, a fenced block) is never touched; an
+// address inside an email (`help@www.example.com`) is not a web address, and a `mailto:` link's text
+// is left whole.
+// The template escapes the result again, so nothing decoded here becomes markup.
+const HIDDEN_CLASS = 'st-mk';
+const CODE_CLASS = 'st-code';
+const SKIPPED_ELEMENTS = new Set(['script', 'style', 'template', 'noscript', 'svg']);
+const BLOCK_ELEMENTS = new Set(['address', 'article', 'aside', 'blockquote', 'dd', 'details', 'dialog', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main',
+  'nav', 'ol', 'p', 'pre', 'section', 'summary', 'table', 'td', 'th', 'tr', 'ul']);
+const classesOf = (node) => {
+  const a = (node.attrs || []).find((x) => x.name === 'class');
+  return a ? a.value.split(/\s+/) : [];
+};
+const isHidden = (node) => classesOf(node).includes(HIDDEN_CLASS) || (node.attrs || []).some((x) => x.name === 'hidden');
+const isCode = (node) => node.nodeName === 'code' || classesOf(node).includes(CODE_CLASS);
+// A `mailto:` link's text is an address someone is meant to use: left whole, like code.
+const isMailto = (node) => node.tagName === 'a'
+  && (node.attrs || []).some((x) => x.name === 'href' && /^\s*mailto:/i.test(x.value));
+
+// The visible text of a parsed fragment as ordered segments `{ s, code, anchor }`: `code` when it is
+// inside a code element, `anchor` = which link it sits in (0 = none). An explicit stack, not
+// recursion: nesting depth is author-controlled (thousands of `<small>` render fine on the page),
+// and one call frame per level would let one post abort loading every post.
+function visibleSegments(fragment, skip = null) {
+  const segs = [];
+  let anchors = 0;
+  const stack = [];
+  const pushChildren = (node, code, anchor) => {
+    const kids = node.childNodes || [];
+    for (let i = kids.length - 1; i >= 0; i--) stack.push({ node: kids[i], code, anchor });
+  };
+  pushChildren(fragment, false, 0);
+  while (stack.length) {
+    const f = stack.pop();
+    if (f.space) { segs.push({ s: ' ', code: f.code, anchor: f.anchor }); continue; }
+    const { node, code, anchor } = f;
+    if (node.nodeName === '#text') { segs.push({ s: node.value, code, anchor }); continue; }
+    if (!node.tagName || SKIPPED_ELEMENTS.has(node.tagName) || (skip && skip.has(node.tagName)) || isHidden(node)) continue;
+    if (node.tagName === 'br') { segs.push({ s: ' ', code, anchor }); continue; }
+    const inCode = code || isCode(node) || isMailto(node);
+    const inAnchor = !inCode && node.tagName === 'a' ? ++anchors : anchor;
+    const block = BLOCK_ELEMENTS.has(node.tagName);
+    if (block) { segs.push({ s: ' ', code, anchor }); stack.push({ space: true, code, anchor }); }
+    pushChildren(node, inCode, inAnchor);
+  }
+  return segs;
+}
+
+// An address is ASCII (RFC 3986's characters; a non-ASCII path arrives percent-encoded), so the run
+// stops at the first other character: CJK prose written right against a URL (full-width brackets,
+// 。) is never read as part of it.
+// It starts at a word boundary, so `awww.example.com` is not read as `a` + an address — and never
+// inside an email: `help@www.example.com` is one address someone is meant to write to.
+const URL_SOURCE = "(?<![A-Za-z0-9@._%+\\-])(?:https?:\\/\\/|www\\.)[A-Za-z0-9\\-._~:/?#[\\]@!$&'()*+,;=%]+";
+const URL_RUN = new RegExp(URL_SOURCE, 'gi');
+const WHOLE_URL = new RegExp('^\\s*' + URL_SOURCE + '\\s*$', 'i');
+// Where the address ends inside a matched run. First at a closing bracket the address never opened —
+// `(https://example.com),then` is prose around an address, not one — then trailing characters that
+// end the SENTENCE, not the address (the GFM autolink rule).
+function splitUrlTail(m) {
+  let end = m.length;
+  const depth = { ')': 0, ']': 0 };
+  for (let i = 0; i < m.length; i++) {
+    const c = m[i];
+    if (c === '(') depth[')']++;
+    else if (c === '[') depth[']']++;
+    else if ((c === ')' || c === ']') && depth[c]-- === 0) { end = i; break; }
+  }
+  for (;;) {
+    const c = m[end - 1];
+    if (/[.,;:!?'"*_~]/.test(c)) { end--; continue; }
+    break;
+  }
+  return [m.slice(0, end), m.slice(end)];
+}
+// Marks used while the pieces are stitched back together: private-use code points, chosen per call
+// from those the text does NOT contain — author text may carry private-use characters (custom-font
+// glyphs), and a fixed choice would let one of them be read as a mark.
+function unusedMarks(text, n) {
+  const marks = [];
+  for (let cp = 0xE000; marks.length < n && cp <= 0xF8FF; cp++) {
+    const c = String.fromCharCode(cp);
+    if (!text.includes(c)) marks.push(c);
+  }
+  return marks.length === n ? marks : null;
+}
+// excerptSource: the post body with the lines an excerpt never reads MARKED, before rendering — the
+// same lines the excerpt has always skipped: a heading or hashtag line (a leading `#`: a heading
+// repeats the title, a hashtag run is noise), a blockquote (`>`), and a link-list line (`[`).
+// Outside fenced code only: inside a fence such a line is code the page shows.
+// 🔴 Marked, never rewritten (round 7). Rounds 5–6 replaced a skipped line's words before rendering,
+// and every replacement was a guess at what the renderer would have done with them: the words
+// removed could be a comment's `-->`, so a later comment swallowed the public text between them.
+// Now every word stays where the author wrote it, so the renderer draws exactly the page — comment
+// boundaries, code and links included — and the marks only say WHERE each visible character came
+// from: `open` after the line's structural prefix, `close` at its end. excerptOfBody trusts them only
+// when the page shows every one of them, in order (excerptMarkedText): a mark the page hid — in a
+// comment, a link's destination, an attribute — no longer says where a line ends.
+const HEADING_PREFIX = /^(\s*#{1,4}\s+)/;   // flowingHtml's own heading split
+const QUOTE_PREFIX = /^(\s*(?:>\s?)+)/;
+export function excerptSource(body, { open, close }) {
+  let inFence = false;
+  return String(body || '').split('\n').map((line) => {
+    const fence = /^\s*(```|~~~)/.test(line);
+    const t = line.trim();
+    const skipped = !fence && !inFence && (t.startsWith('#') || t.startsWith('>') || t.startsWith('['));
+    if (fence) inFence = !inFence;
+    if (!skipped) return line;
+    const prefix = (HEADING_PREFIX.exec(line) || QUOTE_PREFIX.exec(line) || /^\s*/.exec(line))[0];
+    return prefix + open + line.slice(prefix.length) + close;
+  }).join('\n');
+}
+// What the excerpt drops when the marks cannot be trusted: the page's own heading and quote
+// elements, read from the unmarked page (a hashtag or link-list line then stays, as the page shows it).
+const SKIPPED_BLOCK_ELEMENTS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote']);
+const pageSegments = (markdown, skip) => visibleSegments(parseFragment(flowingHtml(String(markdown || ''), { br: true })), skip);
+// The visible text of segments, the way a check compares them: all of it, and its code.
+const segText = (segs) => [collapse(segs.map((x) => x.s).join('')), collapse(segs.filter((x) => x.code).map((x) => x.s).join(''))].join('\u0000');
+// excerptMarkedText: the marked page's segments with the skipped lines' text dropped, or null when
+// the marks cannot be trusted. Two checks, both on what the page shows:
+//  · the marks moved nothing — without them, the marked page's visible text (and its code) is the
+//    page's (a mark is not a word, but the renderer reads lines, and a line that starts with a mark
+//    is not always the line it was);
+//  · every mark is visible, in source order — open, close, open, close… — so each skipped line's
+//    text is exactly what lies between its own pair. A mark the page did not show (swallowed by a
+//    link's destination, an attribute, a comment) would leave a line without its end, and the
+//    dropping would run on into the prose after it (round 8).
+function excerptMarkedText(body, page) {
+  const marks = unusedMarks(body, 2);
+  if (!marks) return null;
+  const [open, close] = marks;
+  const source = excerptSource(body, { open, close });
+  const segs = pageSegments(source);
+  const strip = (s) => s.split(open).join('').split(close).join('');
+  if (segText(segs.map((x) => ({ ...x, s: strip(x.s) }))) !== segText(page)) return null;
+  const want = source.replace(new RegExp('[^' + open + close + ']', 'g'), '');
+  const seen = segs.map((x) => x.s).join('').replace(new RegExp('[^' + open + close + ']', 'g'), '');
+  if (seen !== want) return null;
+  let dropping = false;
+  const out = [];
+  for (const seg of segs) {
+    let s = '';
+    for (const c of seg.s) {
+      if (c === open) dropping = true;
+      else if (c === close) dropping = false;
+      else if (!dropping) s += c;
+    }
+    out.push({ ...seg, s });
+  }
+  return out;
+}
+// excerptOfBody: a post body → its excerpt text: the page's visible text, less the skipped lines.
+export function excerptOfBody(body) {
+  const src = String(body || '');
+  const segs = excerptMarkedText(src, pageSegments(src)) || pageSegments(src, SKIPPED_BLOCK_ELEMENTS);
+  return excerptTextOf(segs);
+}
+// HTML collapses ASCII whitespace only: a no-break or ideographic space is shown as typed, so it stays.
+const collapse = (s) => s.replace(/[ \t\n\r\f]+/g, ' ').replace(/^ | $/g, '');
+// An email is one atom, found BEFORE any web address is looked for: a pragmatic local@domain with
+// RFC 5322 dot-atom characters in the local part. `www.support@example.com` is an address someone is
+// meant to write to, not a web address with words around it. It is found in the VISIBLE text across
+// inline boundaries (`help@[www.example.com](/contact)` shows one address). Part of a web address
+// that STARTED EARLIER in the same run is not an email — its path (`https://example.com/a@b.co`) or
+// its user info (`https://user:pass@example.com`) — but a colon or a slash on its own is
+// punctuation: `Contact:www.support@example.com` is an address, not a URL (rounds 7–8).
+const EMAIL = /(?<![A-Za-z0-9!#$%&'*+=?^_`{|}~.-])[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+/g;
+export function excerptPlainText(markdown) {
+  return excerptTextOf(pageSegments(markdown));
+}
+function excerptTextOf(segs) {
+  // runs: consecutive segments of one kind — the same link, plain prose, or code
+  const runs = [];
+  for (const seg of segs) {
+    const last = runs[runs.length - 1];
+    if (last && last.code === seg.code && (seg.code || last.anchor === seg.anchor)) last.s += seg.s;
+    else runs.push({ ...seg });
+  }
+  const all = runs.map((r) => r.s).join('');
+  const marks = unusedMarks(all, 3);
+  // every private-use code point in use (not a real text) — nothing to stitch with; keep the text
+  if (!marks) return collapse(all);
+  const [GONE, OPEN, CLOSE] = marks;
+  const codes = [];
+  let text = '';
+  const slot = (literal) => { codes.push(literal); return OPEN + (codes.length - 1) + CLOSE; };
+  // emails, over the visible text with code blanked (an address never runs into or out of code)
+  const flat = runs.map((r) => (r.code ? ' '.repeat(r.s.length) : r.s)).join('');
+  const kept = new Uint8Array(flat.length);
+  // where the web address covering i began — looked for inside each run, the same boundaries the
+  // removal below uses, so an address in a link's text never reaches past the link (round 8)
+  const urlStarts = new Int32Array(flat.length).fill(-1);
+  const urlEnds = new Int32Array(flat.length);
+  for (let i = 0, at = 0; i < runs.length; at += runs[i].s.length, i++) {
+    if (runs[i].code) continue;
+    for (const m of runs[i].s.matchAll(URL_RUN)) {
+      urlStarts.fill(at + m.index, at + m.index, at + m.index + m[0].length);
+      urlEnds.fill(at + m.index + m[0].length, at + m.index, at + m.index + m[0].length);
+    }
+  }
+  // An email that starts inside an earlier address is not one; the search resumes where that address
+  // ends (every start inside it would be refused the same way), so an email right after a link whose
+  // text is an address is still found — and each character is looked at a bounded number of times.
+  const email = new RegExp(EMAIL.source, 'g');
+  for (let m; (m = email.exec(flat));) {
+    const u = urlStarts[m.index];
+    if (u === -1 || u === m.index) kept.fill(1, m.index, m.index + m[0].length);
+    else email.lastIndex = urlEnds[m.index];
+  }
+  let offset = 0;
+  for (const r of runs) {
+    const start = offset;
+    offset += r.s.length;
+    if (r.code) { text += slot(r.s); continue; }
+    const pieces = [];
+    for (let i = 0; i < r.s.length;) {
+      let j = i;
+      while (j < r.s.length && kept[start + j] === kept[start + i]) j++;
+      pieces.push({ email: kept[start + i] === 1, s: r.s.slice(i, j) });
+      i = j;
+    }
+    if (r.anchor && !pieces.some((p) => p.email) && WHOLE_URL.test(r.s)) { text += GONE; continue; }
+    for (const p of pieces) text += p.email ? slot(p.s) : p.s.replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1]);
+  }
+  // an emptied bracket pair goes with its address — repeated, so `((url))` empties both
+  const emptied = new RegExp('[(\\[{<（【「][ \\t\\n\\r\\f]*' + GONE + '[ \\t\\n\\r\\f]*[)\\]}>）】」]', 'g');
+  for (let prev = ''; prev !== text;) { prev = text; text = text.replace(emptied, GONE); }
+  text = text
+    .replace(new RegExp('[ \\t\\n\\r\\f]*' + GONE + '[ \\t\\n\\r\\f]*(?=[.,;:!?)\\]}。，、；：！？）】」]|$)', 'g'), '')
+    .split(GONE).join(' ')
+    .replace(new RegExp(OPEN + '(\\d+)' + CLOSE, 'g'), (_, i) => codes[Number(i)]);
+  return collapse(text);
+}
+
 // The first YouTube line's poster path, or '' (tile#148 — see parsePost's featured image).
 const youtubePoster = (body) => { const v = youtubeLines(body)[0]; return v ? v.poster : ''; };
 
@@ -179,10 +431,12 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // capped via capExcerpt(excerptMax) — excerptMax defaults to 180 so this is unchanged, and the
   // full un-truncated join is kept as excerptText so buildIndexView can re-cap per-site (e.g.
   // a site with shorter cards) without re-parsing the body.
-  const fullText = replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '').split('\n')
-    // (a bare YouTube address on its own line is a player now, not words — tile#148)
-    .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>') && !youtubeLine(s))
-    .join(' ');
+  // 🩸 The body is turned into PLAIN TEXT — the visible text of the page's own rendering — before
+  // the cut (excerptPlainText above). Images were stripped here and links were not, so a post
+  // imported from a social feed — a paragraph of `[#tag](https://…/hashtag/…?…)` links — listed its
+  // raw markdown, and the cut could land mid-URL: one unbreakable 180-character string that pushed
+  // a 390px index 427px wide.
+  const fullText = excerptOfBody(replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => ''));
   const excerpt = capExcerpt(fullText, excerptMax);
   // `slug:` in frontmatter OVERRIDES the one derived from the filename. Normally the filename IS
   // the slug (and stays the single source of truth for every site that doesn't set this), but a
@@ -783,6 +1037,20 @@ function warnUnknownDateFormat(format) {
 // same as an unrecognised format would (see CJK_DATE_FORMATS above). `lang` absent keeps the
 // historic behaviour of always rendering the named format, since there is no page locale to gate
 // on. `ymd-slash` has no script and is never gated.
+// carouselPostDate: the date on a `posts=N` carousel card. With `blog-date-format` set it is
+// fmtDate with the blog index's own language rule (indexDateLang), so the home strip and the index
+// print one date the same way; without it, the carousel's historic short form (YY/M/D) is kept,
+// so no site that never asked moves.
+export function carouselPostDate(s, meta = {}, viewLang) {
+  const format = meta['blog-date-format'];
+  if (format) {
+    const d = new Date(s);
+    return isNaN(d) ? '' : fmtDate(s, format, indexDateLang(format, meta, viewLang));
+  }
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(s || ''));
+  return m ? `${m[1].slice(2)}/${Number(m[2])}/${Number(m[3])}` : '';
+}
+
 export function fmtDate(s, format, lang) {
   const d = new Date(s);
   if (isNaN(d)) return s;
