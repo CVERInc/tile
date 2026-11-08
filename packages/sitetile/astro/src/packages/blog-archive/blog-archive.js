@@ -24,6 +24,8 @@
 // script-injection-safe by construction: every cell is built with createElement + textContent (never
 // innerHTML / set:html), so a post title/tag carrying markup renders as literal text — the
 // same discipline as blog-search.js and the age-gate island.
+import { cardImgAttrs } from '@emit/card-img.mjs';
+
 (function () {
 
   // Chrome copy comes from the server (SiteLayout emits <script type="application/json" data-bl-copy>).
@@ -121,12 +123,12 @@
     a.className = 'bl-entry-link';
     a.href = x.u || '#';
 
-    if (x.i) {
+    // The same card image the server writes (emit/card-img.mjs): sizes for the list layout, and
+    // width/height when the build read the file (`iw`/`ih` in the index), never otherwise.
+    const imgAttrs = cardImgAttrs({ src: typeof x.i === 'string' ? x.i : '', cls: 'bl-entry-img', layout: 'list', width: x.iw, height: x.ih });
+    if (imgAttrs) {
       const img = document.createElement('img');
-      img.className = 'bl-entry-img';
-      img.src = x.i;
-      img.alt = '';
-      img.loading = 'lazy';
+      for (const [k, v] of Object.entries(imgAttrs)) img.setAttribute(k, v);
       a.appendChild(img);
     }
 

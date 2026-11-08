@@ -6,6 +6,7 @@
 // so page 1 and the pager share this one component and can't drift. Template is verbatim from the
 // old index.astro so output stays byte-for-byte identical.
 import SiteLayout from '../layouts/SiteLayout.astro';
+import { cardImgAttrs } from '@emit/card-img.mjs';
 import Section from './Section.astro';
 import { fmtDate, dateBadgeParts, buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang, blogAlternates, indexDateLang } from '../lib/blog.mjs';
 import { safeHref } from '@sitetile';
@@ -94,7 +95,7 @@ const twinMark = recordListTwin({
       {pagePosts.map((p) => (
         <li class="bl-entry" data-tags={p.tags.join('|')} data-ym={p.date ? p.date.slice(0, 7) : ''}>
           <a class="bl-entry-link" href={postUrl(p, meta)}>
-            {p.image && <img class="bl-entry-img" src={p.image} alt="" loading="lazy" />}
+            {p.image && <img {...cardImgAttrs({ src: p.image, cls: 'bl-entry-img', layout: 'list', width: p.imageWidth, height: p.imageHeight })} />}
             {p.date && (dateFormat === 'cjk-badge' ? (
               <time class="bl-date bl-date-badge">
                 <span class="bl-date-month">{dateBadgeParts(p.date, meta.lang).month}</span>

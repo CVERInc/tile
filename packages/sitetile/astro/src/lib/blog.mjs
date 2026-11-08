@@ -14,6 +14,7 @@ export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts, indexDateLang } 
 import { DEFAULT_LANG, toUrlLocale, toBcp47, parseLocales, defaultLocaleOf, sameLocale, tagLocalesSource, localesSourceOf, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 // The one site-level key that must NOT take part in loadSite's locale merge — see loadSite below.
 import { DYNAMIC_CORAL_CSS_KEY, dynamicCoralCssMode } from './dynamic-coral-css.mjs';
+import { localImageSize } from './image-size.mjs';
 
 const FM_LIST_RE = /^\[(.*)\]$/;
 const PRIVACY_FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -263,6 +264,12 @@ export function publicFacing(post) {
   return { ...post, body: '', description: '', excerpt: '', excerptText: '' };
 }
 
+// The featured image's size keys, present only when allPosts read them — so a view-model of a post
+// whose size is unknown keeps exactly the shape it had (the private-artifacts allowlists pin it).
+function imageSizeOf(p) {
+  return p.imageWidth && p.imageHeight ? { imageWidth: p.imageWidth, imageHeight: p.imageHeight } : {};
+}
+
 export function publicFacingPosts(posts) {
   return (posts || []).map((p) => publicFacing(p));
 }
@@ -273,6 +280,7 @@ export function postCards(posts, meta) {
     href: postUrl(p, meta),
     date: p.date,
     image: p.image,
+    ...imageSizeOf(p),
     description: p.description,
   }));
 }
@@ -283,7 +291,13 @@ export function allPosts(glob, excerptMax) {
   const posts = [];
   for (const [path, raw] of Object.entries(glob)) {
     const slug = path.split('/').pop().replace(/\.md$/, '');
-    posts.push(parsePost(slug, raw, excerptMax)); // undefined → parsePost default 180 (unchanged)
+    const post = parsePost(slug, raw, excerptMax); // undefined → parsePost default 180 (unchanged)
+    // The featured image's intrinsic size, when it is a file this build ships (public/) and its
+    // header reads cleanly — so every card can reserve its box (emit/card-img.mjs). A remote image
+    // gets no size at all: it is never fetched, and a guessed box is worse than none.
+    const size = post.image ? localImageSize(post.image) : null;
+    if (size) { post.imageWidth = size.width; post.imageHeight = size.height; }
+    posts.push(post);
   }
   return posts.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
@@ -670,6 +684,7 @@ function archivePostView(post) {
     date: post.date,
     tags: post.tags,
     image: post.image,
+    ...imageSizeOf(post),
     author: post.author,
     permalink: post.permalink,
   };
@@ -1442,7 +1457,7 @@ export function termLocaleMap(kind, contentFiles, blogLocaleFiles, meta, basePos
 }
 
 // searchIndex: the lean, all-in-one JSON payload the blog-search AND blog-archive islands
-// fetch ONCE (lazily). One post → { t:title, u:url, g:tags, d:date, i:image } — short keys
+// fetch ONCE (lazily). One post → { t:title, u:url, g:tags, d:date, i:image, iw/ih:its size when known } — short keys
 // keep the corpus small over the wire. `i` (the featured-image URL, '' when none) lets the
 // blog-archive island's ?tag=/?ym= filtered listing render the SAME image-card the server
 // renders for the recent set (the archive spans the FULL corpus, not the ~10 posts in the
@@ -1461,6 +1476,9 @@ export function searchIndex(posts, meta) {
     const p = publicFacing(post);
     const row = { t: p.title, u: postUrl(p, meta), g: p.tags || [], d: p.date || '', i: p.image || '' };
     if (withBody) row.e = String(p.excerptText || '').slice(0, bodyChars);
+    // `iw`/`ih`: the featured image's intrinsic size, only when the build read it (allPosts), so
+    // the archive island's cards reserve the same box the server's do. Absent, never guessed.
+    if (p.imageWidth && p.imageHeight) { row.iw = p.imageWidth; row.ih = p.imageHeight; }
     return row;
   });
 }

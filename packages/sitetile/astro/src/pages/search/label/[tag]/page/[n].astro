@@ -10,6 +10,7 @@
 // none. No-op (zero output) unless `blog-label-routes` is truthy AND `blog-page-size` is
 // set — so non-Blogger sites and unpaginated sites generate nothing here.
 import SiteLayout from '../../../../../layouts/SiteLayout.astro';
+import { cardImgAttrs } from '@emit/card-img.mjs';
 import { allPosts, listedPosts, siteMeta, systemPageLang, fmtDate, dateBadgeParts, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy, indexDateLang } from '../../../../../lib/blog.mjs';
 import Arrow from '@cvernet/signet/Arrow.astro';
 import '@cvernet/signet/arrow.css';   // tail-retract hover morph CSS for the pager Prev/Next Arrows
@@ -84,7 +85,7 @@ const pageHref = (n) => (n === 1 ? `/search/label/${tag}` : `/search/label/${tag
       {pagePosts.map((p) => (
         <li class="bl-entry" data-tags={p.tags.join('|')} data-ym={p.date ? p.date.slice(0, 7) : ''}>
           <a class="bl-entry-link" href={postUrl(p, meta)}>
-            {p.image && <img class="bl-entry-img" src={p.image} alt="" loading="lazy" />}
+            {p.image && <img {...cardImgAttrs({ src: p.image, cls: 'bl-entry-img', layout: 'list', width: p.imageWidth, height: p.imageHeight })} />}
             {p.date && (dateFormat === 'cjk-badge' ? (
               <time class="bl-date bl-date-badge">
                 <span class="bl-date-month">{dateBadgeParts(p.date, meta.lang).month}</span>

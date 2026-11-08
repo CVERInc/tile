@@ -242,6 +242,12 @@ const ALLOWED_CHUNKS = [
   ['pkg-runtimes (bleedblend canvas)', 'willReadFrequently'],
   // reef#2790: the appbar switch with the corner dock base it imports (see ALLOWED_INLINE above).
   ['installed-app bottom bar (standalone only; pwa + nav sites only)', 'data-st-appbar'],
+  // The blog-archive island (`packages: blog` sites; self-gating on ?tag=/?ym=, rebuilds the list
+  // from /search-index.json). It was small enough to be inlined, and so never reached this audit;
+  // importing the shared card-image helper (packages/emit/card-img.mjs) took it past Vite's inline
+  // limit and it is now its own chunk. Verified progressive: the server-rendered list is the JS-off
+  // state, and the island only replaces it when a filter param is present.
+  ['blog-archive island (packages: blog sites; self-gating on ?tag=/?ym=)', 'data-bl-copy'],
 ];
 
 // 🩸 2026-08-08. This audit counted <script> TAGS, and a <script type="application/ld+json"> is
@@ -1594,6 +1600,17 @@ const checks = [
   }],
   ['YouTube line: the devlog index card for that post uses the same proxied poster', () =>
     readFileSync(join(DIST, 'devlog/index.html'), 'utf8').includes('src="/_yt/dQw4w9WgXcQ.jpg"')],
+  // Post-card images go through ONE helper (packages/emit/card-img.mjs). Over every built page, not
+  // a sample: each card <img> carries lazy + async decode + the list layout's sizes, and none of them
+  // is given a width/height, because this fixture's only card image (/_yt/…) is not a file the
+  // build ships — a size it cannot read is never guessed. Non-vacuous: the index card must exist.
+  ['card images: every built post-card <img> carries the helper\'s attributes, and no guessed size', () => {
+    const tags = allHtmlPages(DIST).flatMap((f) => readFileSync(f, 'utf8').match(/<img class="bl-(?:entry|keep)-img"[^>]*>/g) || []);
+    const index = readFileSync(join(DIST, 'devlog/index.html'), 'utf8').match(/<img class="bl-entry-img"[^>]*>/g) || [];
+    return index.length > 0 && tags.length >= index.length
+      && tags.every((t) => t.includes(' sizes="100vw"') && t.includes(' loading="lazy"') && t.includes(' decoding="async"')
+        && !/ (?:width|height|srcset)=/.test(t));
+  }],
   ['🔴 YouTube line: no built page points at i.ytimg.com', () =>
     allHtmlPages(DIST).every((f) => !readFileSync(f, 'utf8').includes('i.ytimg.com'))],
   ['🔴 banner on a post: a post that exists in one language offers no switch at all', () =>
