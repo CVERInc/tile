@@ -144,10 +144,18 @@ ok(big.page.start <= anchor.offset && anchor.offset < big.page.end, 'after A+ th
 ok(surface.querySelectorAll('.ptr-flow-line').map((l) => l.textContent).join('\n').replace(/\s+/g, ' ').includes(anchorText.replace(/\s+/g, ' ').slice(0, 12)),
   'that text is in the drawn lines');
 eq(prog.textContent, (big.index + 1) + ' / ' + big.total, 'page N/M is recounted at the new size');
-root.querySelector('[data-act="font-larger"]').click();
+// every further step keeps it too — one step can keep the same page NUMBER by luck, three cannot
+const held = [];
+for (let i = 0; i < 2; i++) {
+  root.querySelector('[data-act="font-larger"]').click();
+  const v = mounted.reader.view();
+  held.push([v.fontSize, v.page.start <= anchor.offset && anchor.offset < v.page.end]);
+}
+eq(held, [[22, true], [26, true]], 'A+ to 22 and to 26: the page on screen still holds the anchored text');
 root.querySelector('[data-act="font-smaller"]').click();
 root.querySelector('[data-act="font-smaller"]').click();
-eq([mounted.reader.view().fontSize, mounted.reader.view().index], [18, before.index], '18 → 20 → 22 → 20 → 18 lands back on the page it started from');
+root.querySelector('[data-act="font-smaller"]').click();
+eq([mounted.reader.view().fontSize, mounted.reader.view().index], [18, before.index], '18 → 20 → 22 → 26 → 22 → 20 → 18 lands back on the page it started from');
 // resize reflows the same way
 const narrow = mounted.reader.resize({ width: 220, height: 420 });
 ok(narrow.page.start <= anchor.offset && anchor.offset < narrow.page.end, 'a narrower viewport also keeps the text on screen');
