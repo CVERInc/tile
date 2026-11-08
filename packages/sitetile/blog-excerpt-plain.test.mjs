@@ -167,6 +167,23 @@ const REVIEW_CASES = [
   // it does not pair with a `-->` below it
   ['<!--\n# Heading\nImportant visible instruction\n-->\nEnd', '<!-- Important visible instruction --> End'],
   ['Keep <!--\n> quoted\n--> today.', 'Keep <!-- --> today.'],
+  // round 7: a skipped line keeps every word it has for the renderer — only its visible text is
+  // dropped — so a comment closer on it still closes the comment, and the public text after it stays
+  ['<!-- Draft notes\n> -->\nDo not enter the closed trail.\n<!-- End notes -->\nOpen trails are listed below.',
+    'Do not enter the closed trail. Open trails are listed below.'],
+  ['<!--\n[ends -->\nImportant visible instruction\n<!-- private\n-->\nEnd', 'Important visible instruction End'],
+  // …and text the page shows after a closer belongs to the line it is written on
+  ['<!-- open\n> q --> quote tail\nafter', 'after'],
+  ['Intro\n[<!-- x\nstill hidden --> visible tail', 'Intro visible tail'],
+  // a line whose mark would change what the page shows (a quoted comment opener) falls back to the
+  // page's own blocks: its heading and quote elements are dropped from the unmarked page
+  ['> <!-- start\nhidden\n-->\nvisible', 'visible'],
+  // round 7: a colon alone is label punctuation — the address after it is an email, not a URL…
+  ['Contact:www.support@example.com today.', 'Contact:www.support@example.com today.'],
+  ['Contact:help@example.com today.', 'Contact:help@example.com today.'],
+  // …while the user info of a web address that started earlier is still part of that address
+  ['See https://user:www.pass@example.com/x today.', 'See today.'],
+  ['See https://user:pass@example.com/x today.', 'See today.'],
 ];
 for (const [input, want] of REVIEW_CASES) {
   test(`review fixture: ${JSON.stringify(input)}`, () => assert.equal(excerptOf(input), want));
