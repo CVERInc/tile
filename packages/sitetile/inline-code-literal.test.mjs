@@ -92,4 +92,45 @@ test('P2: private-use characters in the text are kept, and the renderer still wo
   assert.equal(inlineHtml(all + ' `x` [a](/b)'), all + ' ' + CODE('x') + ' <a href="/b">a</a>');
 });
 
+// ── round 2: a decoded destination is never read as a placeholder ───────────────────────────────
+// The marks are chosen from the RAW text, and a destination is entity-decoded later. With no
+// private-use character in the text the atom mark is U+E001, so `&#xE001;` in a destination decodes
+// to exactly that mark. The fix is provenance, not more reservations: a destination is decoded only
+// as it is restored, in the single pass that never rescans what it puts back.
+test('round 2: ![a](photo&#xE001;.png) is an image whose parsed src holds the decoded character', () => {
+  for (const html of [inlineHtml('![a](photo&#xE001;.png)'), inlineHtml('![a](photo&#57345;.png)'), bodyHtml('![a](photo&#xE001;.png) and text')]) {
+    const [img] = elements(html, 'img');
+    assert.ok(img, html);
+    assert.equal(attrs(img).src, 'photo.png');
+  }
+});
+test('round 2: [go](/&#xE001;0&#xE001;) keeps its link, and the code span after it stays separate', () => {
+  for (const html of [inlineHtml('[go](/&#xE001;0&#xE001;) `foo`'), bodyHtml('[go](/&#57345;0&#57345;) `foo`')]) {
+    const links = elements(html, 'a');
+    assert.equal(links.length, 1, html);
+    assert.equal(attrs(links[0]).href, '/0');
+    assert.equal(links[0].childNodes.length, 1, 'the link holds only its label');
+    assert.equal(elements(html, 'span').filter((el) => attrs(el).class === 'st-code').length, 1, html);
+  }
+});
+test('round 2: a destination-shaped run that forms no link keeps its decoded text', () => {
+  assert.equal(inlineHtml('Keep ](&#xE001;0&#xE001;) here.'), 'Keep ](0) here.');
+  assert.equal(inlineHtml('Keep ](&#57345;0&#57345;) and `x` here.'), 'Keep ](0) and ' + CODE('x') + ' here.');
+});
+// The destination guard. An HTML comment is removed by escapeInline, AFTER the raw-text stash
+// looked for `](`, so `]<!---->(` becomes `](` with a code atom as its destination. Restoring that
+// atom into href="…"/src="…" would put the span's markup and quotes inside the attribute.
+test('destination guard: a comment-joined `](` with a code span as destination forms no link or image', () => {
+  for (const input of ['[go]<!--c-->(`x" onmouseover="alert(1)`)', '![i]<!--c-->(`x" onerror="alert(1)`)']) {
+    for (const html of [inlineHtml(input), bodyHtml(input)]) {
+      assert.equal(elements(html, 'a').length + elements(html, 'img').length, 0, html);
+      const spans = elements(html, 'span').filter((el) => attrs(el).class === 'st-code');
+      assert.equal(spans.length, 1, html);
+      for (const el of elements(html, 'span')) assert.deepEqual(el.attrs.map((a) => a.name), ['class'], html);
+    }
+  }
+  // control: the same comment-joined shape with a plain destination still links, as it always did
+  assert.equal(attrs(elements(inlineHtml('[go]<!--c-->(/x)'), 'a')[0]).href, '/x');
+});
+
 console.log('\ninline-code-literal: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));

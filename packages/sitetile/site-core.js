@@ -1454,7 +1454,7 @@ function inlineHtml(text, opts) {
   if (!marks) return escHtml(src0);   // every private-use code point is in use: plain text, nothing promoted
   const [H, A] = marks;
   const tokenRe = (m) => new RegExp(m + '(\\d+)' + m, 'g');
-  const hrefRe = tokenRe(H), atomRe = tokenRe(A);
+  const hrefRe = tokenRe(H), anyRe = new RegExp(H + '(\\d+)' + H + '|' + A + '(\\d+)' + A, 'g');
   const hrefs = [];
   // The link and image patterns below are shapes read by bracketMatches, not regexes — see its comment.
   const stashed = replaceMatches(src0, LINK_DEST,
@@ -1478,7 +1478,12 @@ function inlineHtml(text, opts) {
   // restored after the <a> forms.
   const atoms = [];
   const atom = (html) => { atoms.push(html); return A + (atoms.length - 1) + A; };
-  const unstash = (t) => t.replace(atomRe, (m, i) => atoms[+i]);
+  // ONE restore, for both kinds of placeholder, in a single left-to-right pass: a value it puts back
+  // is never scanned again. That is what keeps provenance (tile#268 review round 2): a destination
+  // is decoded only as it is restored, so a decoded `&#xE001;` that happens to equal this call's mark
+  // lands in the output as text and is never read as a placeholder.
+  const hrefText = (i) => escHtml(decodeEntitiesOnce(hrefs[+i]));
+  const restore = (t) => t.replace(anyRe, (m, h, a) => (h !== undefined ? hrefText(h) : atoms[+a]));
   s = s.replace(CODE_SPAN_HTML, (m) => atom(m.replace(hrefRe, (mm, i) => escHtml(hrefs[+i]))));
   // round 2, P2-1: this used to escHtml the RAW captured href unconditionally. An author whose
   // destination already carried an entity (`?a=1&amp;b=2` from an HTML-to-Markdown import, or a
@@ -1487,7 +1492,9 @@ function inlineHtml(text, opts) {
   // and a literal-`&` author to the same, correctly-single-escaped output — and, as a side
   // effect, is what lets the scheme check below see through an entity-obfuscated scheme
   // (`javascript&#58;`) instead of leaning on escaping alone to neutralise it.
-  s = s.replace(hrefRe, (m, i) => escHtml(decodeEntitiesOnce(hrefs[+i])));
+  // That decode-once-then-escape is hrefText() above. It runs only at restore time — inside the
+  // image/link callbacks below for a destination that forms one, and in the final restore for one
+  // that doesn't — never as a pass over the stream: decoded text in the stream could spell a mark.
   // An image is an ATOM too, the moment its tag is built (tile#268 review, P1). Its alt/src are
   // attribute values: a code atom in the alt is restored first, so attrq quotes the span's own `"`,
   // and the finished <img> is then lifted out so no later pass can reach inside a quoted attribute.
@@ -1500,7 +1507,7 @@ function inlineHtml(text, opts) {
   // question only — it never checked the SCHEME, so `![[javascript:alert(1)]]` reached a live
   // `<img src>` untouched. Same guard as the sibling markdown-image line two rows below.
   s = replaceMatches(s, WIKI_IMAGE, (mm, inner) => {
-    const real = unstash(inner);
+    const real = restore(inner);
     return isSafeImageSrc(real) ? atom(imgTag(real.split('/').pop(), real)) : inner.split('/').pop();
   });
   // markdown image: `src` here is the (now escaped) restored destination. A disallowed scheme
@@ -1508,16 +1515,23 @@ function inlineHtml(text, opts) {
   // fallback text, per isSafeImageSrc above (round 2, P1-2: images additionally allow a small
   // raster `data:` allowlist that a plain href never does).
   s = replaceMatches(s, MD_IMAGE, (mm, alt, src) => {
-    if (src.includes(A)) return mm;
-    return isSafeImageSrc(src) ? atom(imgTag(unstash(alt), src)) : alt;
+    if (src.includes(A)) return mm;   // an atom as a destination: see the link pass below
+    const real = restore(src);
+    return isSafeImageSrc(real) ? atom(imgTag(restore(alt), real)) : alt;
   });
   // External inline links open in a new tab too (design 2026-07-13, extended from affordances to
   // prose at the maintainer's call): an external link is external wherever it appears.
   s = replaceMatches(s, MD_LINK, (mm, lab, href) => {
+    // A destination is normally one stashed href. It can be an ATOM when an HTML comment, removed
+    // by escapeInline, joins `]` and `(` that the raw-text stash saw apart: `` [go]<!---->(`x`) ``.
+    // Restoring that atom into href="…" would put the code span's markup, quotes included, inside
+    // the attribute. No link forms; the text stays as written.
     if (href.includes(A)) return mm;
-    if (!isSafeHref(href)) return lab; // disallowed scheme (e.g. javascript:) → plain text, no href
-    const tgt = /^https?:\/\//i.test(href) ? ' target="_blank" rel="noopener"' : '';
-    return '<a href="' + attrq(href) + '"' + tgt + '>' + lab + '</a>';
+    const real = restore(href);
+    if (!isSafeHref(real)) return lab; // disallowed scheme (e.g. javascript:) → plain text, no href
+    const tgt = /^https?:\/\//i.test(real) ? ' target="_blank" rel="noopener"' : '';
+    // The start tag is an atom: its href is decoded text, which the final restore must not scan.
+    return atom('<a href="' + attrq(real) + '"' + tgt + '>') + lab + '</a>';
   });
   // Allowlisted inline <small> (no attributes) — the one raw tag legacy IRs use for muted fine
   // print (e.g. an "updated on …" stamp). escapeInline escaped it to `&lt;small&gt;`; re-emit
@@ -1528,7 +1542,7 @@ function inlineHtml(text, opts) {
   // escape→re-emit trick as <small>. General: any inlineHtml call site (h1, eyebrow, prose spans)
   // gets real line breaks for free. script-injection-safe: no attrs, no other tag.
   s = s.replace(/&lt;br\s*\/?&gt;/g, '<br>');
-  return unstash(s);
+  return restore(s);
 }
 
 // Private-use code points `text` does not contain, `n` of them, for inlineHtml's per-call stash
