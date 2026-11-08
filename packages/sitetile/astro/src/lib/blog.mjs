@@ -11,7 +11,13 @@ export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts, indexDateLang } 
 import { indexDateLang, badgeMonths } from './chrome-copy.mjs';
 import { dateText } from '../../../../emit/entry-date.mjs';
 export { entryDateHtml } from '../../../../emit/entry-date.mjs';
-import { parseFragment } from 'parse5';
+import { createRequire } from 'node:module';
+// parse5 is loaded on first use, by the excerpt's visible-text path, never at import. A consumer
+// imports this file for routing, dates and feeds from a checkout with no node_modules, and a
+// top-level import made all of that fail on a package only the excerpt needs (clean-import.test.mjs).
+// require, not import(): the excerpt path is synchronous, and parse5's exports map has a CJS build.
+let parse5;
+const parseFragment = (html) => (parse5 ||= createRequire(import.meta.url)('parse5')).parseFragment(html);
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.

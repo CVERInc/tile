@@ -53,7 +53,12 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, normalize, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse } from 'parse5';
+import { createRequire } from 'node:module';
+// parse5 is loaded on first use (parseHead), never at import: agent-list-twins.mjs imports this file
+// for its file walkers, which parse nothing, and a module that only walks a directory should not need
+// node_modules to load (clean-import.test.mjs). require, not import(): parseHead is synchronous.
+let parse5;
+const parse = (html, opts) => (parse5 ||= createRequire(import.meta.url)('parse5')).parse(html, opts);
 
 const NAV_BASE = 'http://sitetile.invalid/';
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
