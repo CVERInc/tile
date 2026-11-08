@@ -3,7 +3,7 @@
 // engine the pagetile web host's authoring editor uses). This file adds ONLY the read-only reader
 // projection (prev/next, chapter table of contents, image URL resolution) — it does NOT
 // reimplement parsing, per the family rule (one model, every surface consumes it).
-import { parseBook, flattenPages, isPhotobook, PHOTOBOOK_SOURCE } from '../../../../../packages/pagetile/book-core.js';
+import { parseBook, flattenPages, isPhotobook, isFlowPage, PHOTOBOOK_SOURCE } from '../../../../../packages/pagetile/book-core.js';
 // Relative, not the `@sitetile` alias, so plain `node` can still import this file (pagetile-blurb.test.mjs).
 import { bracketMatches, BRACKET_SHAPES } from '../../../site-core.js';
 
@@ -77,6 +77,7 @@ export function loadFirstBook(glob) {
 //     chapters: [{ id, title, index, pageCount, startGlobalIndex, coverSrc,
 //                  pages: [{ id, pageInChapter, globalIndex, imageSrc, caption }] }] }
 //   + a photobook only: source: 'photobook' on the book, { kind, focus } on each page ('' = undeclared)
+//   + a flow page only (any book): kind: 'flow', and its caption is the reflowable text
 // A book's one-line blurb, with at most ONE inline `[label](href)` — split into the three pieces a
 // template can render without ever handing raw markup to the page.
 //
@@ -137,6 +138,9 @@ export function loadReaderBook(raw) {
         caption: p.caption || '',
       };
       if (photobook) { entry.kind = p.kind || ''; entry.focus = p.focus || ''; }
+      // A flow page (reef#2279) says so, and its `caption` is the text the reader reflows. Only a flow
+      // page gets the key, so a comic's projection stays the object it was (pagetile-photobook.test.mjs).
+      else if (isFlowPage(p)) entry.kind = p.kind;
       g += 1;
       return entry;
     });
