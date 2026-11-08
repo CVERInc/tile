@@ -164,11 +164,10 @@ const refFeatured = (b) => {
 const refExcerptText = (b) => b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
   .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
   .join(' ');
-// …and the same lines as parsePost reads them now: each one turned into plain text (links → their
-// text, markers and URLs dropped) before the join. That stage is blog.mjs's excerptPlainText, used
-// here as is: this ruler is about how IMAGES are found and stripped, which the stage does not touch.
-const refExcerptPlainText = (b) => b.replace(/!\[[^\]]*\]\([^)]*\)/g, '').split('\n')
-  .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>'))
+// …and the same body as parsePost reads it now: grouped into paragraphs and each turned into the
+// visible text the page shows (blog.mjs's excerptParagraphs + excerptPlainText, used here as is).
+// This ruler is about how IMAGES are found and stripped, which that stage does not touch.
+const refExcerptPlainText = (b) => blog.excerptParagraphs(b.replace(/!\[[^\]]*\]\([^)]*\)/g, ''))
   .map(blog.excerptPlainText).filter(Boolean)
   .join(' ');
 

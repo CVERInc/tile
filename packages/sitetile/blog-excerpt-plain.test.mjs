@@ -123,10 +123,33 @@ const REVIEW_CASES = [
   ['See ((https://example.com/a)). Next.', 'See. Next.'],
   ['Visit <https://example.com/my_long_path> today.', 'Visit today.'],
   ['Read [https://short.example/AB](https://short.example/AB?ref=1) now', 'Read now'],
+  // round 3: a link's own boundary holds while its address is removed — prose after it survives
+  ['Read [https://example.com](https://example.com),please read carefully.', 'Read,please read carefully.'],
+  ['Call [www.example.com](https://example.com)/support today.', 'Call /support today.'],
+  ['Read (https://example.com),please read carefully.', 'Read,please read carefully.'],
+  ['See {https://example.com/a}. Next.', 'See. Next.'],
+  ['Call awww.example.com today.', 'Call awww.example.com today.'],
+  // round 3: a paragraph is rendered in one call, so a code span soft-wrapped across a source newline
+  // is one code element — and code is never touched by the URL rule
+  ['Run `curl\nhttps://example.com/api` daily.', 'Run curl https://example.com/api daily.'],
+  ['Always **back up\nbefore upgrading** today.', 'Always back up before upgrading today.'],
+  // round 3: private-use characters are author text (custom-font glyphs), kept verbatim
+  ['Keep \uE002\uE0000\uE001 here.', 'Keep \uE002\uE0000\uE001 here.'],
+  ['Keep \uE002\uE0000\uE001 and `other` here.', 'Keep \uE002\uE0000\uE001 and other here.'],
+  ['Keep \uE002 here.', 'Keep \uE002 here.'],
+  // HTML collapses ASCII whitespace only; an ideographic space is shown as typed
+  ['Alpha Beta\u3000Gamma', 'Alpha Beta\u3000Gamma'],
 ];
 for (const [input, want] of REVIEW_CASES) {
   test(`review fixture: ${JSON.stringify(input)}`, () => assert.equal(excerptOf(input), want));
 }
+
+test('deeply nested markup the page renders does not abort loading posts (round 3)', () => {
+  const raw = '---\ntitle: deep\n---\nStart ' + '<small>'.repeat(5000) + 'visible' + '</small>'.repeat(5000) + ' end.\n';
+  const posts = blog.allPosts({ '/blog/deep.md': raw });
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].excerptText, 'Start visible end.');
+});
 
 test('a plain excerpt is unchanged (no site whose posts are prose moves)', () => {
   const post = `---\ntitle: t\n---\nFirst line of prose.\nSecond line, still prose.\n`;

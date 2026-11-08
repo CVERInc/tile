@@ -120,9 +120,9 @@ function capExcerpt(text, max) {
   return text.length > n ? text.slice(0, n).trim() + ' […]' : text;
 }
 
-// excerptPlainText: one markdown line → the words a reader sees, for an excerpt.
-// The oracle is the post page itself: the line goes through inlineHtml — the SAME inline renderer the
-// post body uses — and the excerpt is the VISIBLE TEXT of that HTML, read by a real HTML parser
+// excerptPlainText: one markdown paragraph → the words a reader sees, for an excerpt.
+// The oracle is the post page itself: the paragraph goes through inlineHtml — the SAME inline renderer
+// the post body uses — and the excerpt is the VISIBLE TEXT of that HTML, read by a real HTML parser
 // (parse5), not by a hand-written stripper. So a link reads as its text (cut where the page cuts it,
 // a `]` or `[0]` inside a URL included); entities decode with the full HTML table; whatever the page
 // shows literally (an authored `<b>`, `x<y`, `&frac12;` — inlineHtml escapes those) the excerpt shows
@@ -130,8 +130,10 @@ function capExcerpt(text, max) {
 // are `display: none`) is not read. A `<br>` or a block boundary is one space.
 // One rule is the excerpt's own: URLs go — a bare address, an autolink, a link whose text IS its
 // address — because a URL in a card is never words, and it is the one string a narrow card cannot
-// wrap. The sentence punctuation around one is kept, and an emptied `( )` goes with it. Text inside a
-// code element is the exception: it is shown exactly as the page renders it, address and all.
+// wrap. The sentence punctuation around one is kept, and an emptied `( )` goes with it. Two
+// boundaries the page draws are kept while that happens: a LINK's text is matched on its own (so a
+// URL rule never runs on into the prose after the anchor), and a CODE element's text is never
+// touched (shown exactly as the page renders it, address and all).
 // The template escapes the result again, so nothing decoded here becomes markup.
 const HIDDEN_CLASS = 'st-mk';
 const CODE_CLASS = 'st-code';
@@ -145,63 +147,122 @@ const classesOf = (node) => {
 };
 const isHidden = (node) => classesOf(node).includes(HIDDEN_CLASS) || (node.attrs || []).some((x) => x.name === 'hidden');
 const isCode = (node) => node.nodeName === 'code' || classesOf(node).includes(CODE_CLASS);
-// The visible text of parsed nodes, in order. With `codes`, a code element's text is set aside there
-// and a slot left in its place, so the URL rule below never reaches inside it.
-function visibleText(nodes, out, codes = null) {
-  for (const node of nodes) {
-    if (node.nodeName === '#text') { out.push(node.value); continue; }
+
+// The visible text of a parsed fragment as ordered segments `{ s, code, anchor }`: `code` when it is
+// inside a code element, `anchor` = which link it sits in (0 = none). An explicit stack, not
+// recursion: nesting depth is author-controlled (thousands of `<small>` render fine on the page),
+// and one call frame per level would let one post abort loading every post.
+function visibleSegments(fragment) {
+  const segs = [];
+  let anchors = 0;
+  const stack = [];
+  const pushChildren = (node, code, anchor) => {
+    const kids = node.childNodes || [];
+    for (let i = kids.length - 1; i >= 0; i--) stack.push({ node: kids[i], code, anchor });
+  };
+  pushChildren(fragment, false, 0);
+  while (stack.length) {
+    const f = stack.pop();
+    if (f.space) { segs.push({ s: ' ', code: f.code, anchor: f.anchor }); continue; }
+    const { node, code, anchor } = f;
+    if (node.nodeName === '#text') { segs.push({ s: node.value, code, anchor }); continue; }
     if (!node.tagName || SKIPPED_ELEMENTS.has(node.tagName) || isHidden(node)) continue;
-    if (node.tagName === 'br') { out.push(' '); continue; }
-    if (codes && isCode(node)) {
-      out.push(CODE_OPEN + codes.length + CODE_CLOSE);
-      codes.push(visibleText(node.childNodes || [], []).join(''));
-      continue;
-    }
+    if (node.tagName === 'br') { segs.push({ s: ' ', code, anchor }); continue; }
+    const inCode = code || isCode(node);
+    const inAnchor = !inCode && node.tagName === 'a' ? ++anchors : anchor;
     const block = BLOCK_ELEMENTS.has(node.tagName);
-    if (block) out.push(' ');
-    visibleText(node.childNodes || [], out, codes);
-    if (block) out.push(' ');
+    if (block) { segs.push({ s: ' ', code, anchor }); stack.push({ space: true, code, anchor }); }
+    pushChildren(node, inCode, inAnchor);
   }
-  return out;
+  return segs;
 }
-// Private-use code points no rendered text carries: a code element's slot, and "a URL was here".
-const CODE_OPEN = '\uE000', CODE_CLOSE = '\uE001', GONE = '\uE002';
+
 // An address is ASCII (RFC 3986's characters; a non-ASCII path arrives percent-encoded), so the run
 // stops at the first other character: CJK prose written right against a URL (full-width brackets,
 // 。) is never read as part of it.
-const URL_RUN = /(?:https?:\/\/|www\.)[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/gi;
-// Trailing characters that end the SENTENCE, not the address (the GFM autolink rule): a closing
-// bracket only when the address did not open it.
+// It starts at a word boundary, so `awww.example.com` is not read as `a` + an address.
+const URL_SOURCE = "(?<![A-Za-z0-9])(?:https?:\\/\\/|www\\.)[A-Za-z0-9\\-._~:/?#[\\]@!$&'()*+,;=%]+";
+const URL_RUN = new RegExp(URL_SOURCE, 'gi');
+const WHOLE_URL = new RegExp('^\\s*' + URL_SOURCE + '\\s*$', 'i');
+// Where the address ends inside a matched run. First at a closing bracket the address never opened —
+// `(https://example.com),then` is prose around an address, not one — then trailing characters that
+// end the SENTENCE, not the address (the GFM autolink rule).
 function splitUrlTail(m) {
   let end = m.length;
+  const depth = { ')': 0, ']': 0 };
+  for (let i = 0; i < m.length; i++) {
+    const c = m[i];
+    if (c === '(') depth[')']++;
+    else if (c === '[') depth[']']++;
+    else if ((c === ')' || c === ']') && depth[c]-- === 0) { end = i; break; }
+  }
   for (;;) {
     const c = m[end - 1];
     if (/[.,;:!?'"*_~]/.test(c)) { end--; continue; }
-    if (c === ')' || c === ']') {
-      const open = c === ')' ? '(' : '[';
-      const body = m.slice(0, end);
-      if (body.split(open).length - 1 < body.split(c).length - 1) { end--; continue; }
-    }
     break;
   }
   return [m.slice(0, end), m.slice(end)];
 }
-const EMPTIED_BRACKETS = /[(\[<（【「]\s*\uE002\s*[)\]>）】」]/g;
-function withoutUrls(text) {
-  let s = text.replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1]);
-  // repeated, so `((url))` empties both pairs, not just the inner one
-  for (let prev = ''; prev !== s;) { prev = s; s = s.replace(EMPTIED_BRACKETS, GONE); }
-  return s
-    .replace(/\s*\uE002\s*(?=[.,;:!?)\]。，、；：！？）】」]|$)/g, '')
-    .replace(/\uE002/g, ' ');
+// Marks used while the pieces are stitched back together: private-use code points, chosen per call
+// from those the text does NOT contain — author text may carry private-use characters (custom-font
+// glyphs), and a fixed choice would let one of them be read as a mark.
+function unusedMarks(text, n) {
+  const marks = [];
+  for (let cp = 0xE000; marks.length < n && cp <= 0xF8FF; cp++) {
+    const c = String.fromCharCode(cp);
+    if (!text.includes(c)) marks.push(c);
+  }
+  return marks.length === n ? marks : null;
 }
-export function excerptPlainText(line) {
+// excerptParagraphs: the body's surviving lines, grouped the way the page groups them — a run of
+// lines with no blank line between is ONE paragraph, and the page renders it in one inlineHtml call,
+// so a code span or link soft-wrapped across a source newline is still one element. Lines that are
+// not words are skipped exactly as before — headings, blockquotes, link-list lines, a bare YouTube
+// address (a player now — tile#148) — and a skipped line ends the paragraph. Lines are joined with a
+// space, as the excerpt always joined them.
+export function excerptParagraphs(body) {
+  const paras = [];
+  let cur = [];
+  const flush = () => { if (cur.length) paras.push(cur.join(' ')); cur = []; };
+  for (const raw of String(body || '').split('\n')) {
+    const s = raw.trim();
+    if (!s || s.startsWith('#') || s.startsWith('[') || s.startsWith('>') || youtubeLine(s)) { flush(); continue; }
+    cur.push(s);
+  }
+  flush();
+  return paras;
+}
+// HTML collapses ASCII whitespace only: a no-break or ideographic space is shown as typed, so it stays.
+const collapse = (s) => s.replace(/[ \t\n\r\f]+/g, ' ').replace(/^ | $/g, '');
+export function excerptPlainText(paragraph) {
+  const segs = visibleSegments(parseFragment(inlineHtml(String(paragraph || ''))));
+  // runs: consecutive segments of one kind — the same link, plain prose, or code
+  const runs = [];
+  for (const seg of segs) {
+    const last = runs[runs.length - 1];
+    if (last && last.code === seg.code && (seg.code || last.anchor === seg.anchor)) last.s += seg.s;
+    else runs.push({ ...seg });
+  }
+  const all = runs.map((r) => r.s).join('');
+  const marks = unusedMarks(all, 3);
+  // every private-use code point in use (not a real text) — nothing to stitch with; keep the text
+  if (!marks) return collapse(all);
+  const [GONE, OPEN, CLOSE] = marks;
   const codes = [];
-  const text = visibleText(parseFragment(inlineHtml(String(line || ''))).childNodes, [], codes).join('');
-  return withoutUrls(text)
-    .replace(/\uE000(\d+)\uE001/g, (_, i) => codes[Number(i)])
-    .replace(/\s+/g, ' ')
-    .trim();
+  let text = '';
+  for (const r of runs) {
+    if (r.code) { text += OPEN + codes.length + CLOSE; codes.push(r.s); continue; }
+    if (r.anchor && WHOLE_URL.test(r.s)) { text += GONE; continue; }
+    text += r.s.replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1]);
+  }
+  // an emptied bracket pair goes with its address — repeated, so `((url))` empties both
+  const emptied = new RegExp('[(\\[{<（【「][ \\t\\n\\r\\f]*' + GONE + '[ \\t\\n\\r\\f]*[)\\]}>）】」]', 'g');
+  for (let prev = ''; prev !== text;) { prev = text; text = text.replace(emptied, GONE); }
+  text = text
+    .replace(new RegExp('[ \\t\\n\\r\\f]*' + GONE + '[ \\t\\n\\r\\f]*(?=[.,;:!?)\\]}。，、；：！？）】」]|$)', 'g'), '')
+    .split(GONE).join(' ')
+    .replace(new RegExp(OPEN + '(\\d+)' + CLOSE, 'g'), (_, i) => codes[Number(i)]);
+  return collapse(text);
 }
 
 // The first YouTube line's poster path, or '' (tile#148 — see parsePost's featured image).
@@ -268,9 +329,7 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // below). Images were stripped here and links were not, so a post imported from a social feed —
   // a paragraph of `[#tag](https://…/hashtag/…?…)` links — listed its raw markdown, and the cut
   // could land mid-URL: one unbreakable 180-character string that pushed a 390px index 427px wide.
-  const fullText = replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '').split('\n')
-    // (a bare YouTube address on its own line is a player now, not words — tile#148)
-    .map((s) => s.trim()).filter((s) => s && !s.startsWith('#') && !s.startsWith('[') && !s.startsWith('>') && !youtubeLine(s))
+  const fullText = excerptParagraphs(replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => ''))
     .map(excerptPlainText).filter(Boolean)
     .join(' ');
   const excerpt = capExcerpt(fullText, excerptMax);
