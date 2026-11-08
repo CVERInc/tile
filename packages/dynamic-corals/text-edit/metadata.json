@@ -1,0 +1,48 @@
+{
+  "id": "text-edit",
+  "author": "official",
+  "summary": "Lets an owner change the words of a plain heading, paragraph or list item in a framed preview; posts a text-only edit to the host.",
+  "embed": "<div hidden data-dynamic-coral=\"text-edit\" data-parent-origin=\"https://editor.example\"></div>\n<script src=\"text-edit.js\"></script>",
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects the text-edit coral. One per page.",
+      "values": [
+        "text-edit"
+      ]
+    },
+    {
+      "name": "data-parent-origin",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "The only origin edits are posted to and answers are accepted from. No default: the coral does not mount without it."
+    },
+    {
+      "name": "data-page",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "The page path the host saves to. Absent: the frame's location.pathname."
+    },
+    {
+      "name": "data-hint-editor",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "The host's sentence for text that has formatting or structure (use the editor)."
+    },
+    {
+      "name": "data-hint-refused",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "The host's sentence for a refused edit, when its answer carries none."
+    }
+  ],
+  "host": "sitetile",
+  "requirements": "Renderer output inside a frame. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host applies edits with text-edit-source.mjs (or a port measured against it) and answers with `reef-text-edit-result`."
+}
