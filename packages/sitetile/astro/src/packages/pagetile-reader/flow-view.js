@@ -152,12 +152,24 @@ async function mountFlowReader(root, deps) {
   on(root.querySelector('.ptr-tap-back'), () => step(false));
   on(smaller, () => render(reader.nudgeFont(-1)));
   on(larger, () => render(reader.nudgeFont(1)));
+  // immersive mode is the same body class the fixed reader uses (its CSS hides the chrome)
+  const immersiveBtn = root.querySelector('[data-act="immersive"]');
+  const toggleImmersive = () => {
+    if (!doc.body) return;
+    const now = doc.body.classList.toggle('ptr-immersive');
+    if (immersiveBtn) immersiveBtn.setAttribute('aria-pressed', now ? 'true' : 'false');
+  };
+  on(immersiveBtn, toggleImmersive);
+  on(root.querySelector('.ptr-tap-center'), toggleImmersive);
+  on(root.querySelector('[data-act="close"]'), () => { if (doc.body && doc.body.classList.contains('ptr-immersive')) toggleImmersive(); });
   doc.addEventListener('keydown', (e) => {
     if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || '')) return;
     if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); step(true); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); step(false); }
     else if (e.key === '+' || e.key === '=') render(reader.nudgeFont(1));
     else if (e.key === '-') render(reader.nudgeFont(-1));
+    else if (e.key === 'f' || e.key === 'F') toggleImmersive();
+    else if (e.key === 'Escape' && doc.body && doc.body.classList.contains('ptr-immersive')) toggleImmersive();
   });
   if (win && win.addEventListener && !d.viewport) {
     let t = null;
