@@ -148,8 +148,12 @@ const REVIEW_CASES = [
   ['    Show <!-- note --> here.', 'Show <!-- note --> here.'],
   ['Example\n~~~sh\ncurl https://example.com/api\n~~~\ntoday.', 'Example curl https://example.com/api today.'],
   ['~~~ini\n[section]\n~~~', '[section]'],
-  ['## Heading\nBody text', 'Heading Body text'],
-  ['> quoted\n\nafter', 'quoted after'],
+  // headings, hashtag runs and quotes are skipped by source line, as excerpts always skipped them —
+  // outside fenced code only (inside a fence they are code the page shows)
+  ['## Heading\nBody text', 'Body text'],
+  ['> quoted\n\nafter', 'after'],
+  ['#comics #daily\nToday we drew a cat.', 'Today we drew a cat.'],
+  ['~~~sh\n# install\n> out.txt\n~~~', '# install > out.txt'],
   ['一行目\n二行目', '一行目 二行目'],
   ['[#a](https://x.example/a) [#b](https://x.example/b)\nprose line', 'prose line'],
 ];

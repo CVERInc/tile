@@ -223,7 +223,9 @@ function unusedMarks(text, n) {
   return marks.length === n ? marks : null;
 }
 // excerptSource: the post body with the lines an excerpt never reads blanked out, BEFORE rendering —
-// a link-list line (a leading `[`) and a bare YouTube address (a player, not words — tile#148).
+// the same lines the excerpt has always skipped: a heading or hashtag line (a leading `#`: a heading
+// repeats the title, a hashtag run is noise), a blockquote (`>`), a link-list line (`[`), and a bare
+// YouTube address (a player, not words — tile#148).
 // Outside fenced code only: inside a fence such a line is code the page shows. A blanked line stays
 // a line, so every block boundary the renderer draws is still where it was.
 export function excerptSource(body) {
@@ -232,7 +234,7 @@ export function excerptSource(body) {
     if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return line; }
     if (inFence) return line;
     const t = line.trim();
-    return t.startsWith('[') || youtubeLine(t) ? '' : line;
+    return t.startsWith('#') || t.startsWith('>') || t.startsWith('[') || youtubeLine(t) ? '' : line;
   }).join('\n');
 }
 // HTML collapses ASCII whitespace only: a no-break or ideographic space is shown as typed, so it stays.
