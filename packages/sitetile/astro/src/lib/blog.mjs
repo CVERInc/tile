@@ -9,6 +9,7 @@ import { splitFrontmatter, bodyHtml, inlineHtml, parseSite, safeHref, safeSrc, d
 // moved, the call sites did not.
 export { sidebarCopy, unquote, archivePrefixes, dateBadgeParts, indexDateLang } from './chrome-copy.mjs';
 import { indexDateLang } from './chrome-copy.mjs';
+import { parseFragment } from 'parse5';
 // toUrlLocale / toBcp47 are pure string transforms (no @sitetile import), so pulling them in here
 // costs nothing a plain `node` test can't already afford — sitemap.mjs already does the same
 // cross-import.
@@ -120,36 +121,50 @@ function capExcerpt(text, max) {
 }
 
 // excerptPlainText: one markdown line → the words a reader sees, for an excerpt.
-// The line goes through inlineHtml — the SAME inline parser the post body uses — so a link is cut
-// where the post page cuts it (a `]` or `[0]` inside a URL included), and the excerpt keeps exactly
-// the link TEXT the post shows. Its output is then read as tokens, not scrubbed with one regex chain,
-// because three kinds of text need three treatments and only the parser's markup tells them apart:
-//   · markers (`**`, `` ` ``, kept by inlineHtml as .st-mk spans) are dropped;
-//   · a code span's content is LITERAL — its `~~`, `<b>` or `&amp;` is what the post shows, and is
-//     kept exactly (set aside before the prose pass, put back after it);
-//   · everything else is the author's prose. There an authored tag is dropped (a line break becomes
-//     a space, so `Contact<br>Support` stays two words), an authored entity is decoded (`&amp;`,
-//     `&#38;`, `&copy;`), a paired `~~strike~~` loses its delimiters, and URLs go — an autolink, a
-//     bare address, or a link whose text IS its address — with the sentence punctuation around them
-//     kept, and an emptied `( )` removed with them. A URL in an excerpt is never words, and it is the
-//     one string a narrow card cannot wrap. A comparison sign (`a < b`) is not a tag and stays.
-// The template escapes the result again, so decoding here never becomes markup.
-const PARSER_ESCAPES = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" };
-const unescapeParser = (s) => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, n) => PARSER_ESCAPES[n]);
-const AUTHORED_ENTITIES = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', shy: '', copy: '©', reg: '®', trade: '™',
-  hellip: '…', mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', laquo: '«',
-  raquo: '»', middot: '·', bull: '•', deg: '°', times: '×', divide: '÷', euro: '€', pound: '£', yen: '¥',
-  cent: '¢', sect: '§', para: '¶',
+// The oracle is the post page itself: the line goes through inlineHtml — the SAME inline renderer the
+// post body uses — and the excerpt is the VISIBLE TEXT of that HTML, read by a real HTML parser
+// (parse5), not by a hand-written stripper. So a link reads as its text (cut where the page cuts it,
+// a `]` or `[0]` inside a URL included); entities decode with the full HTML table; whatever the page
+// shows literally (an authored `<b>`, `x<y`, `&frac12;` — inlineHtml escapes those) the excerpt shows
+// literally too; and text the page hides (.st-mk markers — `**`, `` ` ``, an escape's backslash —
+// are `display: none`) is not read. A `<br>` or a block boundary is one space.
+// One rule is the excerpt's own: URLs go — a bare address, an autolink, a link whose text IS its
+// address — because a URL in a card is never words, and it is the one string a narrow card cannot
+// wrap. The sentence punctuation around one is kept, and an emptied `( )` goes with it. Text inside a
+// code element is the exception: it is shown exactly as the page renders it, address and all.
+// The template escapes the result again, so nothing decoded here becomes markup.
+const HIDDEN_CLASS = 'st-mk';
+const CODE_CLASS = 'st-code';
+const SKIPPED_ELEMENTS = new Set(['script', 'style', 'template', 'noscript']);
+const BLOCK_ELEMENTS = new Set(['address', 'article', 'aside', 'blockquote', 'dd', 'details', 'dialog', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main',
+  'nav', 'ol', 'p', 'pre', 'section', 'summary', 'table', 'td', 'th', 'tr', 'ul']);
+const classesOf = (node) => {
+  const a = (node.attrs || []).find((x) => x.name === 'class');
+  return a ? a.value.split(/\s+/) : [];
 };
-const decodeEntity = (whole, name) => {
-  if (name[0] === '#') {
-    const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
-    return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+const isHidden = (node) => classesOf(node).includes(HIDDEN_CLASS) || (node.attrs || []).some((x) => x.name === 'hidden');
+const isCode = (node) => node.nodeName === 'code' || classesOf(node).includes(CODE_CLASS);
+// The visible text of parsed nodes, in order. With `codes`, a code element's text is set aside there
+// and a slot left in its place, so the URL rule below never reaches inside it.
+function visibleText(nodes, out, codes = null) {
+  for (const node of nodes) {
+    if (node.nodeName === '#text') { out.push(node.value); continue; }
+    if (!node.tagName || SKIPPED_ELEMENTS.has(node.tagName) || isHidden(node)) continue;
+    if (node.tagName === 'br') { out.push(' '); continue; }
+    if (codes && isCode(node)) {
+      out.push(CODE_OPEN + codes.length + CODE_CLOSE);
+      codes.push(visibleText(node.childNodes || [], []).join(''));
+      continue;
+    }
+    const block = BLOCK_ELEMENTS.has(node.tagName);
+    if (block) out.push(' ');
+    visibleText(node.childNodes || [], out, codes);
+    if (block) out.push(' ');
   }
-  return Object.prototype.hasOwnProperty.call(AUTHORED_ENTITIES, name) ? AUTHORED_ENTITIES[name] : whole;
-};
-// Private-use code points the prose pass never produces: a code span's slot, and "a URL was here".
+  return out;
+}
+// Private-use code points no rendered text carries: a code element's slot, and "a URL was here".
 const CODE_OPEN = '\uE000', CODE_CLOSE = '\uE001', GONE = '\uE002';
 // An address is ASCII (RFC 3986's characters; a non-ASCII path arrives percent-encoded), so the run
 // stops at the first other character: CJK prose written right against a URL (full-width brackets,
@@ -171,45 +186,19 @@ function splitUrlTail(m) {
   }
   return [m.slice(0, end), m.slice(end)];
 }
-function plainProse(s) {
+const EMPTIED_BRACKETS = /[(\[<（【「]\s*\uE002\s*[)\]>）】」]/g;
+function withoutUrls(text) {
+  let s = text.replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1]);
+  // repeated, so `((url))` empties both pairs, not just the inner one
+  for (let prev = ''; prev !== s;) { prev = s; s = s.replace(EMPTIED_BRACKETS, GONE); }
   return s
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<(?:https?:\/\/|mailto:)[^<>\s]*>/gi, GONE)
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>/g, '')
-    .replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, decodeEntity)
-    .replace(/~~(?=\S)([^~]*?\S)~~/g, '$1')
-    .replace(URL_RUN, (m) => GONE + splitUrlTail(m)[1])
-    .replace(/[(\[（【「]\s*\uE002\s*[)\]）】」]/g, GONE)
     .replace(/\s*\uE002\s*(?=[.,;:!?)\]。，、；：！？）】」]|$)/g, '')
     .replace(/\uE002/g, ' ');
 }
 export function excerptPlainText(line) {
   const codes = [];
-  let prose = '', inCode = 0, inMarker = 0, code = '';
-  const depth = [];   // what each open <span> was: 'code' | 'mk' | ''
-  for (const [tok] of inlineHtml(String(line || '')).matchAll(/<[^>]*>|[^<]+/g)) {
-    if (tok[0] !== '<') {
-      if (inMarker) continue;
-      if (inCode) code += unescapeParser(tok); else prose += unescapeParser(tok);
-      continue;
-    }
-    if (/^<br\b/i.test(tok)) { if (inCode) code += ' '; else prose += ' '; continue; }
-    if (/^<span\b/i.test(tok)) {
-      const kind = /class="st-code"/.test(tok) ? 'code' : /class="st-mk"/.test(tok) ? 'mk' : '';
-      depth.push(kind);
-      if (kind === 'code') { inCode++; if (inCode === 1) code = ''; }
-      if (kind === 'mk') inMarker++;
-      continue;
-    }
-    if (/^<\/span/i.test(tok)) {
-      const kind = depth.pop();
-      if (kind === 'mk') inMarker--;
-      if (kind === 'code' && --inCode === 0) { prose += CODE_OPEN + codes.length + CODE_CLOSE; codes.push(code); }
-    }
-    // any other parser tag (<a>, <small>, …) is a wrapper: its text is already in the stream
-  }
-  return plainProse(prose)
+  const text = visibleText(parseFragment(inlineHtml(String(line || ''))).childNodes, [], codes).join('');
+  return withoutUrls(text)
     .replace(/\uE000(\d+)\uE001/g, (_, i) => codes[Number(i)])
     .replace(/\s+/g, ' ')
     .trim();

@@ -78,31 +78,51 @@ test('no run in the excerpt is longer than a word: nothing a narrow card cannot 
 test('links with brackets inside the URL, emphasis, code, autolinks and bare URLs', () => {
   const post = `---\ntitle: t\n---\nThanks to [A Channel](https://social.example.com/achannel?__cft__[0]=AZX&__tn__=-]K-R) for **the** _feature_ and \`code\` ~~old~~ <https://example.com/x> see https://example.com/long/path?q=1 or [https://short.example/AB](https://short.example/AB?ref=1) a < b & c\n`;
   const s = parsePost('t', post).excerptText;
-  assert.equal(s, 'Thanks to A Channel for the feature and code old see or a < b & c');
+  assert.equal(s, 'Thanks to A Channel for the feature and code ~~old~~ see or a < b & c');
 });
 
-// Review findings on the first version, each with the reviewer's own input as the fixture and an
-// expected output written by hand (not produced by any parser under test).
+// Review fixtures. THE ORACLE IS THE POST PAGE: each expected value is the text a reader sees where
+// the post renders that line (inlineHtml's HTML, with the hidden .st-mk markers not shown), written
+// by hand from that HTML — not produced by the code under test. The excerpt's one rule of its own is
+// that URLs go, keeping the sentence around them.
 const excerptOf = (line) => parsePost('t', `---\ntitle: t\n---\n${line}\n`).excerptText;
 const REVIEW_CASES = [
-  // 1. a line break the parser renders is a word boundary, not nothing
+  // a line break the page renders is a word boundary
   ['Contact<br>Support', 'Contact Support'],
   ['line<br/>two<br />three', 'line two three'],
-  // 2. a code span's content is literal: its `~~` stays; a paired strike in prose loses its delimiters
+  // code: what the page renders inside the code span, unchanged
   ['Use `~~` as the operator.', 'Use ~~ as the operator.'],
-  ['Use `<b>text</b>` and `&amp;` here, ~~not this~~.', 'Use <b>text</b> and &amp; here, not this.'],
-  // 3. authored entities are decoded and authored tags dropped, in prose and in link text
-  ['Bread &amp; butter &#38; jam &#x26; tea', 'Bread & butter & jam & tea'],
-  ['&copy; 2026 &mdash; all&nbsp;rights &bogus; kept', '© 2026 — all rights &bogus; kept'],
-  ['Read <b>this</b> and <em>that</em>.', 'Read this and that.'],
-  ['Read [Bread &amp; butter](/post) today.', 'Read Bread & butter today.'],
+  ['Use `<b>text</b>` and `&amp;` here, ~~not this~~.', 'Use <b>text</b> and &amp; here, ~~not this~~.'],
+  ['see `https://code.example/x` here', 'see https://code.example/x here'],
+  // the page's inline code span collapses whitespace (span.st-code is white-space: normal)
+  ['Use `a  b` here.', 'Use a b here.'],
+  // page-renderer behaviour, not excerpt: inlineHtml renders these INSIDE a code span as a real line
+  // break, a <small> and a link, so the page shows them that way and so does the excerpt
+  ['Use `<br>` between lines.', 'Use between lines.'],
+  ['Use `<small>text</small>` here.', 'Use text here.'],
+  ['Write `[label](/path)` here.', 'Write label here.'],
+  // escaped characters are literal on the page; the backslash is a hidden marker
+  ['Use \\~\\~word\\~\\~ here.', 'Use ~~word~~ here.'],
+  ['**b** *i* \\*lit\\*', 'b i *lit*'],
+  // page-renderer behaviour, not excerpt: inlineHtml escapes authored HTML and entities, so the page
+  // shows them as typed — and so does the excerpt (no comparison or attribute can be eaten)
+  ['Keep x<y and y>z.', 'Keep x<y and y>z.'],
   ['a < b and c > d, x<y', 'a < b and c > d, x<y'],
-  // 4. removing an address keeps the sentence around it, and an emptied parenthetical goes too
+  ['Read <span title="x > y">this</span> today.', 'Read <span title="x > y">this</span> today.'],
+  ['Read <b>this</b> and <em>that</em>.', 'Read <b>this</b> and <em>that</em>.'],
+  ['Save &frac12; the space.', 'Save &frac12; the space.'],
+  ['Enjoy caf&eacute; &agrave; la carte.', 'Enjoy caf&eacute; &agrave; la carte.'],
+  ['Write &lt;b&gt;bold&lt;/b&gt; here.', 'Write &lt;b&gt;bold&lt;/b&gt; here.'],
+  ['Bread &amp; butter &#38; jam &#x26; tea', 'Bread &amp; butter &#38; jam &#x26; tea'],
+  ['Read [Bread &amp; butter](/post) today.', 'Read Bread &amp; butter today.'],
+  // removing an address keeps the sentence around it, and an emptied bracket pair goes too
   ['See (https://example.com/page). Next sentence.', 'See. Next sentence.'],
   ['See https://example.com/page. Next sentence.', 'See. Next sentence.'],
   ['Wiki (https://en.example.org/wiki/Foo_(bar)), then more.', 'Wiki, then more.'],
   ['見（https://example.com/a）。下一句', '見。下一句'],
+  ['See ((https://example.com/a)). Next.', 'See. Next.'],
   ['Visit <https://example.com/my_long_path> today.', 'Visit today.'],
+  ['Read [https://short.example/AB](https://short.example/AB?ref=1) now', 'Read now'],
 ];
 for (const [input, want] of REVIEW_CASES) {
   test(`review fixture: ${JSON.stringify(input)}`, () => assert.equal(excerptOf(input), want));
