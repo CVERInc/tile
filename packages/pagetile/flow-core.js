@@ -31,26 +31,40 @@ import { flattenPages } from './book-core.js';
 const DEFAULTS = { width: 360, height: 560, fontSize: 16, lineHeight: 1.5, paragraphGap: 0.5, headingScale: 1.3 };
 const QUOTE_LEN = 32;
 
-// Wide glyphs: CJK ideographs, kana, hangul, fullwidth forms and CJK punctuation.
-const WIDE = '\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6';
-const RE_WIDE = new RegExp('[' + WIDE + ']');
+// Wide glyphs: CJK ideographs, kana, hangul, fullwidth forms and CJK punctuation — and the
+// supplementary planes' kana and ideographs (Kana Supplement/Extended, CJK Extension B onwards), so
+// an astral ideograph breaks per glyph like a BMP one. Every pattern built from this uses the `u`
+// flag: it matches code points, never half a surrogate pair.
+const WIDE = '\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6'
+  + '\u{1AFF0}-\u{1B16F}\u{20000}-\u{3FFFD}';
+const RE_WIDE = new RegExp('^[' + WIDE + ']$', 'u');
+const RE_MARK = /^\p{M}$/u;
+// A glyph: a base code point with the combining marks that follow it (é as e + U+0301, が as
+// か + U+3099). A mark is never measured, broken or carried away on its own.
+const RE_GLYPH = /\P{M}\p{M}*|\p{M}+/gu;
+// Where the text a line ends with is a CR before its LF (CRLF): a hard break, no glyph width.
+const RE_HARD_BREAK = /\r?\n/g;
 
 function defaultMeasure(str, fontSize) {
   let em = 0;
-  for (const ch of String(str)) em += ch === ' ' || ch === '\t' ? 0.3 : RE_WIDE.test(ch) ? 1 : 0.55;
+  for (const ch of String(str)) {
+    em += ch === ' ' || ch === '\t' ? 0.3 : ch === '\r' || ch === '\n' || RE_MARK.test(ch) ? 0 : RE_WIDE.test(ch) ? 1 : 0.55;
+  }
   return em * fontSize;
 }
 
 // Break units: a latin word (with the spaces that follow it), or ONE wide glyph — CJK text may break
-// between any two characters. Offsets are absolute in the text.
+// between any two glyphs. A combining mark always stays in the unit of the glyph before it. Offsets
+// are absolute in the text.
+const RE_UNIT_SRC = '[' + WIDE + ']\\p{M}*[ \\t\\r]*|(?:[^ \\t\\r\\n' + WIDE + ']\\p{M}*)+[ \\t\\r]*|[ \\t\\r]+';
 function unitsOf(text, from, to) {
   const units = [];
-  const re = new RegExp('[' + WIDE + '][ \\t]*|[^ \\t' + WIDE + ']+[ \\t]*|[ \\t]+', 'g');
+  const re = new RegExp(RE_UNIT_SRC, 'gu');
   re.lastIndex = from;
   let m;
   while ((m = re.exec(text)) && m.index < to) {
     const end = Math.min(m.index + m[0].length, to);
-    const word = text.slice(m.index, end).replace(/[ \t]+$/, '');
+    const word = text.slice(m.index, end).replace(/[ \t\r]+$/, '');
     units.push({ start: m.index, end, word });
   }
   return units;
@@ -76,10 +90,16 @@ function layoutFlow(text, opts) {
     const fs = block.heading ? o.fontSize * o.headingScale : o.fontSize;
     let line = null;
     const open = (start) => { line = { start, end: start, width: 0, height: fs * o.lineHeight, gap: 0, trail: 0 }; lines.push(line); };
-    // a single \n inside a paragraph is a hard line break
-    let segStart = block.start;
-    for (const seg of src.slice(block.start, block.end).split('\n')) {
-      const segEnd = segStart + seg.length;
+    // a single \n (or \r\n) inside a paragraph is a hard line break; the break itself has no width
+    // and stays in the line it ends, so LF and CRLF texts lay out the same
+    const segs = [];
+    RE_HARD_BREAK.lastIndex = block.start;
+    for (let at = block.start, m; at <= block.end; at = m ? m.index + m[0].length : block.end + 1) {
+      m = RE_HARD_BREAK.exec(src);
+      if (m && m.index >= block.end) m = null;
+      segs.push([at, m ? m.index : block.end]);
+    }
+    for (const [segStart, segEnd] of segs) {
       open(segStart);
       for (const u of unitsOf(src, segStart, segEnd)) {
         const w = measure(u.word, fs);
@@ -87,7 +107,7 @@ function layoutFlow(text, opts) {
         if (w > o.width) {
           // a word wider than a whole line (a long URL) is broken by character, never overflowed
           let at = u.start;
-          for (const ch of u.word) {
+          for (const ch of u.word.match(RE_GLYPH)) {
             const cw = measure(ch, fs);
             if (line.width > 0 && line.width + cw > o.width) open(at);
             line.width += cw; line.trail = 0; at += ch.length;
@@ -98,7 +118,6 @@ function layoutFlow(text, opts) {
         // trailing spaces hang at a line end and become the gap before the next word
         line.trail = measure(src.slice(u.start + u.word.length, u.end), fs);
       }
-      segStart = segEnd + 1;
     }
     line.gap = o.fontSize * o.lineHeight * o.paragraphGap;   // the space after a paragraph
   }
