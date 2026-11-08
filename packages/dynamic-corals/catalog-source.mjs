@@ -77,6 +77,7 @@ export const INTERNAL = {
   carousel: {
     'data-car-init': 'Runtime mount guard written by the coral.',
   },
+  'text-edit': {},
 };
 
 // Explicitly account for the names passed through inbox-bubble's computed data-${name} helper.
