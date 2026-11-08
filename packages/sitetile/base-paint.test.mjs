@@ -212,6 +212,8 @@ const BLOG = {
   index: readFileSync(join(HERE, 'astro', 'src', 'components', 'BlogIndexView.astro'), 'utf8'),
   archive: readFileSync(join(HERE, 'astro', 'src', 'components', 'ArchiveView.astro'), 'utf8'),
   post: readFileSync(join(HERE, 'astro', 'src', 'components', 'PostArticle.astro'), 'utf8'),
+  // The list card's date is written by the shared emitter (server views AND the archive island).
+  date: readFileSync(join(HERE, '..', 'emit', 'entry-date.mjs'), 'utf8'),
 };
 
 // [class, which component emits it, what the UA does to it if we say nothing]
@@ -220,7 +222,7 @@ const FLOOR = [
   ['bl-entry-link', 'index', 'an inline <a> holding <img>/<time>/<h2>/<p>'],
   ['bl-tags', 'index', 'adjacent <span>s concatenate: 工程設計筆記'],
   ['bl-share', 'post', 'adjacent <a>s concatenate: TwitterFacebook'],
-  ['bl-date-badge', 'index', 'month/day/year are three adjacent spans: 08082026'],
+  ['bl-date-badge', 'date', 'month/day/year are three adjacent spans: 08082026'],
   ['bl-post-nav', 'post', 'newer and older run together on one line'],
   ['bl-tag-filter', 'index', 'adjacent <button>s touch'],
 ];
@@ -229,7 +231,8 @@ for (const [cls, where, symptom] of FLOOR) {
   test(`🔴 .${cls} has a floor rule — without it: ${symptom}`, () => {
     // Markup first: if the class is renamed the CSS goes dead and a look-only assertion would
     // keep passing while the page broke again.
-    assert.match(BLOG[where], new RegExp(`class="[^"]*\\b${cls}\\b`),
+    // (The emitter names its classes as JS strings, not as a class="" attribute.)
+    assert.match(BLOG[where], where === 'date' ? new RegExp(`'[^']*\\b${cls}\\b[^']*'`) : new RegExp(`class="[^"]*\\b${cls}\\b`),
       `${where} must still emit .${cls}`);
     const rules = rulesFor(cls);
     assert.ok(rules.length > 0, `.${cls} must be styled in site.css`);

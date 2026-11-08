@@ -25,6 +25,7 @@
 // innerHTML / set:html), so a post title/tag carrying markup renders as literal text — the
 // same discipline as blog-search.js and the age-gate island.
 import { cardImgAttrs } from '@emit/card-img.mjs';
+import { entryDate } from '@emit/entry-date.mjs';
 
 (function () {
 
@@ -88,9 +89,17 @@ import { cardImgAttrs } from '@emit/card-img.mjs';
   if (!wantTag && !wantYm) return; // no deep link → leave the server-rendered recent set as-is
 
   // Mirror whatever card shape the server rendered for the recent set, so a filtered card
-  // is visually identical: detect the date style + the "read more" label from the initial DOM.
+  // is visually identical. The date comes from the spec the server rendered with (`data-bl-date`
+  // on .bl-list) through the same emitter (emit/entry-date.mjs) — 🩸 this file used to build the
+  // badge spans itself with no whitespace between them (「2月192024」 beside the page's
+  // 「2月 19 2024」) and printed every other format as the raw index date. The detected fallback
+  // only covers a page that carries no spec.
   const firstEntry = list.querySelector('.bl-entry');
-  const badgeMode = !!(firstEntry && firstEntry.querySelector('.bl-date-badge'));
+  const dateSpec = (() => {
+    try { const v = JSON.parse(list.dataset.blDate || 'null'); if (v && typeof v === 'object') return v; } catch { /* fall through */ }
+    const badge = !!(firstEntry && firstEntry.querySelector('.bl-date-badge'));
+    return badge ? { badge: true, months: COPY.months } : { format: 'intl' };
+  })();
   const rmEl = firstEntry && firstEntry.querySelector('.bl-read-more');
   const readMore = rmEl ? rmEl.textContent : '';
 
@@ -105,12 +114,19 @@ import { cardImgAttrs } from '@emit/card-img.mjs';
     })
     .catch(() => { /* network fail → leave the static recent set, no worse than before */ });
 
-  function badgeParts(d) {
-    const dt = new Date(d);
-    if (isNaN(dt)) return null;
-    // SHORT month — this is the compact date badge, not the filter heading. Mixing the two up
-    // puts "July 2026" where a two-character chip belongs.
-    return { m: COPY.months[dt.getMonth()] || String(dt.getMonth() + 1), day: String(dt.getDate()), year: String(dt.getFullYear()) };
+  // The card's <time>, from the shared tree: text children become text nodes, so the badge's
+  // inter-span whitespace is the server's own.
+  function dateEl(view) {
+    const time = document.createElement('time');
+    time.className = view.cls;
+    for (const c of view.children) {
+      if (typeof c === 'string') { time.appendChild(document.createTextNode(c)); continue; }
+      const s = document.createElement('span');
+      s.className = c.cls;
+      s.textContent = c.text;
+      time.appendChild(s);
+    }
+    return time;
   }
 
   function buildEntry(x) {
@@ -132,27 +148,7 @@ import { cardImgAttrs } from '@emit/card-img.mjs';
       a.appendChild(img);
     }
 
-    if (x.d) {
-      if (badgeMode) {
-        const b = badgeParts(x.d);
-        if (b) {
-          const time = document.createElement('time');
-          time.className = 'bl-date bl-date-badge';
-          for (const [cls, val] of [['bl-date-month', b.m], ['bl-date-day', b.day], ['bl-date-year', b.year]]) {
-            const s = document.createElement('span');
-            s.className = cls;
-            s.textContent = val;
-            time.appendChild(s);
-          }
-          a.appendChild(time);
-        }
-      } else {
-        const time = document.createElement('time');
-        time.className = 'bl-date';
-        time.textContent = x.d;
-        a.appendChild(time);
-      }
-    }
+    if (x.d) a.appendChild(dateEl(entryDate(x.d, dateSpec)));
 
     const h2 = document.createElement('h2');
     h2.className = 'bl-title';

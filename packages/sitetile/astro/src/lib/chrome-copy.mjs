@@ -3,16 +3,23 @@
 // function parked behind `@sitetile` is a function no test can reach, and unreachable string
 // resolution is how five copies of the same Chinese literal lived in this renderer for months.
 import { uiCopy as lingoUiCopy, dateHeading, NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
+// Relative, not `@emit`: this module stays reachable from a plain `node` test (see above).
+import { badgeParts } from '../../../../emit/entry-date.mjs';
 
 // dateBadgeParts: split a date into month/day/year strings for the `cjk-badge` index-card
 // layout (three stacked <span>s a theme's CSS can lay out as a badge) — a real
-// index cards show "11月" / "11" / "2025" as separate lines.
+// index cards show "11月" / "11" / "2025" as separate lines. The split itself lives in
+// emit/entry-date.mjs, which the archive island shares; this only supplies the locale's labels.
 export function dateBadgeParts(s, lang) {
-  const d = new Date(s);
-  if (isNaN(d)) return { month: '', day: '', year: '' };
-  // 🩸 the month was `${n}月` for every tenant. A compact badge wants a SHORT label, which is why
-  // this reads monthShort and not month: "Jul", not "July", and not 7月 on an English site.
-  return { month: lingoUiCopy(lang || NEUTRAL_UI_LANG).monthShort(d.getMonth() + 1), day: String(d.getDate()), year: String(d.getFullYear()) };
+  return badgeParts(s, badgeMonths(lang));
+}
+
+// badgeMonths: the 12 month labels a badge uses, for the spec the server hands the island.
+// 🩸 the month was `${n}月` for every tenant. A compact badge wants a SHORT label, which is why
+// this reads monthShort and not month: "Jul", not "July", and not 7月 on an English site.
+export function badgeMonths(lang) {
+  const u = lingoUiCopy(lang || NEUTRAL_UI_LANG);
+  return Array.from({ length: 12 }, (_, i) => u.monthShort(i + 1));
 }
 
 // indexDateLang: the language a listing card's date is written in. Same rule as PostArticle: with no
