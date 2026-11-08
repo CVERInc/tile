@@ -171,7 +171,7 @@ function visibleSegments(fragment, skip = null) {
   pushChildren(fragment, false, 0);
   while (stack.length) {
     const f = stack.pop();
-    if (f.space) { segs.push({ s: ' ', code: f.code, anchor: f.anchor, brk: true }); continue; }
+    if (f.space) { segs.push({ s: ' ', code: f.code, anchor: f.anchor }); continue; }
     const { node, code, anchor } = f;
     if (node.nodeName === '#text') { segs.push({ s: node.value, code, anchor }); continue; }
     if (!node.tagName || SKIPPED_ELEMENTS.has(node.tagName) || (skip && skip.has(node.tagName)) || isHidden(node)) continue;
@@ -179,7 +179,7 @@ function visibleSegments(fragment, skip = null) {
     const inCode = code || isCode(node) || isMailto(node);
     const inAnchor = !inCode && node.tagName === 'a' ? ++anchors : anchor;
     const block = BLOCK_ELEMENTS.has(node.tagName);
-    if (block) { segs.push({ s: ' ', code, anchor, brk: true }); stack.push({ space: true, code, anchor }); }
+    if (block) { segs.push({ s: ' ', code, anchor }); stack.push({ space: true, code, anchor }); }
     pushChildren(node, inCode, inAnchor);
   }
   return segs;
@@ -232,23 +232,21 @@ function unusedMarks(text, n) {
 // removed could be a comment's `-->`, so a later comment swallowed the public text between them.
 // Now every word stays where the author wrote it, so the renderer draws exactly the page — comment
 // boundaries, code and links included — and the marks only say WHERE each visible character came
-// from: `open` after the line's structural prefix, `close` at its end. Text the page hides cannot
-// carry a mark out, and the one way hidden text gives way to visible text mid-line is a comment
-// closer, so every closer is followed by a mark naming the kind of line it is on (`inSkipped` /
-// `inKept`). excerptOfBody checks that the marks moved nothing (excerptMarkedText) before trusting them.
+// from: `open` after the line's structural prefix, `close` at its end. excerptOfBody trusts them only
+// when the page shows every one of them, in order (excerptMarkedText): a mark the page hid — in a
+// comment, a link's destination, an attribute — no longer says where a line ends.
 const HEADING_PREFIX = /^(\s*#{1,4}\s+)/;   // flowingHtml's own heading split
 const QUOTE_PREFIX = /^(\s*(?:>\s?)+)/;
-const COMMENT_CLOSER = /--!?>/g;            // `-->`, `--!>` (and the `-->` inside `<!-->`)
-export function excerptSource(body, { open, close, inSkipped, inKept }) {
+export function excerptSource(body, { open, close }) {
   let inFence = false;
   return String(body || '').split('\n').map((line) => {
     const fence = /^\s*(```|~~~)/.test(line);
     const t = line.trim();
     const skipped = !fence && !inFence && (t.startsWith('#') || t.startsWith('>') || t.startsWith('['));
     if (fence) inFence = !inFence;
-    if (!skipped) return line.replace(COMMENT_CLOSER, (m) => m + inKept);
+    if (!skipped) return line;
     const prefix = (HEADING_PREFIX.exec(line) || QUOTE_PREFIX.exec(line) || /^\s*/.exec(line))[0];
-    return prefix + open + line.slice(prefix.length).replace(COMMENT_CLOSER, (m) => m + inSkipped) + close;
+    return prefix + open + line.slice(prefix.length) + close;
   }).join('\n');
 }
 // What the excerpt drops when the marks cannot be trusted: the page's own heading and quote
@@ -258,23 +256,32 @@ const pageSegments = (markdown, skip) => visibleSegments(parseFragment(flowingHt
 // The visible text of segments, the way a check compares them: all of it, and its code.
 const segText = (segs) => [collapse(segs.map((x) => x.s).join('')), collapse(segs.filter((x) => x.code).map((x) => x.s).join(''))].join('\u0000');
 // excerptMarkedText: the marked page's segments with the skipped lines' text dropped, or null when
-// the marks changed what the page shows (a mark is not a word, but the renderer reads lines, and a
-// line that starts with a mark is not always the line it was). A block boundary also ends a line.
+// the marks cannot be trusted. Two checks, both on what the page shows:
+//  · the marks moved nothing — without them, the marked page's visible text (and its code) is the
+//    page's (a mark is not a word, but the renderer reads lines, and a line that starts with a mark
+//    is not always the line it was);
+//  · every mark is visible, in source order — open, close, open, close… — so each skipped line's
+//    text is exactly what lies between its own pair. A mark the page did not show (swallowed by a
+//    link's destination, an attribute, a comment) would leave a line without its end, and the
+//    dropping would run on into the prose after it (round 8).
 function excerptMarkedText(body, page) {
-  const marks = unusedMarks(body, 4);
+  const marks = unusedMarks(body, 2);
   if (!marks) return null;
-  const [open, close, inSkipped, inKept] = marks;
-  const segs = pageSegments(excerptSource(body, { open, close, inSkipped, inKept }));
-  const strip = (s) => s.split(open).join('').split(close).join('').split(inSkipped).join('').split(inKept).join('');
+  const [open, close] = marks;
+  const source = excerptSource(body, { open, close });
+  const segs = pageSegments(source);
+  const strip = (s) => s.split(open).join('').split(close).join('');
   if (segText(segs.map((x) => ({ ...x, s: strip(x.s) }))) !== segText(page)) return null;
+  const want = source.replace(new RegExp('[^' + open + close + ']', 'g'), '');
+  const seen = segs.map((x) => x.s).join('').replace(new RegExp('[^' + open + close + ']', 'g'), '');
+  if (seen !== want) return null;
   let dropping = false;
   const out = [];
   for (const seg of segs) {
-    if (seg.brk) { dropping = false; out.push(seg); continue; }
     let s = '';
     for (const c of seg.s) {
-      if (c === open || c === inSkipped) dropping = true;
-      else if (c === close || c === inKept) dropping = false;
+      if (c === open) dropping = true;
+      else if (c === close) dropping = false;
       else if (!dropping) s += c;
     }
     out.push({ ...seg, s });
@@ -293,10 +300,10 @@ const collapse = (s) => s.replace(/[ \t\n\r\f]+/g, ' ').replace(/^ | $/g, '');
 // RFC 5322 dot-atom characters in the local part. `www.support@example.com` is an address someone is
 // meant to write to, not a web address with words around it. It is found in the VISIBLE text across
 // inline boundaries (`help@[www.example.com](/contact)` shows one address). Part of a web address
-// that STARTED EARLIER is not an email — its path (`https://example.com/a@b.co`) or its user info
-// (`https://user:pass@example.com`) — but a colon on its own is label punctuation:
-// `Contact:www.support@example.com` is an address, not a URL (round 7).
-const EMAIL = /(?<![A-Za-z0-9!#$%&'*+\/=?^_`{|}~.-])[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+/g;
+// that STARTED EARLIER in the same run is not an email — its path (`https://example.com/a@b.co`) or
+// its user info (`https://user:pass@example.com`) — but a colon or a slash on its own is
+// punctuation: `Contact:www.support@example.com` is an address, not a URL (rounds 7–8).
+const EMAIL = /(?<![A-Za-z0-9!#$%&'*+=?^_`{|}~.-])[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+/g;
 export function excerptPlainText(markdown) {
   return excerptTextOf(pageSegments(markdown));
 }
@@ -319,11 +326,25 @@ function excerptTextOf(segs) {
   // emails, over the visible text with code blanked (an address never runs into or out of code)
   const flat = runs.map((r) => (r.code ? ' '.repeat(r.s.length) : r.s)).join('');
   const kept = new Uint8Array(flat.length);
-  const urlStarts = new Int32Array(flat.length).fill(-1);   // where the web address covering i began
-  for (const m of flat.matchAll(URL_RUN)) urlStarts.fill(m.index, m.index, m.index + m[0].length);
-  for (const m of flat.matchAll(EMAIL)) {
+  // where the web address covering i began — looked for inside each run, the same boundaries the
+  // removal below uses, so an address in a link's text never reaches past the link (round 8)
+  const urlStarts = new Int32Array(flat.length).fill(-1);
+  const urlEnds = new Int32Array(flat.length);
+  for (let i = 0, at = 0; i < runs.length; at += runs[i].s.length, i++) {
+    if (runs[i].code) continue;
+    for (const m of runs[i].s.matchAll(URL_RUN)) {
+      urlStarts.fill(at + m.index, at + m.index, at + m.index + m[0].length);
+      urlEnds.fill(at + m.index + m[0].length, at + m.index, at + m.index + m[0].length);
+    }
+  }
+  // An email that starts inside an earlier address is not one; the search resumes where that address
+  // ends (every start inside it would be refused the same way), so an email right after a link whose
+  // text is an address is still found — and each character is looked at a bounded number of times.
+  const email = new RegExp(EMAIL.source, 'g');
+  for (let m; (m = email.exec(flat));) {
     const u = urlStarts[m.index];
     if (u === -1 || u === m.index) kept.fill(1, m.index, m.index + m[0].length);
+    else email.lastIndex = urlEnds[m.index];
   }
   let offset = 0;
   for (const r of runs) {
