@@ -96,11 +96,11 @@ const REVIEW_CASES = [
   ['see `https://code.example/x` here', 'see https://code.example/x here'],
   // the page's inline code span collapses whitespace (span.st-code is white-space: normal)
   ['Use `a  b` here.', 'Use a b here.'],
-  // page-renderer behaviour, not excerpt: inlineHtml renders these INSIDE a code span as a real line
-  // break, a <small> and a link, so the page shows them that way and so does the excerpt
-  ['Use `<br>` between lines.', 'Use between lines.'],
-  ['Use `<small>text</small>` here.', 'Use text here.'],
-  ['Write `[label](/path)` here.', 'Write label here.'],
+  // a code span is literal on the page (tile#267), so `<br>`, `<small>` and a link written inside
+  // one are the visible text there, and the excerpt keeps them
+  ['Use `<br>` between lines.', 'Use <br> between lines.'],
+  ['Use `<small>text</small>` here.', 'Use <small>text</small> here.'],
+  ['Write `[label](/path)` here.', 'Write [label](/path) here.'],
   // escaped characters are literal on the page; the backslash is a hidden marker
   ['Use \\~\\~word\\~\\~ here.', 'Use ~~word~~ here.'],
   ['**b** *i* \\*lit\\*', 'b i *lit*'],
