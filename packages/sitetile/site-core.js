@@ -1548,16 +1548,13 @@ function inlineHtml(text, opts) {
 // Private-use code points `text` does not contain, `n` of them, for inlineHtml's per-call stash
 // marks (tile#268). One pass collects the private-use characters present, so an input stuffed with
 // them costs the same linear scan as any other. Null when the private-use planes are all taken.
-const RE_PRIVATE_USE = /[\uE000-\uF8FF\uDBB0-\uDBFF]/;
+// The scan is by CODE POINT (a `u`-flag regex), never by hand-written surrogate ranges: round 3 of
+// the review found the first version's plane-15 lead-surrogate bound off by 0x30, so authored
+// U+F0000–U+FBFFF went unseen and, with the BMP range full, were handed out as "unused" marks.
+const RE_PRIVATE_USE = /[\u{E000}-\u{F8FF}\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu;
 function unusedMarks(text, n) {
   const used = new Set();
-  if (RE_PRIVATE_USE.test(text)) {          // most text has none: one native scan and done
-    for (let i = 0; i < text.length; i++) {
-      const c = text.charCodeAt(i);
-      if (c >= 0xE000 && c <= 0xF8FF) used.add(c);
-      else if (c >= 0xDBB0 && c <= 0xDBFF) used.add(text.codePointAt(i));   // planes 15–16 lead
-    }
-  }
+  for (const m of text.matchAll(RE_PRIVATE_USE)) used.add(m[0].codePointAt(0));
   const marks = [];
   for (const [lo, hi] of [[0xE000, 0xF8FF], [0xF0000, 0xFFFFD], [0x100000, 0x10FFFD]]) {
     for (let cp = lo; cp <= hi && marks.length < n; cp++) if (!used.has(cp)) marks.push(String.fromCodePoint(cp));

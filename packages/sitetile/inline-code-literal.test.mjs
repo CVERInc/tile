@@ -133,4 +133,26 @@ test('destination guard: a comment-joined `](` with a code span as destination f
   assert.equal(attrs(elements(inlineHtml('[go]<!--c-->(/x)'), 'a')[0]).href, '/x');
 });
 
+// ── round 3: supplementary private-use characters are seen too ──────────────────────────────────
+// With every BMP private-use code point in the text, the marks come from plane 15. The first scan
+// read plane-15 surrogates from the wrong lower bound, so authored U+F0000–U+FBFFF went unseen and
+// were handed out as marks: U+F0000 as the destination mark, U+F0001 as the atom mark.
+{
+  let BMP = '';
+  for (let cp = 0xE000; cp <= 0xF8FF; cp++) BMP += String.fromCharCode(cp);
+  const H15 = String.fromCodePoint(0xF0000), A15 = String.fromCodePoint(0xF0001), LATE = String.fromCodePoint(0xFBFFF);
+  const cases = [
+    [BMP + ' Keep ' + A15 + '0' + A15 + ' here.', BMP + ' Keep ' + A15 + '0' + A15 + ' here.'],
+    [BMP + ' Keep ' + A15 + '0' + A15 + ' and `x` here.', BMP + ' Keep ' + A15 + '0' + A15 + ' and ' + CODE('x') + ' here.'],
+    [BMP + ' Keep ' + H15 + '0' + H15 + ' [go](/real)', BMP + ' Keep ' + H15 + '0' + H15 + ' <a href="/real">go</a>'],
+    [BMP + ' ' + LATE + ' `x` [a](/b)', BMP + ' ' + LATE + ' ' + CODE('x') + ' <a href="/b">a</a>'],
+  ];
+  for (const [input, want] of cases) {
+    test('round 3: BMP private-use range full + authored ' + JSON.stringify(input.slice(BMP.length)) + ' is kept as typed', () => {
+      assert.equal(inlineHtml(input), want);
+      assert.equal(bodyHtml(input), '<p>' + want + '</p>');
+    });
+  }
+}
+
 console.log('\ninline-code-literal: ' + passed + ' passed' + (process.exitCode ? ', SOME FAILED' : ', all green'));
