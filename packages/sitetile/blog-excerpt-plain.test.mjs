@@ -139,6 +139,19 @@ const REVIEW_CASES = [
   ['Keep \uE002 here.', 'Keep \uE002 here.'],
   // HTML collapses ASCII whitespace only; an ideographic space is shown as typed
   ['Alpha Beta\u3000Gamma', 'Alpha Beta\u3000Gamma'],
+  // round 4: an email is one token — its host is not a web address, and a mailto: link stays whole
+  ['Contact help@www.example.com today.', 'Contact help@www.example.com today.'],
+  ['Contact [help@www.example.com](mailto:help@www.example.com) today.', 'Contact help@www.example.com today.'],
+  ['Write to team.www@example.com or visit www.example.com today.', 'Write to team.www@example.com or visit today.'],
+  // round 4: the body renderer's own blocks — what the page shows is what the excerpt reads
+  ['Keep <!--\n- important instruction\n--> today.', 'Keep <!-- important instruction --> today.'],
+  ['    Show <!-- note --> here.', 'Show <!-- note --> here.'],
+  ['Example\n~~~sh\ncurl https://example.com/api\n~~~\ntoday.', 'Example curl https://example.com/api today.'],
+  ['~~~ini\n[section]\n~~~', '[section]'],
+  ['## Heading\nBody text', 'Heading Body text'],
+  ['> quoted\n\nafter', 'quoted after'],
+  ['一行目\n二行目', '一行目 二行目'],
+  ['[#a](https://x.example/a) [#b](https://x.example/b)\nprose line', 'prose line'],
 ];
 for (const [input, want] of REVIEW_CASES) {
   test(`review fixture: ${JSON.stringify(input)}`, () => assert.equal(excerptOf(input), want));

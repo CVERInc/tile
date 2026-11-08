@@ -120,24 +120,28 @@ function capExcerpt(text, max) {
   return text.length > n ? text.slice(0, n).trim() + ' […]' : text;
 }
 
-// excerptPlainText: one markdown paragraph → the words a reader sees, for an excerpt.
-// The oracle is the post page itself: the paragraph goes through inlineHtml — the SAME inline renderer
-// the post body uses — and the excerpt is the VISIBLE TEXT of that HTML, read by a real HTML parser
-// (parse5), not by a hand-written stripper. So a link reads as its text (cut where the page cuts it,
-// a `]` or `[0]` inside a URL included); entities decode with the full HTML table; whatever the page
-// shows literally (an authored `<b>`, `x<y`, `&frac12;` — inlineHtml escapes those) the excerpt shows
-// literally too; and text the page hides (.st-mk markers — `**`, `` ` ``, an escape's backslash —
-// are `display: none`) is not read. A `<br>` or a block boundary is one space.
+// excerptPlainText: markdown → the words a reader sees, for an excerpt.
+// The oracle is the post page itself: the text goes through flowingHtml — the SAME full-body renderer
+// the post page uses (bodyHtml's blocks: paragraphs, lists, quotes, fenced code, comments, an indented
+// paragraph's literal comments; headings layered on top) — and the excerpt is the VISIBLE TEXT of that
+// HTML, read by a real HTML parser (parse5) in document order, not by a hand-written stripper. So a
+// link reads as its text; entities decode with the full HTML table; whatever the page shows literally
+// (an authored `<b>`, `x<y`, `&frac12;`, an unterminated `<!--`) the excerpt shows literally too; text
+// the page hides (.st-mk markers — `**`, `` ` ``, an escape's backslash — are `display: none`) is not
+// read; and a `<br>` or a block boundary is one space. It renders in the renderer's line-break mode
+// (`br`), so consecutive lines stay a space apart in the excerpt — CJK lines included — as they always
+// were.
 // One rule is the excerpt's own: URLs go — a bare address, an autolink, a link whose text IS its
 // address — because a URL in a card is never words, and it is the one string a narrow card cannot
-// wrap. The sentence punctuation around one is kept, and an emptied `( )` goes with it. Two
-// boundaries the page draws are kept while that happens: a LINK's text is matched on its own (so a
-// URL rule never runs on into the prose after the anchor), and a CODE element's text is never
-// touched (shown exactly as the page renders it, address and all).
+// wrap. The sentence punctuation around one is kept, and an emptied `( )` goes with it. Boundaries
+// the page draws are kept while that happens: a LINK's text is matched on its own (so the rule never
+// runs on into the prose after the anchor); CODE (a code span, a fenced block) is never touched; an
+// address inside an email (`help@www.example.com`) is not a web address, and a `mailto:` link's text
+// is left whole.
 // The template escapes the result again, so nothing decoded here becomes markup.
 const HIDDEN_CLASS = 'st-mk';
 const CODE_CLASS = 'st-code';
-const SKIPPED_ELEMENTS = new Set(['script', 'style', 'template', 'noscript']);
+const SKIPPED_ELEMENTS = new Set(['script', 'style', 'template', 'noscript', 'svg']);
 const BLOCK_ELEMENTS = new Set(['address', 'article', 'aside', 'blockquote', 'dd', 'details', 'dialog', 'div', 'dl', 'dt',
   'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main',
   'nav', 'ol', 'p', 'pre', 'section', 'summary', 'table', 'td', 'th', 'tr', 'ul']);
@@ -147,6 +151,9 @@ const classesOf = (node) => {
 };
 const isHidden = (node) => classesOf(node).includes(HIDDEN_CLASS) || (node.attrs || []).some((x) => x.name === 'hidden');
 const isCode = (node) => node.nodeName === 'code' || classesOf(node).includes(CODE_CLASS);
+// A `mailto:` link's text is an address someone is meant to use: left whole, like code.
+const isMailto = (node) => node.tagName === 'a'
+  && (node.attrs || []).some((x) => x.name === 'href' && /^\s*mailto:/i.test(x.value));
 
 // The visible text of a parsed fragment as ordered segments `{ s, code, anchor }`: `code` when it is
 // inside a code element, `anchor` = which link it sits in (0 = none). An explicit stack, not
@@ -168,7 +175,7 @@ function visibleSegments(fragment) {
     if (node.nodeName === '#text') { segs.push({ s: node.value, code, anchor }); continue; }
     if (!node.tagName || SKIPPED_ELEMENTS.has(node.tagName) || isHidden(node)) continue;
     if (node.tagName === 'br') { segs.push({ s: ' ', code, anchor }); continue; }
-    const inCode = code || isCode(node);
+    const inCode = code || isCode(node) || isMailto(node);
     const inAnchor = !inCode && node.tagName === 'a' ? ++anchors : anchor;
     const block = BLOCK_ELEMENTS.has(node.tagName);
     if (block) { segs.push({ s: ' ', code, anchor }); stack.push({ space: true, code, anchor }); }
@@ -180,8 +187,9 @@ function visibleSegments(fragment) {
 // An address is ASCII (RFC 3986's characters; a non-ASCII path arrives percent-encoded), so the run
 // stops at the first other character: CJK prose written right against a URL (full-width brackets,
 // 。) is never read as part of it.
-// It starts at a word boundary, so `awww.example.com` is not read as `a` + an address.
-const URL_SOURCE = "(?<![A-Za-z0-9])(?:https?:\\/\\/|www\\.)[A-Za-z0-9\\-._~:/?#[\\]@!$&'()*+,;=%]+";
+// It starts at a word boundary, so `awww.example.com` is not read as `a` + an address — and never
+// inside an email: `help@www.example.com` is one address someone is meant to write to.
+const URL_SOURCE = "(?<![A-Za-z0-9@._%+\\-])(?:https?:\\/\\/|www\\.)[A-Za-z0-9\\-._~:/?#[\\]@!$&'()*+,;=%]+";
 const URL_RUN = new RegExp(URL_SOURCE, 'gi');
 const WHOLE_URL = new RegExp('^\\s*' + URL_SOURCE + '\\s*$', 'i');
 // Where the address ends inside a matched run. First at a closing bracket the address never opened —
@@ -214,28 +222,23 @@ function unusedMarks(text, n) {
   }
   return marks.length === n ? marks : null;
 }
-// excerptParagraphs: the body's surviving lines, grouped the way the page groups them — a run of
-// lines with no blank line between is ONE paragraph, and the page renders it in one inlineHtml call,
-// so a code span or link soft-wrapped across a source newline is still one element. Lines that are
-// not words are skipped exactly as before — headings, blockquotes, link-list lines, a bare YouTube
-// address (a player now — tile#148) — and a skipped line ends the paragraph. Lines are joined with a
-// space, as the excerpt always joined them.
-export function excerptParagraphs(body) {
-  const paras = [];
-  let cur = [];
-  const flush = () => { if (cur.length) paras.push(cur.join(' ')); cur = []; };
-  for (const raw of String(body || '').split('\n')) {
-    const s = raw.trim();
-    if (!s || s.startsWith('#') || s.startsWith('[') || s.startsWith('>') || youtubeLine(s)) { flush(); continue; }
-    cur.push(s);
-  }
-  flush();
-  return paras;
+// excerptSource: the post body with the lines an excerpt never reads blanked out, BEFORE rendering —
+// a link-list line (a leading `[`) and a bare YouTube address (a player, not words — tile#148).
+// Outside fenced code only: inside a fence such a line is code the page shows. A blanked line stays
+// a line, so every block boundary the renderer draws is still where it was.
+export function excerptSource(body) {
+  let inFence = false;
+  return String(body || '').split('\n').map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return line; }
+    if (inFence) return line;
+    const t = line.trim();
+    return t.startsWith('[') || youtubeLine(t) ? '' : line;
+  }).join('\n');
 }
 // HTML collapses ASCII whitespace only: a no-break or ideographic space is shown as typed, so it stays.
 const collapse = (s) => s.replace(/[ \t\n\r\f]+/g, ' ').replace(/^ | $/g, '');
-export function excerptPlainText(paragraph) {
-  const segs = visibleSegments(parseFragment(inlineHtml(String(paragraph || ''))));
+export function excerptPlainText(markdown) {
+  const segs = visibleSegments(parseFragment(flowingHtml(String(markdown || ''), { br: true })));
   // runs: consecutive segments of one kind — the same link, plain prose, or code
   const runs = [];
   for (const seg of segs) {
@@ -325,13 +328,12 @@ export function parsePost(slug, raw, excerptMax = 180) {
   // capped via capExcerpt(excerptMax) — excerptMax defaults to 180 so this is unchanged, and the
   // full un-truncated join is kept as excerptText so buildIndexView can re-cap per-site (e.g.
   // a site with shorter cards) without re-parsing the body.
-  // 🩸 Each surviving line is turned into PLAIN TEXT before the join and the cut (excerptPlainText
-  // below). Images were stripped here and links were not, so a post imported from a social feed —
-  // a paragraph of `[#tag](https://…/hashtag/…?…)` links — listed its raw markdown, and the cut
-  // could land mid-URL: one unbreakable 180-character string that pushed a 390px index 427px wide.
-  const fullText = excerptParagraphs(replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => ''))
-    .map(excerptPlainText).filter(Boolean)
-    .join(' ');
+  // 🩸 The body is turned into PLAIN TEXT — the visible text of the page's own rendering — before
+  // the cut (excerptPlainText above). Images were stripped here and links were not, so a post
+  // imported from a social feed — a paragraph of `[#tag](https://…/hashtag/…?…)` links — listed its
+  // raw markdown, and the cut could land mid-URL: one unbreakable 180-character string that pushed
+  // a 390px index 427px wide.
+  const fullText = excerptPlainText(excerptSource(replaceMatches(b, BRACKET_SHAPES.DESC_IMAGE, () => '')));
   const excerpt = capExcerpt(fullText, excerptMax);
   // `slug:` in frontmatter OVERRIDES the one derived from the filename. Normally the filename IS
   // the slug (and stays the single source of truth for every site that doesn't set this), but a
