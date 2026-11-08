@@ -154,6 +154,8 @@ function parseBook(text) {
   const lines = body.split('\n');
   const chapters = [];
   let chapter = null, page = null, fence = false;
+  // a page-head field (image, kind, focus) was consumed: `kind: flow` after it is no longer the first line
+  let headTaken = false;
   let captionBuf = [];
   // the page head: layout lines are read only until the caption has said something
   const inPageHead = () => !captionBuf.some((l) => l.trim() !== '');
@@ -166,7 +168,7 @@ function parseBook(text) {
     chapter = { id: '', title: title, pages: [] }; chapters.push(chapter); };
   const newPage = (title) => { flushCaption();
     if (!chapter) newChapter('');   // a page before any chapter → an implicit untitled chapter
-    page = { id: '', title: title, images: [], caption: '' };
+    page = { id: '', title: title, images: [], caption: '' }; headTaken = false;
     if (photobook) { page.kind = ''; page.focus = ''; }
     chapter.pages.push(page); };
 
@@ -177,13 +179,14 @@ function parseBook(text) {
       const hc = /^#\s+(.*)$/.exec(line);   if (hc) { newChapter(hc[1].trim()); continue; }
       const hp = /^##\s+(.*)$/.exec(line);  if (hp) { newPage(hp[1].trim()); continue; }
       // a flow page opens with `kind: flow`, before any image or text (reef#2279; see FLOW below)
-      if (page && !page.kind && !page.images.length && inPageHead() && RE_FLOW_HEAD.test(line)) { page.kind = FLOW_KIND; continue; }
+      if (page && !headTaken && inPageHead() && RE_FLOW_HEAD.test(line)) { page.kind = FLOW_KIND; headTaken = true; continue; }
       // a flow page's body is reflowable text, verbatim: an image line stays where the author put it
-      const img = parseImageLine(line);     if (img && page && page.kind !== FLOW_KIND) { page.images.push(img); continue; }
-      if (photobook && page && inPageHead()) {
+      const img = parseImageLine(line);     if (img && page && page.kind !== FLOW_KIND) { page.images.push(img); headTaken = true; continue; }
+      // …and so is a photobook field: once flow begins, `focus:` / `kind:` lines are body text
+      if (photobook && page && page.kind !== FLOW_KIND && inPageHead()) {
         // a key the page already has is not read twice — the repeat stays caption, so nothing is lost
         const lay = parseLayoutLine(line);
-        if (lay && !page[Object.keys(lay)[0]]) { Object.assign(page, lay); continue; }
+        if (lay && !page[Object.keys(lay)[0]]) { Object.assign(page, lay); headTaken = true; continue; }
       }
     }
     if (page) captionBuf.push(line);
