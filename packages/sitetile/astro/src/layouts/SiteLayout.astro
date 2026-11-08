@@ -31,6 +31,9 @@ import { bubbleLoaderScript } from '../lib/inbox-bubble-loader.mjs';
 import { APPBAR_CSS, APPBAR_HEAD_SCRIPT, APPBAR_CORAL_FLOOR, isCurrent as appbarCurrent, flatten as appbarFlatten, moreLabel as appbarMoreLabel, navLabel as appbarNavLabel } from '../lib/appbar.mjs';
 import { bubbleKaitoOn } from '../lib/bubble-kaito.mjs';
 import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
+// Every inline <style set:html> below goes through styleText, so its text cannot close the element
+// whatever the producer stripped (the theme compiler strips too; neither relies on the other).
+import { styleText } from '../lib/style-text.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import NavNode from '../components/NavNode.astro';
 import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
@@ -984,7 +987,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         🔴 Which is why the statement above is the site's, not the renderer's: an undeclared site
         emits the three-name statement character for character, so declaring is the only thing
         that can name `reef.corals` on a page. */}
-    <style is:inline set:html={layerOrder}></style>
+    <style is:inline set:html={styleText(layerOrder)}></style>
     <style is:inline>@view-transition { navigation: auto; }</style>
     {/* hreflang — ABSOLUTE URLs when a `site` is configured (Astro.site), matching a real
         <head>; falls back to root-relative when unset. `localePath` is page-aware (same page,
@@ -1018,20 +1021,20 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         enough: while these sheets were still unlayered, they outranked the theme regardless of
         order or specificity once the theme itself moved into a layer. The intent was always this;
         the mechanism now matches it. */}
-    {pkgCss && <style is:inline set:html={`@layer reef.theme {\n${pkgCss}\n}`}></style>}{appbar && <style is:inline set:html={APPBAR_CSS}></style>}{appbar && <script is:inline set:html={APPBAR_HEAD_SCRIPT}></script>}
-    {localeBannerCss && <style is:inline set:html={`@layer reef.theme {\n${localeBannerCss}\n}`}></style>}
+    {pkgCss && <style is:inline set:html={styleText(`@layer reef.theme {\n${pkgCss}\n}`)}></style>}{appbar && <style is:inline set:html={styleText(APPBAR_CSS)}></style>}{appbar && <script is:inline set:html={APPBAR_HEAD_SCRIPT}></script>}
+    {localeBannerCss && <style is:inline set:html={styleText(`@layer reef.theme {\n${localeBannerCss}\n}`)}></style>}
     {/* A platform-drawn route's own sheet (the language chooser). It names its layers itself: the
         look in `reef.theme` — here, ahead of the theme, so the theme wins ties like it does against
         every package above — and the box in `reef.responsive`, except for the heading block or
         the list when this site's theme names it; the page's own box never moves (`themeCss` is all
         the CSS a site's author supplies: the one theme file, compiled tokens and hand-written rules
         together). See lingo/language-page.css. */}
-    {routeCss && <style is:inline set:html={typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss)}></style>}
+    {routeCss && <style is:inline set:html={styleText(typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss))}></style>}
     {/* The site's own CSS. It wins over the renderer because `reef.theme` is the later LAYER —
         not because of where this tag sits. The previous comment here claimed it won by being last
         in <head>; the served HTML disagreed (theme at ~1.3k, Astro's site.css <link> at ~12.8k),
         and that wrong-but-confident comment is part of how the trap survived being looked at. */}
-    {themeCss && <style is:inline set:html={`@layer reef.theme {\n${themeCss}\n}`}></style>}
+    {themeCss && <style is:inline set:html={styleText(`@layer reef.theme {\n${themeCss}\n}`)}></style>}
     {themeToggle && (
       <script is:inline define:vars={{ storageKey: 'rf-theme' }}>
         (function () {

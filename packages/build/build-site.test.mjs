@@ -166,6 +166,45 @@ if (existsSync(join(ASTRO, 'node_modules'))) {
   });
 }
 
+// The site's theme file is inlined into a <style> element. Whatever the file carries — here a
+// closer the compiler would have stripped, handed to the build directly — the built page must keep
+// it inside the element: one `</style` per style element, and legitimate CSS byte-identical.
+if (existsSync(join(ASTRO, 'node_modules'))) {
+  test('theme: an inlined theme cannot close its <style> element; legitimate CSS is untouched', async (t) => {
+    const irDir = mkdtempSync(join(tmpdir(), 'tile-style-ir-'));
+    const outDir = mkdtempSync(join(tmpdir(), 'tile-style-out-'));
+    const themeFile = join(irDir, 'theme.css');
+    t.after(() => { rmSync(irDir, { recursive: true, force: true }); rmSync(outDir, { recursive: true, force: true }); });
+    writeFileSync(join(irDir, '_site.md'), '---\nbrand: Style Fixture\nlang: en-US\ntheme: closerprobe\n---\n');
+    writeFileSync(join(irDir, 'home.md'), '---\nsitetile-page: home\ntitle: home\nlang: en-US\n---\n\n## home\n\nBody.\n');
+    const legit = [
+      '@import url("/fonts/x.css");',
+      '.a::before { content: "<b> 1 < 2"; }',
+      '.b { background: url("/img/x.png"); }',
+      '<!-- .c { color: red; } -->',
+    ].join('\n');
+    writeFileSync(themeFile, `${legit}\n.x{}</sTyLe><i data-probe="after-closer"></i>\n.y{}</STYLE >\n`);
+
+    const result = await buildSite({ irDir, engineDir: ENGINE, outDir, siteUrl: 'https://style.example', themeFile });
+    assert.equal(result.code, 0, 'astro build exited non-zero');
+    const html = readFileSync(join(outDir, 'index.html'), 'utf8');
+
+    const opens = [...html.matchAll(/<style\b[^>]*>/gi)];
+    const closes = [...html.matchAll(/<\/style/gi)];
+    assert.ok(opens.length > 0, 'no inline <style> element on the page');
+    assert.equal(closes.length, opens.length, 'the page does not have exactly one </style per <style> element');
+    // Each element's text runs to the next closer; the theme's element is the one with the probe.
+    const bodies = opens.map((m) => {
+      const start = m.index + m[0].length;
+      return html.slice(start, html.slice(start).search(/<\/style/i) + start);
+    });
+    const theme = bodies.filter((b) => b.includes('data-probe="after-closer"'));
+    assert.equal(theme.length, 1, 'the text after the theme\'s closer is not inside the theme\'s <style> element');
+    assert.ok(theme[0].includes('.y{}'), 'the theme\'s element ended before the end of the theme');
+    assert.ok(theme[0].includes(legit), 'legitimate theme CSS was not inlined byte-identical');
+  });
+}
+
 // 🩸 …and "SKIPPED" only means something if something can make it stop being true. The CI workflow
 // ran `bash scripts/test.sh` and installed nothing at all, while the renderer's node_modules is
 // gitignored — so the case above, the only one in this repo that turns an IR directory into real
