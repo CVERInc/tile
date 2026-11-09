@@ -28,6 +28,7 @@ registerHooks({
 
 const core = await import('./site-core.js');
 const { loadSite } = await import('./astro/src/lib/blog.mjs');
+const { localeEditions, editionMeta } = await import('./astro/src/lib/locale-editions.mjs');
 
 const SITE_MD = '---\nsitetile-page: _site\ntitle: Untitled site\nsite-title: Actual Name\nlang: en-US\n---\n';
 const PAGE_MD = { title: 'About us', 'sitetile-page': 'page' };
@@ -110,4 +111,42 @@ test('siteNameSource / routeSiteNameSource: { name, key } for every rung of the 
     if (fn === siteNameSource) assert.equal(core.siteName(meta, fallback), name);
     if (fn === routeSiteNameSource) assert.equal(core.routeSiteName(meta, fallback), name);
   }
+});
+
+// ── tile#279 r3 (argon review) ───────────────────────────────────────────────────────────────────
+test('r3: a _site.md whose only key was the reserved one is still a site config', () => {
+  const warn = console.warn; console.warn = () => {};
+  let cfg;
+  try { cfg = loadSite({ '../../content/_site.md': '---\nsite-title: Hand-written Stash\n---\n' }); } finally { console.warn = warn; }
+  assert.deepEqual(cfg, { 'site-title': '' });
+});
+
+test('r3: a home page that writes site-title cannot rename the site on /language or /<loc>/404 (editions meta)', () => {
+  const files = {
+    '/content/_site.md': '---\nsitetile-page: _site\ntitle: Atlas Observatory\nlocales: en-US, ja-JP\n---\n',
+    '/content/home.md': '---\nsitetile-page: home\ntitle: Welcome\nsite-title: Leaked From Home\n---\n\n## Home\nHome body.\n',
+    '/content/ja-jp/_site.md': '---\nsitetile-page: _site\ntitle: アトラス天文台\n---\n',
+    '/content/ja-jp.md': '---\nsitetile-page: home\ntitle: ようこそ\nsite-title: Leaked From JA Home\n---\n\n## JA\nJA body.\n',
+  };
+  const warn = console.warn; console.warn = () => {};
+  let ed;
+  try { ed = localeEditions(files); } finally { console.warn = warn; }
+  assert.equal(editionMeta(ed, 'en-US')['site-title'], 'Atlas Observatory');
+  assert.equal(editionMeta(ed, 'ja-JP')['site-title'], 'アトラス天文台');
+  assert.equal(core.siteName(editionMeta(ed, 'en-US'), ''), 'Atlas Observatory');
+});
+
+test('r3: siteSurfaces — header, bubble, og and JSON-LD all come from one siteNameSource result', () => {
+  const { siteSurfaces } = core;
+  const S = (meta, o = { pageTitle: 'About Us', host: 'example.com' }) => siteSurfaces(meta, o);
+  // footer-brand only (stash present, empty): never the page title
+  assert.deepEqual(S({ 'site-title': '', 'footer-brand': 'HOSHIYA', title: 'About Us' }), { name: 'HOSHIYA', key: 'footer-brand', header: 'HOSHIYA' });
+  // nothing site-level at all: the documented fallback is the site's host, constant on every route
+  assert.deepEqual(S({ 'site-title': '', title: 'About Us', theme: 'warm' }), { name: 'example.com', key: 'fallback', header: 'example.com' });
+  // placeholder + footer-brand: the placeholder is unset for the header too
+  assert.deepEqual(S({ 'site-title': 'Untitled site', 'footer-brand': 'HOSHIYA', title: 'About Us' }), { name: 'HOSHIYA', key: 'footer-brand', header: 'HOSHIYA' });
+  // brand stays the header wordmark while the title names the site
+  assert.deepEqual(S({ 'site-title': 'Studio Lilac — comics', brand: 'Lilac' }), { name: 'Studio Lilac — comics', key: 'site-title', header: 'Lilac' });
+  // no _site.md (no stash): the home page / page title still stands in, as before this PR
+  assert.deepEqual(S({ title: 'Legacy Home' }, { pageTitle: 'Legacy Home', host: 'example.com' }), { name: 'Legacy Home', key: 'fallback', header: 'Legacy Home' });
 });

@@ -861,17 +861,29 @@ function siteNamesOf(html) {
   const ld = jsonLdSiteNames(html).join(' | ');
   const logo = html.match(/<a\b[^>]*class="[^"]*\brf-logo\b[^"]*"[^>]*>([\s\S]*?)<\/a>/);
   const header = logo ? (logo[1].match(/<img\b[^>]*\balt="([^"]*)"/) || [])[1] ?? logo[1].replace(/<[^>]*>/g, '').trim() : undefined;
-  return { og, ld, header };
+  // the LAYOUT's site-wide inbox bubble (rendered after the footer, only when the build has a SITE_ID);
+  // a mount the author wrote into a page body is the author's own words, not a site-name surface
+  const tail = html.slice(html.lastIndexOf('</footer>') + 1 || 0);
+  const bubble = html.lastIndexOf('</footer>') < 0 ? null : tail.match(/<div\b[^>]*data-dynamic-coral="inbox-bubble"[^>]*data-kind="site"[^>]*>/);
+  const attr = (n) => (bubble ? (bubble[0].match(new RegExp(` ${n}="([^"]*)"`)) || [])[1] : undefined);
+  return { og, ld, header, bubbleTitle: attr('data-title'), bubbleName: attr('data-site-name') };
 }
+const SITE_NAME_FIELDS = ['og', 'ld', 'header', 'bubbleTitle', 'bubbleName'];
 // → [] when every locale's documents agree; else one line per (locale, field) naming the values.
 function siteNameDisagreements(files, locales) {
   const groups = new Map();
   for (const [rel, html] of files) {
-    if (!/<meta property="og:site_name"/.test(html)) continue; // a redirect stub / non-layout document
+    if (!/<meta property="og:type"/.test(html)) continue; // a redirect stub / non-layout document
     const seg = rel.split('/')[0];
     const loc = locales.includes(seg) ? seg : '';
     const names = siteNamesOf(html);
-    for (const field of ['og', 'ld', 'header']) {
+    // within one document, too: JSON-LD names the site exactly as og:site_name does
+    if (names.og !== undefined && names.ld !== names.og) {
+      const key = `${loc || '(base)'} og≠ld`;
+      if (!groups.has(key)) groups.set(key, new Map([['', '']]));
+      groups.get(key).set(`${names.og} / ${names.ld}`, rel);
+    }
+    for (const field of SITE_NAME_FIELDS) {
       if (names[field] === undefined) continue;
       const key = `${loc || '(base)'} ${field}`;
       if (!groups.has(key)) groups.set(key, new Map());
@@ -883,7 +895,7 @@ function siteNameDisagreements(files, locales) {
     .map(([key, byValue]) => `${key}: ${[...byValue].map(([v, rel]) => `${JSON.stringify(v)} (${rel})`).join(' vs ')}`);
 }
 // The reviewer's input (tile#279): a real title, a short brand, and the reserved key written out.
-function buildRouteNameFixture(siteMd) {
+function buildRouteNameFixture(siteMd, extraContent = {}) {
   const dir = mkdtempSync(join(HERE, '..', '.smoke-route-names-'));
   try {
     cpSync(HERE, dir, { recursive: true, filter: src => !/[\\/](node_modules|\.astro|dist[^\\/]*)(?:[\\/]|$)/.test(src) });
@@ -896,9 +908,10 @@ function buildRouteNameFixture(siteMd) {
     for (const [file, kind, title] of [['home', 'home', 'Welcome'], ['about', 'page', 'About the observatory']]) {
       writeFileSync(join(dir, 'content', file + '.md'), `---\nsitetile-page: ${kind}\ntitle: ${title}\nlang: en-US\n---\n\n## Fixture\nFixture body.\n`);
     }
+    for (const [rel, body] of Object.entries(extraContent)) { mkdirSync(dirname(join(dir, 'content', rel)), { recursive: true }); writeFileSync(join(dir, 'content', rel), body); }
     writeFileSync(join(dir, 'blog/first-light.md'), '---\ntitle: "First light"\ndescription: "Fixture post."\npubDate: 2026-08-03\ncategories: news\ntags: telescopes\n---\nA post body.\n');
     const dist = join(dir, 'dist-route-names');
-    execFileSync('npx', ['astro', 'build', '--outDir', dist], { cwd: dir, stdio: 'inherit', env: { ...process.env, SITE_URL: 'https://example.com' } });
+    execFileSync('npx', ['astro', 'build', '--outDir', dist], { cwd: dir, stdio: 'inherit', env: { ...process.env, SITE_URL: 'https://example.com', SITE_ID: 'route-names' } });
     return htmlFilesOf(dist);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -906,6 +919,21 @@ function buildRouteNameFixture(siteMd) {
 }
 const routeNamePages = buildRouteNameFixture('---\nsitetile-page: _site\ntitle: Atlas Observatory\nbrand: Atlas\nsite-title: Atlas Observatory\npackages: blog\nblog-search: on\nblog-category-routes: on\nlang: en-US\n---\n');
 const ROUTE_KINDS = ['index.html', 'about/index.html', 'devlog/index.html', 'devlog/first-light/index.html', '404.html'];
+// tile#279 r3 — the argon review's inputs: no title and no brand (footer-brand only; nothing but a
+// theme key), a seeded placeholder title beside a footer-brand, and a home page that writes the
+// reserved `site-title` itself on a two-locale site (the /language and /<loc>/404 routes read home
+// frontmatter OVER the site config).
+const SITE_HEAD = '---\nsitetile-page: _site\npackages: blog\nblog-search: on\nblog-category-routes: on\nlang: en-US\n';
+const routeNameInputs = {
+  'footer-brand only': buildRouteNameFixture(SITE_HEAD + 'footer-brand: HOSHIYA\n---\n'),
+  'theme only': buildRouteNameFixture(SITE_HEAD + 'theme: warm\n---\n'),
+  'placeholder + footer-brand': buildRouteNameFixture(SITE_HEAD + 'title: Untitled site\nfooter-brand: HOSHIYA\n---\n'),
+  'home writes site-title (two locales)': buildRouteNameFixture(SITE_HEAD.replace('lang: en-US\n', 'lang: en-US\nlocales: en-US, ja-JP\n') + 'title: Atlas Observatory\n---\n', {
+    'home.md': '---\nsitetile-page: home\ntitle: Welcome\nsite-title: Leaked From Home\nlang: en-US\n---\n\n## Home\nHome body.\n',
+    'ja-jp/_site.md': '---\nsitetile-page: _site\ntitle: アトラス天文台\n---\n',
+    'ja-jp.md': '---\nsitetile-page: home\ntitle: ようこそ\nsite-title: Leaked From JA Home\nlang: ja-JP\n---\n\n## JA\nJA body.\n',
+  }),
+};
 const bubbleNameAttrs = page => (page.match(/<div\b[^>]*data-dynamic-coral="inbox-bubble"[^>]*>/g) || []).map(tag =>
   Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value])));
 const bubbleNameHeader = page => ((page.match(/<a\b[^>]*class="[^"]*\brf-logo\b[^"]*"[^>]*>([\s\S]*?)<\/a>/) || [])[1] || '').replace(/<[^>]*>/g, '').trim();
@@ -1466,6 +1494,16 @@ const checks = [
     assert.deepEqual(bad, [], bad.join(' ;; '));
     return true;
   }],
+  ...Object.entries(routeNameInputs).map(([label, pages]) => [`site name (tile#279 r3, ${label}): header, bubble, og and JSON-LD agree on every route kind`, () => {
+    for (const rel of ROUTE_KINDS) assert.ok(pages.has(rel), `route kind built: ${rel}`);
+    const bad = siteNameDisagreements(pages, ['ja-jp']);
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    const home = siteNamesOf(pages.get('index.html'));
+    for (const f of SITE_NAME_FIELDS) assert.ok(home[f] !== undefined && home[f] !== '', `${f} rendered on the home page: ${JSON.stringify(home)}`);
+    assert.ok(![...pages.values()].some((h) => /Leaked From/.test(h)), 'a page\'s own site-title never reaches any route');
+    assert.ok(!/Welcome|About/.test(home.header), `header is a site name, not a page title: ${home.header}`);
+    return true;
+  }]),
   ['site name: the reviewer\'s _site.md (title + brand + reserved site-title) — one name on every route kind', () => {
     for (const rel of ROUTE_KINDS) assert.ok(routeNamePages.has(rel), `route kind built: ${rel} (have ${[...routeNamePages.keys()].slice(0, 12).join(', ')})`);
     assert.ok([...routeNamePages.keys()].some((r) => /(^|\/)(category|tag|search)\//.test(r)), `an archive or search route was built: ${[...routeNamePages.keys()].join(', ')}`);

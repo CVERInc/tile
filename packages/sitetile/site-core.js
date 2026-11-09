@@ -3504,12 +3504,11 @@ function siteNameSource(meta, fallback = '', titleKey = 'site-title') {
 }
 
 /**
- * `siteNameSource` for whatever meta a route hands the layout. A merged content page carries the
- * catch-all's `site-title` stash (its own `title` is the PAGE's); every other route — blog posts and
- * indexes, archives, search, the 404 — hands over the site config itself, where `title` IS the
- * site's title and there is no stash (loadSite drops a `site-title:` written in `_site.md`: it is
- * the reserved stash key, not a site-layer key). An unstashed meta's `title` is therefore read as the
- * site title, reported as key `title`. A placeholder is still unset either way.
+ * `siteNameSource` for a meta that MAY lack the `site-title` stash, reading such a meta's `title` as
+ * the site title (reported as key `title`). Since tile#279 r2 every route of a site that has a
+ * `_site.md` carries the stash (loadSite stamps the config's own title), so the layout does not call
+ * this; it remains for a raw site config (configSiteNameSource) and for callers holding a meta with
+ * no stash. A placeholder is still unset either way.
  */
 function routeSiteNameSource(meta, fallback = '') {
   const m = meta || {};
@@ -3525,6 +3524,31 @@ function routeSiteNameSource(meta, fallback = '') {
 function configSiteNameSource(config, fallback = '') {
   const { 'site-title': _reserved, ...rest } = config || {};
   return routeSiteNameSource(rest, fallback);
+}
+
+/**
+ * EVERY site-name surface a page carries, from ONE `siteNameSource` result (tile#279 r3): og:site_name
+ * and the JSON-LD WebSite/publisher name are `name`; the header wordmark and the inbox bubble's
+ * data-title / data-site-name are `header` — the site's `brand:` when it has one (the short wordmark
+ * a site picks for its own header), else that same `name`.
+ *
+ * The fallback, when nothing site-level names the site:
+ *   · a site WITH a `_site.md` (its meta carries the `site-title` stash, possibly ''): `host`, the
+ *     site's own hostname — constant on every route, never a page's title;
+ *   · a site with NO `_site.md` (no stash; the home page stands in for the site config): the meta's
+ *     own `title`, then `pageTitle` — that legacy shape has nothing site-level to prefer.
+ *
+ * @param {object} meta  what the route hands the layout
+ * @param {{ pageTitle?: string, host?: string }} [o]
+ * @returns {{ name: string, key: string, header: string }}
+ */
+function siteSurfaces(meta, { pageTitle = '', host = '' } = {}) {
+  const m = meta || {};
+  const str = (v) => (v == null ? '' : String(v).trim());
+  const stashed = Object.prototype.hasOwnProperty.call(m, 'site-title');
+  const fallback = stashed ? str(host) : (str(m.title) || str(pageTitle));
+  const { name, key } = siteNameSource(m, fallback);
+  return { name, key, header: str(m.brand) || name };
 }
 
 /** The name alone — `siteNameSource(meta, fallback).name`. */
@@ -3583,4 +3607,6 @@ export {
   PLACEHOLDER_SITE_TITLES, isPlaceholderSiteTitle, siteName, routeSiteName,
   // …and which key answered: { name, key } (see siteNameSource).
   siteNameSource, routeSiteNameSource, configSiteNameSource,
+  // …and every surface a page derives from that one result (header, bubble, og, JSON-LD).
+  siteSurfaces,
 };

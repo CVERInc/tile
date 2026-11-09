@@ -132,9 +132,11 @@ check('the catch-all stashes site-title AFTER the page merge, so a page cannot c
 const siteCoreExports = await import('./site-core.js');
 const { siteName, isPlaceholderSiteTitle, PLACEHOLDER_SITE_TITLES } = siteCoreExports;
 
-check('the layout reads og:site_name from site-core siteName(meta, headerBrand)', () => {
-  assert.match(layout, /const ogSiteName = siteName\(meta, headerBrand\);/,
-    'og:site_name must resolve through the shared site-name chain');
+check('the layout reads every site-name surface from site-core siteSurfaces (one siteNameSource result)', () => {
+  assert.match(layout, /const siteNames = siteSurfaces\(meta, \{ pageTitle: title, host: Astro\.site \? Astro\.site\.hostname : '' \}\);/,
+    'og:site_name, JSON-LD, the header and the bubble must resolve through the shared site-name chain');
+  assert.match(layout, /const ogSiteName = siteNames\.name;/);
+  assert.match(layout, /const headerBrand = siteNames\.header;/);
   assert.match(layout, /<meta property="og:site_name" content=\{ogSiteName\}/,
     'the tag must consume ogSiteName; consuming headerBrand is the bug this guards');
 });

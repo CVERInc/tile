@@ -697,11 +697,14 @@ export function loadSite(contentGlob, pagePath) {
   for (const [path, raw] of Object.entries(contentGlob || {})) {
     const rel = (path.split('/content/')[1] || '');
     if (rel === '_site.md') {
-      const meta = withoutReservedSiteTitle(splitFrontmatter(String(raw || '')).meta, 'content/_site.md');
-      if (meta && Object.keys(meta).length) base = tagLocalesSource(meta, 'content/_site.md');
+      // tile#279 r3: "is there a config" is asked of what the author WROTE, before the reserved key is
+      // dropped — a `_site.md` whose only key was `site-title` is still a site config (an empty one).
+      const raw0 = splitFrontmatter(String(raw || '')).meta;
+      const meta = withoutReservedSiteTitle(raw0, 'content/_site.md');
+      if (raw0 && Object.keys(raw0).length) base = tagLocalesSource(meta, 'content/_site.md');
     } else {
       const m = rel.match(/^([^/]+)\/_site\.md$/);
-      if (m) { const meta = withoutReservedSiteTitle(splitFrontmatter(String(raw || '')).meta, `content/${rel}`); if (meta && Object.keys(meta).length) locales[m[1]] = tagLocalesSource(meta, `content/${rel}`); }
+      if (m) { const raw0 = splitFrontmatter(String(raw || '')).meta; const meta = withoutReservedSiteTitle(raw0, `content/${rel}`); if (raw0 && Object.keys(raw0).length) locales[m[1]] = tagLocalesSource(meta, `content/${rel}`); }
     }
   }
   if (!base && !Object.keys(locales).length) return null;
@@ -715,9 +718,9 @@ export function loadSite(contentGlob, pagePath) {
   if (mode) merged[DYNAMIC_CORAL_CSS_KEY] = mode; else delete merged[DYNAMIC_CORAL_CSS_KEY];
   // tile#279 r2 — the site's own title travels as the `site-title` stash on EVERY route, not only the
   // content pages the catch-all stashes. Blog posts and indexes, archives, search, the 404 and the
-  // language chooser all receive this config (directly, or under a home page's frontmatter, which
-  // cannot set the reserved key), so the one site-name chain (site-core `siteName`) reads the same
-  // site-level title wherever it runs — never a page's title, never a guess from `meta.title`.
+  // language chooser all receive this config — directly, or under a home page's frontmatter, in which
+  // case the merge re-stamps this value after the page's keys (locale-editions.mjs, like the
+  // catch-all), so a page that writes `site-title:` itself cannot rename the site (tile#279 r3).
   merged['site-title'] = merged.title == null ? '' : String(merged.title);
   return merged;
 }
