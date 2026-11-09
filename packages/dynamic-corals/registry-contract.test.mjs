@@ -101,13 +101,18 @@ function checkRegistryContract({ name, coralDir, registryRoot }) {
   assert.ok(channels && typeof channels === 'object',
     `${name} has no channel entry in registry/manifest.json — no site can load it`);
 
-  // (2)+(3)+(4) v0 and latest both exist, both resolve to something published, and neither is
-  // ahead of the coral's own current version — a channel cannot serve a version its own source
-  // does not yet describe. Behind is fine (see the lag-tolerance note at the top of this file).
-  // tile#284 — and the channel of the coral's OWN major: a breaking release is a new major on a new
-  // channel (`v1` for 1.x), while `v0` keeps serving the 0.x contract its hosts were written for.
-  const ownChannel = `v${String(version).split('.')[0]}`;
-  for (const channel of [...new Set(['v0', 'latest', ownChannel])]) {
+  // (2)+(3)+(4) `latest` and the channel of the coral's OWN major (`v0` for 0.x, `v1` for 1.x) both
+  // exist; every channel resolves to something published and none is ahead of the coral's own
+  // current version — a channel cannot serve a version its own source does not yet describe. Behind
+  // is fine (see the lag-tolerance note at the top of this file).
+  // (4b) tile#284 — 🔴 A CHANNEL IS A MAJOR. Every channel named `v<N>` resolves to an N.x version:
+  // a breaking release is a new major on a new channel, and `v0` keeps serving the 0.x contract its
+  // hosts were written for. Without this, `{ v0: '1.0.0' }` (an old host silently handed the breaking
+  // release) or a swapped `{ v0: '1.0.0', v1: '0.1.0' }` passed every check above.
+  const majorOf = (v) => Number(String(v).split('.')[0]);
+  const ownChannel = `v${majorOf(version)}`;
+  const majorChannels = Object.keys(channels).filter((c) => /^v\d+$/.test(c));
+  for (const channel of [...new Set(['latest', ownChannel, ...majorChannels])]) {
     const channelVersion = channels[channel];
     assert.ok(channelVersion,
       `${name} has no ${channel} channel in registry/manifest.json — no site can load it`);
@@ -116,6 +121,10 @@ function checkRegistryContract({ name, coralDir, registryRoot }) {
     assert.ok(compareVersions(channelVersion, version) <= 0,
       `${name} ${channel} points at ${channelVersion}, which is ahead of this coral's own version ${version} — `
       + 'a channel cannot serve a version its own source does not yet describe');
+    const named = /^v(\d+)$/.exec(channel);
+    assert.ok(!named || majorOf(channelVersion) === Number(named[1]),
+      `${name} ${channel} points at ${channelVersion}, a ${majorOf(channelVersion)}.x version — channel ${channel} serves ${named && named[1]}.x only `
+      + '(a breaking release is a new major on a new channel; an old major\'s channel is never repointed to it)');
   }
 
   const sourceManifest = JSON.parse(readFileSync(join(coralDir, 'manifest.json'), 'utf8'));
@@ -205,7 +214,8 @@ function buildFixture({
     writeFileSync(join(dir, `${name}.js`), '/* fixture bundle (older major) */\n');
   }
 
-  const table = channels ?? { v0: channelVersion, latest: channelVersion, [`v${String(packageVersion).split('.')[0]}`]: channelVersion };
+  // Default: `latest` and the channel of channelVersion's own major (a channel is a major, tile#284).
+  const table = channels ?? { latest: channelVersion, [`v${String(channelVersion).split('.')[0]}`]: channelVersion };
   writeFileSync(join(registryRoot, 'manifest.json'), JSON.stringify({ [name]: table }, null, 2) + '\n');
 
   return { tmp, name, coralDir, registryRoot };
@@ -233,7 +243,7 @@ test('CONTROL on the lag tolerance: channel behind package version, package vers
 
 test('a channel pointing at an unpublished version is red', () => {
   withFixture({
-    packageVersion: '1.0.0', channelVersion: '0.9.0', publishChannelVersionArtifact: false,
+    packageVersion: '1.1.0', channelVersion: '1.0.0', publishChannelVersionArtifact: false,
   }, (fx) => {
     assert.throws(() =>
       checkRegistryContract({ name: fx.name, coralDir: fx.coralDir, registryRoot: fx.registryRoot }),
@@ -280,6 +290,35 @@ test('tile#284: a 1.x coral with no v1 channel is red, even when v0 and latest e
   });
 });
 
+test('tile#284 (codex r2): v0 repointed to the breaking 1.0.0 while v1 exists is red', () => {
+  withFixture({ packageVersion: '1.0.0', channels: { v0: '1.0.0', v1: '1.0.0', latest: '1.0.0' } }, (fx) => {
+    assert.throws(() =>
+      checkRegistryContract({ name: fx.name, coralDir: fx.coralDir, registryRoot: fx.registryRoot }),
+      /v0 points at 1\.0\.0, a 1\.x version — channel v0 serves 0\.x only/);
+  });
+});
+
+test('tile#284 (codex r2): swapped majors — v0 on 1.0.0, v1 on 0.1.0 — is red', () => {
+  withFixture({ packageVersion: '1.0.0', extraVersions: ['0.1.0'], channels: { v0: '1.0.0', v1: '0.1.0', latest: '1.0.0' } }, (fx) => {
+    assert.throws(() =>
+      checkRegistryContract({ name: fx.name, coralDir: fx.coralDir, registryRoot: fx.registryRoot }),
+      /channel v[01] serves [01]\.x only/);
+  });
+  // and each half alone is red with its own name
+  withFixture({ packageVersion: '1.0.0', extraVersions: ['0.1.0'], channels: { v0: '0.1.0', v1: '0.1.0', latest: '1.0.0' } }, (fx) => {
+    assert.throws(() =>
+      checkRegistryContract({ name: fx.name, coralDir: fx.coralDir, registryRoot: fx.registryRoot }),
+      /v1 points at 0\.1\.0, a 0\.x version — channel v1 serves 1\.x only/);
+  });
+});
+
+test('tile#284 CONTROL: a 0.x coral on v0 and latest — green', () => {
+  withFixture({ packageVersion: '0.3.0', channelVersion: '0.2.0' }, (fx) => {
+    assert.doesNotThrow(() =>
+      checkRegistryContract({ name: fx.name, coralDir: fx.coralDir, registryRoot: fx.registryRoot }));
+  });
+});
+
 test('tile#284 CONTROL: v0 kept on 0.1.0 while v1 and latest serve 1.0.0 — green', () => {
   withFixture({ packageVersion: '1.0.0', extraVersions: ['0.1.0'], channels: { v0: '0.1.0', v1: '1.0.0', latest: '1.0.0' } }, (fx) => {
     assert.doesNotThrow(() =>
@@ -299,7 +338,7 @@ if (existsSync(MANIFEST_PATH)) {
   const registryManifest = JSON.parse(readFileSync(MANIFEST_PATH, 'utf8'));
 
   for (const name of REGISTRY_CORALS) {
-    test(`${name}: registry/channel contract holds (own version published; v0/latest resolve, never lead; source-manifest identity valid and agrees with the immutable copy after normalisation)`, () => {
+    test(`${name}: registry/channel contract holds (own version published; latest and own-major channel resolve, never lead; every vN serves N.x; source-manifest identity valid and agrees with the immutable copy after normalisation)`, () => {
       checkRegistryContract({ name, coralDir: join(CORALS_DIR, name), registryRoot: REGISTRY_ROOT });
     });
   }
