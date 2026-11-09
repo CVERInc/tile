@@ -24,6 +24,7 @@
 // home, not `/`: a Chinese visitor who came in through /zh-tw/ stays in Chinese.
 //
 // noindex, as the root 404: a 404 that gets indexed is a search result that wastes somebody's click.
+import { siteTitleSuffix } from '@sitetile';
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { localeEditions, editionMeta, contentPageRel } from '../../lib/locale-editions.mjs';
 import { toUrlLocale, uiCopy, sameLocale } from '../../packages/lingo/locale.mjs';
@@ -58,7 +59,7 @@ const { lang, meta } = Astro.props;
 const copy = uiCopy(lang);
 const home = `/${toUrlLocale(lang)}/`;
 ---
-<SiteLayout title={`${copy.notFoundTitle} — ${meta.title || ''}`} lang={lang} meta={meta} robots="noindex" languageReturn={home}>
+<SiteLayout title={`${copy.notFoundTitle}${siteTitleSuffix(meta)}`} lang={lang} meta={meta} robots="noindex" languageReturn={home}>
   <section class="st-section st-notfound">
     <h1>{copy.notFoundTitle}</h1>
     <p>{copy.notFoundBody}</p>

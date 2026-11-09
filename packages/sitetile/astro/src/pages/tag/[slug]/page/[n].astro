@@ -3,6 +3,7 @@
 // Fans out to (tag × page 2..totalPages): each tag has its own post count. No-op unless
 // `blog-tag-routes` is truthy AND `blog-page-size` is set. Slug-keyed like ../index.astro.
 // Rendering delegated to the shared ArchiveView.
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from '../../../../components/ArchiveView.astro';
 import { uiCopy } from '../../../../packages/lingo/locale.mjs';
 import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, tagBase } from '../../../../lib/blog.mjs';
@@ -44,5 +45,5 @@ const labelPosts = posts.filter((p) => p.tags.includes(tag));
 const subhead = archivePrefixes(meta).tag + tag;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
-<ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag}${uiCopy(meta.lang).pageSuffix(pageNum)}— ${meta.title || ''}`}
+<ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag}${uiCopy(meta.lang).pageSuffix(pageNum)}${siteTitleSuffix(meta, '— ')}`}
   heading={tag} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />

@@ -1,8 +1,9 @@
 // blog tenancy — WHO a blog belongs to, and whether a site has one at all.
 //
 // Split out of blog.mjs so it can be exercised by plain `node` (blog.mjs imports the
-// `@sitetile` Vite alias, which only resolves inside an Astro build). Nothing here needs
-// the model layer: these are pure functions over a site's frontmatter and its post corpus.
+// `@sitetile` Vite alias, which only resolves inside an Astro build). Only the site-name
+// chain comes from the model layer (site-core.js, plain ESM, imported by path); the rest are
+// pure functions over a site's frontmatter and its post corpus.
 // blog.mjs re-exports all three, so every call site still imports from blog.mjs.
 //
 // WHY THIS FILE EXISTS. The blog package once carried its vendor's identity as its
@@ -14,6 +15,8 @@
 // zero posts between them, neither declaring `packages: blog` — were both publishing a
 // /devlog wearing the vendor's name and voice, and a 1410-post blog's feed was "Devlog — Devlog".
 // A landlord's name must not be the default on a tenant's door.
+
+import { titleSiteName } from '../../../site-core.js';
 
 // blogInstalled: does this site actually HAVE a blog? Two ways to qualify — it DECLARED the
 // capability (`packages: blog`), or its store already holds posts. The second arm is not
@@ -31,7 +34,8 @@ export function blogInstalled(meta, posts) {
 // filtering empties first means it now publishes its blog title alone. A site that sets both
 // keeps a feed titled "<site> — <blog>", byte-identical to the old literal.
 export function feedTitle(meta) {
-  const site = String((meta && meta.title) || '').trim();
+  // The site half is the site's title name (site-core titleSiteName): never a seeded placeholder.
+  const site = titleSiteName(meta).trim();
   const blog = String((meta && meta['blog-title']) || '').trim();
   return [site, blog].filter(Boolean).join(' — ') || 'Blog';
 }

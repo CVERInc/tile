@@ -34,6 +34,7 @@ import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-
 import { fileForPath } from './noindex-pass.mjs';
 import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
 import { encodePng, APPLE_TOUCH_PX } from '../icon-core.mjs';
+import { PLACEHOLDER_SITE_TITLES } from '../site-core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
@@ -895,7 +896,7 @@ function siteNameDisagreements(files, locales) {
     .map(([key, byValue]) => `${key}: ${[...byValue].map(([v, rel]) => `${JSON.stringify(v)} (${rel})`).join(' vs ')}`);
 }
 // The reviewer's input (tile#279): a real title, a short brand, and the reserved key written out.
-function buildRouteNameFixture(siteMd, extraContent = {}) {
+function buildRouteNameFixture(siteMd, extraContent = {}, extraBlog = {}) {
   const dir = mkdtempSync(join(HERE, '..', '.smoke-route-names-'));
   try {
     cpSync(HERE, dir, { recursive: true, filter: src => !/[\\/](node_modules|\.astro|dist[^\\/]*)(?:[\\/]|$)/.test(src) });
@@ -910,6 +911,7 @@ function buildRouteNameFixture(siteMd, extraContent = {}) {
     }
     for (const [rel, body] of Object.entries(extraContent)) { mkdirSync(dirname(join(dir, 'content', rel)), { recursive: true }); writeFileSync(join(dir, 'content', rel), body); }
     writeFileSync(join(dir, 'blog/first-light.md'), '---\ntitle: "First light"\ndescription: "Fixture post."\npubDate: 2026-08-03\ncategories: news\ntags: telescopes\n---\nA post body.\n');
+    for (const [rel, body] of Object.entries(extraBlog)) { mkdirSync(dirname(join(dir, 'blog', rel)), { recursive: true }); writeFileSync(join(dir, 'blog', rel), body); }
     const dist = join(dir, 'dist-route-names');
     execFileSync('npx', ['astro', 'build', '--outDir', dist], { cwd: dir, stdio: 'inherit', env: { ...process.env, SITE_URL: 'https://example.com', SITE_ID: 'route-names' } });
     return htmlFilesOf(dist);
@@ -917,8 +919,25 @@ function buildRouteNameFixture(siteMd, extraContent = {}) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
-const routeNamePages = buildRouteNameFixture('---\nsitetile-page: _site\ntitle: Atlas Observatory\nbrand: Atlas\nsite-title: Atlas Observatory\npackages: blog\nblog-search: on\nblog-category-routes: on\nlang: en-US\n---\n');
+const routeNamePages = buildRouteNameFixture('---\nsitetile-page: _site\ntitle: Atlas Observatory\nbrand: Atlas\nsite-title: Atlas Observatory\npackages: blog\nblog-search: on\nblog-category-routes: on\nblog-tag-routes: on\nblog-date-routes: on\nlang: en-US\n---\n');
 const ROUTE_KINDS = ['index.html', 'about/index.html', 'devlog/index.html', 'devlog/first-light/index.html', '404.html'];
+// ── THE SITE NAME IN A PAGE TITLE (reef#3040) ─────────────────────────────────────────────────────
+// Every title surface a route carries: <title>, og:title, twitter:title, and the footer line that
+// falls back to the title (SiteLayout: no footer links and no copyright → <p>{title}</p>).
+function titleSurfacesOf(html) {
+  const unesc = (v) => v == null ? v : v.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  const footer = (html.match(/<footer\b[^>]*class="[^"]*\brf-footer\b[^"]*"[^>]*>([\s\S]*?)<\/footer>/) || [])[1];
+  return {
+    title: unesc((html.match(/<title>([^<]*)<\/title>/) || [])[1]),
+    og: unesc((html.match(/<meta property="og:title" content="([^"]*)">/) || [])[1]),
+    twitter: unesc((html.match(/<meta name="twitter:title" content="([^"]*)">/) || [])[1]),
+    footer: footer == null ? undefined : unesc((footer.match(/<p>([^<]*)<\/p>/) || [])[1]),
+  };
+}
+// The route kinds that append the site's name to their own heading, as built by these fixtures.
+const SUFFIX_ROUTES = ['devlog/index.html', 'devlog/first-light/index.html', '404.html', 'tag/telescopes/index.html',
+  'category/news/index.html', '2026/index.html', '2026/08/index.html', 'search/index.html'];
+const SUFFIX_ROUTES_JA = ['ja-jp/404.html', 'ja-jp/devlog/index.html', 'ja-jp/devlog/first-light/index.html', 'ja-jp/tag/telescopes/index.html', 'ja-jp/category/news/index.html'];
 // tile#279 r3 — the argon review's inputs: no title and no brand (footer-brand only; nothing but a
 // theme key), a seeded placeholder title beside a footer-brand, and a home page that writes the
 // reserved `site-title` itself on a two-locale site (the /language and /<loc>/404 routes read home
@@ -928,6 +947,12 @@ const routeNameInputs = {
   'footer-brand only': buildRouteNameFixture(SITE_HEAD + 'footer-brand: HOSHIYA\n---\n'),
   'theme only': buildRouteNameFixture(SITE_HEAD + 'theme: warm\n---\n'),
   'placeholder + footer-brand': buildRouteNameFixture(SITE_HEAD + 'title: Untitled site\nfooter-brand: HOSHIYA\n---\n'),
+  // reef#3040: the seeded placeholder is the ONLY name (base and a second locale), with every
+  // archive kind routed — the title-suffix check below reads this build.
+  'placeholder only (two locales, every archive)': buildRouteNameFixture(
+    SITE_HEAD.replace('lang: en-US\n', 'lang: en-US\nlocales: en-US, ja-JP\n') + 'title: Untitled site\nblog-tag-routes: on\nblog-date-routes: on\n---\n',
+    { 'ja-jp/_site.md': '---\nsitetile-page: _site\ntitle: 無題のサイト\n---\n', 'ja-jp.md': '---\nsitetile-page: home\ntitle: ようこそ\nlang: ja-JP\n---\n\n## JA\nJA body.\n' },
+    { 'ja-jp/first-light.md': '---\ntitle: "初光"\ndescription: "Fixture post."\npubDate: 2026-08-04\ncategories: news\ntags: telescopes\n---\n本文。\n' }),
   'home writes site-title (two locales)': buildRouteNameFixture(SITE_HEAD.replace('lang: en-US\n', 'lang: en-US\nlocales: en-US, ja-JP\n') + 'title: Atlas Observatory\n---\n', {
     'home.md': '---\nsitetile-page: home\ntitle: Welcome\nsite-title: Leaked From Home\nlang: en-US\n---\n\n## Home\nHome body.\n',
     'ja-jp/_site.md': '---\nsitetile-page: _site\ntitle: アトラス天文台\n---\n',
@@ -1565,6 +1590,43 @@ const checks = [
     assert.ok(!/Welcome|About/.test(home.header), `header is a site name, not a page title: ${home.header}`);
     return true;
   }]),
+  ['title suffix (reef#3040): the placeholder site title never reaches <title>, og:title, twitter:title or the footer line on any route', () => {
+    const pages = routeNameInputs['placeholder only (two locales, every archive)'];
+    const have = [...pages.keys()];
+    for (const rel of [...SUFFIX_ROUTES, ...SUFFIX_ROUTES_JA]) assert.ok(pages.has(rel), `route built: ${rel} (have ${have.join(', ')})`);
+    const placeholders = Object.values(PLACEHOLDER_SITE_TITLES);
+    const bad = [];
+    let docs = 0;
+    for (const [rel, html] of pages) {
+      if (!/<meta property="og:type"/.test(html)) continue; // a redirect stub / non-layout document
+      docs++;
+      const t = titleSurfacesOf(html);
+      for (const [field, v] of Object.entries(t)) {
+        if (v == null) continue;
+        if (placeholders.some((p) => v.includes(p))) bad.push(`${rel} ${field}: ${JSON.stringify(v)}`);
+        // no real name → the suffix is omitted, not left dangling
+        if (/—\s*$/.test(v)) bad.push(`${rel} ${field} dangles: ${JSON.stringify(v)}`);
+      }
+    }
+    assert.ok(docs >= SUFFIX_ROUTES.length + SUFFIX_ROUTES_JA.length, `layout documents checked: ${docs}`);
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    // the heading alone stands: the post's own title, the 404's own words
+    assert.equal(titleSurfacesOf(pages.get('devlog/first-light/index.html')).title, 'First light');
+    assert.equal(titleSurfacesOf(pages.get('ja-jp/devlog/first-light/index.html')).title, '初光');
+    return true;
+  }],
+  ['title suffix (reef#3040): a real site name is still the suffix on every route that carries one', () => {
+    const bad = [];
+    for (const rel of SUFFIX_ROUTES) {
+      assert.ok(routeNamePages.has(rel), `route built: ${rel} (have ${[...routeNamePages.keys()].join(', ')})`);
+      const t = titleSurfacesOf(routeNamePages.get(rel));
+      for (const field of ['title', 'og', 'twitter']) if (!String(t[field]).endsWith(' — Atlas Observatory')) bad.push(`${rel} ${field}: ${JSON.stringify(t[field])}`);
+      if (t.footer !== undefined && t.footer !== t.title) bad.push(`${rel} footer ≠ title: ${JSON.stringify(t.footer)}`);
+    }
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    assert.equal(titleSurfacesOf(routeNamePages.get('devlog/first-light/index.html')).title, 'First light — Atlas Observatory');
+    return true;
+  }],
   ['site name: the reviewer\'s _site.md (title + brand + reserved site-title) — one name on every route kind', () => {
     for (const rel of ROUTE_KINDS) assert.ok(routeNamePages.has(rel), `route kind built: ${rel} (have ${[...routeNamePages.keys()].slice(0, 12).join(', ')})`);
     assert.ok([...routeNamePages.keys()].some((r) => /(^|\/)(category|tag|search)\//.test(r)), `an archive or search route was built: ${[...routeNamePages.keys()].join(', ')}`);
