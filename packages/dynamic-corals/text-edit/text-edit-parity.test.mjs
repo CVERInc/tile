@@ -161,12 +161,12 @@ test('the editor posts one text-only edit, and a refusal puts the old words back
   assert.equal(ed.begin(f), true);
   f.el.textContent = '  Black\nwalnut ';
   const m = ed.commit();
-  assert.deepEqual(m, { type: EDIT_MESSAGE, id: 'e1', page: '/', revision: REV(PAGE), anchor: { section: 's1-about-us', start: 13, end: 13 }, before: 'Walnut', after: 'Black walnut' });
+  assert.deepEqual(m, { type: EDIT_MESSAGE, doc: ed.doc, id: 'e1', page: '/', revision: REV(PAGE), anchor: { section: 's1-about-us', start: 13, end: 13 }, before: 'Walnut', after: 'Black walnut' });
   assert.equal(f.el.textContent, 'Black walnut');
-  assert.equal(ed.onResult({ type: RESULT_MESSAGE, id: 'e1', ok: false, hint: 'Changed elsewhere — open the editor.' }), true);
+  assert.equal(ed.onResult({ type: RESULT_MESSAGE, doc: ed.doc, id: 'e1', ok: false, hint: 'Changed elsewhere — open the editor.' }), true);
   assert.equal(f.el.textContent, 'Walnut');
   assert.deepEqual(hints, ['Changed elsewhere — open the editor.']);
-  assert.equal(ed.onResult({ type: RESULT_MESSAGE, id: 'e1', ok: true }), false, 'an answer is used once');
+  assert.equal(ed.onResult({ type: RESULT_MESSAGE, doc: ed.doc, id: 'e1', ok: true }), false, 'an answer is used once');
 
   // unchanged and emptied text posts nothing; Escape restores
   assert.equal(ed.begin(f), true); assert.equal(ed.commit(), null);
