@@ -31,6 +31,9 @@ import { bubbleLoaderScript } from '../lib/inbox-bubble-loader.mjs';
 import { APPBAR_CSS, APPBAR_HEAD_SCRIPT, APPBAR_CORAL_FLOOR, isCurrent as appbarCurrent, flatten as appbarFlatten, moreLabel as appbarMoreLabel, navLabel as appbarNavLabel } from '../lib/appbar.mjs';
 import { bubbleKaitoOn } from '../lib/bubble-kaito.mjs';
 import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
+// Every inline <style set:html> below goes through styleText, so its text cannot close the element
+// whatever the producer stripped (the theme compiler strips too; neither relies on the other).
+import { styleText } from '../lib/style-text.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import NavNode from '../components/NavNode.astro';
 import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
@@ -531,7 +534,7 @@ const showTopBanner = !!(bleed && bleed.topBanner && locales.length > 0);
 //   right: `.st-sidebar-main` carries the normal <slot /> content
 // All other values (or absent) fall through to the current single-column rf-main.
 // sidebar-nav syntax mirrors footer-cols: `;;` = group separator, `;` = item, `Label=url`.
-import { parseSidebarNav, safeHref, safeSrc } from '../../../site-core.js';
+import { parseSidebarNav, safeHref, safeSrc, siteName, routeSiteName } from '../../../site-core.js';
 import { groupByArchive, footerWidgets, blogSearchOn, postUrl, loadSite } from '../lib/blog.mjs';
 const pageLayout = meta.layout ? String(meta.layout).trim() : 'stack';
 const isSidebar = pageLayout === 'sidebar';
@@ -782,27 +785,6 @@ const bubbleOn = !!bubbleSiteId && inboxBubbleOn(meta, Astro.url.pathname, rende
 // too (../lib/public-artifacts.mjs), so the attribute never points at a file that is `[]` on purpose.
 const hasBlogPosts = Object.keys(import.meta.glob('../../blog/*.md')).length > 0;
 const bubbleSearch = (hasBlog || hasBlogPosts) && bubbleSearchOn(meta);
-// Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
-// already named. No new copy, no new default to get wrong in somebody else's language.
-const feedLinkTitle = `${String(meta['blog-title'] || meta.title || '').trim() || 'Feed'}`;
-// JSON-LD graph for THIS page. `article` only when the page said so — PostView sets og-type, so a
-// content page can never accidentally claim to be a blog post.
-const jsonLd = jsonLdScript(pageGraph({
-  kind: ogType === 'article' ? 'article' : 'website',
-  url: canonicalHref,
-  siteName: String(meta['site-title'] || meta.title || '').trim(),
-  siteUrl: Astro.site ? new URL('/', Astro.site).href : '',
-  logo: absUrl(String(meta['site-logo'] || meta['footer-logo'] || '').trim()),
-  title: String(meta['share-title'] || title || '').trim(),
-  description: String(meta.description || '').trim(),
-  image: shareImage,
-  datePublished: String(meta['article-published-time'] || '').trim(),
-  author: String(meta['article-author'] || meta['blog-author'] || '').trim(),
-  // Only when search is really on — advertising a SearchAction for a route that no longer exists
-  // would be the same defect as the hreflang above.
-  searchUrl: blogSearchOn(meta) && hasBlog && Astro.site ? new URL('/search', Astro.site).href : '',
-  inLanguage: htmlLang,
-}));
 // og:site_name is the NAME OF THE SITE, so it must be identical on every page. It used to reuse
 // `headerBrand`, which is a per-page value (meta.brand → meta.title → title) and therefore drifted
 // to whatever the page called itself. `site-title` is stashed by the [...path] catch-all before the
@@ -823,10 +805,41 @@ const jsonLd = jsonLdScript(pageGraph({
 // to `headerBrand`'s page-title tail. `headerBrand` itself stays the LAST resort, kept for legacy
 // sites with no _site.md at all (no site-title key, no brand, no footer-brand set anywhere) —
 // there is nothing site-level left to prefer there, which is the old behaviour, not a regression.
-const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
-  || (meta.brand ? String(meta.brand).trim() : '')
-  || (meta['footer-brand'] ? String(meta['footer-brand']).trim() : '')
-  || headerBrand;
+//
+// 🩸 reef#3040 (measured live): a new site is born with a placeholder `title:` (未命名網站, "Untitled
+// site"…), owners fill `brand:` and leave `title:` alone, and this chain read the placeholder first —
+// og:site_name and the JSON-LD below named the site 未命名網站 on every share card and search result.
+// The chain now lives in site-core.js (`siteName`), next to the placeholder list the platform seeds
+// from: a title equal to a placeholder is UNSET there, so brand / footer-brand win over it, and it is
+// still the site's one constant name when neither exists (a page's own title never stands in).
+const ogSiteName = siteName(meta, headerBrand);
+// JSON-LD's WebSite/publisher name, through the same chain. tile#277 r2: blog, archive, search and
+// 404 routes hand this layout the site config itself — `title` with no `site-title` stash — and a
+// real title there must stay first (it always was, here); `routeSiteName` reads that `title` as the
+// site title only when no stash exists, so a merged content page's own title is never taken for it.
+// On a stashed content page this is exactly `ogSiteName`.
+const jsonLdSiteName = routeSiteName(meta, headerBrand);
+// Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
+// already named. No new copy, no new default to get wrong in somebody else's language.
+const feedLinkTitle = `${String(meta['blog-title'] || meta.title || '').trim() || 'Feed'}`;
+// JSON-LD graph for THIS page. `article` only when the page said so — PostView sets og-type, so a
+// content page can never accidentally claim to be a blog post.
+const jsonLd = jsonLdScript(pageGraph({
+  kind: ogType === 'article' ? 'article' : 'website',
+  url: canonicalHref,
+  siteName: jsonLdSiteName,
+  siteUrl: Astro.site ? new URL('/', Astro.site).href : '',
+  logo: absUrl(String(meta['site-logo'] || meta['footer-logo'] || '').trim()),
+  title: String(meta['share-title'] || title || '').trim(),
+  description: String(meta.description || '').trim(),
+  image: shareImage,
+  datePublished: String(meta['article-published-time'] || '').trim(),
+  author: String(meta['article-author'] || meta['blog-author'] || '').trim(),
+  // Only when search is really on — advertising a SearchAction for a route that no longer exists
+  // would be the same defect as the hreflang above.
+  searchUrl: blogSearchOn(meta) && hasBlog && Astro.site ? new URL('/search', Astro.site).href : '',
+  inLanguage: htmlLang,
+}));
 // Where this site's dynamic-coral package CSS sits in the cascade — stamped on the DOCUMENT ROOT,
 // not <body>, because a registry-served widget reads it as `document.documentElement` and most
 // coral mounts are authored page markdown this layout never renders, so there is no per-mount
@@ -863,6 +876,12 @@ const siteEmbed = typeof siteEmbedRaw === 'string' && siteEmbedRaw.trim() !== ''
 const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
   ? '@layer reef.base, reef.corals, reef.theme, reef.responsive;'
   : '@layer reef.base, reef.theme, reef.responsive;';
+// Inline-style bodies, computed here so every <style set:html> below is the one census-allowed
+// shape `set:html={styleText(<identifier>)}` (packages/sitetile/style-text.test.mjs).
+const pkgCssBlock = pkgCss ? `@layer reef.theme {\n${pkgCss}\n}` : '';
+const localeBannerBlock = localeBannerCss ? `@layer reef.theme {\n${localeBannerCss}\n}` : '';
+const routeCssText = routeCss ? (typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss)) : '';
+const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
 ---
 <!doctype html>
 <html lang={htmlLang} data-lingo-root data-dynamic-coral-css={dynamicCoralCss || undefined} class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
@@ -984,7 +1003,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         🔴 Which is why the statement above is the site's, not the renderer's: an undeclared site
         emits the three-name statement character for character, so declaring is the only thing
         that can name `reef.corals` on a page. */}
-    <style is:inline set:html={layerOrder}></style>
+    <style is:inline set:html={styleText(layerOrder)}></style>
     <style is:inline>@view-transition { navigation: auto; }</style>
     {/* hreflang — ABSOLUTE URLs when a `site` is configured (Astro.site), matching a real
         <head>; falls back to root-relative when unset. `localePath` is page-aware (same page,
@@ -1018,20 +1037,20 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         enough: while these sheets were still unlayered, they outranked the theme regardless of
         order or specificity once the theme itself moved into a layer. The intent was always this;
         the mechanism now matches it. */}
-    {pkgCss && <style is:inline set:html={`@layer reef.theme {\n${pkgCss}\n}`}></style>}{appbar && <style is:inline set:html={APPBAR_CSS}></style>}{appbar && <script is:inline set:html={APPBAR_HEAD_SCRIPT}></script>}
-    {localeBannerCss && <style is:inline set:html={`@layer reef.theme {\n${localeBannerCss}\n}`}></style>}
+    {pkgCss && <style is:inline set:html={styleText(pkgCssBlock)}></style>}{appbar && <style is:inline set:html={styleText(APPBAR_CSS)}></style>}{appbar && <script is:inline set:html={APPBAR_HEAD_SCRIPT}></script>}
+    {localeBannerCss && <style is:inline set:html={styleText(localeBannerBlock)}></style>}
     {/* A platform-drawn route's own sheet (the language chooser). It names its layers itself: the
         look in `reef.theme` — here, ahead of the theme, so the theme wins ties like it does against
         every package above — and the box in `reef.responsive`, except for the heading block or
         the list when this site's theme names it; the page's own box never moves (`themeCss` is all
         the CSS a site's author supplies: the one theme file, compiled tokens and hand-written rules
         together). See lingo/language-page.css. */}
-    {routeCss && <style is:inline set:html={typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss)}></style>}
+    {routeCss && <style is:inline set:html={styleText(routeCssText)}></style>}
     {/* The site's own CSS. It wins over the renderer because `reef.theme` is the later LAYER —
         not because of where this tag sits. The previous comment here claimed it won by being last
         in <head>; the served HTML disagreed (theme at ~1.3k, Astro's site.css <link> at ~12.8k),
         and that wrong-but-confident comment is part of how the trap survived being looked at. */}
-    {themeCss && <style is:inline set:html={`@layer reef.theme {\n${themeCss}\n}`}></style>}
+    {themeCss && <style is:inline set:html={styleText(themeCssBlock)}></style>}
     {themeToggle && (
       <script is:inline define:vars={{ storageKey: 'rf-theme' }}>
         (function () {
@@ -1222,10 +1241,10 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
       {headerActions.length > 0 && (
         <div class="rf-header-actions" data-cart-guild={cartWired ? cartGuild : undefined} data-cart-href={cartWired && cartHref ? cartHref : undefined}>
           {headerActions.map((a) => a.type === 'link'
-            ? <a class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} href={safeHref(a.target) || '#'} aria-label={a.label} set:html={a.icon}></a>
+            ? <a class={a.mobile ? 'rf-ha-btn rf-ha-btn--mobile' : 'rf-ha-btn'} href={safeHref(a.target) || '#'} aria-label={a.label} set:html={a.icon}></a>
             : <Fragment>
                 <input type="checkbox" id={a.id} class="rf-ha-check" hidden data-ha-toggle />
-                <label class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
+                <label class={a.mobile ? 'rf-ha-btn rf-ha-btn--mobile' : 'rf-ha-btn'} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
                   <span class="rf-ha-icon" set:html={a.icon}></span>
                   {a.badge != null && <span class="rf-ha-badge" data-count={a.badge}>{a.badge}</span>}
                 </label>

@@ -59,6 +59,16 @@ export const CUSTOM_CSS_MARKER = 'reef:has-custom-css';
  *  literals — the same reason CUSTOM_CSS_MARKER is a shared token and not a sentence. */
 export const THEME_CSS_REL = 'theme.css';
 
+/** Remove every `</style` (ASCII case-insensitive) until none is left. One pass is not enough:
+ *  deleting an inner match can join the text on either side into a new `</style`, and the compiled
+ *  file is inlined into a <style> element, where that sequence can only end the stylesheet. Each
+ *  pass that changes anything shortens the string, so the loop terminates. */
+export function stripStyleCloser(css) {
+  let out = String(css ?? '');
+  for (let prev = null; prev !== out;) { prev = out; out = out.replace(/<\/style/gi, ''); }
+  return out;
+}
+
 export function compileThemeCss(meta, residueCss = '') {
   // Both interpolations below are DEFENSIVE, not decorative: the name lands inside a `/* … */`
   // comment (so `*​/` would escape it) and each value lands inside `html:root { … }` (so `}` would
@@ -84,7 +94,7 @@ export function compileThemeCss(meta, residueCss = '') {
     scaled['gd-h3'] = step(1); scaled['gd-h2'] = step(2); scaled['gd-h1'] = step(3);
   }
   const decls = block({ ...scaled, ...(meta || {}) });
-  const residue = String(residueCss ?? '').replace(/<\/style/gi, '').trim();
+  const residue = stripStyleCloser(residueCss).trim();
   // 🌗 The dark half of a paired palette. Emitted ONLY for the tokens actually overridden, under
   // `html[data-theme="dark"]:root` (0,2,1) so it beats the default block (0,1,1) whenever the toggle
   // has stamped the attribute — which SiteLayout's inline script does BEFORE first paint, so there is

@@ -3446,6 +3446,71 @@ function deriveDescription(sections, max = DESC_MAX) {
   return '';
 }
 
+// ── The site's name, and the placeholder a site is born with ─────────────────────────────────────
+//
+// 🩸 A hosting platform seeds a new site's `_site.md` with a placeholder `title:` in the owner's UI
+// language ("Untitled site", 未命名網站…). Owners name the site in `brand:` and leave `title:` alone,
+// and the site-name chain read `title` first — so og:site_name and the JSON-LD WebSite/publisher
+// name went live as 「未命名網站」 on a site whose `brand:` was filled in. Measured on a live site:
+// `title: 未命名網站`, a real `brand:`, and every share card and search result named it 未命名網站.
+//
+// 🔴 ONE LIST, read by both sides. The platform's create step writes `title:` from this table and its
+// verify step names a site still carrying one of these values; the layout below treats a title
+// equal to any of them as UNSET. Kept here, in the editing model the platform vendors, so the
+// writer and the reader cannot drift: a new language or a reworded placeholder is one edit.
+// Keyed by the nine UI locale codes the platform seeds in (lower-case BCP 47).
+const PLACEHOLDER_SITE_TITLES = Object.freeze({
+  'en-us': 'Untitled site',
+  'zh-tw': '未命名網站',
+  'ja-jp': '無題のサイト',
+  'zh-hans': '未命名网站',
+  'ko-kr': '제목 없는 사이트',
+  'es-es': 'Sitio sin título',
+  'de-de': 'Unbenannte Website',
+  'fr-fr': 'Site sans titre',
+  'pt-br': 'Site sem título',
+});
+const PLACEHOLDER_SITE_TITLE_SET = new Set(Object.values(PLACEHOLDER_SITE_TITLES).map((t) => t.normalize('NFC')));
+
+/** True when `value` is exactly one of the seeded placeholder titles (trimmed, NFC). */
+function isPlaceholderSiteTitle(value) {
+  if (value == null) return false;
+  const s = String(value).trim().normalize('NFC');
+  return s !== '' && PLACEHOLDER_SITE_TITLE_SET.has(s);
+}
+
+/**
+ * The NAME OF THE SITE — a per-site constant (og:site_name, JSON-LD WebSite/publisher name), never
+ * whatever one page calls itself. `meta['site-title']` is the site config's own `title:` stashed by
+ * the catch-all before the page merge; `fallback` is the layout's last resort (its header brand)
+ * for sites with no site-level name at all.
+ *
+ * Order: a real site title → `brand:` → `footer-brand:` → the placeholder title (still the site's
+ * one constant name when nothing better exists, so a page's own title never stands in for it) →
+ * `fallback`.
+ */
+function siteName(meta, fallback = '') {
+  const m = meta || {};
+  const str = (v) => (v == null ? '' : String(v).trim());
+  const title = str(m['site-title']);
+  const named = isPlaceholderSiteTitle(title) ? '' : title;
+  return named || str(m.brand) || str(m['footer-brand']) || title || str(fallback);
+}
+
+/**
+ * `siteName` for whatever meta a route hands the layout. A merged content page carries the
+ * catch-all's `site-title` stash (its own `title` is the PAGE's); every other route — blog posts and
+ * indexes, archives, search, the 404 — hands over the site config itself, where `title` IS the
+ * site's title and there is no stash. Reading `site-title` alone would let `brand:` replace a real
+ * title on exactly those routes, so an unstashed meta's `title` is read as the site title. A
+ * placeholder is still unset either way.
+ */
+function routeSiteName(meta, fallback = '') {
+  const m = meta || {};
+  const stashed = Object.prototype.hasOwnProperty.call(m, 'site-title');
+  return siteName(stashed ? m : { ...m, 'site-title': m.title }, fallback);
+}
+
 export {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml,
   parseParams, splitFrontmatter, slugify,
@@ -3488,4 +3553,6 @@ export {
   // the link/image matcher and its shapes, exported so their test can hold each shape against the
   // regex it replaced — see bracketMatches' own comment.
   bracketMatches, replaceMatches, BRACKET_SHAPES,
+  // the seeded placeholder site titles and the site-name chain that treats one as unset.
+  PLACEHOLDER_SITE_TITLES, isPlaceholderSiteTitle, siteName, routeSiteName,
 };
