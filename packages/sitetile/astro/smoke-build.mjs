@@ -810,7 +810,12 @@ lang: en-US
 `);
     for (const [file, title, meta] of [
       ['fallback-meta', 'Fallback page', { title: 'Fallback site', 'site-title': 'OG fallback site', lang: 'en-US' }],
-      ['fallback-prop', 'Fallback prop', { 'site-title': 'OG fallback prop', lang: 'en-US' }]
+      ['fallback-prop', 'Fallback prop', { 'site-title': 'OG fallback prop', lang: 'en-US' }],
+      // tile#277 r2: the shape blog/archive/search/404 routes hand the layout — the site config itself
+      // (blog.mjs siteMeta), `title` with no `site-title` stash.
+      ['unstashed-title', 'Unstashed title', { title: 'Atlas Observatory', brand: 'Atlas', lang: 'en-US' }],
+      ['unstashed-footer', 'Unstashed footer', { title: 'Atlas Observatory', 'footer-brand': 'Atlas Footer', lang: 'en-US' }],
+      ['unstashed-placeholder', 'Unstashed placeholder', { title: 'Untitled site', brand: 'Atlas', lang: 'en-US' }]
     ]) {
       writeFileSync(join(dir, 'src/pages', file + '.astro'), `---
 import SiteLayout from '../layouts/SiteLayout.astro';
@@ -823,7 +828,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       cwd: dir, stdio: 'inherit',
       env: { ...process.env, SITE_ID: 'bubble-name', PLATFORM_ORIGIN: 'https://platform.example', SITE_URL: 'https://example.com' },
     });
-    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop'].map(page => [page, page + '/index.html'])]
+    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop', 'unstashed-title', 'unstashed-footer', 'unstashed-placeholder'].map(page => [page, page + '/index.html'])]
       .map(([key, file]) => [key, readFileSync(join(dist, file), 'utf8')]));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -849,6 +854,18 @@ function bubbleNameNamesMatch(page, title, siteName) {
   const el = { getAttribute: name => attrs[0][name] || null };
   assert.equal(bubbleNameResolve(el, { querySelector: () => ({ getAttribute: () => 'Other OG name' }) }, { hostname: 'fallback.example' }), siteName);
   assert.equal(bubbleNameDialog(el, { ask: 'Ask…', title: 'Message' }, true), title);
+}
+// Every distinct site name the page's JSON-LD carries (WebSite.name and the publisher's name).
+function jsonLdSiteNames(page) {
+  const names = new Set();
+  for (const [, raw] of page.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+    const graph = JSON.parse(raw);
+    for (const node of graph['@graph'] || [graph]) {
+      if (node['@type'] === 'WebSite' && node.name) names.add(node.name);
+      if (node.publisher && node.publisher.name) names.add(node.publisher.name);
+    }
+  }
+  return [...names];
 }
 function bubbleNameNamesFollowHeader(page) {
   const header = bubbleNameHeader(page);
@@ -1311,7 +1328,11 @@ const checks = [
     const page = bubbleNamePages.home;
     assert.equal(bubbleNameNamesFollowHeader(page), 'Example Workshop');
     assert.ok(page.includes('<title>Untitled site</title>'));
-    assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'), 'head precedence remains independent of the bubble');
+    // The seeded placeholder title is UNSET for the site's name: with `brand:` filled in, the share
+    // card and the structured data carry the brand, never the placeholder (site-core siteName).
+    assert.ok(page.includes('<meta property="og:site_name" content="Example Workshop">'), 'a placeholder title must fall back to brand for og:site_name');
+    assert.ok(!page.includes('<meta property="og:site_name" content="Untitled site">'));
+    assert.deepEqual(jsonLdSiteNames(page), ['Example Workshop'], 'JSON-LD WebSite and publisher names follow og:site_name');
     const attrs = bubbleNameAttrs(page)[0];
     assert.equal(attrs['data-id'], 'bubble-name');
     assert.equal(attrs['data-api-base'], 'https://platform.example');
@@ -1321,8 +1342,19 @@ const checks = [
     const page = bubbleNamePages.about;
     assert.equal(bubbleNameNamesFollowHeader(page), 'Example Workshop');
     assert.ok(page.includes('<title>Example article</title>'));
-    assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'));
-    assert.ok(!page.includes('<meta property="og:site_name" content="Example Workshop">'));
+    assert.ok(page.includes('<meta property="og:site_name" content="Example Workshop">'));
+    assert.ok(!page.includes('<meta property="og:site_name" content="Untitled site">'));
+    assert.deepEqual(jsonLdSiteNames(page), ['Example Workshop']);
+    return true;
+  }],
+  // tile#277 r2 — a route with no content-page stash (blog, archives, search, 404) carries the site
+  // config's own `title`: a REAL one stays first in JSON-LD; only a placeholder gives way to brand.
+  ['JSON-LD site name: an unstashed route keeps a real title first, and only a placeholder gives way', () => {
+    for (const pages of [bubbleNamePages, bubbleNameNoBrandPages]) {
+      assert.deepEqual(jsonLdSiteNames(pages['unstashed-title']), ['Atlas Observatory']);
+      assert.deepEqual(jsonLdSiteNames(pages['unstashed-footer']), ['Atlas Observatory']);
+      assert.deepEqual(jsonLdSiteNames(pages['unstashed-placeholder']), ['Atlas']);
+    }
     return true;
   }],
   ['bubble site name: sites without brand keep base attribute chains and hand-mounted names survive', () => {
@@ -1330,7 +1362,10 @@ const checks = [
       const page = bubbleNameNoBrandPages[key];
       assert.equal(bubbleNameHeader(page), header);
       bubbleNameNamesMatch(page, 'Untitled site', 'Untitled site');
+      // No brand and no footer-brand: the placeholder is still the site's one constant name, so a
+      // page's own title (Example article) never stands in for it.
       assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'));
+      assert.deepEqual(jsonLdSiteNames(page), ['Untitled site']);
     }
     for (const [key, header, name] of [['fallback-meta', 'Fallback site', 'OG fallback site'], ['fallback-prop', 'Fallback prop', 'OG fallback prop']]) {
       const page = bubbleNameNoBrandPages[key];
@@ -2597,8 +2632,11 @@ const checks = [
 let fail = 0;
 for (const [name, fn] of checks) {
   let ok = false;
-  try { ok = fn(); } catch { ok = false; }
+  let why = '';
+  try { ok = fn(); } catch (e) { ok = false; why = String(e?.message || e).split('\n')[0]; }
   console.log(`  ${ok ? '✓' : '✗'} ${name}`);
+  // An assertion's own message is the reason a red check is red; printed so a failure names itself.
+  if (!ok && why) console.log(`      ${why}`);
   if (!ok) fail++;
 }
 if (unaccounted.length) console.log('  ⚠ unaccounted scripts:\n    ' + unaccounted.join('\n    '));

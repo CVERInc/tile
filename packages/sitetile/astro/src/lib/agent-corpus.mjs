@@ -12,7 +12,7 @@
 // property the worker mapping rests on.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { deriveDescription, isSiteFile, parseSite } from '@sitetile';
+import { deriveDescription, isSiteFile, parseSite, siteName } from '@sitetile';
 import {
   allPosts,
   blogBase,
@@ -96,10 +96,10 @@ function buildCorpus() {
   }
 
   return {
-    // Same site-name chain SiteLayout's ogSiteName resolves (site-level keys before any page's own
-    // title), with the home page standing in for its last resort.
+    // Same site-name chain SiteLayout's ogSiteName resolves — site-core `siteName`, the one place a
+    // seeded placeholder title counts as unset — with the home page standing in for its last resort.
     site: {
-      name: String(meta.title || meta.brand || meta['footer-brand'] || (home && home.title) || '').trim(),
+      name: siteName({ 'site-title': meta.title, brand: meta.brand, 'footer-brand': meta['footer-brand'] }, (home && home.title) || ''),
       description: String(meta.description || '').trim() || String((home && home.summary) || ''),
       origin: '',
     },
