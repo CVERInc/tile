@@ -41,11 +41,11 @@ const strippedEnv = (extra = {}) => {
 // REGISTRY_CORALS / LOCAL_ONLY_CORALS are themselves DERIVED from CORALS (see corals.mjs) rather
 // than a second hand-kept list, so the per-coral loop below is what actually proves they cannot
 // silently diverge from the table an added coral would be entered into.
-ok('REGISTRY_CORALS names exactly the six corals that publish through the registry',
-  JSON.stringify([...REGISTRY_CORALS].sort()) === JSON.stringify(['countdown', 'dock', 'events', 'inbox-bubble', 'repo-facts', 'sponsor', 'square-shop']),
+ok('REGISTRY_CORALS names exactly the eight corals that publish through the registry',
+  JSON.stringify([...REGISTRY_CORALS].sort()) === JSON.stringify(['countdown', 'dock', 'events', 'inbox-bubble', 'repo-facts', 'sponsor', 'square-shop', 'text-edit']),
   REGISTRY_CORALS.join(', '));
-ok('LOCAL_ONLY_CORALS names exactly the non-registry corals: Cardtile-served qr/drawer, the sitetile section corals and the framed-preview text-edit',
-  JSON.stringify([...LOCAL_ONLY_CORALS].sort()) === JSON.stringify(['carousel', 'drawer', 'grid-filter', 'grid-masonry', 'hero-parallax', 'qr', 'text-edit']),
+ok('LOCAL_ONLY_CORALS names exactly the non-registry corals: Cardtile-served qr/drawer and the sitetile section corals',
+  JSON.stringify([...LOCAL_ONLY_CORALS].sort()) === JSON.stringify(['carousel', 'drawer', 'grid-filter', 'grid-masonry', 'hero-parallax', 'qr']),
   LOCAL_ONLY_CORALS.join(', '));
 for (const [name, cfg] of Object.entries(CORALS)) {
   const inRegistry = REGISTRY_CORALS.includes(name);
