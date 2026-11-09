@@ -1,9 +1,9 @@
 {
   "name": "text-edit",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/text-edit/1.0.0/text-edit.js",
+  "source": "https://feelreef.com/corals/text-edit/1.1.0/text-edit.js",
   "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/text-edit",
   "requires": [],
   "calls": [],

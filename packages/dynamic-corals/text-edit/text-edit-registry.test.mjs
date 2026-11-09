@@ -19,10 +19,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const metadataOf = (name) => JSON.parse(readFileSync(join(HERE, '..', name, 'metadata.json'), 'utf8'));
 const VERSION = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version;
 
-test('text-edit is a registry participant at 1.0.0, with a valid source manifest', () => {
+test('text-edit is a registry participant at 1.1.0, with a valid source manifest', () => {
   assert.equal(CORALS['text-edit'].registry, true);
   assert.ok(REGISTRY_CORALS.includes('text-edit'));
-  assert.equal(VERSION, '1.0.0');
+  assert.equal(VERSION, '1.1.0');
   const manifest = JSON.parse(readFileSync(join(HERE, 'manifest.json'), 'utf8'));
   assert.deepEqual(validateCoralManifest(manifest, { name: 'text-edit', version: VERSION }), { ok: true, missing: [], mismatches: [] });
   assert.equal(manifest.source, `https://feelreef.com/corals/text-edit/${VERSION}/text-edit.js`);
@@ -38,11 +38,11 @@ test('the embed loads the registry channel v1, not a host-served copy and never 
 
 // tile#284 — 1.0.0 is breaking for hosts (an answer must echo `doc`), so it is a new major on a new
 // channel. A channel is a major: `v<N>` serves N.x, and an embed names the channel of its own major.
-test('tile#284: text-edit is 1.0.0 on channel v1, and the README says what breaks for hosts', () => {
-  assert.equal(VERSION, '1.0.0');
+test('tile#284: text-edit is 1.x (1.1.0 adds the probe, additive) on channel v1, and the README says what breaks for hosts', () => {
+  assert.equal(VERSION, '1.1.0');
   const manifest = JSON.parse(readFileSync(join(HERE, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '1.0.0');
-  assert.equal(manifest.source, 'https://feelreef.com/corals/text-edit/1.0.0/text-edit.js');
+  assert.equal(manifest.version, '1.1.0');
+  assert.equal(manifest.source, 'https://feelreef.com/corals/text-edit/1.1.0/text-edit.js');
   assert.match(metadataOf('text-edit').requirements, /channel `v1`/);
   const readme = readFileSync(join(HERE, 'README.md'), 'utf8');
   assert.match(readme, /1\.0\.0 is breaking for hosts: echo `doc`/);
@@ -73,7 +73,7 @@ test('the public catalog does not list text-edit, and lists every other registry
   assert.equal(listedInCatalog({ listed: true }), true);
 });
 
-test('the registry build publishes text-edit@1.0.0: the artifact and its manifest', (t) => {
+test('the registry build publishes text-edit@1.1.0: the artifact and its manifest', (t) => {
   // build.mjs also rewrites <coral>/<coral>.js where it runs, so it runs on a COPY: inside the repo's
   // gitignored out/ (it stamps the commit with `git rev-parse`), never over the committed artifact.
   const repo = join(HERE, '../../..');
@@ -90,7 +90,7 @@ test('the registry build publishes text-edit@1.0.0: the artifact and its manifes
     delete env.CORAL_REGISTRY;
     execFileSync('node', [join(sandbox, 'build.mjs'), 'text-edit', '--registry', registry], { stdio: 'pipe', env });
     const dir = join(registry, 'versions', 'text-edit', VERSION);
-    assert.ok(existsSync(join(dir, 'text-edit.js')), 'versions/text-edit/1.0.0/text-edit.js');
+    assert.ok(existsSync(join(dir, 'text-edit.js')), 'versions/text-edit/1.1.0/text-edit.js');
     const norm = (text) => normalizeGeneratedCode(text, 'text-edit', VERSION);
     assert.equal(norm(readFileSync(join(dir, 'text-edit.js'), 'utf8')), norm(readFileSync(join(HERE, 'text-edit.js'), 'utf8')),
       'the published code is the committed local artifact (the commit stamp aside)');

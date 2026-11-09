@@ -55,6 +55,13 @@ it shows a short "change it in the editor" hint instead, and links keep working 
   carries that `doc` back: an answer with another `doc`, or with none, is ignored. Ids (`e1`, `b1`)
   restart in every document, so a host addresses its answers by `doc`, not by id or by window: the
   frame's window is the same object across a navigation.
+- **Probe (1.1.0).** A host can ask which document the frame shows now: it posts
+  `{ type: 'reef-text-edit-probe', nonce }` (`nonce`: 1–64 characters of `A–Z a–z 0–9 _ -`) to the
+  frame, and the coral answers `{ type: 'reef-text-edit-ready', doc, probe: nonce }` with the same
+  `doc` as its first ready. Probes are taken only from the parent window at `data-parent-origin`,
+  like every answer; anything else is ignored. A document without the coral (or with 1.0.0) answers
+  nothing, which is how a host tells that the frame has moved somewhere it cannot edit. Additive:
+  same channel `v1`.
 - **1.0.0 is breaking for hosts: echo `doc`.** A host written for 0.1.0 answers without `doc`, and
   1.0.0 ignores every such answer, so an edit that host saved is shown as unconfirmed (`unknown`,
   with the old words) and its readback is ignored too. Accepting a missing `doc` would bring back the
@@ -101,7 +108,7 @@ Lets an owner change the words of a plain heading, paragraph or list item in a f
 
 Author: `official`.
 
-Host: `sitetile`. Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, echoing the message's `doc` (the coral ignores an answer with any other `doc`, or none) and relaying `revision` and `section` from a successful apply. It processes the frame's messages in the order received, one at a time, and answers a `reef-text-edit-readback` with `reef-text-edit-readback-result` (same `doc`) (text-edit-source.mjs `readTextAt`). Served by the coral registry on channel `v1` (`/corals/text-edit/v1/text-edit.js`; 1.0.0 needs the host to echo `doc`, and `v0` stays on 0.1.0): the host adds the mount and the script to its own framed preview.
+Host: `sitetile`. Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, echoing the message's `doc` (the coral ignores an answer with any other `doc`, or none) and relaying `revision` and `section` from a successful apply. It processes the frame's messages in the order received, one at a time, and answers a `reef-text-edit-readback` with `reef-text-edit-readback-result` (same `doc`) (text-edit-source.mjs `readTextAt`). It answers a host's `reef-text-edit-probe` (`nonce`) from the parent origin with its ready, `{ type: 'reef-text-edit-ready', doc, probe: nonce }` (1.1.0). Served by the coral registry on channel `v1` (`/corals/text-edit/v1/text-edit.js`; 1.0.0 needs the host to echo `doc`, and `v0` stays on 0.1.0): the host adds the mount and the script to its own framed preview.
 
 Not listed in the public coral catalog.
 
