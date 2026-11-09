@@ -3481,34 +3481,84 @@ function isPlaceholderSiteTitle(value) {
 
 /**
  * The NAME OF THE SITE — a per-site constant (og:site_name, JSON-LD WebSite/publisher name), never
- * whatever one page calls itself. `meta['site-title']` is the site config's own `title:` stashed by
- * the catch-all before the page merge; `fallback` is the layout's last resort (its header brand)
- * for sites with no site-level name at all.
+ * whatever one page calls itself — and WHICH key it came from. `meta['site-title']` is the site
+ * config's own `title:` stashed by the catch-all before the page merge; `fallback` is the layout's
+ * last resort (its header brand) for sites with no site-level name at all.
  *
- * Order: a real site title → `brand:` → `footer-brand:` → the placeholder title (still the site's
- * one constant name when nothing better exists, so a page's own title never stands in for it) →
- * `fallback`.
+ * Order: a real site title (`site-title`) → `brand` → `footer-brand` → the placeholder title
+ * (`placeholder`: still the site's one constant name when nothing better exists, so a page's own
+ * title never stands in for it) → `fallback`. `key` names the rung that answered, so a caller (a
+ * platform's verify step) reports the chain's own choice instead of re-deriving it.
+ *
+ * @returns {{ name: string, key: 'site-title'|'title'|'brand'|'footer-brand'|'placeholder'|'fallback' }}
  */
-function siteName(meta, fallback = '') {
+function siteNameSource(meta, fallback = '', titleKey = 'site-title') {
   const m = meta || {};
   const str = (v) => (v == null ? '' : String(v).trim());
   const title = str(m['site-title']);
-  const named = isPlaceholderSiteTitle(title) ? '' : title;
-  return named || str(m.brand) || str(m['footer-brand']) || title || str(fallback);
+  if (title && !isPlaceholderSiteTitle(title)) return { name: title, key: titleKey };
+  if (str(m.brand)) return { name: str(m.brand), key: 'brand' };
+  if (str(m['footer-brand'])) return { name: str(m['footer-brand']), key: 'footer-brand' };
+  if (title) return { name: title, key: 'placeholder' };
+  return { name: str(fallback), key: 'fallback' };
 }
 
 /**
- * `siteName` for whatever meta a route hands the layout. A merged content page carries the
- * catch-all's `site-title` stash (its own `title` is the PAGE's); every other route — blog posts and
- * indexes, archives, search, the 404 — hands over the site config itself, where `title` IS the
- * site's title and there is no stash. Reading `site-title` alone would let `brand:` replace a real
- * title on exactly those routes, so an unstashed meta's `title` is read as the site title. A
- * placeholder is still unset either way.
+ * `siteNameSource` for a meta that MAY lack the `site-title` stash, reading such a meta's `title` as
+ * the site title (reported as key `title`). Since tile#279 r2 every route of a site that has a
+ * `_site.md` carries the stash (loadSite stamps the config's own title), so the layout does not call
+ * this; it remains for a raw site config (configSiteNameSource) and for callers holding a meta with
+ * no stash. A placeholder is still unset either way.
  */
-function routeSiteName(meta, fallback = '') {
+function routeSiteNameSource(meta, fallback = '') {
   const m = meta || {};
+  if (Object.prototype.hasOwnProperty.call(m, 'site-title')) return siteNameSource(m, fallback);
+  return siteNameSource({ ...m, 'site-title': m.title }, fallback, 'title');
+}
+
+/**
+ * The name a raw SITE CONFIG (`_site.md` frontmatter, as a platform parses it) gives the site — the
+ * same answer the build gives on every route: the reserved `site-title` key is ignored, exactly as
+ * loadSite ignores it, and `title` is the site title.
+ */
+function configSiteNameSource(config, fallback = '') {
+  const { 'site-title': _reserved, ...rest } = config || {};
+  return routeSiteNameSource(rest, fallback);
+}
+
+/**
+ * EVERY site-name surface a page carries, from ONE `siteNameSource` result (tile#279 r3): og:site_name
+ * and the JSON-LD WebSite/publisher name are `name`; the header wordmark and the inbox bubble's
+ * data-title / data-site-name are `header` — the site's `brand:` when it has one (the short wordmark
+ * a site picks for its own header), else that same `name`.
+ *
+ * The fallback, when nothing site-level names the site:
+ *   · a site WITH a `_site.md` (its meta carries the `site-title` stash, possibly ''): `host`, the
+ *     site's own hostname — constant on every route, never a page's title;
+ *   · a site with NO `_site.md` (no stash; the home page stands in for the site config): the meta's
+ *     own `title`, then `pageTitle` — that legacy shape has nothing site-level to prefer.
+ *
+ * @param {object} meta  what the route hands the layout
+ * @param {{ pageTitle?: string, host?: string }} [o]
+ * @returns {{ name: string, key: string, header: string }}
+ */
+function siteSurfaces(meta, { pageTitle = '', host = '' } = {}) {
+  const m = meta || {};
+  const str = (v) => (v == null ? '' : String(v).trim());
   const stashed = Object.prototype.hasOwnProperty.call(m, 'site-title');
-  return siteName(stashed ? m : { ...m, 'site-title': m.title }, fallback);
+  const fallback = stashed ? str(host) : (str(m.title) || str(pageTitle));
+  const { name, key } = siteNameSource(m, fallback);
+  return { name, key, header: str(m.brand) || name };
+}
+
+/** The name alone — `siteNameSource(meta, fallback).name`. */
+function siteName(meta, fallback = '') {
+  return siteNameSource(meta, fallback).name;
+}
+
+/** The name alone — `routeSiteNameSource(meta, fallback).name`. */
+function routeSiteName(meta, fallback = '') {
+  return routeSiteNameSource(meta, fallback).name;
 }
 
 export {
@@ -3555,4 +3605,8 @@ export {
   bracketMatches, replaceMatches, BRACKET_SHAPES,
   // the seeded placeholder site titles and the site-name chain that treats one as unset.
   PLACEHOLDER_SITE_TITLES, isPlaceholderSiteTitle, siteName, routeSiteName,
+  // …and which key answered: { name, key } (see siteNameSource).
+  siteNameSource, routeSiteNameSource, configSiteNameSource,
+  // …and every surface a page derives from that one result (header, bubble, og, JSON-LD).
+  siteSurfaces,
 };

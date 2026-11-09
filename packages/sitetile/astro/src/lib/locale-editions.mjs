@@ -53,7 +53,10 @@ export function localeEditions(files) {
     // Same rule as the page route: a home page's own `locales` is a page's line under a site config.
     if (cfg || rel !== 'home') pageLocalesOrWarn(site.meta, `content/${rel}.md`, cfg);
     else tagLocalesSource(site.meta, `content/${rel}.md`);
-    if (cfg) site.meta = { ...cfg, ...site.meta };
+    // tile#279 r3 — the reserved `site-title` is re-stamped AFTER the home's own keys, exactly as the
+    // catch-all ([...path].astro) does: a home page that writes `site-title:` must not rename the site
+    // on /language and /<loc>/404, which read this meta.
+    if (cfg) site.meta = { ...cfg, ...site.meta, 'site-title': cfg['site-title'] ?? '' };
     homesByRel[rel] = site.meta;
   }
   const rootHome = homesByRel.home;
