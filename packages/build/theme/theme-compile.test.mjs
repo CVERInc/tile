@@ -145,3 +145,31 @@ test('a string announce compiles to exactly one key; link/deadline ride along; o
   assert.deepEqual(compileTheme({ name: 'warm', 'announce-href': '/sale' }).siteMeta, { theme: 'warm' },
     'a link with no text announces nothing');
 });
+
+// The custom CSS (residue) is inlined into a <style> element, so `</style` is removed from it. The
+// removal must reach a FIXED POINT: deleting one match can join its neighbours into a new one.
+test('residue: `</style` removal reaches a fixed point (nested, mixed case)', () => {
+  const inputs = [
+    'a{}</sty</stylele>b{}',
+    'a{}</</STYLEstyle>b{}',
+    'a{}<</style/</sTyLeSTYLE>b{}',
+    'a{}</s</st</styletyleyle>b{}',
+  ];
+  for (const residue of inputs) {
+    const css = compileThemeCss({ name: 't' }, residue);
+    assert.doesNotMatch(css, /<\/style/i, `a style closer survived: ${JSON.stringify(residue)}`);
+  }
+});
+
+test('residue: legitimate CSS is carried byte-identical', () => {
+  const residue = [
+    '@import url("/fonts/x.css");',
+    '.a::before { content: "<b> 1 < 2"; }',
+    '.b { background: url("/img/x.png"); }',
+    '.c { background: url(data:image/svg+xml,%3Csvg%3E); }',
+    '<!-- .d { color: red; } -->',
+    '.e { content: "</styl" "e"; }',
+  ].join('\n');
+  const css = compileThemeCss({ name: 't' }, residue);
+  assert.ok(css.includes(residue), 'legitimate custom CSS was altered');
+});

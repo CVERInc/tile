@@ -186,8 +186,14 @@ test('🔴 package CSS is layered WITH the theme, and emitted before it', () => 
   const pkgLine = lines.find((l) => l.includes('pkgCss &&'));
   const bannerLine = lines.find((l) => l.includes('localeBannerCss &&'));
   assert.ok(pkgLine && bannerLine, 'package CSS and the locale banner are still emitted');
-  assert.match(pkgLine, /@layer reef\.theme/, 'package CSS belongs in reef.theme');
-  assert.match(bannerLine, /@layer reef\.theme/, 'the locale banner belongs in reef.theme');
+  // The layer wrapper is built in the frontmatter (pkgCssBlock / localeBannerBlock) so each sink is
+  // the census-allowed `set:html={styleText(<identifier>)}` shape; follow the identifier to it.
+  const blockOf = (line) => {
+    const id = /styleText\(\s*([A-Za-z_$][\w$]*)\s*\)/.exec(line)?.[1];
+    return id ? lines.find((l) => new RegExp(`^const ${id} = `).test(l)) : undefined;
+  };
+  assert.match(blockOf(pkgLine) ?? pkgLine, /@layer reef\.theme/, 'package CSS belongs in reef.theme');
+  assert.match(blockOf(bannerLine) ?? bannerLine, /@layer reef\.theme/, 'the locale banner belongs in reef.theme');
   // ORDER inside the layer is what decides ties, so it is asserted, not assumed.
   assert.ok(lines.indexOf(pkgLine) < lines.findIndex((l) => l.includes('themeCss &&')),
     'package CSS must be emitted BEFORE the site theme, so a tie goes to the theme');
