@@ -23,8 +23,10 @@
 //   withHref(key, value, link, newHref) → string
 //       The value with that one link's href replaced. It writes the readable spelling when that
 //       reads back as the same single link, else percent-encodes the characters that are syntax for
-//       that key (in the path; see encodeFor for why not in a query) — whitespace and controls are
-//       ALWAYS encoded, wherever they stand (see TOKEN_SPACE for why) — and in both cases checks — by re-reading the result with the readers below — that
+//       that key (in the path; see encodeFor for why not in a query) — whitespace, controls and
+//       every URL-fragile character (derived from new URL(), see encodeTarget) are ALWAYS encoded —
+//       and then checks that a browser resolves the result where it resolves encodeTarget(newHref),
+//       and — by re-reading the result with the readers below — that
 //       the link count, every other link, every label, heading, tree shape and weight are exactly as
 //       they were and only this link's target changed. When no spelling can do that it throws an
 //       Error whose message starts `withHref: `; it never returns a value the layout would read
@@ -296,9 +298,83 @@ const SYNTAX = {
 // either deletes (tab, LF, CR) or percent-encodes itself, so writing them encoded changes nothing
 // a browser resolves and keeps every byte of the frontmatter line printable.
 const TOKEN_SPACE = /\s/;
-const alwaysEncoded = (ch) => TOKEN_SPACE.test(ch) || ch <= '\u001f' || ch === '\u007f';
+const tokenOrControl = (ch) => TOKEN_SPACE.test(ch) || ch <= '\u001f' || ch === '\u007f';
+
+// 🩸 round 3 (review of #278, P1). Round 2's set was still a LIST, and it missed `\`: a URL parser
+// turns a path backslash into `/`, so `/a\b` written raw went to `/a/b` (and `/\host/p` to another
+// host). No list of characters is the fix, because the question is not "which characters are odd"
+// but "where does a browser go". So the browser's own resolution — `new URL()` — is the oracle, and
+// the always-encoded URL set is DERIVED from it:
+//
+//   encodeTarget(href) is the one canonical spelling of a target. Its path is data: a valid `%XX`
+//   stays an escape, a bare `%` becomes `%25`, and every other character the URL parser does not
+//   leave literal in a path (measured per character, below) is percent-encoded. Its query and
+//   fragment are the caller's, kept as written except whitespace and controls. Its scheme and
+//   authority are kept.
+//   A character is URL-FRAGILE when a target holding it raw (`/a<c>b`) resolves to a different URL
+//   than its canonical spelling does. Those are always encoded in a path, wherever they stand.
+//   chrome-links.test.mjs recomputes the set over every BMP code point and astral samples and
+//   requires urlFragileChars() to be exactly it.
+//
+// `?` and `#` are not path data here: withHref takes an HREF, whose path ends at the first of them
+// (a move keeps a link's `?query#fragment`). A page whose own name holds one is passed encoded
+// (`%3F`, `%23`), and a valid escape passes through untouched.
+const PROBE_BASE = 'https://site.example/dir/page';
+const resolveHref = (h) => { try { return new URL(h, PROBE_BASE).href; } catch { return null; } };
+const memo = (fn) => { const m = new Map(); return (c) => { if (!m.has(c)) m.set(c, fn(c)); return m.get(c); }; };
+// Does the URL parser leave `c` literal inside a path? Measured in context, so `.` (a dot segment
+// alone) and `/` read as what they are inside a name.
+const parserKeepsLiteral = memo((c) => { try { return new URL(`/a${c}b`, PROBE_BASE).pathname === `/a${c}b`; } catch { return false; } });
+const HEX2 = /^[0-9A-Fa-f]{2}$/;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
 // A scheme and authority (`https://host:port`, `//host`, `mailto:`) keep their own colons.
 const SCHEME_AUTHORITY = /^(?:[A-Za-z][A-Za-z0-9+.-]*:(?:\/\/[^/?#\s]*)?|\/\/[^/?#\s]*)/;
+function partsOf(href) {
+  const m = href.match(SCHEME_AUTHORITY);
+  const head = m ? m[0] : '';
+  const rest = href.slice(head.length);
+  const cut = rest.search(/[?#]/);
+  return { head, path: cut < 0 ? rest : rest.slice(0, cut), tail: cut < 0 ? '' : rest.slice(cut) };
+}
+// `path` with each character for which `encode(c)` holds percent-encoded, valid `%XX` escapes kept.
+function encodePath(path, encode) {
+  let out = '';
+  const cs = [...path];
+  for (let i = 0; i < cs.length; i++) {
+    const c = cs[i];
+    if (c === '%' && HEX2.test(cs.slice(i + 1, i + 3).join(''))) { out += c + cs[i + 1] + cs[i + 2]; i += 2; continue; }
+    out += encode(c) ? encodeURIComponent(c) : c;
+  }
+  return out;
+}
+const encodeEach = (s, encode) => [...s].map((c) => (encode(c) ? encodeURIComponent(c) : c)).join('');
+
+/** The canonical spelling of a target href (see above). Throws on a lone surrogate, which has none. */
+export function encodeTarget(href) {
+  const h = String(href);
+  if (LONE_SURROGATE.test(h)) throw new TypeError('encodeTarget: a lone surrogate has no URL spelling');
+  const { head, path, tail } = partsOf(h);
+  return encodeEach(head, tokenOrControl)
+    + encodePath(path, (c) => c === '%' || !parserKeepsLiteral(c))
+    + encodeEach(tail, tokenOrControl);
+}
+
+// Is `c` URL-fragile (see above)? Asked of the oracle, one character at a time, and remembered.
+const urlFragile = memo((c) => resolveHref(`/a${c}b`) !== resolveHref(encodeTarget(`/a${c}b`)));
+/** Every BMP character that is URL-fragile — what chrome-links.test.mjs holds the oracle to. */
+export function urlFragileChars() {
+  const out = new Set();
+  for (let cp = 0; cp <= 0xffff; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const c = String.fromCharCode(cp);
+    if (urlFragile(c)) out.add(c);
+  }
+  return out;
+}
+// Always encoded in a path: the tokenizers' whitespace, controls, and every URL-fragile character.
+const alwaysInPath = (c) => tokenOrControl(c) || urlFragile(c);
+
 // 🔴 Encoding is only safe where the encoded character MEANS the same thing. In a path it does
 // (`/Jane%3BDoe/` is the page `/Jane;Doe/`). In a query or fragment `=`, `;` and `:` are delimiters
 // to whoever reads them — `?b%3Dc` is a different query from `?b=c` — so there only whitespace and
@@ -308,16 +384,19 @@ const QUERY_DELIMS = ';=:';
 
 function encodeFor(key, href) {
   const syntax = SYNTAX[key] || '';
-  const enc = (s, chars) => s.replace(/[\s\S]/g, (ch) => (alwaysEncoded(ch) || chars.includes(ch) ? encodeURIComponent(ch) : ch));
-  const m = href.match(SCHEME_AUTHORITY);
-  const head = m ? m[0] : '';
-  const rest = href.slice(head.length);
-  const cut = rest.search(/[?#]/);
-  const path = cut < 0 ? rest : rest.slice(0, cut);
-  const tail = cut < 0 ? '' : rest.slice(cut);
   const minus = (chars) => [...syntax].filter((c) => !chars.includes(c)).join('');
-  return enc(head, minus(':')) + enc(path, syntax) + enc(tail, minus(QUERY_DELIMS));
+  const { head, path, tail } = partsOf(href);
+  const headSyntax = minus(':');
+  const tailSyntax = minus(QUERY_DELIMS);
+  return encodeEach(head, (c) => tokenOrControl(c) || headSyntax.includes(c))
+    + encodePath(path, (c) => alwaysInPath(c) || syntax.includes(c))
+    + encodeEach(tail, (c) => tokenOrControl(c) || tailSyntax.includes(c));
 }
+
+// The path-syntax escapes this writer introduces are equivalences the design accepts (round 1), so
+// a destination is compared with them decoded; everything else must resolve identically.
+const ALL_SYNTAX_ESC = new RegExp(`%(${[...new Set(Object.values(SYNTAX).join(''))].map((c) => c.charCodeAt(0).toString(16).toUpperCase()).join('|')})`, 'gi');
+const destinationOf = (h) => { const r = resolveHref(h); return r == null ? null : r.replace(ALL_SYNTAX_ESC, (m) => decodeURIComponent(m)); };
 
 /** See the header. */
 export function withHref(key, value, link, newHref) {
@@ -336,11 +415,19 @@ export function withHref(key, value, link, newHref) {
   if (want !== want.trim() || /^[\u0000-\u0020]|[\u0000-\u0020]$/.test(want)) {
     throw new Error(`withHref: ${JSON.stringify(want)} begins or ends in whitespace, which no \`${key}\` link can hold`);
   }
-  // The readable spelling is a candidate only when it holds nothing from the always-encoded set.
-  const candidates = [...want].some(alwaysEncoded) ? [encodeFor(key, want)] : [want, encodeFor(key, want)];
+  if (LONE_SURROGATE.test(want)) throw new Error(`withHref: ${JSON.stringify(want)} holds a lone surrogate, which no URL can`);
+  // Where a browser must end up: the canonical spelling's destination. No destination, no write.
+  const goal = destinationOf(encodeTarget(want));
+  if (goal == null) throw new Error(`withHref: ${JSON.stringify(want)} is not a URL a browser can follow`);
+  // The readable spelling is a candidate only when its path holds nothing from the always-encoded
+  // set (and its scheme, authority, query and fragment no whitespace or control).
+  const p = partsOf(want);
+  const readable = ![...p.path].some(alwaysInPath) && ![...p.head + p.tail].some(tokenOrControl);
+  const candidates = readable ? [want, encodeFor(key, want)] : [encodeFor(key, want)];
   for (const href of candidates) {
     const out = v.slice(0, from.start) + href + v.slice(from.end);
-    if (readsAs(key, v, idx, href, out)) return out;
+    // Both oracles: the grammar reads it back as exactly this one change, AND the browser goes there.
+    if (readsAs(key, v, idx, href, out) && destinationOf(href) === goal) return out;
   }
   throw new Error(`withHref: \`${key}\` cannot hold ${JSON.stringify(want)} as this one link without changing how the rest of the value reads`);
 }
