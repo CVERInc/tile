@@ -1,4 +1,4 @@
-// Review cases for the text-edit coral (rounds 1–3), each one a reproduction that used to pass
+// Review cases for the text-edit coral (rounds 1–4), each one a reproduction that used to pass
 // silently.   run: node --test packages/dynamic-corals/text-edit/text-edit-review.test.mjs
 //
 // Every case here once wrote words onto a line other than the one the owner tapped, or showed words
@@ -257,6 +257,114 @@ test('after a title is saved, the same frame can edit its paragraph and the titl
   assert.equal(host.md, '## Contact us\n\nChanged body\n');
 });
 
+// ── Round 4: a refusal that arrives while the same element is focused again ──────────────────────
+// The owner presses Enter (e1 is sent), clicks the same paragraph again without typing, and only
+// then does the host refuse e1. The refused words must go, focused or not, and leaving the field
+// must not send them again: only a new keystroke makes a new edit.
+function refocused() {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  ed.begin(f);
+  host.refuse.add('e1');
+  return { host, ed, f, root };
+}
+
+test('a refusal rolls a refocused, untouched element back, and an unchanged blur sends nothing', () => {
+  const { host, ed, f } = refocused();
+  assert.equal(ed.stateOf(f.el), 'editing');
+  host.answer(ed);
+  assert.equal(f.el.textContent, 'Original', 'rolled back although the element is focused');
+  assert.equal(ed.stateOf(f.el), 'editing');
+  assert.equal(ed.commit(), null);
+  assert.equal(host.inbox.length, 0, 'the refused change is not retried');
+  assert.equal(ed.stateOf(f.el), 'idle');
+  assert.equal(host.md, '## About\n\nOriginal\n');
+});
+
+test('a refusal keeps newer words typed into the refocused element, and they are sent against the saved words', () => {
+  const { host, ed, f } = refocused();
+  f.el.textContent = 'Second';
+  host.answer(ed);
+  assert.equal(f.el.textContent, 'Second');
+  const m = ed.commit();
+  assert.ok(m, 'the newer words are a new edit');
+  assert.deepEqual([m.before, m.after], ['Original', 'Second']);
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nSecond\n');
+  assert.equal(ed.stateOf(f.el), 'idle');
+});
+
+test('Escape after a refusal while typing puts back the saved words, never the refused ones', () => {
+  const { host, ed, f } = refocused();
+  f.el.textContent = 'Second';
+  host.answer(ed);
+  ed.cancel();
+  assert.equal(f.el.textContent, 'Original');
+  assert.equal(ed.stateOf(f.el), 'idle');
+  assert.equal(host.inbox.length, 0);
+});
+
+test('a refusal keeps newer words already committed, and sends them next', () => {
+  const { host, ed, f } = refocused();
+  f.el.textContent = 'Second'; ed.commit();
+  assert.equal(ed.stateOf(f.el), 'pending');
+  host.answer(ed);
+  assert.equal(f.el.textContent, 'Second');
+  assert.equal(host.inbox.length, 1);
+  assert.deepEqual([host.inbox[0].before, host.inbox[0].after], ['Original', 'Second']);
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nSecond\n');
+});
+
+test('refocusing a refused element and leaving it untouched sends nothing; a new keystroke does', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  host.refuse.add('e1'); host.answer(ed);
+  assert.equal(ed.stateOf(f.el), 'refused');
+  assert.equal(f.el.textContent, 'Original');
+  for (let i = 0; i < 3; i++) { ed.begin(f); assert.equal(ed.commit(), null); }
+  assert.equal(host.inbox.length, 0);
+  ed.begin(f); f.el.textContent = 'First'; const m = ed.commit();
+  assert.ok(m, 'typed again, so it is a new edit');
+  assert.equal(m.id, 'e2');
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nFirst\n');
+});
+
+test('a success while the element is focused again keeps it editing, with the saved words acknowledged', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  ed.begin(f); host.answer(ed);
+  assert.equal(ed.stateOf(f.el), 'editing');
+  assert.equal(f.el.textContent, 'First');
+  assert.equal(ed.commit(), null);
+  assert.equal(ed.stateOf(f.el), 'idle');
+  ed.begin(f); f.el.textContent = 'Original'; const m = ed.commit();
+  assert.deepEqual([m.before, m.after], ['First', 'Original'], 'changing back is a real edit once First is saved');
+});
+
+test('words typed back to the saved ones while an edit is pending are not sent after its refusal', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  ed.begin(f); f.el.textContent = 'Original'; ed.commit();
+  host.refuse.add('e1'); host.answer(ed);
+  assert.equal(host.inbox.length, 0);
+  assert.equal(f.el.textContent, 'Original');
+  assert.equal(ed.stateOf(f.el), 'idle');
+});
+
 // ── Mounting: a double of the frame, its parent and a sibling ─────────────────────────────────────
 function frame(attrs, md = '## About\n\nOld\n') {
   const root = render(md);
@@ -278,8 +386,9 @@ function frame(attrs, md = '## About\n\nOld\n') {
   const p = offered(root).find((f) => f.kind === 'p').el;
   const key = (init) => { const e = { target: p, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...init }; docListeners.keydown(e); return e; };
   const click = () => docListeners.click({ target: p });
+  const focusout = () => docListeners.focusout({ target: p });
   const reply = (data, from) => winListeners.message({ data, origin: from.origin, source: from.source });
-  return { editor: ed, sent, p, parent, key, click, reply };
+  return { editor: ed, sent, p, parent, key, click, focusout, reply };
 }
 const REV = 'r-test';
 
@@ -329,4 +438,18 @@ test('Enter and Escape during IME composition are left to the IME', () => {
   assert.equal(f.key({ key: 'Enter', isComposing: false }).defaultPrevented, true);
   assert.equal(f.sent.length, 1);
   assert.equal(f.sent[0].m.after, '拼音輸入');
+});
+
+test('in the frame: Enter, click again, refusal, leave — the old words are back and only one edit was posted', () => {
+  const f = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  f.click(); f.p.textContent = 'New'; f.key({ key: 'Enter' });
+  assert.equal(f.sent.length, 1);
+  f.click();
+  assert.equal(f.editor.active && f.editor.active.el, f.p);
+  f.reply({ type: RESULT_MESSAGE, id: 'e1', ok: false }, { origin: 'https://editor.example', source: f.parent });
+  assert.equal(f.p.textContent, 'Old', 'rolled back while focused');
+  f.focusout();
+  assert.equal(f.sent.length, 1, 'leaving the field does not retry the refused edit');
+  f.click(); f.key({ key: 'Enter' });
+  assert.equal(f.sent.length, 1, 'neither does Enter without typing');
 });
