@@ -32,6 +32,9 @@ import {
   navMenuOf, footerLinksOf, footerColsOf, labelHrefListOf, headerCtaOf, headerActionsOf, postCtaOf,
   sidebarNavOf, hrefValueOf, parseNavPart, parseNavIndented, parseNavFlat,
 } from './chrome-links.mjs';
+// Through the namespace, so a module without them fails the tests that use them, not the import.
+import * as chromeLinks from './chrome-links.mjs';
+const { encodeTarget, urlFragileChars } = chromeLinks;
 
 const ENGINE = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -268,7 +271,7 @@ function maskHrefs(key, model) {
 
 // A path built from every character any of the grammars treats as syntax.
 const HOSTILE = ['/Jane;Doe/new/', '/a b/', '/p|q/', '/x>>y/', '/k=v/', '/c:d/', '/w^12', '/tab\there/', '/ideo\u3000space/', '/all ;|=:>>^\t/',
-  '/nb\u00a0sp/', '/cr\rhere/', '/lf\nhere/', '/ls\u2028x/', '/em\u2003x/', '/bom\ufeffx/', '/vt\vx/', '/ff\fx/', '/nel\u0085x/', '/c0\u0001x/'];
+  '/back\\slash/', '/\\\\x.example/net', '/50%off/', '/pre%3Bencoded/', '/caf%C3%A9/', '/nb\u00a0sp/', '/cr\rhere/', '/lf\nhere/', '/ls\u2028x/', '/em\u2003x/', '/bom\ufeffx/', '/vt\vx/', '/ff\fx/', '/nel\u0085x/', '/c0\u0001x/'];
 
 // 🩸 round 2 (review of #278): the hostile test used to check only that the PARSER read the target
 // back. `/a\tb` written raw into a whole-value key reads back as `/a\tb`, and a browser's URL parser
@@ -278,7 +281,9 @@ const HOSTILE = ['/Jane;Doe/new/', '/a b/', '/p|q/', '/x>>y/', '/k=v/', '/c:d/',
 // (percent-encoded). The writer's own path-syntax escapes (`%3B` for `;` …) are equivalences the
 // design accepts, so both sides have those decoded before comparing.
 const BASE = 'https://site.example/dir/page';
-const asData = (h) => h.replace(/[\s\u0000-\u001f\u007f]/g, (c) => encodeURIComponent(c));
+// 🩸 round 3: the expected destination is encodeTarget(target) — the module's one canonical
+// encoding — not a hand list of what to encode (round 2's list missed `\`, which a URL parser turns
+// into `/`). See the BMP oracle test below.
 const SYNTAX_ESC = /%(3B|3D|3A|5E|7C|3E)/gi;
 const dest = (h) => new URL(h, BASE).href.replace(SYNTAX_ESC, (m) => decodeURIComponent(m));
 for (const k of KEYS) {
@@ -295,8 +300,10 @@ for (const k of KEYS) {
         wrote++;
         const after = parseChromeLinks(k, out);
         assert.equal(after.length, links.length, `${k}: link count moved in ${JSON.stringify(out)}`);
-        assert.equal(decodeURIComponent(after[idx].href), target, `${k}: ${JSON.stringify(out)}`);
-        assert.equal(dest(after[idx].href), dest(asData(target)), `${k}: ${JSON.stringify(out)} does not reach ${JSON.stringify(target)}`);
+        // (round 3: was `decodeURIComponent(written) === target`, which cannot hold once a target
+        // carries its own `%` — a bare one throws, a valid escape decodes away. Where the browser
+        // goes is the property; the destination check below is that oracle.)
+        assert.equal(dest(after[idx].href), dest(encodeTarget(target)), `${k}: ${JSON.stringify(out)} does not reach ${JSON.stringify(target)}`);
         assert.ok(!/[\s\u0000-\u001f\u007f]/.test(after[idx].href), `${k}: whitespace or a control reached the value raw: ${JSON.stringify(out)}`);
         assert.equal(after[idx].start, links[idx].start);
         assert.equal(out.slice(0, links[idx].start), v.slice(0, links[idx].start), 'nothing before the link moves');
@@ -323,6 +330,60 @@ test('writer (review #278): a tab inside a path is written %09, so the browser d
   for (const k of ['copyright-href', 'language-href', 'header-actions-cart-href', 'age-gate-back-url', 'announce-href']) {
     assert.equal(withHref(k, '/old', parseChromeLinks(k, '/old')[0], '/a\tb'), '/a%09b', k);
   }
+});
+
+test('writer (review #278 r2): a backslash in a path is written %5C, so the browser does not turn it into /', () => {
+  // the reviewer's reproducer, verbatim
+  const v = 'Go=/old';
+  const out = withHref('blog-post-cta', v, parseChromeLinks('blog-post-cta', v)[0], '/a\\b');
+  assert.equal(out, 'Go=/a%5Cb');
+  assert.equal(new URL(postCtaOf(out).href, BASE).href, 'https://site.example/a%5Cb');
+  assert.equal(withHref('copyright-href', '/old', parseChromeLinks('copyright-href', '/old')[0], '/a\\b'), '/a%5Cb');
+  assert.equal(withHref('nav', 'A /old', parseChromeLinks('nav', 'A /old')[0], '/a\\b'), 'A /a%5Cb');
+  // a leading `/\` would otherwise be a network-path reference to another host
+  const net = withHref('copyright-href', '/old', parseChromeLinks('copyright-href', '/old')[0], '/\\x.example/p');
+  assert.equal(new URL(net, BASE).host, 'site.example');
+});
+
+test('encodeTarget: the canonical encoding — path data encoded, escapes, query and fragment kept', () => {
+  assert.equal(encodeTarget('/a\\b'), '/a%5Cb');
+  assert.equal(encodeTarget('/50%off/'), '/50%25off/');           // a bare `%` is data
+  assert.equal(encodeTarget('/caf%C3%A9/'), '/caf%C3%A9/');       // a valid escape is an escape
+  assert.equal(encodeTarget('/café/'), '/caf%C3%A9/');
+  assert.equal(encodeTarget('/a b"c<d>e`f{g}h'), '/a%20b%22c%3Cd%3Ee%60f%7Bg%7Dh');
+  assert.equal(encodeTarget('/Jane;Doe/=:@!$&\'()*+,-._~/'), '/Jane;Doe/=:@!$&\'()*+,-._~/');
+  assert.equal(encodeTarget('/p?q=a b\\c%#f g'), '/p?q=a%20b\\c%#f%20g'); // past the path only whitespace/controls
+  assert.equal(encodeTarget('https://x.example:8443/a\\b?x'), 'https://x.example:8443/a%5Cb?x');
+});
+
+test('writer: the always-encoded URL set is exactly what new URL() resolves differently — derived, not listed', () => {
+  // The oracle: a target `/a<c>b` written raw reaches a different URL than its canonical encoding
+  // does ⇒ c must always be encoded. Computed here over every BMP code point and astral samples;
+  // the module's set must be exactly this set, and every write must reach the canonical URL.
+  const resolve = (h) => { try { return new URL(h, BASE).href; } catch { return null; } };
+  const fragile = [];
+  const astral = ['\u{1F600}', '\u{20000}', '\u{E0001}', '\u{10FFFF}'];
+  const chars = [];
+  for (let cp = 0; cp <= 0xffff; cp++) if (cp < 0xd800 || cp > 0xdfff) chars.push(String.fromCharCode(cp));
+  chars.push(...astral);
+  const old = parseChromeLinks('copyright-href', '/old')[0];
+  for (const c of chars) {
+    const target = `/a${c}b`;
+    if (resolve(target) !== resolve(encodeTarget(target))) fragile.push(c);
+    const out = withHref('copyright-href', '/old', old, target);
+    assert.equal(resolve(out), resolve(encodeTarget(target)), `U+${c.codePointAt(0).toString(16)}: ${JSON.stringify(out)} goes somewhere else`);
+    // and in a grammar with syntax of its own, the destination holds too (syntax escapes aside)
+    let n;
+    try { n = withHref('footer-social', 'A=/old', parseChromeLinks('footer-social', 'A=/old')[0], target); } catch { continue; }
+    assert.equal(dest(parseChromeLinks('footer-social', n)[0].href), dest(encodeTarget(target)), `footer-social U+${c.codePointAt(0).toString(16)}`);
+  }
+  assert.deepEqual([...urlFragileChars()].sort(), fragile.sort(), 'the module\'s URL set must be exactly the oracle\'s failing set');
+  // the reviewer's two cases are in it (a sanity floor, not the definition)
+  assert.ok(fragile.includes('\\') && fragile.includes('\t'), JSON.stringify(fragile));
+});
+
+test('writer: a lone surrogate has no URL spelling and is refused', () => {
+  assert.throws(() => withHref('copyright-href', '/old', parseChromeLinks('copyright-href', '/old')[0], '/a\ud800b'), /^Error: withHref: /);
 });
 
 test('writer: the encoded set is the tokenizers\' own whitespace class — every code point trim() removes', () => {

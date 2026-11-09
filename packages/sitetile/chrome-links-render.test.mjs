@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSite } from '../build/index.mjs';
 import { splitFrontmatter } from './site-core.js';
 import { CHROME_LINK_KEYS, parseChromeLinks, withHref } from './chrome-links.mjs';
+import * as chromeLinks from './chrome-links.mjs';
 
 const ENGINE = fileURLToPath(new URL('../..', import.meta.url));
 const FIXTURE = fileURLToPath(new URL('./fixtures/chrome-links-ir', import.meta.url));
@@ -26,6 +27,7 @@ if (!existsSync(join(ENGINE, 'packages/sitetile/astro/node_modules'))) {
 }
 
 const work = mkdtempSync(join(tmpdir(), 'tile-chrome-links-'));
+const dest = (h) => new URL(h, 'https://example.com/dir/page').href.replace(/%(3B|3D|3A|5E|7C|3E)/gi, (m) => decodeURIComponent(m));
 const walk = (dir) => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 
 // Replace `key`'s value in one Markdown file's frontmatter: a one-line `key: value`, or the fixture's
@@ -58,10 +60,14 @@ try {
     const links = parseChromeLinks(key, value);
     assert.ok(links.length > 0, `\`${key}\` in the fixture must hold a link`);
     const link = links[links.length - 1];
-    const target = `/moved-${key}/a b;c|d=e:f${key === 'footer' ? '>>g' : ''}^1/`;
+    // round 3: a backslash and a bare `%` too — the two characters a URL parser changes in a path
+    // that the earlier targets could not show.
+    const target = `/moved-${key}/a b;c|d=e:f\\g%h${key === 'footer' ? '>>g' : ''}^1/`;
     const next = withHref(key, value, link, target);
     const written = parseChromeLinks(key, next)[links.length - 1].href;
-    assert.equal(decodeURIComponent(written), target);
+    // where a browser goes from the written href is where the canonical encoding of the target goes
+    // (the writer's own path-syntax escapes, %3B and friends, aside)
+    assert.equal(dest(written), dest(chromeLinks.encodeTarget(target)), `${key}: ${written}`);
     writeFileSync(file, setValue(text, key, next));
     assert.equal(splitFrontmatter(readFileSync(file, 'utf8')).meta[key], next, `${key}: the file reads back as written`);
     moves.push({ key, from: link.href, to: written });
