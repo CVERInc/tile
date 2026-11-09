@@ -26,7 +26,10 @@ it shows a short "change it in the editor" hint instead, and links keep working 
   refusal puts the saved words back, even while the owner has the element focused again, unless
   newer words were typed over the refused ones; those stay and are sent next. A refused edit is
   never sent again without a new keystroke: focusing and leaving the element sends nothing. Each
-  element is `idle`, `editing`, `pending` or `refused` (`STATES` in text-edit-core.mjs).
+  element is `idle`, `editing`, `pending` or `refused` (`STATES` in text-edit-core.mjs). Only the
+  host's answer ends `pending`: words typed while an edit of that element is outstanding are a
+  draft, sent after a success against the new revision (Escape drops the draft, not the edit), so
+  the preview never shows words as saved that the host did not save.
 - **Message.** `{ type: 'reef-text-edit', id, page, revision, anchor, before, after }` to the parent
   window at `data-parent-origin` only; the answer is
   `{ type: 'reef-text-edit-result', id, ok, hint?, revision?, section? }`, accepted only from that

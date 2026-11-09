@@ -274,7 +274,7 @@ function refocused() {
 
 test('a refusal rolls a refocused, untouched element back, and an unchanged blur sends nothing', () => {
   const { host, ed, f } = refocused();
-  assert.equal(ed.stateOf(f.el), 'editing');
+  assert.equal(ed.stateOf(f.el), 'pending', 'focusing it does not leave pending (round 5)');
   host.answer(ed);
   assert.equal(f.el.textContent, 'Original', 'rolled back although the element is focused');
   assert.equal(ed.stateOf(f.el), 'editing');
@@ -362,7 +362,65 @@ test('words typed back to the saved ones while an edit is pending are not sent a
   host.refuse.add('e1'); host.answer(ed);
   assert.equal(host.inbox.length, 0);
   assert.equal(f.el.textContent, 'Original');
+  assert.equal(ed.stateOf(f.el), 'refused', 'its outstanding edit was refused');
+});
+
+// ── Round 5: `pending` is left only by the host's reply ───────────────────────────────────────────
+// Commit `First` (e1 in flight), click the same element, type the saved words back and leave before
+// e1 succeeds. The host stores `First`; the frame must not show `Original` as saved — the reversal
+// is a draft, sent against the new revision once e1 is answered.
+test('typing the saved words back while a save is pending is sent after that save succeeds', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  ed.begin(f); f.el.textContent = 'Original'; ed.commit();
+  assert.equal(ed.stateOf(f.el), 'pending', 'a user event does not leave pending');
+  assert.equal(host.inbox.length, 1);
+  host.answer(ed);
+  assert.equal(host.md, '## About\n\nFirst\n');
+  assert.equal(host.inbox.length, 1, 'the reversal is sent once e1 is saved');
+  assert.deepEqual([host.inbox[0].id, host.inbox[0].before, host.inbox[0].after], ['e2', 'First', 'Original']);
+  assert.notEqual(host.inbox[0].revision, sourceRevision('## About\n\nOriginal\n'), 'against the new revision');
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nOriginal\n');
+  assert.equal(f.el.textContent, 'Original');
   assert.equal(ed.stateOf(f.el), 'idle');
+});
+
+test('clicking a pending element and leaving it untouched, then a refusal: rolled back, never resent', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  ed.begin(f); ed.commit();
+  host.refuse.add('e1'); host.answer(ed);
+  assert.equal(f.el.textContent, 'Original');
+  assert.equal(ed.stateOf(f.el), 'refused');
+  assert.equal(host.inbox.length, 0, 'the refused words are not sent again');
+});
+
+test('no user event leaves pending: click, blur, Enter, Escape and typing all keep the save outstanding', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  ed.begin(f); assert.equal(ed.stateOf(f.el), 'pending');
+  f.el.textContent = 'Draft'; ed.cancel();
+  assert.equal(ed.stateOf(f.el), 'pending');
+  assert.equal(f.el.textContent, 'First', 'Escape discards the draft only; the pending words stay');
+  ed.begin(f); ed.commit(); assert.equal(ed.stateOf(f.el), 'pending');
+  ed.begin(f); f.el.textContent = ''; ed.commit();
+  assert.equal(ed.stateOf(f.el), 'pending');
+  assert.equal(f.el.textContent, 'First');
+  assert.equal(host.inbox.length, 1);
+  host.drain(ed);
+  assert.equal(ed.stateOf(f.el), 'idle');
+  assert.equal(host.md, '## About\n\nFirst\n');
+  assert.equal(host.inbox.length, 0, 'nothing was drafted, so nothing more is sent');
 });
 
 // ── Mounting: a double of the frame, its parent and a sibling ─────────────────────────────────────

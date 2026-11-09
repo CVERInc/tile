@@ -25,9 +25,11 @@
 //
 // Edits go ONE AT A TIME. The owner can keep typing, but the next edit is only sent once the
 // previous one is answered, with acknowledged words as its `before` and the revision the last
-// answer returned. A refusal always puts the acknowledged words back, focused or not, unless newer
-// words were typed over the refused ones; and a refused edit is never sent again without a new
-// keystroke (see STATES and the transition table in createEditor).
+// answer returned. An element with an edit outstanding stays `pending` until the host answers it:
+// words typed meanwhile are a draft, sent after a success against the new revision. A refusal
+// always puts the acknowledged words back, focused or not, unless newer words were typed over the
+// refused ones; and a refused edit is never sent again without a new keystroke (see STATES and the
+// transition table in createEditor).
 // (An edit replaces one line with one line, so a span stays valid after its neighbours change.)
 //
 // The edit the host receives (postMessage to the parent window, at the configured origin only):
@@ -139,12 +141,17 @@ export function anchorFor(el, section, before = cleanText(el.textContent)) {
 }
 
 /** Where one element's words stand. Every element the owner has touched is in exactly one:
- *   idle     — it shows its acknowledged words, and nothing about it is outstanding;
- *   editing  — the owner is typing in it (an earlier save of it may still be outstanding);
- *   pending  — committed words of it wait for the host, sent or queued behind another edit;
- *   refused  — its last save was refused and its acknowledged words are back.
- * Nothing leaves `refused` or `idle` by itself: only the owner focusing it again and typing makes
- * a new edit, so a refused save is never retried behind their back. */
+ *   idle     — it shows its saved words, and nothing about it is outstanding;
+ *   editing  — the owner is typing in it, and nothing about it is outstanding;
+ *   pending  — one edit of it waits for the host (sent, or queued behind another element's edit);
+ *   refused  — its last edit was refused and its saved words are back.
+ * `pending` has exactly two exits and both are the host's reply: a success (→ idle, the saved words
+ * as base) and a refusal (→ the rollback below). No click, blur, Enter, Escape or typing leaves it.
+ * Typing into a pending element edits a DRAFT, kept until the reply: a success then sends the draft
+ * against the new revision, a refusal keeps it as newer words. Escape during pending drops the
+ * draft only. So a draft is never shown as saved, and the frame never forgets an answer it is owed.
+ * Nothing leaves `refused` or `idle` by itself: only the owner typing again makes a new edit, so a
+ * refused edit is never retried behind their back. */
 export const STATES = Object.freeze({ IDLE: 'idle', EDITING: 'editing', PENDING: 'pending', REFUSED: 'refused' });
 const { IDLE, EDITING, PENDING, REFUSED } = STATES;
 
@@ -156,68 +163,80 @@ const { IDLE, EDITING, PENDING, REFUSED } = STATES;
  *   hint(text, el) — show a short hint next to an element
  */
 export function createEditor({ page, revision, post, hint, words = {} }) {
-  let active = null;            // the element in `editing`, if any
+  let active = null;            // the element the owner is typing in (editing, or a pending draft)
   let seq = 0;
   let rev = typeof revision === 'string' && revision ? revision : null;
-  // element → { section, kind, state, ack (saved words), want (latest committed words),
-  //             base (the words the element showed when typing began, or the coral last wrote) }
+  // element → { section, kind, state,
+  //             ack   — the saved words;
+  //             sent  — the words of its one outstanding edit (pending only), else null;
+  //             draft — words committed while pending, for after the reply, else null;
+  //             base  — the words it showed when the owner focused it, or the coral last wrote }
   const known = new Map();
-  const queue = [];             // elements whose latest words are not acknowledged yet, oldest first
+  const queue = [];             // pending elements whose edit is not sent yet, oldest first
   let inflight = null;          // { id, el, after } — the one edit the host has not answered
   const sectionIds = new Map(); // section element → its id in the source since a title edit
   const refusedHint = (text) => (typeof text === 'string' && text ? text : (words.refused || DEFAULT_REFUSED));
+  const editorHint = () => words.useEditor || DEFAULT_HINT;
 
   const show = (el, k, text) => { el.textContent = text; k.base = text; };
-  // Where an element rests when nobody is typing in it.
-  const rest = (k) => (k.want !== k.ack ? PENDING : IDLE);
+  const send = (el, k, text) => { k.sent = text; queue.push(el); return PENDING; };
+  const pendingWords = (k) => (k.draft !== null ? k.draft : k.sent);
 
   // ── The transitions. state → event → handler(el, k, arg) returning the next state. An event a
-  // state has no entry for changes nothing (a commit with nobody typing, an answer for an element
-  // with nothing outstanding). `ok` and `refuse` carry { after: the words that edit sent, text }.
+  // state has no row for changes nothing. User events: focus (click), commit (Enter or blur),
+  // cancel (Escape). Host events: ok and refuse, with { after: the words that edit sent, text }.
+  // Every row of PENDING except ok and refuse returns PENDING.
   const TRANSITIONS = {
     [IDLE]: { focus: startTyping },
     [REFUSED]: { focus: startTyping },
-    [PENDING]: { focus: startTyping, ok: saved, refuse: refusedAway },
-    [EDITING]: { commit: commitDraft, cancel: cancelDraft, ok: savedWhileTyping, refuse: refusedWhileTyping },
+    [EDITING]: { commit: commitEdit, cancel: cancelEdit },
+    [PENDING]: { focus: watchDraft, commit: commitDraft, cancel: dropDraft, ok: saved, refuse: refused },
   };
 
   function startTyping(el, k) { k.base = cleanText(el.textContent); return EDITING; }
 
-  function commitDraft(el, k) {
-    if (unsafeText(el.textContent)) { show(el, k, k.want); hint(refusedHint(null), el); return rest(k); }
+  function commitEdit(el, k) {
+    if (unsafeText(el.textContent)) { show(el, k, k.ack); hint(refusedHint(null), el); return IDLE; }
     const after = cleanText(el.textContent);
-    if (after === k.want) { show(el, k, after); return rest(k); }
-    if (!after) { show(el, k, k.want); hint(words.useEditor || DEFAULT_HINT, el); return rest(k); }
+    if (!after) { show(el, k, k.ack); hint(editorHint(), el); return IDLE; }
     show(el, k, after);
-    k.want = after;
-    if (!queue.includes(el)) queue.push(el);
-    return rest(k);
+    return after === k.ack ? IDLE : send(el, k, after);
   }
 
-  function cancelDraft(el, k) { show(el, k, k.want); return rest(k); }
+  function cancelEdit(el, k) { show(el, k, k.ack); return IDLE; }
 
-  function saved(el, k, { after }) { k.ack = after; return rest(k); }
-  function savedWhileTyping(el, k, { after }) { k.ack = after; return EDITING; }
+  function watchDraft(el, k) { k.base = cleanText(el.textContent); return PENDING; }
 
-  // A refused save always rolls back: what was committed returns to the acknowledged words, unless
-  // newer words were committed after it (those are queued and go next, against the saved words).
-  function refusedAway(el, k, { after, text }) {
-    hint(refusedHint(text), el);
-    if (k.want !== after) return rest(k);
-    k.want = k.ack;
-    show(el, k, k.ack);
-    return REFUSED;
+  function commitDraft(el, k) {
+    if (unsafeText(el.textContent)) { show(el, k, pendingWords(k)); hint(refusedHint(null), el); return PENDING; }
+    const after = cleanText(el.textContent);
+    if (!after) { show(el, k, pendingWords(k)); hint(editorHint(), el); return PENDING; }
+    k.draft = after === k.sent ? null : after;
+    show(el, k, after);
+    return PENDING;
   }
-  // The same while the owner is typing in it again. The element shows the refused words only
-  // because nothing was typed since it was focused (it still shows `base`): then they go too.
-  // A newer draft stays on screen; leaving the field sends it as a new edit.
-  function refusedWhileTyping(el, k, { after, text }) {
-    hint(refusedHint(text), el);
-    if (k.want === after) {
-      k.want = k.ack;
-      if (cleanText(el.textContent) === k.base) show(el, k, k.ack);
+
+  function dropDraft(el, k) { k.draft = null; show(el, k, k.sent); return PENDING; }
+
+  function saved(el, k, { after }) { k.ack = after; k.sent = null; return settle(el, k, false); }
+
+  function refused(el, k, { text }) { hint(refusedHint(text), el); k.sent = null; return settle(el, k, true); }
+
+  // After the reply. While the owner is typing in it, what it shows is their draft against the
+  // saved words: it stays, unless the edit was refused and nothing was typed or drafted since the
+  // element was focused (it still shows the refused words) — then the saved words come back.
+  // Otherwise a draft different from the saved words is the next edit; without one, the element
+  // shows its saved words.
+  function settle(el, k, wasRefused) {
+    const draft = k.draft;
+    k.draft = null;
+    if (active === el) {
+      if (wasRefused && draft === null && cleanText(el.textContent) === k.base) show(el, k, k.ack);
+      return EDITING;
     }
-    return EDITING;
+    if (draft !== null && draft !== k.ack) { show(el, k, draft); return send(el, k, draft); }
+    show(el, k, k.ack);
+    return wasRefused ? REFUSED : IDLE;
   }
 
   function step(el, event, arg) {
@@ -229,13 +248,13 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
 
   function begin(found) {
     if (!found) return false;
-    if (!found.plain) { hint(words.useEditor || DEFAULT_HINT, found.el); return false; }
+    if (!found.plain) { hint(editorHint(), found.el); return false; }
     if (active === found.el) return true;
     if (active) commit();
     if (!anchorFor(found.el, found.section)) return false;
     if (!known.has(found.el)) {
       const now = cleanText(found.el.textContent);
-      known.set(found.el, { section: found.section, kind: found.kind, state: IDLE, ack: now, want: now, base: now });
+      known.set(found.el, { section: found.section, kind: found.kind, state: IDLE, ack: now, sent: null, draft: null, base: now });
     }
     step(found.el, 'focus');
     active = found.el;
@@ -249,21 +268,21 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
     step(el, 'cancel');
   }
 
-  // Send the next unacknowledged edit, with acknowledged words as `before`. Returns what it posted.
+  // Send the next queued edit, with the saved words as `before`. Returns what it posted.
   function pump() {
     while (!inflight && queue.length) {
       const el = queue.shift();
       const k = known.get(el);
-      if (k.want === k.ack) continue;
+      if (k.state !== PENDING || k.sent === null) continue;
       const anchor = rev && anchorFor(el, k.section, k.ack);
-      if (!anchor) { step(el, 'refuse', { after: k.want, text: null }); continue; }
+      if (!anchor) { step(el, 'refuse', { after: k.sent, text: null }); continue; }
       const id = 'e' + (++seq);
       const message = {
         type: EDIT_MESSAGE, id, page, revision: rev,
         anchor: { section: sectionIds.get(k.section) || anchor.section, start: anchor.start, end: anchor.end },
-        before: k.ack, after: k.want,
+        before: k.ack, after: k.sent,
       };
-      inflight = { id, el, after: k.want };
+      inflight = { id, el, after: k.sent };
       try { post(message); } catch { inflight = null; step(el, 'refuse', { after: message.after, text: null }); continue; }
       return message;
     }
