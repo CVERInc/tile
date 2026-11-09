@@ -7,16 +7,15 @@
 // changing a link, adding a block — belongs to the host's own editor, and the coral says so.
 //
 // ── The anchor (the contract with whoever applies the edit) ─────────────────────────────────────
-// The renderer already stamps every section with a stable id computed from the source
-// (`s<n>-<slug>`, parseSite; pinned by sitetile/section-anchor.test.mjs). Inside a section the
-// coral names an element by:
-//   { section: '<section id>', kind: 'title' | 'p' | 'li', occurrence: k, before: '<its text>' }
-// `occurrence` counts only elements of the same kind in that section whose text is EXACTLY
-// `before`, in document order — so the applier looks for the k-th fragment of that kind whose
-// RENDERED words equal `before` (text-edit-source.mjs renders the source to count). A layout detail
-// of the renderer (an eyebrow, a button row, a figure) can therefore never shift which source line
-// an edit lands on: if the words are not there, or the two counts disagree, the edit is refused,
-// never written somewhere else.
+// The coral only offers elements the renderer itself has mapped to their source: in an editing
+// preview (`parseSite(md, { sourceLines: true })`) sitetile stamps each paragraph, list item and
+// heading it draws from a prose body with `data-src="<first>-<last>"`, the 0-based inclusive lines
+// of the page Markdown it came from. An edit names
+//   { section: '<section id>', start, end }   plus `before` (the words it replaces)
+// and the applier (text-edit-source.mjs) re-renders the same source, finds the one element stamped
+// with that span, checks it shows `before`, and rewrites only that line. Nothing is counted, so no
+// second reading of the source can disagree with the renderer about which line an element is.
+// A page rendered without spans (any production build) offers nothing.
 //
 // Freshness is the REVISION, not `before`: duplicates renumber when somebody else edits one of
 // them, and the words alone cannot tell. The host stamps the frame with `data-revision` (the
@@ -24,13 +23,13 @@
 // and the applier refuses any other one. A success answers with the new revision (and the section's
 // new id — a title edit changes it), which the next edit is made against.
 //
-// Edits go ONE AT A TIME. The owner can keep typing, but the next edit is only computed and sent
-// once the previous one is answered, and always against acknowledged words: a pending edit shows in
-// the preview, yet never counts as an occurrence, and a refusal only puts the old words back when
-// nothing newer was typed over them.
+// Edits go ONE AT A TIME. The owner can keep typing, but the next edit is only sent once the
+// previous one is answered, with acknowledged words as its `before` and the revision the last
+// answer returned: a refusal only puts the old words back when nothing newer was typed over them.
+// (An edit replaces one line with one line, so a span stays valid after its neighbours change.)
 //
 // The edit the host receives (postMessage to the parent window, at the configured origin only):
-//   { type: 'reef-text-edit', id, page, revision, anchor: { section, kind, occurrence }, before, after }
+//   { type: 'reef-text-edit', id, page, revision, anchor: { section, start, end }, before, after }
 // and the answer the coral listens for (from that origin AND from the parent window itself):
 //   { type: 'reef-text-edit-result', id, ok, hint?, revision?, section? }
 // A refused edit puts the old words back and shows the host's hint (or the coral's own default).
@@ -77,9 +76,37 @@ export function kindOf(el, section) {
   return null;
 }
 
-/** Plain = no element inside it. A bold word, a link, an inline image or code makes the element a
- *  structural one, which the coral does not edit. */
-export const isPlain = (el) => !el.children || el.children.length === 0;
+/** The source span the renderer stamped on an element, or null. */
+const RE_SPAN = /^(\d+)-(\d+)$/;
+export function spanOf(el) {
+  const m = RE_SPAN.exec((el && el.getAttribute && el.getAttribute('data-src')) || '');
+  if (!m) return null;
+  const start = Number(m[1]), end = Number(m[2]);
+  return end >= start ? { start, end } : null;
+}
+
+/** Plain = one source line, and no element inside it. A bold word, a link, an inline image or code
+ *  makes the element a structural one, and a soft-wrapped paragraph is several lines: the coral
+ *  edits neither. */
+export const isPlain = (el) => (!el.children || el.children.length === 0) && (() => { const s = spanOf(el); return !!s && s.start === s.end; })();
+
+/** True when `s` holds a character the HTML parser drops or rewrites, or that cannot be stored as
+ *  text: C0 controls other than tab, LF and FF (U+0000 is dropped, CR becomes LF), DEL and the C1
+ *  controls, U+FFFE/U+FFFF, and a lone surrogate. Words with one are never sent or written. */
+export function unsafeText(s) {
+  const t = String(s == null ? '' : s);
+  for (let i = 0; i < t.length; i++) {
+    const c = t.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const d = t.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) { i++; continue; }
+      return true;
+    }
+    if (c >= 0xdc00 && c <= 0xdfff) return true;
+    if (c < 0x20 ? c !== 0x09 && c !== 0x0a && c !== 0x0c : (c >= 0x7f && c <= 0x9f) || c === 0xfffe || c === 0xffff) return true;
+  }
+  return false;
+}
 
 /** The words as the owner sees them, on one line. */
 export const cleanText = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
@@ -98,20 +125,15 @@ export function editableAt(target) {
     if (n.tagName === 'SECTION' || n.tagName === 'BODY') return null;
     const section = sectionOf(n);
     const kind = section && kindOf(n, section);
-    if (kind) return { el: n, section, kind, plain: isPlain(n) };
+    if (kind) return spanOf(n) ? { el: n, section, kind, plain: isPlain(n) } : null; // no span → not mapped
   }
   return null;
 }
 
-/** The anchor for an element. `before` defaults to the element's current words; `textOf` gives
- *  every element's words for counting (the editor passes acknowledged words, never pending ones). */
-export function anchorFor(el, section, kind, before = cleanText(el.textContent), textOf = (n) => cleanText(n.textContent)) {
-  let occurrence = 0;
-  for (const other of descendants(section)) {
-    if (other === el) return { section: section.id, kind, occurrence, before };
-    if (kindOf(other, section) === kind && textOf(other) === before) occurrence++;
-  }
-  return null;
+/** The anchor for an element: its section's id and the source span the renderer stamped on it. */
+export function anchorFor(el, section, before = cleanText(el.textContent)) {
+  const span = spanOf(el);
+  return span && section ? { section: section.id, start: span.start, end: span.end, before } : null;
 }
 
 /**
@@ -129,7 +151,6 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
   const queue = [];             // elements whose latest words are not acknowledged yet, oldest first
   let inflight = null;          // { id, el, after } — the one edit the host has not answered
   const sectionIds = new Map(); // section element → its id in the source since a title edit
-  const ackText = (n) => (known.has(n) ? known.get(n).ack : cleanText(n.textContent));
   const refusedHint = (text) => (typeof text === 'string' && text ? text : (words.refused || DEFAULT_REFUSED));
 
   function begin(found) {
@@ -137,7 +158,7 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
     if (!found.plain) { hint(words.useEditor || DEFAULT_HINT, found.el); return false; }
     if (active === found.el) return true;
     if (active) commit();
-    if (!anchorFor(found.el, found.section, found.kind)) return false;
+    if (!anchorFor(found.el, found.section)) return false;
     if (!known.has(found.el)) {
       const now = cleanText(found.el.textContent);
       known.set(found.el, { section: found.section, kind: found.kind, ack: now, want: now });
@@ -161,18 +182,18 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
     hint(refusedHint(text), el);
   }
 
-  // Send the next unacknowledged edit, computed against acknowledged words. Returns what it posted.
+  // Send the next unacknowledged edit, with acknowledged words as `before`. Returns what it posted.
   function pump() {
     while (!inflight && queue.length) {
       const el = queue.shift();
       const k = known.get(el);
       if (k.want === k.ack) continue;
-      const anchor = rev && anchorFor(el, k.section, k.kind, k.ack, ackText);
+      const anchor = rev && anchorFor(el, k.section, k.ack);
       if (!anchor) { refuse(el, k, k.want, null); continue; }
       const id = 'e' + (++seq);
       const message = {
         type: EDIT_MESSAGE, id, page, revision: rev,
-        anchor: { section: sectionIds.get(k.section) || anchor.section, kind: k.kind, occurrence: anchor.occurrence },
+        anchor: { section: sectionIds.get(k.section) || anchor.section, start: anchor.start, end: anchor.end },
         before: k.ack, after: k.want,
       };
       inflight = { id, el, after: k.want };
@@ -188,6 +209,7 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
     const el = active;
     active = null;
     const k = known.get(el);
+    if (unsafeText(el.textContent)) { el.textContent = k.want; hint(words.refused || DEFAULT_REFUSED, el); return null; }
     const after = cleanText(el.textContent);
     if (after === k.want) { el.textContent = after; return null; }
     if (!after) { el.textContent = k.want; hint(words.useEditor || DEFAULT_HINT, el); return null; }

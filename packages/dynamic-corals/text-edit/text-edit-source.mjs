@@ -3,35 +3,36 @@
 // is measured against (text-edit-parity.test.mjs renders real pages and round-trips every
 // editable element through here; text-edit-review.test.mjs holds the cases that once misfired).
 //
-// The anchor is described in text-edit-core.mjs. Here it is resolved against the source:
-//   revision → sourceRevision() of the Markdown the frame was rendered from (or of what the last
-//              acknowledged edit produced). Any other revision is refused as `changed`: a stale
-//              preview's occurrence count means nothing once somebody else has renumbered it;
-//   section  → the n-th `## ` section of the page (the same fence-aware split parseSite does,
-//              whose `id` the renderer stamps on the <section>), which must be plain `prose`;
-//   kind     → 'title' (the `## ` line), 'p' (a paragraph), 'li' (a list item);
-//   before + occurrence → the occurrence-th fragment of that kind whose RENDERED words equal
-//              `before`.
-// 🔴 The population the occurrence counts in is the renderer's, not the source's: every source
-// block is rendered on its own with sitetile's renderer, and every element the coral would address
-// in that render (core's own kindOf) is one fragment with the words it shows. A comment that
-// vanishes, a soft-wrapped CJK line that joins without a space: those fragments stay in the
-// population, with the words the owner sees, and are refused as not plain. And because a block
-// rendered alone can still differ from the page rendered whole, the applier renders the whole page
-// too and counts the coral's elements with those words: when the two counts differ, the edit is
-// refused as `ambiguous` instead of landing on whichever line the source walk happened to find.
-// Only a fragment written as plain words on ONE source line, whose rendered words are exactly its
-// source words, is editable: no inline markup, no soft-wrapped paragraph, no item with a
-// continuation line. Everything else is refused with a reason, and the host tells the owner to use
-// the editor. The replacement keeps the line's own structure (indent, list marker, `## `) and swaps
-// only the words. A successful edit returns the new revision and the section's id after the edit
-// (a title edit changes it), which the host hands back to the coral in its answer.
+// 🔴 The anchor is a SOURCE SPAN THE RENDERER EMITTED, never a re-derivation of the renderer's
+// block structure. In an editing preview the page is parsed with `parseSite(md, { sourceLines:
+// true })`, and sitetile stamps every paragraph, list item (its own line) and heading it draws from
+// a prose body with `data-src="<first>-<last>"` (0-based, inclusive lines of the page Markdown).
+// The coral sends that span. Two earlier rounds instead looked for "the n-th fragment showing these
+// words" by walking the source a second time and counting, and every walk disagreed with the
+// renderer somewhere (nested lists, comment tails, fences inside fences). There is no counting here.
+//
+// An edit { anchor: { section, start, end }, before, after, revision } is applied when:
+//   revision → equals sourceRevision() of the Markdown (else `changed`): the span was taken from a
+//              render of exactly this source, or of what the coral's own acknowledged edits made it;
+//   section  → is a plain `prose` section of the page (else `not-found` / `unsupported-section`);
+//   span     → the page, rendered again the same way, has exactly one element the coral addresses
+//              stamped with that span in that section (else `not-found`), and it shows `before`
+//              (else `changed`);
+//   plain    → the span is ONE source line whose words, after its own marker (indent, list marker,
+//              `#`s), are plain and are exactly what the element shows, and the element holds no
+//              other element (else `not-plain`);
+//   after    → is plain words the renderer shows as written, with no character the HTML parser
+//              drops or rewrites (else `after-not-plain`).
+// Only that line's words change; its marker stays. A success returns the new revision and the
+// section's id after the edit (a title edit changes it), which the host hands back to the coral.
 
-import { parseSite, parseParams, splitFrontmatter, renderSiteToHtml, bodyHtml, inlineHtml } from '../../sitetile/site-core.js';
-import { kindOf, cleanText } from './text-edit-core.mjs';
+import { parseSite, parseParams, renderSiteToHtml, bodyHtml } from '../../sitetile/site-core.js';
+import { kindOf, cleanText, unsafeText } from './text-edit-core.mjs';
 
-const RE_FENCE = /^\s*(```|~~~)/;
-const RE_H2 = /^##(?:\s+(.*))?$/;
+// One source line's own marker and its words: a list item, an ATX heading, or a paragraph line.
+const RE_LIST_LINE = /^(\s*(?:[-*+]|\d+[.)])\s+)(.*)$/;
+const RE_HEADING_LINE = /^(\s*#{1,6}[ \t]+)(.*)$/;
+const RE_PARA_LINE = /^(\s*)(.*)$/;
 const RE_LIST = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
 // Characters that are (or can become) inline markup or HTML in the renderer: emphasis, code,
 // links/images, raw HTML, escapes, strikethrough, table cells, brace params.
@@ -39,7 +40,7 @@ const RE_MARKUP = /[*_`[\]<>\\~|{}]|https?:\/\/|&[#a-z0-9]+;/i;
 // A line that opens some other block than a paragraph.
 const RE_BLOCK = /^\s*(#|>|\||<!--|%%|!\[|```|~~~|-{3,}\s*$|={3,}\s*$)/;
 
-export const REASONS = Object.freeze(['malformed', 'changed', 'unsupported-section', 'not-found', 'ambiguous', 'not-plain', 'after-not-plain']);
+export const REASONS = Object.freeze(['malformed', 'changed', 'unsupported-section', 'not-found', 'not-plain', 'after-not-plain']);
 
 const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 
@@ -65,7 +66,9 @@ export function sourceRevision(markdown) {
 // sitetile's HTML is well-formed and escapes text (&amp; &lt; &gt;) and attribute values (&quot;
 // too), so a tag tokenizer is enough to give core's kindOf the same tree a browser would build.
 // Script/style bodies and comments are skipped whole: they are not text, and a `<` inside one must
-// not open an element.
+// not open an element. Text follows the HTML parser on the characters it changes: input CR and
+// CRLF become LF (input stream preprocessing), and U+0000 in body text is dropped (the "in body"
+// insertion mode ignores it) — so a word with NUL in it reads here as it reads in the frame.
 const VOID = new Set(['img', 'br', 'hr', 'input', 'meta', 'link', 'source', 'wbr', 'col', 'area']);
 const decode = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 export class El {
@@ -84,9 +87,9 @@ export class El {
 export function htmlTree(html, Make = El) {
   const root = new Make('body', {}, null);
   let cur = root;
-  for (const m of String(html).matchAll(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w-]*)([^>]*)>|([^<]+)/gi)) {
+  for (const m of String(html).replace(/\r\n?/g, '\n').matchAll(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>|<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w-]*)([^>]*)>|([^<]+)/gi)) {
     if (m[1] || m[0].startsWith('<!--')) continue;
-    if (m[5] !== undefined) { cur.nodes.push(decode(m[5])); continue; }
+    if (m[5] !== undefined) { cur.nodes.push(decode(m[5].replace(/\u0000/g, ''))); continue; }
     const tag = m[3].toLowerCase();
     if (m[2]) { while (cur !== root && cur.tagName !== tag.toUpperCase()) cur = cur.parentElement; if (cur !== root) cur = cur.parentElement; continue; }
     const attrs = {};
@@ -107,87 +110,11 @@ function addressed(html) {
 }
 const renderBlock = (src) => addressed(bodyHtml(src, { linkRows: 'st-prose' }));
 
-/** How many elements the coral addresses in that section of the WHOLE rendered page, of that kind,
- *  showing exactly those words. */
-function renderedCount(markdown, sectionId, kind, words) {
-  const root = htmlTree(renderSiteToHtml(parseSite(markdown)));
-  let sec = null;
-  for (const el of root.all()) if (el.tagName === 'SECTION' && el.id === sectionId) { sec = el; break; }
-  if (!sec) return -1;
-  let n = 0;
-  for (const el of sec.all()) if (kindOf(el, sec) === kind && cleanText(el.textContent) === words) n++;
-  return n;
-}
-
-/** Every addressable fragment of a page, in source order:
- *  { section, kind, line (0-based, whole file), text (the words the renderer shows), plain }
- *  — plus `supported` per section. */
-export function textFragments(markdown) {
-  const text = String(markdown == null ? '' : markdown);
-  const { body } = splitFrontmatter(text);
-  if (!text.endsWith(body)) return { fragments: [], sections: [] };
-  const lines = text.split('\n');
-  const first = lines.length - body.split('\n').length;
-  const parsed = parseSite(text).sections;
-
-  const sections = [];
-  let cur = null, fence = false;
-  for (let i = first; i < lines.length; i++) {
-    if (RE_FENCE.test(lines[i])) { fence = !fence; if (cur) cur.lines.push(i); continue; }
-    const h2 = !fence && RE_H2.exec(lines[i]);
-    if (h2) { cur = { head: i, title: (h2[1] || '').trim(), lines: [] }; sections.push(cur); continue; }
-    if (cur) cur.lines.push(i);
-  }
-
-  const fragments = [];
-  sections.forEach((sec, si) => {
-    const p = parsed[si];
-    sec.id = p ? p.id : null;
-    sec.supported = !!p && p.type === 'prose' && !parseParams(p.params || '').ordered;
-    if (!sec.id) return;
-    if (sec.title) {
-      const shown = cleanText(htmlTree(inlineHtml(p.title)).textContent);
-      fragments.push({ section: sec.id, kind: 'title', line: sec.head, text: shown, plain: !RE_MARKUP.test(sec.title) && shown === clean(sec.title) && !!shown });
-    }
-    // Source blocks first ('p' = paragraph lines, 'li' = an item and its continuation lines,
-    // 'h' = a `#` heading line, which renders as an element the coral counts as a title)…
-    const blocks = [];
-    let inFence = false, inComment = false, block = null;
-    const end = () => { if (block) blocks.push(block); block = null; };
-    for (const k of sec.lines) {
-      const ln = lines[k];
-      if (inComment) { if (ln.includes('-->')) inComment = false; continue; }
-      if (RE_FENCE.test(ln)) { end(); inFence = !inFence; continue; }
-      if (inFence) continue;
-      if (!ln.trim()) { end(); continue; }
-      if (/^\s*<!--/.test(ln)) { end(); if (!ln.includes('-->')) inComment = true; continue; }
-      if (RE_LIST.test(ln)) { end(); block = { kind: 'li', lines: [k] }; continue; }
-      if (block && block.kind === 'li') { block.lines.push(k); continue; } // continuation line
-      if (!block && /^\s*#/.test(ln)) { blocks.push({ kind: 'h', lines: [k] }); continue; }
-      if (!block && RE_BLOCK.test(ln)) continue;  // quote, table, type line, image block…
-      (block || (block = { kind: 'p', lines: [] })).lines.push(k);
-    }
-    end();
-    // …then each block rendered on its own: every element the coral would address in it is a
-    // fragment, with the words it shows. Plain only when the block is one source line rendering as
-    // exactly one element of its own kind, with no element inside, showing its source words as written.
-    for (const b of blocks) {
-      const found = renderBlock(b.lines.map((k) => lines[k]).join('\n'));
-      const raw = b.kind === 'li' ? RE_LIST.exec(lines[b.lines[0]])[3] : lines[b.lines[0]];
-      const single = b.kind !== 'h' && b.lines.length === 1 && found.length === 1 && found[0].kind === b.kind;
-      for (const { el, kind } of found) {
-        const shown = cleanText(el.textContent);
-        fragments.push({ section: sec.id, kind, line: b.lines[0], text: shown,
-          plain: single && el.children.length === 0 && !RE_MARKUP.test(raw) && shown === clean(raw) && !!shown });
-      }
-    }
-  });
-  return { fragments, sections };
-}
-
-/** Is `after` something the coral may write as plain words? Plain by the source rule, and shown by
- *  the renderer exactly as written (no placeholder, entity or markup it would turn into something else). */
+/** Is `after` something the coral may write as plain words? No character the HTML parser drops or
+ *  rewrites (core's unsafeText), plain by the source rule, and shown by the renderer exactly as
+ *  written (no placeholder, entity or markup it would turn into something else). */
 export function plainAfter(after) {
+  if (typeof after !== 'string' || unsafeText(after)) return false;
   const t = clean(after);
   if (!t || t.length > 4000 || RE_MARKUP.test(t) || RE_BLOCK.test(t) || RE_LIST.test(t)) return false;
   const found = renderBlock(t);
@@ -195,35 +122,41 @@ export function plainAfter(after) {
 }
 
 /**
- * Apply one text-only edit. `edit` = { anchor: { section, kind, occurrence }, before, after, revision }.
+ * Apply one text-only edit. `edit` = { anchor: { section, start, end }, before, after, revision }.
  * → { ok: true, markdown, line, revision, section } | { ok: false, reason } (reason ∈ REASONS)
  *   revision — sourceRevision of the new Markdown: the coral's next edit is made against it;
  *   section  — the edited section's id in the new Markdown (a title edit changes it).
  */
 export function applyTextEdit(markdown, edit) {
   const a = edit && edit.anchor;
-  if (!a || typeof a.section !== 'string' || !['title', 'p', 'li'].includes(a.kind)
-    || !Number.isInteger(a.occurrence) || a.occurrence < 0
+  if (!a || typeof a.section !== 'string' || !Number.isInteger(a.start) || !Number.isInteger(a.end)
+    || a.start < 0 || a.end < a.start
     || typeof edit.before !== 'string' || typeof edit.after !== 'string'
     || typeof edit.revision !== 'string') return { ok: false, reason: 'malformed' };
-  if (edit.revision !== sourceRevision(markdown)) return { ok: false, reason: 'changed' };
-  const before = clean(edit.before), after = clean(edit.after);
-  const { fragments, sections } = textFragments(markdown);
-  const sec = sections.find((s) => s.id === a.section);
-  if (!sec) return { ok: false, reason: 'not-found' };
-  if (!sec.supported) return { ok: false, reason: 'unsupported-section' };
-  const same = fragments.filter((f) => f.section === a.section && f.kind === a.kind && f.text === before);
-  if (renderedCount(markdown, a.section, a.kind, before) !== same.length) return { ok: false, reason: 'ambiguous' };
-  const hit = same[a.occurrence];
-  if (!hit) return { ok: false, reason: 'not-found' };
-  if (!hit.plain) return { ok: false, reason: 'not-plain' };
-  if (!plainAfter(after)) return { ok: false, reason: 'after-not-plain' };
-  const lines = String(markdown).split('\n');
-  const ln = lines[hit.line];
-  if (a.kind === 'title') lines[hit.line] = '## ' + after;
-  else if (a.kind === 'li') { const m = RE_LIST.exec(ln); lines[hit.line] = m[1] + m[2] + ' ' + after; }
-  else lines[hit.line] = /^\s*/.exec(ln)[0] + after;
+  const md = String(markdown == null ? '' : markdown);
+  if (edit.revision !== sourceRevision(md)) return { ok: false, reason: 'changed' };
+  const site = parseSite(md, { sourceLines: true });
+  const si = site.sections.findIndex((s) => s.id === a.section);
+  if (si < 0) return { ok: false, reason: 'not-found' };
+  const sec = site.sections[si];
+  if (sec.type !== 'prose' || parseParams(sec.params || '').ordered) return { ok: false, reason: 'unsupported-section' };
+  // The element the frame showed for that span: the same render, read back.
+  let secEl = null;
+  for (const el of htmlTree(renderSiteToHtml(site)).all()) if (el.tagName === 'SECTION' && el.id === a.section) { secEl = el; break; }
+  const span = a.start + '-' + a.end;
+  const hits = secEl ? [...secEl.all()].filter((el) => el.getAttribute('data-src') === span && kindOf(el, secEl)) : [];
+  if (hits.length !== 1) return { ok: false, reason: 'not-found' };
+  const el = hits[0];
+  const before = clean(edit.before);
+  if (cleanText(el.textContent) !== before) return { ok: false, reason: 'changed' };
+  if (a.start !== a.end || el.children.length) return { ok: false, reason: 'not-plain' };
+  const lines = md.split('\n');
+  const shape = el.tagName === 'LI' ? RE_LIST_LINE : /^H[1-6]$/.test(el.tagName) ? RE_HEADING_LINE : RE_PARA_LINE;
+  const m = shape.exec(lines[a.start]);
+  if (!m || RE_MARKUP.test(m[2]) || unsafeText(m[2]) || clean(m[2]) !== before) return { ok: false, reason: 'not-plain' };
+  if (!plainAfter(edit.after)) return { ok: false, reason: 'after-not-plain' };
+  lines[a.start] = m[1] + clean(edit.after);
   const next = lines.join('\n');
-  const moved = parseSite(next).sections[sections.indexOf(sec)];
-  return { ok: true, markdown: next, line: hit.line, revision: sourceRevision(next), section: moved ? moved.id : a.section };
+  const moved = parseSite(next).sections[si];
+  return { ok: true, markdown: next, line: a.start, revision: sourceRevision(next), section: moved ? moved.id : a.section };
 }
