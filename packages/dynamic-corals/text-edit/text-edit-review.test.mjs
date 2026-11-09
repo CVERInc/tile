@@ -717,8 +717,15 @@ function frame(attrs, md = '## About\n\nOld\n') {
   const focusout = () => docListeners.focusout({ target: p });
   // A host's answer echoes this document's `doc` unless the test says otherwise (tile#283).
   const reply = (data, from) => winListeners.message({ data: { doc: ed && ed.doc, ...data }, origin: from.origin, source: from.source });
+  // Delivers a message to the frame's window the way a browser does: to whatever 'message' listener
+  // is registered, or to nobody. Returns whether anything was listening (`reply` throws instead).
+  const deliver = (data, from) => {
+    const listener = winListeners.message;
+    if (listener) listener({ data, origin: from.origin, source: from.source });
+    return !!listener;
+  };
   const css = () => head.nodes.map((n) => n.textContent).join('');
-  return { editor: ed, sent, readies, p, parent, key, click, focusout, reply, css };
+  return { editor: ed, sent, readies, p, parent, key, click, focusout, reply, deliver, css };
 }
 const REV = 'r-test';
 
@@ -923,8 +930,25 @@ test('probe: a probe from another origin, or from a sibling window at the parent
   assert.equal(f.readies.length, 1, 'only the ready at mount');
 });
 
-test('probe: a document where the coral did not mount answers no probe', () => {
-  const f = frame({ 'data-parent-origin': '*', 'data-revision': REV });
-  assert.equal(f.editor, null);
-  assert.deepEqual(f.readies, []);
+test('probe: a document where the coral did not mount answers no probe — a probe is delivered, and nothing is posted', () => {
+  // Each way mounting fails: a wildcard or malformed parent origin, no revision. The probe is sent
+  // from the parent at every origin a host could be at; `deliver` reaches any listener the window has.
+  for (const [attrs, origins] of [
+    [{ 'data-parent-origin': '*', 'data-revision': REV }, ['https://editor.example', 'null', '*']],
+    [{ 'data-parent-origin': 'https://editor.example/path', 'data-revision': REV }, ['https://editor.example']],
+    [{ 'data-parent-origin': 'https://editor.example' }, ['https://editor.example']],
+  ]) {
+    const f = frame(attrs);
+    assert.equal(f.editor, null, JSON.stringify(attrs));
+    for (const origin of origins) {
+      const listening = f.deliver({ type: PROBE_MESSAGE, nonce: 'load-1' }, { origin, source: f.parent });
+      assert.equal(listening, false, `${JSON.stringify(attrs)}: no message listener after a failed mount`);
+    }
+    assert.deepEqual(f.readies, [], `${JSON.stringify(attrs)}: no ready, at mount or to the probe`);
+    assert.deepEqual(f.sent, [], `${JSON.stringify(attrs)}: nothing else posted`);
+  }
+  // CONTROL: the same delivery reaches a mounted coral, which answers.
+  const ok = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  assert.equal(ok.deliver({ type: PROBE_MESSAGE, nonce: 'load-1' }, { origin: 'https://editor.example', source: ok.parent }), true);
+  assert.deepEqual(ok.readies.map((r) => r.m.probe), [undefined, 'load-1']);
 });
