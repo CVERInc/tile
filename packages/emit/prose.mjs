@@ -1,7 +1,7 @@
 // `prose` — the default section: heading + markdown body. The body's markup is `proseBodyHtml`,
 // which the reference renderer's prose branch calls too (reef#1933 S6: every paragraph stays
 // where it is written — a links-only one is a button row in place, an images-only one a figure).
-import { inlineHtml, proseBodyHtml } from '../sitetile/site-core.js';
+import { inlineHtml, proseBodyHtml, srcAttr } from '../sitetile/site-core.js';
 import { attr, when } from './html.mjs';
 import { cellFrame } from './cell.mjs';
 
@@ -9,6 +9,8 @@ import { cellFrame } from './cell.mjs';
  * @param {{ eyebrow?: unknown, align?: unknown, ordered?: boolean, surface?: unknown, cell?: { attrs: string } }} params
  *   `cell` → a Card `text` cell (cell.mjs): the body alone, in the Card's block markdown.
  * @param {{ hero?: boolean, block?: (md: string) => string }} ctx  first section on the page → its title is the page's <h1>
+ * A section parsed with `parseSite(raw, { sourceLines: true })` carries `srcLines`; only then are the
+ * title and body blocks stamped with `data-src` (an editing preview). Otherwise byte-identical.
  */
 export function emitProse(section, params, ctx) {
   if (params.cell) return cellFrame(params.cell, 'st-prose', 'text', ctx.block(section.body || ''));
@@ -17,6 +19,6 @@ export function emitProse(section, params, ctx) {
   return '<section class="st-prose"' + attr('id', section.id) + attr('data-align', align)
     + attr('data-ordered', ordered ? '' : undefined) + attr('data-surface', surface) + '> '
     + when(eyebrow, () => '<p class="st-prose-eyebrow">' + inlineHtml(eyebrow) + '</p>') + ' '
-    + when(section.title, () => '<' + Title + '>' + inlineHtml(section.title) + '</' + Title + '>') + ' '
-    + proseBodyHtml(section.body, ordered) + ' </section>';
+    + when(section.title, () => '<' + Title + (section.srcLines ? srcAttr({ srcLine: section.srcLines.head }, 0, 0) : '') + '>' + inlineHtml(section.title) + '</' + Title + '>') + ' '
+    + proseBodyHtml(section.body, ordered, section.srcLines) + ' </section>';
 }
