@@ -189,11 +189,17 @@ export function iconHrefs(meta, opts) {
 //     read from public/. Nothing is resampled, because iOS scales whatever it is given. When it cannot
 //     be read (an https URL, a JPEG, a missing file) the badge stays. The <link> already points iOS at the mark
 //     whenever the mark is a raster, so the badge is only what a bare probe of the path finds.
-//   · /favicon.ico and /favicon.svg are NOT written. Neither can be derived from the owner's PNG
-//     without an image library (an .ico wants a 32px resample, and an SVG wrapper around a PNG
-//     is a raster in disguise). A browser that finds no /favicon.ico uses the page's
-//     <link rel=icon>, which names the mark. A 404 there costs a bookmark icon until the page is
-//     visited. The badge there costs a wrong brand on every visit.
+//   · /favicon.ico is the owner's PNG wrapped as an ICO, the same bytes again, when there is one.
+//     ICO has carried PNG payloads since Vista, and every browser reads them, so no resample is
+//     needed and none is done (there is no resizer here; see NO RASTERIZER above). Without a
+//     readable owner PNG (an SVG, an https URL, a JPEG, a missing file) it stays the badge.
+//   · /favicon.svg is the owner's own file, byte for byte, when `favicon:` names an SVG this build
+//     can read from public/. Otherwise it is NOT written: <head> links the mark and never
+//     /favicon.svg once a mark is set, and an SVG wrapper around a PNG is a raster in disguise.
+// 🩸 /favicon.ico used to be skipped too, on the reasoning that a 404 there costs only a bookmark
+// icon. But it is the one path every browser and crawler requests with no <link> telling it to —
+// that is what the route exists for — and a real build with `favicon: /icon.png` shipped no
+// /favicon.ico at all. It now always exists: the owner's PNG when there is one, else the badge.
 // With `favicon:` unset, every function below returns exactly what the routes returned before.
 //
 // PRECEDENCE at a well-known path (tile#203 review r1): a file someone placed AT that path in
@@ -291,12 +297,37 @@ export function ownerPng(meta, readPublic, safe) {
   return size ? { href: '/' + rel, bytes, ...size } : null;
 }
 
+/** True when the bytes open like an SVG document: an `<svg` element within the first 4 KB (after
+ *  any XML declaration, doctype or comment). Not a validator, only a guard against serving a file
+ *  that merely ends in .svg as image/svg+xml. */
+function looksLikeSvg(bytes) {
+  if (!(bytes instanceof Uint8Array) || !bytes.length) return false;
+  const head = new TextDecoder('utf-8').decode(bytes.subarray(0, 4096));
+  return /<svg[\s>]/i.test(head);
+}
+
+/**
+ * The owner's favicon as an SVG this build ships: `{ href, bytes }`, or null. Only a `favicon:`
+ * that names a .svg under public/ whose bytes open like an SVG counts.
+ */
+export function ownerSvg(meta, readPublic, safe) {
+  const href = ownerFavicon(meta, safe);
+  if (markType(href) !== 'image/svg+xml') return null;
+  const rel = publicFilePath(href);
+  if (!rel || typeof readPublic !== 'function') return null;
+  const bytes = readPublic(rel);
+  return looksLikeSvg(bytes) ? { href: '/' + rel, bytes } : null;
+}
+
 /** Which of the three well-known paths carry OUR badge in this build, before any public/ file
- *  shadows a route. The routes and the layout's `generated` flag both read this. */
+ *  shadows a route. The layout's `generated` flag reads this. A path missing from the set either
+ *  carries the owner's file (ico and apple with an owner PNG, svg with an owner SVG) or is not
+ *  written at all (svg with any other `favicon:`); faviconIcoFile / faviconSvgFile say which. */
 export function badgePaths(meta, readPublic, safe) {
   const out = new Set();
-  if (!ownerFavicon(meta, safe)) { out.add(ICON_PATHS.ico); out.add(ICON_PATHS.svg); }
-  if (!ownerPng(meta, readPublic, safe)) out.add(ICON_PATHS.apple);
+  const own = ownerPng(meta, readPublic, safe);
+  if (!own) { out.add(ICON_PATHS.ico); out.add(ICON_PATHS.apple); }
+  if (!ownerFavicon(meta, safe)) out.add(ICON_PATHS.svg);
   return out;
 }
 
@@ -304,6 +335,22 @@ export function badgePaths(meta, readPublic, safe) {
 export function appleTouchFile(meta, readPublic, safe) {
   const own = ownerPng(meta, readPublic, safe);
   return own ? own.bytes : appleTouchPng(meta);
+}
+
+/** The /favicon.ico body, ALWAYS present: the owner's PNG inside an ICO when there is one, else the
+ *  badge. The PNG is not resampled; the ICO directory records its real size (0 for 256 and up, as
+ *  the format says, and the PNG's own IHDR is what a reader trusts). */
+export function faviconIcoFile(meta, readPublic, safe) {
+  const own = ownerPng(meta, readPublic, safe);
+  return own ? encodeIco(own.bytes, own.width, own.height) : faviconIco(meta);
+}
+
+/** The /favicon.svg body: the owner's SVG when `favicon:` names one, the badge when no `favicon:`
+ *  takes the path away, else null (the route writes nothing, and nothing links the path). */
+export function faviconSvgFile(meta, readPublic, safe) {
+  const own = ownerSvg(meta, readPublic, safe);
+  if (own) return own.bytes;
+  return ownerFavicon(meta, safe) ? null : badgeSvg(meta);
 }
 
 // ── the SVG badge ────────────────────────────────────────────────────────────────────────────────
@@ -584,11 +631,11 @@ function pngContainer(idat, size) {
 
 /** A one-image .ico wrapping a PNG. Every browser since IE11 reads PNG-in-ICO, and the alternative
  *  is a BMP encoder with a bottom-up upside-down bitmap and a legacy AND mask. */
-function icoContainer(png, size) {
+function icoContainer(png, width, height = width) {
   const head = new Uint8Array(22);
   const dv = new DataView(head.buffer);
   dv.setUint16(0, 0, true); dv.setUint16(2, 1, true); dv.setUint16(4, 1, true);   // reserved, type=icon, count
-  head[6] = size >= 256 ? 0 : size; head[7] = size >= 256 ? 0 : size;             // 0 means 256
+  head[6] = width >= 256 ? 0 : width; head[7] = height >= 256 ? 0 : height;       // 0 means 256
   head[8] = 0; head[9] = 0;
   dv.setUint16(10, 1, true); dv.setUint16(12, 32, true);                          // planes, bpp
   dv.setUint32(14, png.length, true);                                             // bytes of the image
@@ -603,9 +650,9 @@ export function encodePng(px, size) {
   return asBuffer(pngContainer(nodeZlib().deflateSync(pngScanlines(px, size), { level: 9 }), size));
 }
 
-/** PNG → a one-image .ico Buffer. */
-export function encodeIco(png, size) {
-  return asBuffer(icoContainer(png, size));
+/** PNG → a one-image .ico Buffer. `height` defaults to `width` (every image this file draws is square). */
+export function encodeIco(png, width, height = width) {
+  return asBuffer(icoContainer(png, width, height));
 }
 
 // ── what the routes emit ─────────────────────────────────────────────────────────────────────────
