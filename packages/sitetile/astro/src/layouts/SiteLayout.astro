@@ -36,6 +36,12 @@ import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
 import { styleText } from '../lib/style-text.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import NavNode from '../components/NavNode.astro';
+// Every link-bearing chrome key (nav, footer, footer-cols, the `Label=href` lists, header-cta,
+// header-actions, sidebar-nav, the whole-value hrefs) is read by chrome-links.mjs and nothing else —
+// the same file a tool that rewrites those links vendors, so the grammar it edits is this layout's.
+import {
+  navMenuOf, footerLinksOf, footerColsOf, labelHrefListOf, headerCtaOf, headerActionsOf, sidebarNavOf, hrefValueOf,
+} from '../../../chrome-links.mjs';
 import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
 // Swappable design-system shell: site.css is the DEFAULT (reef) skin; a page opts into another skin
 // with `theme: <name>` in frontmatter, which overrides the --gd-* token surface (and may add family
@@ -97,10 +103,8 @@ const hasResidue = /reef:has-custom-css/.test(themeRaw);
 const customTheme = !!themeRaw.trim() && (!compiled || hasResidue);
 // IR-driven footer (substrate rule: single-line frontmatter): `footer: Label /href | Label2 /href2`
 // and `copyright: …`. Any site can set them; absent → the footer falls back to the title.
-const footerLinks = String(meta.footer || '').split('|').map((s) => s.trim()).filter(Boolean)
-  // footer is flat: a `>>` dropdown (header-only) collapses to just its parent link here.
-  .map((s) => { const di = s.indexOf('>>'); return di >= 0 ? s.slice(0, di).trim() : s; })
-  .map((part) => { const m = part.match(/^(.*\S)\s+(\S+)$/); return m ? { label: m[1], href: m[2] } : { label: part, href: '#' }; });
+// The footer is flat: a `>>` dropdown (header-only) collapses to just its parent link here.
+const footerLinks = footerLinksOf(meta.footer);
 const copyright = meta.copyright ? String(meta.copyright).trim() : '';
 // `footer-social: Label=url ; Label2=url2` — an icon row (facebook/instagram/x/youtube/threads
 // recognized by URL host, else a generic link glyph) instead of the text-link footer nav. OPT-IN:
@@ -122,9 +126,7 @@ const ACTION_ICON = {
 };
 ACTION_ICON.hamburger = ACTION_ICON.bars;
 ACTION_ICON.search = ACTION_ICON.magnifier;
-const footerSocial = String(meta['footer-social'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
-  .filter(Boolean)
+const footerSocial = labelHrefListOf(meta['footer-social'])
   .map((it) => {
     const host = (it.href.match(/^https?:\/\/(?:www\.)?([^\/]+)/i) || [])[1] || '';
     return { ...it, icon: BRAND_ICON[host] || GENERIC_ICON };
@@ -132,34 +134,12 @@ const footerSocial = String(meta['footer-social'] || '').split(';').map((s) => s
 // Optional HEADER nav menu (substrate rule: single line): `nav: Label /href | Label2 /href2`.
 // Same syntax as `footer:`. Renders as the top primary menu. OPT-IN: absent → the header keeps just
 // the logo + CTA (a non-opted site is unaffected). For multi-page sites with a top menu (e.g. a WordPress nav).
-// A nav item may carry a DROPDOWN submenu via ` >> ` (parent >> child ; child2). Each child is the
-// same `Label /href` form, separated by ` ; `. Backward-compatible: parts without `>>` stay flat
-// (a non-opted site is unaffected). The submenu renders in the DOM as a `.rf-nav-sub` (theme decides whether
-// to show on hover); its text is always present so multi-page WP mega-menus stay faithful.
-const parseNavPart = (part) => { const m = part.match(/^(.*\S)\s+(\S+)$/); return m ? { label: m[1], href: m[2] } : { label: part, href: '#' }; };
-// A nav is a TREE, spelled by its shape:
-//  • one line, FLAT: `nav: A /a | B /b` — the common top-bar case (`|` separates items).
-//  • indented markdown list, ANY depth (dropdowns / mega-menus): a `nav: |` block scalar, one
-//    `- Label /href` per line, indentation = depth. Whitespace is the tree; it reads at a glance.
-// There is exactly ONE way to nest (the indented list). An earlier inline ` >> `/` ; ` submenu
-// spelling was removed once its last user migrated — two spellings for one thing is a tax.
-const parseNavIndented = (text) => {
-  const root = { children: [] };
-  const stack = [{ node: root, indent: -1 }];
-  for (const raw of text.split('\n')) {
-    if (!raw.trim()) continue;
-    const indent = (raw.match(/^[ \t]*/)[0] || '').replace(/\t/g, '  ').length;
-    const item = { ...parseNavPart(raw.replace(/^[ \t]*-?[ \t]*/, '').trim()), children: [] };
-    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
-    stack[stack.length - 1].node.children.push(item);
-    stack.push({ node: item, indent });
-  }
-  return root.children;
-};
-const parseNavFlat = (text) => text.split('|').map((s) => s.trim()).filter(Boolean)
-  .map((part) => ({ ...parseNavPart(part), children: [] }));
-const navRaw = String(meta.nav || '');
-const navMenu = navRaw.includes('\n') ? parseNavIndented(navRaw) : parseNavFlat(navRaw);
+// A nav is a TREE, spelled by its shape (chrome-links.mjs, navMenuOf): one line is flat
+// (`A /a | B /b`); a `nav: |` block scalar is an indented markdown list, ANY depth (dropdowns /
+// mega-menus), one `- Label /href` per line, indentation = depth. Nested items render in the DOM as
+// a `.rf-nav-sub` (the theme decides whether to show it on hover); its text is always present so
+// multi-page WP mega-menus stay faithful.
+const navMenu = navMenuOf(meta.nav);
 // Optional COLUMNED footer (substrate rule: single line). `footer-brand:` = a wordmark in the
 // footer's left block; `footer-cols:` = `Heading: Label=href ; Label2 ; … ;; Heading2: …` —
 // `;;` separates columns, `;` separates items, `Label=href` links (href omitted → a plain span,
@@ -169,16 +149,9 @@ const footerTagline = String(meta['footer-tagline'] ?? '').trim();
 const footerBrand = meta['footer-brand'] ? String(meta['footer-brand']).trim() : '';
 // Columns keep .rf-foot-col and add --<1-based position> plus --<ASCII heading slug>.
 // Empty, positional, and repeated slugs have only the positional modifier.
-const footerColParts = String(meta['footer-cols'] || '').split(';;').map((c) => c.trim()).filter(Boolean);
+const footerColParts = footerColsOf(meta['footer-cols']);
 const footerColSlugs = new Set(footerColParts.map((_, index) => String(index + 1)));
-const footerCols = footerColParts.map((col, index) => {
-  const firstColon = col.indexOf(':');
-  const ci = firstColon >= 0 && !col.slice(0, firstColon).includes('=') ? firstColon : -1;
-  const head = ci >= 0 ? col.slice(0, ci).trim() : '';
-  const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
-  const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
-    const m = it.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : { label: it, href: '' };
-  });
+const footerCols = footerColParts.map(({ head, items }, index) => {
   const slug = head.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   const nameClass = slug && !footerColSlugs.has(slug) ? ` rf-foot-col--${slug}` : '';
   if (slug) footerColSlugs.add(slug);
@@ -223,7 +196,7 @@ const siteNames = siteSurfaces(meta, { pageTitle: title, host: Astro.site ? Astr
 const headerBrand = siteNames.header;
 // `header-cta: Label=href` — an optional primary action button in the header's right side
 // (e.g. a "Subscribe" pill). General; absent → the header stays as-is.
-const headerCta = (() => { const m = String(meta['header-cta'] || '').match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })();
+const headerCta = headerCtaOf(meta['header-cta']);
 // round 4 (R3-P3-2): hoisted alongside the declaration — was three safeHref(headerCta.href)
 // calls in the template below for the same destination, each a separate drop-warning entry.
 const headerCtaHrefOk = headerCta ? safeHref(headerCta.href) : null;
@@ -244,25 +217,12 @@ const headerCtaHrefOk = headerCta ? safeHref(headerCta.href) : null;
 //              desktop sidebar is always-on) · `badge:<n>` (count badge, hidden at 0).
 // OPT-IN + zero-byte-when-absent: absent → no button, no overlay, no drawer, no CSS
 // effect, no script (every non-opted page renders byte-identical).
-const parseHeaderAction = (label, spec) => {
-  const t = String(spec || '').trim().split(/\s+/).filter(Boolean);
-  const iconName = t[0] || '';
-  const type = (t[1] === 'toggle') ? 'toggle' : 'link';
-  const target = t[2] || '';
-  let reveal = '', badge = null, mobile = false;
-  for (const tok of t.slice(3)) {
-    if (tok === 'mobile') mobile = true;
-    else if (tok === 'dropdown' || tok === 'drawer' || tok.startsWith('drawer:')) reveal = tok;
-    else if (tok === 'badge' || tok.startsWith('badge:')) badge = tok.indexOf(':') >= 0 ? tok.slice(tok.indexOf(':') + 1) : '';
-  }
-  const side = reveal.startsWith('drawer:') ? reveal.slice(7) : (reveal === 'drawer' ? 'right' : 'right');
-  const key = target || iconName;
-  return { label, icon: ACTION_ICON[iconName] || GENERIC_ICON, iconName, type, target, reveal, side, badge, mobile,
-           id: `st-ha-${key}`, drawerId: `st-ha-drawer-${key}` };
-};
-const headerActions = String(meta['header-actions'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S.*)$/); return m ? parseHeaderAction(m[1].trim(), m[2].trim()) : null; })
-  .filter(Boolean);
+// The words are read by chrome-links.mjs (headerActionsOf); the layout adds the icon and the ids.
+const headerActions = headerActionsOf(meta['header-actions'])
+  .map(({ label, iconName, type, target, reveal, side, badge, mobile, key }) => ({
+    label, icon: ACTION_ICON[iconName] || GENERIC_ICON, iconName, type, target, reveal, side, badge, mobile,
+    id: `st-ha-${key}`, drawerId: `st-ha-drawer-${key}`,
+  }));
 const toggleActions = headerActions.filter((a) => a.type === 'toggle');
 const hasSidebarAction = toggleActions.some((a) => a.target === 'sidebar');
 // cart drawer copy (localizable, defaults are English/neutral).
@@ -280,7 +240,7 @@ const cartGuild = (meta['header-actions-cart-guild'] ? String(meta['header-actio
 // exactly like a live `href`. Gate here, at the value's one declaration point (alongside
 // `siteLogo`/`copyrightHref` above), so the `data-cart-href` attribute below and the client
 // script that reads it can never see anything but a validated destination.
-const cartHref = (meta['header-actions-cart-href'] ? (safeHref(String(meta['header-actions-cart-href']).trim()) || '') : '');
+const cartHref = (meta['header-actions-cart-href'] ? (safeHref(hrefValueOf(meta['header-actions-cart-href'])) || '') : '');
 const cartWired = toggleActions.some((a) => a.target === 'cart') && !!cartGuild;
 // `nav-mobile: hamburger` — responsive nav collapse (the real gap: `.rf-nav` had zero
 // breakpoint collapse). Pure CSS below; here it only flips a body attribute + renders
@@ -332,19 +292,17 @@ const breadcrumbHome = meta['breadcrumb-home'] ? String(meta['breadcrumb-home'])
 // `breadcrumb-trail: Label=href ; Label2=href2` — opt-in middle crumb(s) between Home and the
 // page label (WP category-archive convention, e.g. "Home » Category » The post's title").
 // General; absent → trail is just Home » label, unchanged for every other consumer.
-const breadcrumbTrail = String(meta['breadcrumb-trail'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-  .map((s) => { const m = s.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
-  .filter(Boolean);
+const breadcrumbTrail = labelHrefListOf(meta['breadcrumb-trail']);
 // round 3 (Astro consumers, R2-P3-5): `copyright-href` is a raw frontmatter destination; safeHref
 // shares the same policy every other emitter uses (gated once here, at the source).
-const copyrightHref = meta['copyright-href'] ? safeHref(String(meta['copyright-href']).trim()) : '';
+const copyrightHref = meta['copyright-href'] ? safeHref(hrefValueOf(meta['copyright-href'])) : '';
 // round 3 (Astro consumers, R2-P3-5): `language-href` is a raw frontmatter destination (used
 // verbatim as `computedLanguageHref` below when Lingo is off); safeHref shares the same policy
 // every other emitter uses, falling back to the safe default rather than going live unfiltered.
 // 🩸 reef#1910. "The owner wrote a link" is decided on what safeHref LET THROUGH, not on the
 // key having a value: a refused value fell back to `/language`, and on a one-locale site (which
 // builds no chooser) that put a dead link on every page while reading as the owner's own.
-const ownLanguageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '') : '';
+const ownLanguageHref = meta['language-href'] ? (safeHref(hrefValueOf(meta['language-href'])) || '') : '';
 const languageHref = ownLanguageHref || '/language';
 // A theme can declare a webfont stylesheet URL via `fonts:` — emitted as preconnect + <link> (the
 // healthy way), NOT a render-blocking @import inside the theme CSS.
@@ -539,11 +497,11 @@ const showTopBanner = !!(bleed && bleed.topBanner && locales.length > 0);
 //   right: `.st-sidebar-main` carries the normal <slot /> content
 // All other values (or absent) fall through to the current single-column rf-main.
 // sidebar-nav syntax mirrors footer-cols: `;;` = group separator, `;` = item, `Label=url`.
-import { parseSidebarNav, safeHref, safeSrc, siteSurfaces } from '../../../site-core.js';
+import { safeHref, safeSrc, siteSurfaces } from '../../../site-core.js';
 import { groupByArchive, footerWidgets, blogSearchOn, postUrl, loadSite } from '../lib/blog.mjs';
 const pageLayout = meta.layout ? String(meta.layout).trim() : 'stack';
 const isSidebar = pageLayout === 'sidebar';
-const sidebarNavGroups = isSidebar ? parseSidebarNav(meta['sidebar-nav']) : [];
+const sidebarNavGroups = isSidebar ? sidebarNavOf(meta['sidebar-nav']) : [];
 // `sidebar-archive: true` — opt-in year→month post archive tree (Blogger/WP-widget convention),
 // fed by `blogPosts` (see [...slug].astro). Absent/false → no tree (a non-opted site is unaffected).
 const wantArchive = isSidebar && String(meta['sidebar-archive'] || '').trim() === 'true';
@@ -562,9 +520,7 @@ const sidebarSide = isSidebar && String(meta['sidebar-side'] || '').trim() === '
 // commonly end with a social-profile icon row pinned to the column bottom. OPT-IN + sidebar-only,
 // reusing the
 // same host→SVG map as footer-social: absent → nothing renders (existing sidebars are unaffected).
-const sidebarSocial = isSidebar ? String(meta['sidebar-social'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
-  .filter(Boolean)
+const sidebarSocial = isSidebar ? labelHrefListOf(meta['sidebar-social'])
   .map((it) => { const host = (it.href.match(/^https?:\/\/(?:www\.)?([^\/]+)/i) || [])[1] || ''; return { ...it, icon: BRAND_ICON[host] || GENERIC_ICON }; }) : [];
 
 // blog — REEF with Blog. When installed it MOUNTS the blog (index + /<slug> detail,
@@ -675,10 +631,8 @@ const ageGate = ageGateOn ? {
   title: String(meta['age-gate-title'] || '').trim(),
   body: String(meta['age-gate-body'] || '').trim(),
   note: String(meta['age-gate-note'] || '').trim(),
-  noteLinks: String(meta['age-gate-note-links'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-    .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
-    .filter(Boolean),
-  backUrl: safeHref(String(meta['age-gate-back-url'] || '').trim()) || '/',
+  noteLinks: labelHrefListOf(meta['age-gate-note-links']),
+  backUrl: safeHref(hrefValueOf(meta['age-gate-back-url'])) || '/',
   // 🩸 the two button labels defaulted to Japanese for every tenant. They are the only words in
   // this dialog the site does not have to write, so they are the only ones that could be wrong
   // in a language nobody chose. Locale table now, override keys unchanged.
@@ -742,8 +696,9 @@ const shareImage = absUrl(authoredShareImage
 // or REEF with PWA's gen-icons.sh output — shadows the route (Astro skips a route a public/ file
 // already claims) and must never be marked as ours, regardless of what `packages:` declares.
 const ICON_PUBLIC_DIR = join(typeof process !== 'undefined' ? process.cwd() : '.', 'public');
-// …and only the paths where the route drew the BADGE: with `favicon:` set, /apple-touch-icon.png
-// carries the owner's own PNG and the .ico/.svg are not written at all (icon-core's badgePaths).
+// …and only the paths where the route drew the BADGE: with `favicon:` set to a PNG,
+// /apple-touch-icon.png and /favicon.ico carry the owner's own PNG, and /favicon.svg carries the
+// owner's SVG or is not written at all (icon-core's badgePaths).
 const iconBadge = badgePaths(meta, readPublic, safeSrc);
 const iconWritten = new Set(Object.values(ICON_PATHS).filter((p) => {
   try { return !existsSync(join(ICON_PUBLIC_DIR, p)); } catch { return true; }

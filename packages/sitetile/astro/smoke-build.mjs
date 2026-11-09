@@ -992,8 +992,9 @@ const OWNER_MARK_BYTES = (() => {
   return encodePng(px, OWNER_MARK_PX);
 })();
 // `name` picks the sibling directory, `favicon` is the value written into `_site.md` verbatim, and
-// `files` are extra public/ files planted before the build.
-function buildOwnerFaviconFixture(name, favicon, files = {}) {
+// `files` are extra public/ files planted before the build. `key` is the `_site.md` key that value
+// is written under: `favicon` unless a build is about one of the older marks (`site-logo:`).
+function buildOwnerFaviconFixture(name, favicon, files = {}, key = 'favicon') {
   const ODIR = join(HERE, '..', `.smoke-${name}`);
   const SKIP_RE = /[\\/](node_modules|\.astro|dist-[^\\/]*|\.smoke-[^\\/]*)(?:[\\/]|$)/;
   rmSync(ODIR, { recursive: true, force: true });
@@ -1007,7 +1008,7 @@ function buildOwnerFaviconFixture(name, favicon, files = {}) {
 sitetile-page: _site
 brand: Example Studio
 lang: en-US
-favicon: ${favicon}
+${key}: ${favicon}
 ---
 `, 'utf8');
   writeFileSync(join(ODIR, 'content', 'home.md'), `---
@@ -1049,6 +1050,43 @@ const handPlacedHome = readFileSync(join(HPDIST, 'index.html'), 'utf8');
 console.log('▸ astro build → .smoke-owner-favicon-malformed/ (`favicon: https://[`, refused by the layout)…');
 const MFDIST = buildOwnerFaviconFixture('owner-favicon-malformed', 'https://[');
 const malformedHome = readFileSync(join(MFDIST, 'index.html'), 'utf8');
+// The two icon configurations the builds above do not cover: an SVG `favicon:`, and a site whose
+// only mark is the older `site-logo:` (which <head> links, but which takes no generated file away).
+const OWNER_SVG_REL = 'brand/owner-mark.svg';
+const OWNER_SVG_BYTES = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><!-- the owner\'s own mark --><rect width="16" height="16" fill="#c82828"/></svg>\n', 'utf8');
+console.log('▸ astro build → .smoke-owner-favicon-svg/ (a site-level `favicon:` SVG)…');
+const SVGDIST = buildOwnerFaviconFixture('owner-favicon-svg', `/${OWNER_SVG_REL}`, { [OWNER_SVG_REL]: OWNER_SVG_BYTES });
+const svgOwnerHome = readFileSync(join(SVGDIST, 'index.html'), 'utf8');
+console.log('▸ astro build → .smoke-site-logo-only/ (`site-logo:` a PNG, no `favicon:`)…');
+const SLDIST = buildOwnerFaviconFixture('site-logo-only', `/${OWNER_MARK_REL}`, {}, 'site-logo');
+const siteLogoHome = readFileSync(join(SLDIST, 'index.html'), 'utf8');
+// 🔴 THE ICON INVARIANT, one question asked of every icon configuration this file builds: does
+// every `<link rel=icon|apple-touch-icon>` on every page name a file that build wrote, and does
+// /favicon.ico exist? 🩸 It was asked per fixture before, with each fixture's own idea of which
+// files it should have. The PNG `favicon:` fixture's idea was "no /favicon.ico", so /favicon.ico —
+// the one path every browser and crawler requests with no <link> telling it to — answered 404 on
+// every site that set a PNG favicon, and the check for that fixture asserted the 404.
+// `exists` is handed in so the control below can show the gate firing without a broken build.
+function iconInvariantViolations(dist, exists = existsSync) {
+  const out = [];
+  if (!exists(join(dist, 'favicon.ico'))) out.push('/favicon.ico is not in dist');
+  for (const f of allHtmlPages(dist)) {
+    const page = f.slice(dist.length);
+    for (const [tag] of readFileSync(f, 'utf8').matchAll(/<link\b[^>]*>/g)) {
+      const attrs = Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+      if (!['icon', 'apple-touch-icon'].includes(attrs.rel)) continue;
+      const href = String(attrs.href || '').split(/[?#]/)[0];
+      // Every mark these fixtures configure is a root path, so anything else is unresolvable here.
+      if (!/^\/(?!\/)/.test(href)) { out.push(`${page}: ${attrs.rel} → ${attrs.href} is not a root path`); continue; }
+      if (!exists(join(dist, decodeURIComponent(href.slice(1))))) out.push(`${page}: ${attrs.rel} → ${href} is not in dist`);
+    }
+  }
+  return out;
+}
+const ICON_CONFIGS = [['none', DIST], ['png', ODIST], ['png quoted + hand-placed apple-touch', HPDIST],
+  ['png refused by safeSrc', MFDIST], ['svg', SVGDIST], ['site-logo only', SLDIST]];
+/** The ICO's first directory entry's image, as bytes. */
+const icoImage = (b) => b.subarray(b.readUInt32LE(18), b.readUInt32LE(18) + b.readUInt32LE(14));
 const ownerHome = readFileSync(join(ODIST, 'index.html'), 'utf8');
 const manifestIconSrcs = (dist) => JSON.parse(readFileSync(join(dist, 'manifest.webmanifest'), 'utf8')).icons.map((i) => i.src);
 // Every .html the build emitted — not only index.html, because 404.html is exactly the kind of
@@ -1356,23 +1394,46 @@ const checks = [
   // -- a site-level `favicon:` PNG (buildOwnerFaviconFixture) --
   ['🔴 icons: with `favicon:` set to a PNG, /apple-touch-icon.png IS the owner\'s PNG, byte for byte', () =>
     readFileSync(join(ODIST, 'apple-touch-icon.png')).equals(OWNER_MARK_BYTES)],
-  ['🔴 icons: with `favicon:` set, no generated /favicon.ico or /favicon.svg is written (the <link> names the mark)', () =>
-    !existsSync(join(ODIST, 'favicon.ico')) && !existsSync(join(ODIST, 'favicon.svg'))
+  ['🔴 icons: in EVERY icon configuration (none, PNG, SVG, site-logo only, …), /favicon.ico is in dist and every icon <link> on every page names a file in dist', () => {
+    assert.deepEqual(ICON_CONFIGS.flatMap(([name, d]) => iconInvariantViolations(d).map((v) => `${name}: ${v}`)), []);
+    return true;
+  }],
+  ['icons: CONTROL — the invariant fires when a file is missing (a gate that cannot go red proves nothing)', () => {
+    const v = iconInvariantViolations(ODIST, () => false);
+    return v.includes('/favicon.ico is not in dist') && v.some((x) => x.includes(`/${OWNER_MARK_REL} is not in dist`));
+  }],
+  ['🔴 icons: with `favicon:` set to a PNG, /favicon.ico is that PNG, byte for byte, inside an ICO at its real size', () => {
+    const b = readFileSync(join(ODIST, 'favicon.ico'));
+    return b.readUInt16LE(0) === 0 && b.readUInt16LE(2) === 1 && b.readUInt16LE(4) === 1
+      && b[6] === OWNER_MARK_PX && b[7] === OWNER_MARK_PX && icoImage(b).equals(OWNER_MARK_BYTES)
+      && b.length === 22 + OWNER_MARK_BYTES.length;
+  }],
+  ['🔴 icons: with `favicon:` set to a PNG, no badge /favicon.svg is written and nothing links one (the <link> names the mark)', () =>
+    !existsSync(join(ODIST, 'favicon.svg')) && !ownerHome.includes('/favicon.svg')
     && ownerHome.includes(`<link rel="icon" type="image/png" href="/${OWNER_MARK_REL}">`)],
+  ['🔴 icons: with `favicon:` set to an SVG, /favicon.svg IS the owner\'s SVG, byte for byte, and /favicon.ico is the badge', () => {
+    const ico = readFileSync(join(SVGDIST, 'favicon.ico'));
+    return readFileSync(join(SVGDIST, 'favicon.svg')).equals(OWNER_SVG_BYTES)
+      && svgOwnerHome.includes(`<link rel="icon" type="image/svg+xml" href="/${OWNER_SVG_REL}">`)
+      && ico.readUInt16LE(2) === 1 && ico[6] === 32 && icoImage(ico).subarray(1, 4).toString('latin1') === 'PNG';
+  }],
+  ['icons: with only `site-logo:` set, <head> links the logo and the build still writes all three generated files', () =>
+    siteLogoHome.includes(`<link rel="icon" type="image/png" href="/${OWNER_MARK_REL}">`)
+    && ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png'].every((f) => existsSync(join(SLDIST, f)))],
   ['icons: with `favicon:` set, no icon link on the page is labelled our badge', () =>
     !/<link rel="(?:icon|apple-touch-icon)"[^>]*data-generated/.test(ownerHome)],
   ['🔴 manifest: lists the owner\'s PNG at its real size, and only it', () =>
     JSON.stringify(JSON.parse(readFileSync(join(ODIST, 'manifest.webmanifest'), 'utf8')).icons)
       === JSON.stringify([{ src: `/${OWNER_MARK_REL}`, sizes: `${OWNER_MARK_PX}x${OWNER_MARK_PX}`, type: 'image/png', purpose: 'any' }])],
   ['🔴 manifest: every icon it names exists in that build (primary and owner-favicon builds)', () =>
-    [DIST, ODIST, HPDIST, MFDIST].every((d) => manifestIconSrcs(d).every((src) => existsSync(join(d, src.slice(1)))))],
+    [DIST, ODIST, HPDIST, MFDIST, SVGDIST, SLDIST].every((d) => manifestIconSrcs(d).every((src) => existsSync(join(d, src.slice(1)))))],
   ['🔴 icons: a hand-placed public/apple-touch-icon.png keeps the path even with `favicon:` set to a PNG (precedence)', () =>
     readFileSync(join(HPDIST, 'apple-touch-icon.png')).equals(STALE_APPLE_TOUCH)],
-  ['🔴 icons: a QUOTED `favicon:` is linked without its quotes, and still replaces the generated .ico/.svg', () =>
+  ['🔴 icons: a QUOTED `favicon:` is linked without its quotes, and still replaces the badges (the .ico carries the owner PNG, no .svg)', () =>
     handPlacedHome.includes(`<link rel="icon" type="image/png" href="/${OWNER_MARK_REL}">`)
     && handPlacedHome.includes(`<link rel="apple-touch-icon" href="/${OWNER_MARK_REL}">`)
     && !/href="(?:&quot;|&#34;)/.test(handPlacedHome)
-    && !existsSync(join(HPDIST, 'favicon.ico')) && !existsSync(join(HPDIST, 'favicon.svg'))],
+    && icoImage(readFileSync(join(HPDIST, 'favicon.ico'))).equals(OWNER_MARK_BYTES) && !existsSync(join(HPDIST, 'favicon.svg'))],
   ['manifest: with a hand-placed apple-touch-icon.png but no gen-icons.sh output, the owner PNG is the icon', () =>
     JSON.stringify(manifestIconSrcs(HPDIST)) === JSON.stringify([`/${OWNER_MARK_REL}`])],
   ['🔴 icons: `favicon: https://[` (refused by the layout) → <head> links the generated pair AND the build wrote both', () =>
