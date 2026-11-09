@@ -697,11 +697,11 @@ export function loadSite(contentGlob, pagePath) {
   for (const [path, raw] of Object.entries(contentGlob || {})) {
     const rel = (path.split('/content/')[1] || '');
     if (rel === '_site.md') {
-      const { meta } = splitFrontmatter(String(raw || ''));
-      if (meta && Object.keys(meta).length) base = tagLocalesSource(withoutReservedSiteTitle(meta, 'content/_site.md'), 'content/_site.md');
+      const meta = withoutReservedSiteTitle(splitFrontmatter(String(raw || '')).meta, 'content/_site.md');
+      if (meta && Object.keys(meta).length) base = tagLocalesSource(meta, 'content/_site.md');
     } else {
       const m = rel.match(/^([^/]+)\/_site\.md$/);
-      if (m) { const { meta } = splitFrontmatter(String(raw || '')); if (meta && Object.keys(meta).length) locales[m[1]] = tagLocalesSource(withoutReservedSiteTitle(meta, `content/${rel}`), `content/${rel}`); }
+      if (m) { const meta = withoutReservedSiteTitle(splitFrontmatter(String(raw || '')).meta, `content/${rel}`); if (meta && Object.keys(meta).length) locales[m[1]] = tagLocalesSource(meta, `content/${rel}`); }
     }
   }
   if (!base && !Object.keys(locales).length) return null;
@@ -723,7 +723,7 @@ export function loadSite(contentGlob, pagePath) {
 // read every route shares, and named once per file in the build log.
 const warnedSiteTitleFiles = new Set();
 function withoutReservedSiteTitle(meta, file) {
-  if (!Object.prototype.hasOwnProperty.call(meta, 'site-title')) return meta;
+  if (!meta || !Object.prototype.hasOwnProperty.call(meta, 'site-title')) return meta;
   const { 'site-title': _reserved, ...rest } = meta;
   if (!warnedSiteTitleFiles.has(file)) {
     warnedSiteTitleFiles.add(file);
