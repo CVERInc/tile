@@ -51,5 +51,5 @@
     }
   ],
   "host": "sitetile",
-  "requirements": "Renderer output inside a frame. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, relaying `revision` and `section` from a successful apply."
+  "requirements": "Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, relaying `revision` and `section` from a successful apply."
 }

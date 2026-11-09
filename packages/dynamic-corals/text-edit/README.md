@@ -5,21 +5,25 @@ item in a framed preview and types; they never see HTML or Markdown. Bold stays 
 a link because the coral only offers elements whose text is plain: an element with formatting inside
 it shows a short "change it in the editor" hint instead, and links keep working as links.
 
-- **Anchor.** The renderer stamps every section with a stable id (`s<n>-<slug>`). An edit names
-  `{ section, kind: 'title' | 'p' | 'li', occurrence }` plus the words it replaces (`before`):
-  `occurrence` counts only same-kind elements in that section showing exactly those words. The
-  applier counts in the same population: it renders each source block with the real renderer, so a
-  fragment whose comment vanishes or whose lines join stays in the count with the words the owner
-  sees, and is refused as formatted. If the whole rendered page still counts differently, the edit is
-  refused (`ambiguous`), never written somewhere else.
+- **Anchor.** The anchor is a source span that the renderer emits. The applier never re-derives it.
+  The host renders the preview from `parseSite(md, { sourceLines: true })` (Astro:
+  `SITETILE_SOURCE_SPANS=1`). Sitetile then stamps every paragraph, list item (its own line, without
+  its child list) and heading that it draws from a prose body with `data-src="<first>-<last>"`. These
+  are 0-based, inclusive lines of the page Markdown. Without the option, output is byte-identical
+  to a production build. An edit names `{ section, start, end }` from the clicked element's
+  `data-src`, plus the words that it replaces (`before`). The applier renders the same source the
+  same way. It needs exactly one addressed element with that span in that section (else
+  `not-found`) and needs it to show `before` (else `changed`). It also needs the span to be one
+  line whose own words are `before`, written plainly (else `not-plain`). The applier never counts
+  occurrences. An element without a span is not offered.
 - **Revision.** The host stamps `data-revision` (`sourceRevision` of the Markdown it rendered). Every
   edit carries the revision it was computed against; any other one is refused (`changed`), so a
   stale preview or a concurrent edit never lands on a renumbered duplicate. A successful answer
   carries the next revision, and the section's new id (a title edit changes it).
 - **One at a time.** The owner can keep typing; the next edit is computed and sent only after the
-  previous one is answered, against acknowledged words. A pending edit shows in the preview but
-  never counts as an occurrence, and a refusal puts the old words back only when nothing newer was
-  typed over them.
+  previous one is answered, against acknowledged words (`before` is what the host last saved). An
+  edit rewrites one line into one line, so the spans in the frame stay true after a save. A
+  refusal puts the old words back only when nothing newer was typed over them.
 - **Message.** `{ type: 'reef-text-edit', id, page, revision, anchor, before, after }` to the parent
   window at `data-parent-origin` only; the answer is
   `{ type: 'reef-text-edit-result', id, ok, hint?, revision?, section? }`, accepted only from that
@@ -29,7 +33,9 @@ it shows a short "change it in the editor" hint instead, and links keep working 
 - **Source rule.** `text-edit-source.mjs` resolves an edit against the page Markdown and rewrites
   exactly one line, keeping its indent, list marker or `## `. Only `prose` sections; only fragments
   written as plain words on one line that render exactly as written; `after` must be plain words
-  the renderer shows as written, too.
+  the renderer shows as written, too, with no character the HTML parser drops or rewrites (C0/C1
+  controls other than tab/LF/FF, CR, U+0000, U+FFFE/U+FFFF, lone surrogates): such words are
+  refused (`after-not-plain`), and the coral does not send them in the first place.
 - **Gestures.** Enter or leaving the element saves; Escape puts the words back; paste is plain text,
   one line. While an IME is composing, Enter and Escape belong to the IME.
 
@@ -43,7 +49,7 @@ Lets an owner change the words of a plain heading, paragraph or list item in a f
 
 Author: `official`.
 
-Host: `sitetile`. Renderer output inside a frame. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, relaying `revision` and `section` from a successful apply.
+Host: `sitetile`. Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, relaying `revision` and `section` from a successful apply.
 
 ### Embed
 
