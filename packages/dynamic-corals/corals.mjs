@@ -41,6 +41,9 @@ export const CORALS = {
   'grid-filter': { src: 'grid-filter-client.mjs', bundle: true, registry: false },
   'hero-parallax': { src: 'hero-parallax-client.mjs', bundle: true, registry: false },
   'carousel': { src: 'carousel-client.mjs', bundle: true, registry: false },
+  // Click-to-edit words in a framed preview: mounting over a core node drives against real renders.
+  // Local-only — the host that frames the page serves the built file itself.
+  'text-edit': { src: 'text-edit-client.mjs', bundle: true, registry: false },
 };
 
 export const REGISTRY_CORALS = Object.keys(CORALS).filter((name) => CORALS[name].registry);
