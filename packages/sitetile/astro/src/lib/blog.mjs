@@ -697,11 +697,14 @@ export function loadSite(contentGlob, pagePath) {
   for (const [path, raw] of Object.entries(contentGlob || {})) {
     const rel = (path.split('/content/')[1] || '');
     if (rel === '_site.md') {
-      const { meta } = splitFrontmatter(String(raw || ''));
-      if (meta && Object.keys(meta).length) base = tagLocalesSource(meta, 'content/_site.md');
+      // tile#279 r3: "is there a config" is asked of what the author WROTE, before the reserved key is
+      // dropped — a `_site.md` whose only key was `site-title` is still a site config (an empty one).
+      const raw0 = splitFrontmatter(String(raw || '')).meta;
+      const meta = withoutReservedSiteTitle(raw0, 'content/_site.md');
+      if (raw0 && Object.keys(raw0).length) base = tagLocalesSource(meta, 'content/_site.md');
     } else {
       const m = rel.match(/^([^/]+)\/_site\.md$/);
-      if (m) { const { meta } = splitFrontmatter(String(raw || '')); if (meta && Object.keys(meta).length) locales[m[1]] = tagLocalesSource(meta, `content/${rel}`); }
+      if (m) { const raw0 = splitFrontmatter(String(raw || '')).meta; const meta = withoutReservedSiteTitle(raw0, `content/${rel}`); if (raw0 && Object.keys(raw0).length) locales[m[1]] = tagLocalesSource(meta, `content/${rel}`); }
     }
   }
   if (!base && !Object.keys(locales).length) return null;
@@ -713,7 +716,32 @@ export function loadSite(contentGlob, pagePath) {
   const mode = dynamicCoralCssMode((base || {})[DYNAMIC_CORAL_CSS_KEY], 'content/_site.md');
   if (loc && Object.prototype.hasOwnProperty.call(loc, DYNAMIC_CORAL_CSS_KEY)) warnLocaleCoralCss(seg, mode);
   if (mode) merged[DYNAMIC_CORAL_CSS_KEY] = mode; else delete merged[DYNAMIC_CORAL_CSS_KEY];
+  // tile#279 r2 — the site's own title travels as the `site-title` stash on EVERY route, not only the
+  // content pages the catch-all stashes. Blog posts and indexes, archives, search, the 404 and the
+  // language chooser all receive this config — directly, or under a home page's frontmatter, in which
+  // case the merge re-stamps this value after the page's keys (locale-editions.mjs, like the
+  // catch-all), so a page that writes `site-title:` itself cannot rename the site (tile#279 r3).
+  merged['site-title'] = merged.title == null ? '' : String(merged.title);
   return merged;
+}
+
+// `site-title` is the catch-all's RESERVED per-page stash (pages/[...path].astro: "Reserved key, not
+// authorable"), not a site-layer key — SITE_LAYER_KEYS does not list it. Written in a `_site.md` it
+// used to reach every route that receives the config as-is (blog, archives, search, the 404) while
+// content pages overwrote it, so one site carried two names by route. It is dropped here, the single
+// read every route shares, and named once per file in the build log.
+const warnedSiteTitleFiles = new Set();
+function withoutReservedSiteTitle(meta, file) {
+  if (!meta || !Object.prototype.hasOwnProperty.call(meta, 'site-title')) return meta;
+  const { 'site-title': _reserved, ...rest } = meta;
+  if (!warnedSiteTitleFiles.has(file)) {
+    warnedSiteTitleFiles.add(file);
+    console.warn(
+      `sitetile: site-title in ${file} is IGNORED — it is reserved for the page build, not a site ` +
+      `setting. The site's name comes from title (then brand, then footer-brand). Remove it from ${file}.`
+    );
+  }
+  return rest;
 }
 
 // loadSite runs once per page, so the warning is emitted once per offending locale instead of
