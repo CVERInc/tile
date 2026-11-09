@@ -126,20 +126,26 @@ check('the catch-all stashes site-title AFTER the page merge, so a page cannot c
     "'site-title' must come after ...site.meta — placed before it, a page's own site-title would win");
 });
 
-check('the layout reads og:site_name from site-title, not headerBrand', () => {
-  assert.match(layout, /const ogSiteName = \(meta\['site-title'\]/,
-    'og:site_name must resolve from the stashed site title');
+// The chain itself lives in site-core.js (`siteName`), where the platform that seeds placeholder
+// titles reads the same list — so these checks call the REAL function, and the layout checks only
+// that it consumes it.
+const { siteName, isPlaceholderSiteTitle, PLACEHOLDER_SITE_TITLES } = await import('./site-core.js');
+
+check('the layout reads og:site_name from site-core siteName(meta, headerBrand)', () => {
+  assert.match(layout, /const ogSiteName = siteName\(meta, headerBrand\);/,
+    'og:site_name must resolve through the shared site-name chain');
   assert.match(layout, /<meta property="og:site_name" content=\{ogSiteName\}/,
     'the tag must consume ogSiteName; consuming headerBrand is the bug this guards');
 });
 
+check('the JSON-LD WebSite/publisher name is the same site name as og:site_name', () => {
+  assert.match(layout, /pageGraph\(\{[\s\S]*?\n  siteName: ogSiteName,/,
+    'JSON-LD must name the site with the one site-name chain, not its own copy of it');
+});
+
 check('og:site_name still falls back to headerBrand (legacy sites with no _site.md)', () => {
-  const m = layout.match(/const ogSiteName = [^;]+;/);
-  const body = m[0].replace('const ogSiteName =', 'return (').replace(/;$/, ')');
-  // eslint-disable-next-line no-new-func
-  const resolve = (meta, headerBrand) => new Function('meta', 'headerBrand', body)(meta, headerBrand);
-  assert.equal(resolve({}, 'Legacy Brand'), 'Legacy Brand');
-  assert.equal(resolve({ 'site-title': 'ATLAS.DEV' }, 'About Atlas'), 'ATLAS.DEV');
+  assert.equal(siteName({}, 'Legacy Brand'), 'Legacy Brand');
+  assert.equal(siteName({ 'site-title': 'ATLAS.DEV' }, 'About Atlas'), 'ATLAS.DEV');
 });
 
 // ── 4b. og:site_name must not fall through to headerBrand's page-title tail when the site DOES
@@ -150,34 +156,48 @@ check('og:site_name still falls back to headerBrand (legacy sites with no _site.
 // merged title). `brand:` and `footer-brand:` are the two fields already documented elsewhere in
 // this file as site-level chrome, so they must outrank that tail.
 check('og:site_name prefers `brand`/`footer-brand` over headerBrand\'s page-title fallback', () => {
-  const m = layout.match(/const ogSiteName = [^;]+;/);
-  const body = m[0].replace('const ogSiteName =', 'return (').replace(/;$/, ')');
-  // eslint-disable-next-line no-new-func
-  const resolve = (meta, headerBrand) => new Function('meta', 'headerBrand', body)(meta, headerBrand);
   // `headerBrand` here stands in for what it resolves to on a page with no site-level name of its
   // own: the page's own composed <title>, in the shape measured live — `<page> | <brand>【<notice>】`,
   // CJK either side of an ASCII wordmark that is a SUBSTRING of the whole title. That containment is
   // the entire point: a resolver that returns the tail instead of the brand still returns something
   // that "looks like" the brand, so the fixture has to be a title the brand sits INSIDE.
   const pageComposedTitle = 'よくある質問 | HOSHIYA【新HP移行中】';
-  assert.equal(resolve({ brand: 'HOSHIYA' }, pageComposedTitle), 'HOSHIYA');
-  assert.equal(resolve({ 'footer-brand': 'HOSHIYA' }, pageComposedTitle), 'HOSHIYA');
+  assert.equal(siteName({ brand: 'HOSHIYA' }, pageComposedTitle), 'HOSHIYA');
+  assert.equal(siteName({ 'footer-brand': 'HOSHIYA' }, pageComposedTitle), 'HOSHIYA');
   // site-title still outranks both when a site sets its own title too.
-  assert.equal(resolve({ 'site-title': 'ATLAS.DEV', brand: 'Atlas' }, 'ignored'), 'ATLAS.DEV');
+  assert.equal(siteName({ 'site-title': 'ATLAS.DEV', brand: 'Atlas' }, 'ignored'), 'ATLAS.DEV');
   // brand still outranks footer-brand.
-  assert.equal(resolve({ brand: 'Header Name', 'footer-brand': 'Footer Name' }, 'ignored'), 'Header Name');
+  assert.equal(siteName({ brand: 'Header Name', 'footer-brand': 'Footer Name' }, 'ignored'), 'Header Name');
+});
+
+// ── 4c. the seeded placeholder title is UNSET for the site's name ─────────────────────────────────
+// Measured live: `title: 未命名網站` (the placeholder a new site is born with), a filled-in `brand:`,
+// and og:site_name / JSON-LD both said 未命名網站 — the brand never reached a share card.
+check('a placeholder title falls back to brand, then footer-brand, in every seeded language', () => {
+  const titles = Object.values(PLACEHOLDER_SITE_TITLES);
+  assert.equal(titles.length, 9, 'one placeholder per seeded UI language');
+  for (const t of titles) {
+    assert.ok(isPlaceholderSiteTitle(t), t);
+    assert.ok(isPlaceholderSiteTitle(`  ${t}\n`), 'trimmed like every other frontmatter value');
+    assert.equal(siteName({ 'site-title': t, brand: 'Example Workshop' }, 'Example page'), 'Example Workshop');
+    assert.equal(siteName({ 'site-title': t, 'footer-brand': 'Example Footer' }, 'Example page'), 'Example Footer');
+    // Nothing better on the site: the placeholder is still its one constant name, never a page's title.
+    assert.equal(siteName({ 'site-title': t }, 'Example page'), t);
+  }
+  assert.equal(isPlaceholderSiteTitle('Untitled site — my shop'), false, 'only an exact placeholder is unset');
+  assert.equal(isPlaceholderSiteTitle(''), false);
+  assert.equal(isPlaceholderSiteTitle(undefined), false);
+});
+
+mustFail('the placeholder-title fallback check', () => {
+  // the chain as it was before placeholders were unset: a site title, whatever it says, wins
+  const before = (meta, fallback) => String(meta['site-title'] || '').trim() || String(meta.brand || '').trim() || fallback;
+  assert.equal(before({ 'site-title': PLACEHOLDER_SITE_TITLES['zh-tw'], brand: 'Example Workshop' }, ''), 'Example Workshop');
 });
 
 mustFail('the og:site_name brand/footer-brand precedence check', () => {
-  const broken = layout.replace(
-    /const ogSiteName = \(meta\['site-title'\][^;]+;/,
-    "const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '') || headerBrand;",
-  );
-  const m = broken.match(/const ogSiteName = [^;]+;/);
-  const body = m[0].replace('const ogSiteName =', 'return (').replace(/;$/, ')');
-  // eslint-disable-next-line no-new-func
-  const resolve = (meta, headerBrand) => new Function('meta', 'headerBrand', body)(meta, headerBrand);
-  assert.equal(resolve({ brand: 'HOSHIYA' }, 'よくある質問 | HOSHIYA【新HP移行中】'), 'HOSHIYA');
+  const broken = (meta, headerBrand) => (meta['site-title'] ? String(meta['site-title']).trim() : '') || headerBrand;
+  assert.equal(broken({ brand: 'HOSHIYA' }, 'よくある質問 | HOSHIYA【新HP移行中】'), 'HOSHIYA');
 });
 
 mustFail('the og:site_name consumer check', () => {
