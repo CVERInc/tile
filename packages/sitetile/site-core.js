@@ -3477,6 +3477,20 @@ function siteName(meta, fallback = '') {
   return named || str(m.brand) || str(m['footer-brand']) || title || str(fallback);
 }
 
+/**
+ * `siteName` for whatever meta a route hands the layout. A merged content page carries the
+ * catch-all's `site-title` stash (its own `title` is the PAGE's); every other route — blog posts and
+ * indexes, archives, search, the 404 — hands over the site config itself, where `title` IS the
+ * site's title and there is no stash. Reading `site-title` alone would let `brand:` replace a real
+ * title on exactly those routes, so an unstashed meta's `title` is read as the site title. A
+ * placeholder is still unset either way.
+ */
+function routeSiteName(meta, fallback = '') {
+  const m = meta || {};
+  const stashed = Object.prototype.hasOwnProperty.call(m, 'site-title');
+  return siteName(stashed ? m : { ...m, 'site-title': m.title }, fallback);
+}
+
 export {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml,
   parseParams, splitFrontmatter, slugify,
@@ -3520,5 +3534,5 @@ export {
   // regex it replaced — see bracketMatches' own comment.
   bracketMatches, replaceMatches, BRACKET_SHAPES,
   // the seeded placeholder site titles and the site-name chain that treats one as unset.
-  PLACEHOLDER_SITE_TITLES, isPlaceholderSiteTitle, siteName,
+  PLACEHOLDER_SITE_TITLES, isPlaceholderSiteTitle, siteName, routeSiteName,
 };

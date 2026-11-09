@@ -129,7 +129,8 @@ check('the catch-all stashes site-title AFTER the page merge, so a page cannot c
 // The chain itself lives in site-core.js (`siteName`), where the platform that seeds placeholder
 // titles reads the same list — so these checks call the REAL function, and the layout checks only
 // that it consumes it.
-const { siteName, isPlaceholderSiteTitle, PLACEHOLDER_SITE_TITLES } = await import('./site-core.js');
+const siteCoreExports = await import('./site-core.js');
+const { siteName, isPlaceholderSiteTitle, PLACEHOLDER_SITE_TITLES } = siteCoreExports;
 
 check('the layout reads og:site_name from site-core siteName(meta, headerBrand)', () => {
   assert.match(layout, /const ogSiteName = siteName\(meta, headerBrand\);/,
@@ -138,9 +139,10 @@ check('the layout reads og:site_name from site-core siteName(meta, headerBrand)'
     'the tag must consume ogSiteName; consuming headerBrand is the bug this guards');
 });
 
-check('the JSON-LD WebSite/publisher name is the same site name as og:site_name', () => {
-  assert.match(layout, /pageGraph\(\{[\s\S]*?\n  siteName: ogSiteName,/,
-    'JSON-LD must name the site with the one site-name chain, not its own copy of it');
+check('the JSON-LD WebSite/publisher name reads the shared chain through routeSiteName', () => {
+  assert.match(layout, /pageGraph\(\{[\s\S]*?\n  siteName: jsonLdSiteName,/,
+    'JSON-LD must name the site with the shared site-name chain, not its own copy of it');
+  assert.match(layout, /const jsonLdSiteName = routeSiteName\(meta, headerBrand\);/);
 });
 
 check('og:site_name still falls back to headerBrand (legacy sites with no _site.md)', () => {
@@ -187,6 +189,25 @@ check('a placeholder title falls back to brand, then footer-brand, in every seed
   assert.equal(isPlaceholderSiteTitle('Untitled site — my shop'), false, 'only an exact placeholder is unset');
   assert.equal(isPlaceholderSiteTitle(''), false);
   assert.equal(isPlaceholderSiteTitle(undefined), false);
+});
+
+// ── 4d. routes WITHOUT the content-page stash keep a real title first in JSON-LD ─────────────────
+// Blog posts and indexes, archives, search and the 404 hand the layout the site config itself
+// (blog.mjs siteMeta): `title` IS the site's title there and no `site-title` was stashed. Reading
+// `site-title` alone made a real `title: Atlas Observatory` lose to `brand: Atlas` on exactly those
+// routes. A merged content page always carries the stash, so its own page title is never mistaken
+// for the site's.
+check('routeSiteName: an unstashed route keeps its real site title first, and still unsets a placeholder', () => {
+  const { routeSiteName } = siteCoreExports;
+  assert.equal(routeSiteName({ title: 'Atlas Observatory', brand: 'Atlas' }, 'Atlas'), 'Atlas Observatory');
+  assert.equal(routeSiteName({ title: 'Atlas Observatory', 'footer-brand': 'Atlas Footer' }, 'Atlas Observatory'), 'Atlas Observatory');
+  assert.equal(routeSiteName({ title: PLACEHOLDER_SITE_TITLES['en-us'], brand: 'Atlas' }, 'Atlas'), 'Atlas');
+  // A stashed content page: the stash decides, the merged PAGE title never does.
+  assert.equal(routeSiteName({ 'site-title': 'Atlas Observatory', title: 'About us', brand: 'Atlas' }, 'Atlas'), 'Atlas Observatory');
+  assert.equal(routeSiteName({ 'site-title': '', title: 'About us', brand: 'Atlas' }, 'Atlas'), 'Atlas');
+  assert.equal(routeSiteName({ 'site-title': PLACEHOLDER_SITE_TITLES['zh-tw'], title: 'About us', brand: 'Atlas' }, 'Atlas'), 'Atlas');
+  // Legacy (no _site.md, no stash): the old `site-title || meta.title` answer, unchanged.
+  assert.equal(routeSiteName({ title: 'Legacy Home' }, 'Legacy Home'), 'Legacy Home');
 });
 
 mustFail('the placeholder-title fallback check', () => {

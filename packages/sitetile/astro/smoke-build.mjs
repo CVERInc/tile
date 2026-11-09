@@ -810,7 +810,12 @@ lang: en-US
 `);
     for (const [file, title, meta] of [
       ['fallback-meta', 'Fallback page', { title: 'Fallback site', 'site-title': 'OG fallback site', lang: 'en-US' }],
-      ['fallback-prop', 'Fallback prop', { 'site-title': 'OG fallback prop', lang: 'en-US' }]
+      ['fallback-prop', 'Fallback prop', { 'site-title': 'OG fallback prop', lang: 'en-US' }],
+      // tile#277 r2: the shape blog/archive/search/404 routes hand the layout — the site config itself
+      // (blog.mjs siteMeta), `title` with no `site-title` stash.
+      ['unstashed-title', 'Unstashed title', { title: 'Atlas Observatory', brand: 'Atlas', lang: 'en-US' }],
+      ['unstashed-footer', 'Unstashed footer', { title: 'Atlas Observatory', 'footer-brand': 'Atlas Footer', lang: 'en-US' }],
+      ['unstashed-placeholder', 'Unstashed placeholder', { title: 'Untitled site', brand: 'Atlas', lang: 'en-US' }]
     ]) {
       writeFileSync(join(dir, 'src/pages', file + '.astro'), `---
 import SiteLayout from '../layouts/SiteLayout.astro';
@@ -823,7 +828,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       cwd: dir, stdio: 'inherit',
       env: { ...process.env, SITE_ID: 'bubble-name', PLATFORM_ORIGIN: 'https://platform.example', SITE_URL: 'https://example.com' },
     });
-    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop'].map(page => [page, page + '/index.html'])]
+    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop', 'unstashed-title', 'unstashed-footer', 'unstashed-placeholder'].map(page => [page, page + '/index.html'])]
       .map(([key, file]) => [key, readFileSync(join(dist, file), 'utf8')]));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1340,6 +1345,16 @@ const checks = [
     assert.ok(page.includes('<meta property="og:site_name" content="Example Workshop">'));
     assert.ok(!page.includes('<meta property="og:site_name" content="Untitled site">'));
     assert.deepEqual(jsonLdSiteNames(page), ['Example Workshop']);
+    return true;
+  }],
+  // tile#277 r2 — a route with no content-page stash (blog, archives, search, 404) carries the site
+  // config's own `title`: a REAL one stays first in JSON-LD; only a placeholder gives way to brand.
+  ['JSON-LD site name: an unstashed route keeps a real title first, and only a placeholder gives way', () => {
+    for (const pages of [bubbleNamePages, bubbleNameNoBrandPages]) {
+      assert.deepEqual(jsonLdSiteNames(pages['unstashed-title']), ['Atlas Observatory']);
+      assert.deepEqual(jsonLdSiteNames(pages['unstashed-footer']), ['Atlas Observatory']);
+      assert.deepEqual(jsonLdSiteNames(pages['unstashed-placeholder']), ['Atlas']);
+    }
     return true;
   }],
   ['bubble site name: sites without brand keep base attribute chains and hand-mounted names survive', () => {
