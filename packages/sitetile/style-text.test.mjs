@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { censusSource, loadAstroParse, offsetUnit, SRC } from './style-sink-census.mjs';
+import { censusSource, loadAstroParse, offsetUnit, rangeProblem, SRC } from './style-sink-census.mjs';
 import { styleText } from './astro/src/lib/style-text.mjs';
 
 test('no `</style` survives, in any case, however it is nested', () => {
@@ -136,6 +136,10 @@ test('census: `styleText` must be the real helper, not a local of the same name'
     ["---\nimport { identity as styleText } from '../lib/style-text.mjs';\nconst authorCss = 'x';\n---\n", BOUND],
     ["---\nconst authorCss = 'x';\n---\n", /not the named import/],                                     // no import at all
     [HEAD.replace('const x = 1;', 'let y = (styleText) => styleText;'), BOUND],                         // a shadowing parameter
+    // round 6: a type-only import binds nothing at runtime, whether `type` is on the declaration
+    // or on the specifier, so the call reaches whatever global has that name
+    ["---\nimport type { styleText } from '../lib/style-text.mjs';\nconst authorCss = 'x';\n---\n", /not the named import|bound or used/],
+    ["---\nimport { type styleText } from '../lib/style-text.mjs';\nconst authorCss = 'x';\n---\n", /not the named import|bound or used/],
   ];
   for (const [head, why] of heads) {
     const { failures } = run(parse, sink, head);
@@ -143,6 +147,11 @@ test('census: `styleText` must be the real helper, not a local of the same name'
   }
   assert.ok(run(parse, '{((styleText) => <style set:html={styleText(authorCss)}/>)((c) => c)}').failures.some((f) => BOUND.test(f.reason)),
     'a template-level parameter named styleText shadows the import');
+  // the reviewer's round-6 fixture, byte for byte: Astro erases the import and calls the global
+  const typeSpecifier = "---\nimport { type styleText } from '../lib/style-text.mjs';\nglobalThis['styleText'] = (c) => c;\nconst authorCss = 'a{}</style><i data-probe=\"escaped\">injected</i>';\n---\n<style is:inline set:html={styleText(authorCss)}/>";
+  const typed = censusSource(typeSpecifier, parse, { file: FIXTURE, censused: CENSUSED });
+  assert.deepEqual(typed.sinks, [], `a type-only specifier was accepted as the helper: ${JSON.stringify(typed)}`);
+  assert.ok(typed.failures.length >= 1, 'a type-only specifier was accepted as the helper');
   // the reviewer's round-4 fixtures, byte for byte
   for (const v of ['"<div a={"', '`<div a={`', 'x /* <div a={ */']) {
     const src = `---\nconst authorCss = "a{}</style><i data-probe=escaped>injected</i>";\nconst x = 1;\nconst a = "";\nconst styleText = x => x;\n---\n<style is:inline data-x={${v}} set:html={authorCss}></style>`;
@@ -223,7 +232,8 @@ test('census: positions and arguments are read correctly after non-ASCII text', 
   assert.equal(offsetUnit(other), unit === 'utf16' ? 'utf8' : 'utf16', 'the offset probe does not tell the two conventions apart');
   const head = "---\nimport { styleText } from '../lib/style-text.mjs';\nconst css = 'a{}';\n---\n";
   for (const p of [parse, other]) {
-    for (const prefix of ['<!-- a -->', '<!-- \u6f22 -->', '<!-- \u{1F9F8} -->', '<p>\u6f22\u5b57 \u{1F9F8}\u{1F9F8}</p>\n<p>caf\u00e9</p>']) {
+    for (const prefix of ['<!-- a -->', '<!-- \u6f22 -->', '<!-- \u{1F9F8} -->', '<p>\u6f22\u5b57 \u{1F9F8}\u{1F9F8}</p>\n<p>caf\u00e9</p>',
+      '<p data-x="\ud800">\udc00</p>', '<p data-x={"\udc00"}>x</p>']) {
       const src = `${head}${prefix}\n<style is:inline set:html={styleText(css)}></style>`;
       const line = src.split('\n').length;
       const r = censusSource(src, p, { file: FIXTURE, censused: CENSUSED });
@@ -241,6 +251,90 @@ test('census: positions and arguments are read correctly after non-ASCII text', 
   const r = censusSource(`${head}<style is:inline set:html={styleText(css)}></style>`, shifted, { file: FIXTURE, censused: CENSUSED });
   assert.deepEqual(r.sinks, []);
   assert.ok(r.failures.some((f) => /neither UTF-16 nor UTF-8/.test(f.reason)), JSON.stringify(r.failures));
+});
+
+// 🩸 Round 6: the probe compared one element that ended at end of input, so a parser reporting
+// UTF-16 starts and UTF-8 ends passed (String.slice clamps), and the census then quoted
+// `authorCss)}/>` as the argument with no failure. Units mixed by node, by boundary or by region
+// must fail explicitly, both in the probe and in the source being censused.
+const remap = (parse, { which = () => true, starts = true, ends = true, to = 'utf8', when = () => true } = {}) => (src) => {
+  const r = parse(src);
+  if (!when(src)) return r;
+  const at = to === 'utf8' ? (i) => Buffer.byteLength(src.slice(0, i), 'utf8') : (i) => [...src.slice(0, i)].length;
+  const fix = (n, parent) => {
+    if (Array.isArray(n)) { n.forEach((c) => fix(c, parent)); return; }
+    if (!n || typeof n !== 'object') return;
+    if (which(n, parent)) {
+      if (starts && typeof n.start === 'number') n.start = at(n.start);
+      if (ends && typeof n.end === 'number') n.end = at(n.end);
+    }
+    for (const k of Object.keys(n)) if (n[k] && typeof n[k] === 'object') fix(n[k], n);
+  };
+  fix(r.ast, null);
+  return r;
+};
+const MIXED = {
+  'every end in bytes': { starts: false },
+  'every start in bytes': { ends: false },
+  'only Identifier nodes in bytes': { which: (n) => n.type === 'Identifier' },
+  'only JSX attributes in bytes': { which: (n) => n.type === 'JSXAttribute' },
+  'only call arguments in bytes': { which: (n, parent) => parent?.type === 'CallExpression' && parent.arguments?.includes(n) },
+  'everything but JSX in bytes': { which: (n) => !String(n.type).startsWith('JSX') },
+  'only the template in bytes': { which: (n) => String(n.type).startsWith('JSX') },
+  'code points': { to: 'codepoint' },
+};
+
+test('rangeProblem: each boundary is checked before slicing, against its enclosing node and its own text', () => {
+  const src = 'ab{cd}';
+  const cut = (a, b) => src.slice(a, b);
+  const total = src.length;
+  const id = (start, end, name) => ({ type: 'Identifier', start, end, name });
+  const cases = [
+    [{ type: 'X', start: 0, end: 7 }, /not a range inside the source/],          // an end slice() would clamp
+    [{ type: 'X', start: -1, end: 2 }, /not a range inside the source/],
+    [{ type: 'X', start: 3, end: 2 }, /not a range inside the source/],
+    [{ type: 'X', start: 0.5, end: 2 }, /not a range inside the source/],
+    [{ type: 'X', start: 0, end: undefined }, /not a range inside the source/],
+    [{ type: 'X', start: 0, end: 2, kid: id(1, 3, 'b{') }, /outside its enclosing X/],
+    [id(0, 2, 'ba'), /reads "ab", not "ba"/],
+    [{ type: 'Literal', start: 0, end: 2, raw: 'a' }, /reads/],
+    [{ type: 'JSXExpressionContainer', start: 1, end: 6 }, /not \{…\}/],
+    [{ type: 'JSXElement', start: 0, end: 2 }, /not <…>/],
+  ];
+  for (const [ast, why] of cases) assert.match(String(rangeProblem(ast, cut, total)), why, JSON.stringify(ast));
+  // controls
+  assert.equal(rangeProblem({ type: 'X', start: 0, end: 6, kids: [id(0, 2, 'ab'), { type: 'JSXExpressionContainer', start: 2, end: 6, e: id(3, 5, 'cd') }] }, cut, total), null);
+  assert.equal(rangeProblem({ type: 'Literal', start: 0, end: 3, raw: '"\ufffd"' }, (a, b) => '"\ud800"'.slice(a, b), 3), null, 'a lone surrogate the parser stored as U+FFFD');
+  assert.match(String(rangeProblem({ type: 'Literal', start: 0, end: 3, raw: '"\ufffd"' }, (a, b) => '"x"'.slice(a, b), 3)), /reads/, 'only a surrogate maps to U+FFFD');
+  assert.equal(rangeProblem(id(0, 11, 'Layout'), (a, b) => '\\u004cayout'.slice(a, b), 11), null, 'an identifier spelled with an escape');
+});
+
+test('census: a parser whose offsets mix units fails explicitly, in the probe and in the source', { skip: SKIP }, async () => {
+  const parse = await astroParse();
+  // the reviewer's round-6 input, byte for byte
+  const src = "---\nimport { styleText } from '../lib/style-text.mjs';\nconst authorCss='a{}';\n---\n<!-- \u6f22\u{1F9F8} -->\n<style set:html={styleText(authorCss)}/>";
+  const OFFSETS = /offset/;
+  for (const [mode, how] of Object.entries(MIXED)) {
+    const mixed = remap(parse, how);
+    assert.equal(offsetUnit(mixed), null, `${mode}: the offset probe accepted a mixed-unit parser`);
+    for (const body of [src, src.replace('styleText(authorCss)', 'authorCss')]) {
+      const r = censusSource(body, mixed, { file: FIXTURE, censused: CENSUSED });
+      assert.deepEqual(r.sinks, [], `${mode}: a sink was accepted from mixed offsets: ${JSON.stringify(r.sinks)}`);
+      assert.ok(r.failures.some((f) => OFFSETS.test(f.reason)), `${mode}: no explicit offset failure: ${JSON.stringify(r.failures)}`);
+    }
+    // the probe passes (honest offsets for it), the censused source alone is mixed: the
+    // per-source range check must still catch it
+    const sly = remap(parse, { ...how, when: (s) => s.includes('styleText') });
+    assert.equal(offsetUnit(sly), offsetUnit(parse), `${mode}: the probe itself was remapped`);
+    const r = censusSource(src, sly, { file: FIXTURE, censused: CENSUSED });
+    assert.deepEqual(r.sinks, [], `${mode} (source only): a sink was accepted from mixed offsets: ${JSON.stringify(r.sinks)}`);
+    assert.ok(r.failures.some((f) => OFFSETS.test(f.reason)), `${mode} (source only): no explicit offset failure: ${JSON.stringify(r.failures)}`);
+  }
+  // the controls: the honest parser, and the same parser uniformly in the other unit
+  const other = offsetUnit(parse) === 'utf16' ? toByteOffsets(parse) : toCodeUnitOffsets(parse);
+  for (const p of [parse, other]) {
+    assert.deepEqual(censusSource(src, p, { file: FIXTURE, censused: CENSUSED }), { sinks: [{ line: 6, arg: 'authorCss' }], failures: [] }, offsetUnit(p));
+  }
 });
 
 test('every <style set:html> sink in astro/src goes through styleText', { skip: SKIP }, async () => {

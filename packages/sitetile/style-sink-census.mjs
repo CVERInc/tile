@@ -51,18 +51,82 @@ export async function loadAstroParse() {
 // 🩸 Round 5: the census cut node text out of UTF-8 bytes because the parser installed on the box
 // it was written on (compiler-rs 0.3.1) counted bytes; the lockfile installs 0.5.1, which counts
 // UTF-16 code units, and every sink after the first non-ASCII character was cut from the wrong
-// place. So the unit is measured: parse a probe whose element sits after a CJK character and an
-// astral emoji (where the three conventions differ), and see which slicing gives the element back.
-const OFFSET_PROBE = '<!-- \u6f22\u{1F9F8} -->\n<a b="1"/>';
-const OFFSET_PROBE_ELEMENT = '<a b="1"/>';
+// place. So the unit is measured, never assumed.
+// 🩸 Round 6: that probe compared ONE element, which ended at end of input, so a parser with UTF-16
+// starts and UTF-8 ends passed (String.slice clamps an oversized end) and the census then quoted
+// `authorCss)}/>` as the argument, green. A unit is now accepted only if EVERY node of the probe
+// (frontmatter code, comments, elements, attributes, expressions, text, all after non-ASCII
+// characters and followed by more) passes rangeProblem in that unit, and the same check then runs
+// over every censused source, so a parser that mixes units by node type, by boundary or by region
+// fails explicitly instead of being read in the wrong place.
+
+// Identifier text may spell the name with \u escapes.
+const unescapeIdent = (t) => t.replace(/\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})/g, (_, a, b) => String.fromCodePoint(parseInt(a ?? b, 16)));
+
+/**
+ * Every node that carries `start`/`end` must have integer offsets with 0 <= start <= end <= total
+ * (checked BEFORE any slicing, so nothing is clamped), must lie inside the nearest enclosing node
+ * that has a range, and must cut out its own text where the node states it: an identifier's name,
+ * a literal's or JSX text's `raw`, `{…}` for an expression container, `<…>` for an element.
+ * Returns a description of the first violation, or null.
+ */
+export function rangeProblem(ast, cut, total) {
+  let problem = null;
+  const check = (n, outer) => {
+    if (problem) return;
+    if (Array.isArray(n)) { for (const c of n) check(c, outer); return; }
+    if (!n || typeof n !== 'object') return;
+    let inner = outer;
+    if ('start' in n || 'end' in n) {
+      const { start: a, end: b } = n;
+      const what = `${n.type} [${a},${b})`;
+      if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || a > b || b > total) { problem = `${what} is not a range inside the source (length ${total})`; return; }
+      if (outer && (a < outer.start || b > outer.end)) { problem = `${what} lies outside its enclosing ${outer.type} [${outer.start},${outer.end})`; return; }
+      const t = cut(a, b);
+      let want = null;
+      if (n.type === 'Identifier' || n.type === 'JSXIdentifier' || n.type === 'PrivateIdentifier') want = typeof n.name === 'string' ? n.name : null;
+      else if ((n.type === 'Literal' || n.type === 'JSXText') && typeof n.raw === 'string') want = n.raw;
+      // The parser keeps `raw` as a Rust string, so a lone surrogate in the source reads as U+FFFD
+      // there; toWellFormed() makes exactly that substitution and nothing else.
+      if (want !== null && t !== want && t.toWellFormed() !== want && !(n.type === 'Identifier' && unescapeIdent(t) === want)) {
+        problem = `${what} reads ${JSON.stringify(t.slice(0, 40))}, not ${JSON.stringify(want.slice(0, 40))}`; return;
+      }
+      if (n.type === 'JSXExpressionContainer' && !(t.startsWith('{') && t.endsWith('}'))) { problem = `${what} reads ${JSON.stringify(t.slice(0, 40))}, not {…}`; return; }
+      if ((n.type === 'JSXElement' || n.type === 'JSXOpeningElement' || n.type === 'JSXClosingElement') && !(t.startsWith('<') && t.endsWith('>'))) {
+        problem = `${what} reads ${JSON.stringify(t.slice(0, 40))}, not <…>`; return;
+      }
+      inner = n;
+    }
+    for (const k of Object.keys(n)) if (n[k] && typeof n[k] === 'object') check(n[k], inner);
+  };
+  check(ast, null);
+  return problem;
+}
+
+const cutterFor = (src, unit) => {
+  if (unit === 'utf8') {
+    const bytes = Buffer.from(src, 'utf8');
+    return { cut: (a, b) => bytes.subarray(a, b).toString('utf8'), total: bytes.length };
+  }
+  return { cut: (a, b) => src.slice(a, b), total: src.length };
+};
+
+const OFFSET_PROBE = "---\nconst s = '\u6f22\u{1F9F8}';\nconst x = { y: '\u00e9' };\nconst f = (v) => v;\n---\n<!-- \u6f22\u{1F9F8} -->\n"
+  + '<a b="\u00e9" c={x.y}>\u{1F9F8} <i d={s}/>{x.y + f(s)}</a>\n<p e={`\u6f22${s}`}>\u6f22</p>\n\u6f22 end';
+const OFFSET_PROBE_ELEMENT = '<a b="\u00e9" c={x.y}>\u{1F9F8} <i d={s}/>{x.y + f(s)}</a>';
 const offsetUnits = new WeakMap();
 export function offsetUnit(parse) {
   if (offsetUnits.has(parse)) return offsetUnits.get(parse);
   let unit = null;
   try {
-    const el = (parse(OFFSET_PROBE)?.ast?.body ?? []).find((n) => n?.type === 'JSXElement');
-    if (el && OFFSET_PROBE.slice(el.start, el.end) === OFFSET_PROBE_ELEMENT) unit = 'utf16';
-    else if (el && Buffer.from(OFFSET_PROBE, 'utf8').subarray(el.start, el.end).toString('utf8') === OFFSET_PROBE_ELEMENT) unit = 'utf8';
+    const r = parse(OFFSET_PROBE);
+    const el = (r?.ast?.body ?? []).find((n) => n?.type === 'JSXElement');
+    const fits = ['utf16', 'utf8'].filter((u) => {
+      const { cut, total } = cutterFor(OFFSET_PROBE, u);
+      return el && Array.isArray(r.diagnostics) && r.diagnostics.length === 0
+        && rangeProblem(r.ast, cut, total) === null && cut(el.start, el.end) === OFFSET_PROBE_ELEMENT;
+    });
+    unit = fits.length === 1 ? fits[0] : null;
   } catch { unit = null; }
   offsetUnits.set(parse, unit);
   return unit;
@@ -115,8 +179,11 @@ export function censusSource(src, parse, { file = join(SRC, 'Fixture.astro'), ce
   if (!unit) {
     return { sinks, failures: [{ line: 0, reason: 'the parser\'s node offsets are neither UTF-16 nor UTF-8 offsets; the census cannot read source positions' }] };
   }
-  const bytes = unit === 'utf8' ? Buffer.from(src, 'utf8') : null;
-  const cut = (a, b) => (bytes ? bytes.subarray(a, b).toString('utf8') : src.slice(a, b));
+  const { cut, total } = cutterFor(src, unit);
+  const misaligned = rangeProblem(result.ast, cut, total);
+  if (misaligned) {
+    return { sinks, failures: [{ line: 0, reason: `node offsets do not line up with the source (${unit}): ${misaligned}; the census cannot read source positions` }] };
+  }
   const textOf = (n) => cut(n.start, n.end);
   const lineOf = (n) => (typeof n?.start === 'number' ? cut(0, n.start).split('\n').length : 0);
   const fail = (node, reason) => failures.push({ line: lineOf(node), reason });
@@ -135,7 +202,8 @@ export function censusSource(src, parse, { file = join(SRC, 'Fixture.astro'), ce
         componentSpecifiers.add(s);
         componentImports.set(s.local.name, (componentImports.get(s.local.name) ?? 0) + 1);
       }
-      if (s.type === 'ImportSpecifier' && target === STYLE_TEXT_MODULE && !d.importKind?.startsWith?.('type')
+      // `type` may sit on the declaration or on the specifier; either way nothing is bound at runtime.
+      if (s.type === 'ImportSpecifier' && target === STYLE_TEXT_MODULE && !d.importKind?.startsWith?.('type') && !s.importKind?.startsWith?.('type')
           && (s.imported?.name ?? s.imported?.value) === 'styleText' && s.local?.name === 'styleText') {
         canonicalSpecifiers.add(s);
       }
