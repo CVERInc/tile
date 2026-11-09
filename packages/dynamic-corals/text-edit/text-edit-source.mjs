@@ -26,7 +26,7 @@
 // Only that line's words change; its marker stays. A success returns the new revision and the
 // section's id after the edit (a title edit changes it), which the host hands back to the coral.
 
-import { parseSite, parseParams, renderSiteToHtml, bodyHtml } from '../../sitetile/site-core.js';
+import { parseSite, parseParams, renderSiteToHtml, bodyHtml, sourceRevision } from '../../sitetile/site-core.js';
 import { kindOf, cleanText, unsafeText } from './text-edit-core.mjs';
 
 // One source line's own marker and its words: a list item, an ATX heading, or a paragraph line.
@@ -44,23 +44,9 @@ export const REASONS = Object.freeze(['malformed', 'changed', 'unsupported-secti
 
 const clean = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 
-/** The page's source revision: what the frame was rendered from travels with every edit, and an
- *  edit made against any other revision is refused. A content hash (64 bits, cyrb53-style, plus the
- *  length), so any host can compute it from the Markdown alone — at build, to stamp the frame's
- *  `data-revision`, and here, before every edit. */
-export function sourceRevision(markdown) {
-  const s = String(markdown == null ? '' : markdown);
-  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 2654435761);
-    h2 = Math.imul(h2 ^ c, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  const hex = (n) => (n >>> 0).toString(16).padStart(8, '0');
-  return 'r' + s.length.toString(36) + '-' + hex(h2) + hex(h1);
-}
+// The page's source revision lives in sitetile (`sourceRevision`), so the Astro build that stamps
+// the frame's `data-revision` and this applier share ONE implementation. Re-exported here.
+export { sourceRevision };
 
 // ── The renderer's output as elements ────────────────────────────────────────────────────────────
 // sitetile's HTML is well-formed and escapes text (&amp; &lt; &gt;) and attribute values (&quot;
