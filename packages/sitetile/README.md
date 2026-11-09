@@ -96,6 +96,7 @@ Three routes emit an icon set on **every** build, no opt-in: `/favicon.ico` (32�
 | a site that… | gets |
 |---|---|
 | has set `favicon:` (or `site-logo:` / `footer-logo:`) | its own mark in `<link rel=icon>`, and as the apple-touch icon too when the mark is a raster (iOS ignores SVG) |
+| has set `favicon:` to a file in `public/` | the files follow the mark: a PNG is `/apple-touch-icon.png` byte for byte and `/favicon.ico` inside an ICO (not resampled); an SVG is `/favicon.svg` byte for byte. `/favicon.ico` always exists (the badge when there is no PNG to wrap); `/favicon.svg` is not written for a non-SVG mark, and nothing links it |
 | has set nothing | a badge: its own initial on its own `theme-color` (override with `icon-color: #rrggbb`) |
 | hand-places `public/favicon.ico` etc. | that file — Astro skips a route whose name a `public/` file claims, which is also how REEF with PWA's `gen-icons.sh` output keeps winning |
 
