@@ -210,7 +210,10 @@ function mulberry32(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t 
 const rnd = mulberry32(0xC4120E);
 const ATOMS = ['A', 'Shop', '關於', 'a b', '/a', '/b/c', 'https://x.example/p?q=1', '//x.example/n', 'mailto:me@x.example', '#', '/w^12', '^3', '/p;q', '/a=b',
   '/x:y', '|', ';', ';;', '=', ' = ', ':', ' >> ', '>>', '\n', '\n  - ', '\n- ', '\n\t', ' ', '  ', '\t', '\u3000', '-', 'cart', 'toggle', 'link', 'sidebar',
-  'mobile', 'badge:2', 'drawer:left', '\r'];
+  'mobile', 'badge:2', 'drawer:left', '\r',
+  // round 2: every other kind of whitespace the tokenizers' class holds (`\s` / trim()), and one it
+  // does not (U+0085), inside paths as well as between tokens
+  '\u00a0', '\u2003', '\u2028', '\u2029', '\ufeff', '\v', '\f', '\u1680', '\u202f', '\u0085', '/a\tb', '/p\u00a0q', '/c\rr', '/ls\u2028x', '/n\u0085l'];
 for (const k of KEYS) for (let i = 0; i < 1500; i++) {
   let s = '';
   const n = 1 + Math.floor(rnd() * 12);
@@ -264,7 +267,20 @@ function maskHrefs(key, model) {
 }
 
 // A path built from every character any of the grammars treats as syntax.
-const HOSTILE = ['/Jane;Doe/new/', '/a b/', '/p|q/', '/x>>y/', '/k=v/', '/c:d/', '/w^12', '/tab\there/', '/ideo\u3000space/', '/all ;|=:>>^\t/'];
+const HOSTILE = ['/Jane;Doe/new/', '/a b/', '/p|q/', '/x>>y/', '/k=v/', '/c:d/', '/w^12', '/tab\there/', '/ideo\u3000space/', '/all ;|=:>>^\t/',
+  '/nb\u00a0sp/', '/cr\rhere/', '/lf\nhere/', '/ls\u2028x/', '/em\u2003x/', '/bom\ufeffx/', '/vt\vx/', '/ff\fx/', '/nel\u0085x/', '/c0\u0001x/'];
+
+// 🩸 round 2 (review of #278): the hostile test used to check only that the PARSER read the target
+// back. `/a\tb` written raw into a whole-value key reads back as `/a\tb`, and a browser's URL parser
+// then deletes the tab and goes to `/ab` — a different page, with every assertion here green. So
+// each write is now also checked where the visitor's browser resolves it: the written href must
+// reach the same URL as the target does when its whitespace and controls are taken as data
+// (percent-encoded). The writer's own path-syntax escapes (`%3B` for `;` …) are equivalences the
+// design accepts, so both sides have those decoded before comparing.
+const BASE = 'https://site.example/dir/page';
+const asData = (h) => h.replace(/[\s\u0000-\u001f\u007f]/g, (c) => encodeURIComponent(c));
+const SYNTAX_ESC = /%(3B|3D|3A|5E|7C|3E)/gi;
+const dest = (h) => new URL(h, BASE).href.replace(SYNTAX_ESC, (m) => decodeURIComponent(m));
 for (const k of KEYS) {
   test(`writer: ${k} — a hostile href lands as one link, decoding to what was asked, with nothing else moved`, () => {
     let wrote = 0;
@@ -280,6 +296,8 @@ for (const k of KEYS) {
         const after = parseChromeLinks(k, out);
         assert.equal(after.length, links.length, `${k}: link count moved in ${JSON.stringify(out)}`);
         assert.equal(decodeURIComponent(after[idx].href), target, `${k}: ${JSON.stringify(out)}`);
+        assert.equal(dest(after[idx].href), dest(asData(target)), `${k}: ${JSON.stringify(out)} does not reach ${JSON.stringify(target)}`);
+        assert.ok(!/[\s\u0000-\u001f\u007f]/.test(after[idx].href), `${k}: whitespace or a control reached the value raw: ${JSON.stringify(out)}`);
         assert.equal(after[idx].start, links[idx].start);
         assert.equal(out.slice(0, links[idx].start), v.slice(0, links[idx].start), 'nothing before the link moves');
         assert.equal(out.slice(after[idx].end), v.slice(links[idx].end), 'nothing after the link moves');
@@ -295,6 +313,47 @@ for (const k of KEYS) {
     assert.ok(wrote > 0, `${k}: the writer never succeeded`);
   });
 }
+
+test('writer (review #278): a tab inside a path is written %09, so the browser does not delete it', () => {
+  // the reviewer's reproducer, verbatim
+  const v = 'Go=/old';
+  const out = withHref('blog-post-cta', v, parseChromeLinks('blog-post-cta', v)[0], '/a\tb');
+  assert.equal(out, 'Go=/a%09b');
+  assert.equal(new URL(postCtaOf(out).href, BASE).pathname, '/a%09b');
+  for (const k of ['copyright-href', 'language-href', 'header-actions-cart-href', 'age-gate-back-url', 'announce-href']) {
+    assert.equal(withHref(k, '/old', parseChromeLinks(k, '/old')[0], '/a\tb'), '/a%09b', k);
+  }
+});
+
+test('writer: the encoded set is the tokenizers\' own whitespace class — every code point trim() removes', () => {
+  // Every reader here cuts on `\s`, `\S`, trim() or split(/\s+/); in ECMAScript those are one set
+  // (WhiteSpace ∪ LineTerminator). Derive it from trim() over the whole BMP rather than listing it,
+  // and require the writer to encode each member in the most permissive key (a whole value, where
+  // only the ends are cut) — the key where a raw one would otherwise have read back as "the same link".
+  let members = 0;
+  for (let cp = 0; cp <= 0xffff; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue;
+    const c = String.fromCharCode(cp);
+    const ws = c.trim() === '';
+    assert.equal(/\s/.test(c), ws, `U+${cp.toString(16)}: \\s and trim() disagree`);
+    assert.equal(('x' + c + 'y').split(/\s+/).length === 2, ws, `U+${cp.toString(16)}: split(/\\s+/) and trim() disagree`);
+    if (!ws && cp > 0x1f && cp !== 0x7f) continue;
+    members += ws ? 1 : 0;
+    const out = withHref('copyright-href', '/old', parseChromeLinks('copyright-href', '/old')[0], `/a${c}b`);
+    assert.equal(out, `/a${encodeURIComponent(c)}b`, `U+${cp.toString(16)} must be percent-encoded`);
+  }
+  assert.ok(members >= 25, `the whitespace class has ${members} members`);
+  // …and a character outside it is not syntax, so it is written as asked
+  assert.equal(withHref('copyright-href', '/old', parseChromeLinks('copyright-href', '/old')[0], '/n\u0085l'), '/n\u0085l');
+});
+
+test('writer: an href that begins or ends in whitespace is refused — every reader would cut it off', () => {
+  for (const [k, v] of [['copyright-href', '/old'], ['blog-post-cta', 'Go=/old'], ['nav', 'A /old'], ['footer-social', 'A=/old']]) {
+    for (const t of [' /x', '/x ', '\t/x', '/x\u00a0', '\u3000/x']) {
+      assert.throws(() => withHref(k, v, parseChromeLinks(k, v)[0], t), /^Error: withHref: /, `${k}: ${JSON.stringify(t)}`);
+    }
+  }
+});
 
 test('writer: the brief\'s own example — `;` in a `label=href` list is written as %3B', () => {
   const v = 'Home=/ ; Jane=/old/ ; Shop=/shop';
