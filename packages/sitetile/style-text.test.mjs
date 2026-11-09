@@ -2,7 +2,7 @@
 // and the census that every `<style set:html>` sink in the renderer goes through it.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { censusSource, loadAstroParse, SRC } from './style-sink-census.mjs';
 import { styleText } from './astro/src/lib/style-text.mjs';
@@ -37,14 +37,20 @@ test('null/undefined are the empty string', () => {
 
 // Every inline <style> the renderer fills with set:html must route its text through styleText,
 // including any added later. The census reads each `.astro` file through the Astro compiler's own
-// parser (style-sink-census.mjs says what it checks and why it no longer reads text). Without the
-// renderer's dependencies the parser cannot load, and the census FAILS rather than skipping: a
-// census that cannot look must not report that it found nothing.
+// parser (style-sink-census.mjs says what it checks and why it no longer reads text).
+// The parser comes from the renderer's dependencies. If they are installed and it still cannot
+// load, the census FAILS. If they are not installed at all (a bare checkout; scripts/test.sh names
+// that run as one that skipped the renderer), the census tests are SKIPPED by name, and in CI
+// (which installs them) their absence is a failure: a census that cannot look never reports that
+// it found nothing.
 const walk = (dir) => readdirSync(dir).flatMap((n) => {
   const p = join(dir, n);
   return statSync(p).isDirectory() ? walk(p) : (p.endsWith('.astro') ? [p] : []);
 });
 const parserLoad = loadAstroParse().then((parse) => ({ parse }), (error) => ({ error }));
+const BARE = !existsSync(join(SRC, '..', 'node_modules')) && !process.env.CI;
+const SKIP = BARE && 'STYLE-SINK CENSUS SKIPPED: no packages/sitetile/astro/node_modules, so the Astro parser is absent (run npm install there)';
+if (SKIP) console.log(`# ${SKIP}`);
 async function astroParse() {
   const { parse, error } = await parserLoad;
   if (error) assert.fail(`the style-sink census cannot load the Astro parser (@astrojs/compiler-rs via packages/sitetile/astro/node_modules): ${error.message}`);
@@ -64,7 +70,7 @@ const UNPROVEN = /cannot prove is not style/;
 const PARSE = /parse diagnostic|parse\(\) threw/;
 const BOUND = /`styleText` is bound or used here/;
 
-test('census: every non-canonical sink shape is rejected, for the reason it is wrong', async () => {
+test('census: every non-canonical sink shape is rejected, for the reason it is wrong', { skip: SKIP }, async () => {
   const parse = await astroParse();
   const unsafe = [
     // rounds 2–4 (the text scanner's regression list, unchanged)
@@ -112,7 +118,7 @@ test('census: every non-canonical sink shape is rejected, for the reason it is w
   }
 });
 
-test('census: `styleText` must be the real helper, not a local of the same name', async () => {
+test('census: `styleText` must be the real helper, not a local of the same name', { skip: SKIP }, async () => {
   const parse = await astroParse();
   const sink = '<style is:inline set:html={styleText(authorCss)}></style>';
   const heads = [
@@ -136,7 +142,7 @@ test('census: `styleText` must be the real helper, not a local of the same name'
   }
 });
 
-test('census: the canonical shapes are accepted, and so are sinks the AST proves are not style', async () => {
+test('census: the canonical shapes are accepted, and so are sinks the AST proves are not style', { skip: SKIP }, async () => {
   const parse = await astroParse();
   const safe = [
     '<style is:inline set:html = { styleText(authorCss) }></style>',
@@ -150,7 +156,7 @@ test('census: the canonical shapes are accepted, and so are sinks the AST proves
   assert.deepEqual(run(parse, safe[0] + safe[1]).sinks.map((s) => s.arg), ['authorCss', 'theme.css']);
 });
 
-test('every <style set:html> sink in astro/src goes through styleText', async () => {
+test('every <style set:html> sink in astro/src goes through styleText', { skip: SKIP }, async () => {
   const parse = await astroParse();
   const sinks = [];
   const bad = [];
