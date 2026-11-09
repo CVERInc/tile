@@ -180,7 +180,7 @@ for (const rel of tracked('*.mjs', '*.js', '*.cjs')) {
 // (c) the edge corpus — every shape the grammars disagree about, written down once.
 const EDGE = {
   nav: ['A /a | B /b', 'Solo', 'A /a |  | B', '  A  /a  |B /b  ', 'A B C /x?q=1#f', 'A /a >> B /b ; C /c', 'Ünï 關於 /關於/', 'A /x|y',
-    '- A /a\n  - B /b\n    - C /c\n- D', '- A /a\n\t- B /b\n  - C', 'A /a\n\nB /b', '-A /a\n -B', '- /only', '- A  /a  \r\n- B /b\r', 'A　/a | B /b'],
+    '- A /a\n  - B /b\n    - C /c\n- D', '- A /a\n\t- B /b\n  - C', 'A /a\n\nB /b', '-A /a\n -B', '- /only', '- A  /a  \r\n- B /b\r', 'A\u3000/a | B /b'],
   footer: ['A /a | B /b', 'A /a >> B /b | C /c', '>> B /b', 'A >> /b', 'A/a', 'A /x>y | B /b', 'Shop https://x.example/s?a=b | C /c'],
   'footer-cols': ['Company: About=/about ;; Help & Support!: FAQ=/faq ;; --Mixed__Case 42--: A=/a',
     'About=https://x.example/about ; Help=/help', 'Heading: A=https://x.example/a', 'Soon ; A=/x:y', ': A=/a', 'H: A = /a ; B ; C=/c=d',
@@ -206,7 +206,7 @@ for (const [k, vs] of Object.entries(EDGE)) vs.forEach((v) => add(k, v));
 function mulberry32(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const rnd = mulberry32(0xC4120E);
 const ATOMS = ['A', 'Shop', '關於', 'a b', '/a', '/b/c', 'https://x.example/p?q=1', '//x.example/n', 'mailto:me@x.example', '#', '/w^12', '^3', '/p;q', '/a=b',
-  '/x:y', '|', ';', ';;', '=', ' = ', ':', ' >> ', '>>', '\n', '\n  - ', '\n- ', '\n\t', ' ', '  ', '\t', '　', '-', 'cart', 'toggle', 'link', 'sidebar',
+  '/x:y', '|', ';', ';;', '=', ' = ', ':', ' >> ', '>>', '\n', '\n  - ', '\n- ', '\n\t', ' ', '  ', '\t', '\u3000', '-', 'cart', 'toggle', 'link', 'sidebar',
   'mobile', 'badge:2', 'drawer:left', '\r'];
 for (const k of KEYS) for (let i = 0; i < 1500; i++) {
   let s = '';
@@ -261,7 +261,7 @@ function maskHrefs(key, model) {
 }
 
 // A path built from every character any of the grammars treats as syntax.
-const HOSTILE = ['/Jane;Doe/new/', '/a b/', '/p|q/', '/x>>y/', '/k=v/', '/c:d/', '/w^12', '/tab\there/', '/ideo　space/', '/all ;|=:>>^\t/'];
+const HOSTILE = ['/Jane;Doe/new/', '/a b/', '/p|q/', '/x>>y/', '/k=v/', '/c:d/', '/w^12', '/tab\there/', '/ideo\u3000space/', '/all ;|=:>>^\t/'];
 for (const k of KEYS) {
   test(`writer: ${k} — a hostile href lands as one link, decoding to what was asked, with nothing else moved`, () => {
     let wrote = 0;
@@ -311,6 +311,20 @@ test('writer: a footer item keeps its collapsed `>>` tail, and `>>` in its new h
   assert.equal(withHref('footer', v, a, '/x>>y'), 'A /x%3E%3Ey >> B /b | C /c');
 });
 
+test('writer: a query keeps its delimiters — a grammar that cannot hold them raw refuses', () => {
+  const list = 'A=/old ; B=/b';
+  const a = parseChromeLinks('footer-social', list)[0];
+  assert.throws(() => withHref('footer-social', list, a, '/new?x=1'), /^Error: withHref: /);
+  assert.throws(() => withHref('footer-social', list, a, '/new?x;y'), /^Error: withHref: /);
+  // whitespace and never-valid characters in a query are still encoded
+  assert.equal(withHref('footer-social', list, a, '/new?qa b'), 'A=/new?qa%20b ; B=/b');
+  // where `=` / `;` are not syntax, the query is written as asked
+  const n = 'A /old | B /b';
+  assert.equal(withHref('nav', n, parseChromeLinks('nav', n)[0], '/new?x=1;y=2#f:g'), 'A /new?x=1;y=2#f:g | B /b');
+  const c = 'Go=/old';
+  assert.equal(withHref('blog-post-cta', c, parseChromeLinks('blog-post-cta', c)[0], '/new?x=1;y'), 'Go=/new?x=1;y');
+});
+
 test('writer: a sidebar-nav `^weight` stays the weight, and a `^n` in the new href is encoded', () => {
   const v = 'Tags: A=/a^12 ; B=/b';
   const [a, b] = parseChromeLinks('sidebar-nav', v);
@@ -323,13 +337,16 @@ test('writer: a sidebar-nav `^weight` stays the weight, and a `^n` in the new hr
 test('writer: a scheme and an authority keep their colons; a colon that would become a group heading is encoded', () => {
   const v = 'A=/old ; B=/b';
   const [a] = parseChromeLinks('sidebar-nav', v);
-  assert.equal(withHref('sidebar-nav', v, a, 'https://x.example:8443/p'), 'A=https://x.example:8443/p ; B=/b');
+  assert.equal(withHref('sidebar-nav', v, a, 'https://x.example/p'), 'A=https://x.example/p ; B=/b');
+  // a port's colon is the headless group's first bare colon, and an authority cannot be encoded
+  assert.throws(() => withHref('sidebar-nav', v, a, 'https://x.example:8443/p'), /^Error: withHref: /);
   assert.equal(withHref('sidebar-nav', v, a, '/c:d'), 'A=/c%3Ad ; B=/b');
   // a headless group's first bare colon IS the heading separator, and `mailto:` cannot be encoded
   assert.throws(() => withHref('sidebar-nav', v, a, 'mailto:me@x.example'), /^Error: withHref: /);
   // under a heading it is just a link
   const h = 'H: A=/old';
   assert.equal(withHref('sidebar-nav', h, parseChromeLinks('sidebar-nav', h)[0], 'mailto:me@x.example'), 'H: A=mailto:me@x.example');
+  assert.equal(withHref('sidebar-nav', h, parseChromeLinks('sidebar-nav', h)[0], 'https://x.example:8443/a b'), 'H: A=https://x.example:8443/a%20b');
 });
 
 test('writer: an indented nav keeps its tree when a child moves', () => {
