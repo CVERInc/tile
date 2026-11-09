@@ -772,7 +772,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 }
 
 // Separate content keeps placeholder/brand fixtures out of the existing smoke expectations.
-function buildBubbleNameFixture(brand) {
+function buildBubbleNameFixture(brand, extraSiteLines = '') {
   const dir = mkdtempSync(join(HERE, '..', '.smoke-bubble-name-'));
   try {
     cpSync(HERE, dir, { recursive: true, filter: src => !/[\\/](node_modules|\.astro|dist[^\\/]*)(?:[\\/]|$)/.test(src) });
@@ -784,7 +784,7 @@ function buildBubbleNameFixture(brand) {
     writeFileSync(join(dir, 'content/_site.md'), `---
 sitetile-page: _site
 title: Untitled site
-${brand ? 'brand: ' + brand + '\n' : ''}lang: en-US
+${brand ? 'brand: ' + brand + '\n' : ''}${extraSiteLines}lang: en-US
 ---
 `);
     for (const [file, title] of [['home', 'Untitled site'], ['about', 'Example article']]) {
@@ -828,7 +828,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       cwd: dir, stdio: 'inherit',
       env: { ...process.env, SITE_ID: 'bubble-name', PLATFORM_ORIGIN: 'https://platform.example', SITE_URL: 'https://example.com' },
     });
-    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop', 'unstashed-title', 'unstashed-footer', 'unstashed-placeholder'].map(page => [page, page + '/index.html'])]
+    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop', 'unstashed-title', 'unstashed-footer', 'unstashed-placeholder'].map(page => [page, page + '/index.html']), ...(extraSiteLines ? [['devlog', 'devlog/index.html']] : [])]
       .map(([key, file]) => [key, readFileSync(join(dist, file), 'utf8')]));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -836,6 +836,9 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 }
 const bubbleNamePages = buildBubbleNameFixture('Example Workshop');
 const bubbleNameNoBrandPages = buildBubbleNameFixture();
+// One site, one name on every route: a `site-title:` written in `_site.md` is the catch-all's reserved
+// stash key, not a site-layer key, so it is ignored on content pages AND on the blog index alike.
+const siteTitleKeyPages = buildBubbleNameFixture(undefined, 'site-title: Actual Name\npackages: blog\n');
 const bubbleNameAttrs = page => (page.match(/<div\b[^>]*data-dynamic-coral="inbox-bubble"[^>]*>/g) || []).map(tag =>
   Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value])));
 const bubbleNameHeader = page => ((page.match(/<a\b[^>]*class="[^"]*\brf-logo\b[^"]*"[^>]*>([\s\S]*?)<\/a>/) || [])[1] || '').replace(/<[^>]*>/g, '').trim();
@@ -1355,6 +1358,15 @@ const checks = [
       assert.deepEqual(jsonLdSiteNames(pages['unstashed-footer']), ['Atlas Observatory']);
       assert.deepEqual(jsonLdSiteNames(pages['unstashed-placeholder']), ['Atlas']);
     }
+    return true;
+  }],
+  ['site name: a `site-title:` in _site.md is ignored on every route — the home page and the blog index agree', () => {
+    const og = (page) => (page.match(/<meta property="og:site_name" content="([^"]*)">/) || [])[1];
+    const { home, devlog } = siteTitleKeyPages;
+    assert.equal(og(home), og(devlog), `og:site_name by route: ${og(home)} / ${og(devlog)}`);
+    assert.deepEqual(jsonLdSiteNames(home), jsonLdSiteNames(devlog));
+    assert.equal(og(devlog), 'Untitled site');
+    assert.ok(!home.includes('Actual Name') && !devlog.includes('Actual Name'), 'the reserved key reaches no page');
     return true;
   }],
   ['bubble site name: sites without brand keep base attribute chains and hand-mounted names survive', () => {

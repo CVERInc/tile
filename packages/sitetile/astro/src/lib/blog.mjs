@@ -698,10 +698,10 @@ export function loadSite(contentGlob, pagePath) {
     const rel = (path.split('/content/')[1] || '');
     if (rel === '_site.md') {
       const { meta } = splitFrontmatter(String(raw || ''));
-      if (meta && Object.keys(meta).length) base = tagLocalesSource(meta, 'content/_site.md');
+      if (meta && Object.keys(meta).length) base = tagLocalesSource(withoutReservedSiteTitle(meta, 'content/_site.md'), 'content/_site.md');
     } else {
       const m = rel.match(/^([^/]+)\/_site\.md$/);
-      if (m) { const { meta } = splitFrontmatter(String(raw || '')); if (meta && Object.keys(meta).length) locales[m[1]] = tagLocalesSource(meta, `content/${rel}`); }
+      if (m) { const { meta } = splitFrontmatter(String(raw || '')); if (meta && Object.keys(meta).length) locales[m[1]] = tagLocalesSource(withoutReservedSiteTitle(meta, `content/${rel}`), `content/${rel}`); }
     }
   }
   if (!base && !Object.keys(locales).length) return null;
@@ -714,6 +714,25 @@ export function loadSite(contentGlob, pagePath) {
   if (loc && Object.prototype.hasOwnProperty.call(loc, DYNAMIC_CORAL_CSS_KEY)) warnLocaleCoralCss(seg, mode);
   if (mode) merged[DYNAMIC_CORAL_CSS_KEY] = mode; else delete merged[DYNAMIC_CORAL_CSS_KEY];
   return merged;
+}
+
+// `site-title` is the catch-all's RESERVED per-page stash (pages/[...path].astro: "Reserved key, not
+// authorable"), not a site-layer key — SITE_LAYER_KEYS does not list it. Written in a `_site.md` it
+// used to reach every route that receives the config as-is (blog, archives, search, the 404) while
+// content pages overwrote it, so one site carried two names by route. It is dropped here, the single
+// read every route shares, and named once per file in the build log.
+const warnedSiteTitleFiles = new Set();
+function withoutReservedSiteTitle(meta, file) {
+  if (!Object.prototype.hasOwnProperty.call(meta, 'site-title')) return meta;
+  const { 'site-title': _reserved, ...rest } = meta;
+  if (!warnedSiteTitleFiles.has(file)) {
+    warnedSiteTitleFiles.add(file);
+    console.warn(
+      `sitetile: site-title in ${file} is IGNORED — it is reserved for the page build, not a site ` +
+      `setting. The site's name comes from title (then brand, then footer-brand). Remove it from ${file}.`
+    );
+  }
+  return rest;
 }
 
 // loadSite runs once per page, so the warning is emitted once per offending locale instead of
