@@ -497,7 +497,7 @@ const showTopBanner = !!(bleed && bleed.topBanner && locales.length > 0);
 //   right: `.st-sidebar-main` carries the normal <slot /> content
 // All other values (or absent) fall through to the current single-column rf-main.
 // sidebar-nav syntax mirrors footer-cols: `;;` = group separator, `;` = item, `Label=url`.
-import { safeHref, safeSrc, siteSurfaces } from '../../../site-core.js';
+import { safeHref, safeSrc, siteSurfaces, titleSiteName } from '../../../site-core.js';
 import { groupByArchive, footerWidgets, blogSearchOn, postUrl, loadSite } from '../lib/blog.mjs';
 const pageLayout = meta.layout ? String(meta.layout).trim() : 'stack';
 const isSidebar = pageLayout === 'sidebar';
@@ -780,7 +780,7 @@ const ogSiteName = siteNames.name;
 const jsonLdSiteName = ogSiteName;
 // Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
 // already named. No new copy, no new default to get wrong in somebody else's language.
-const feedLinkTitle = `${String(meta['blog-title'] || meta.title || '').trim() || 'Feed'}`;
+const feedLinkTitle = `${String(meta['blog-title'] || titleSiteName(meta) || '').trim() || 'Feed'}`;
 // JSON-LD graph for THIS page. `article` only when the page said so — PostView sets og-type, so a
 // content page can never accidentally claim to be a blog post.
 const jsonLd = jsonLdScript(pageGraph({

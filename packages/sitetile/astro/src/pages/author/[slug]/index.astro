@@ -4,6 +4,7 @@
 // each post's byline; those URLs must survive cutover. One page per DISTINCT author slug in the
 // corpus (post.author). Heading uses the display name from `blog-author-names: slug=名稱 | …`
 // (else the slug). OPT-IN via `blog-author-routes`.
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from '../../../components/ArchiveView.astro';
 import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, authorBase } from '../../../lib/blog.mjs';
 
@@ -34,5 +35,5 @@ const authorPosts = posts.filter((p) => p.author === slug);
 const subhead = archivePrefixes(meta).author + heading;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
-<ArchiveView posts={authorPosts} corpus={posts} meta={meta} title={`${heading} — ${meta.title || ''}`}
+<ArchiveView posts={authorPosts} corpus={posts} meta={meta} title={`${heading}${siteTitleSuffix(meta)}`}
   heading={heading} subhead={subhead} pageHref={pageHref} pageNum={1} />

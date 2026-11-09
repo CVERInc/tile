@@ -6,6 +6,7 @@
 // One page per (locale × distinct tag present in THAT locale's OWN translated posts, slug-mapped
 // via that locale's own `blog-tag-slugs`, falling back to the base value like every other locale
 // meta key). OPT-IN via that locale's own `blog-tag-routes`.
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from '../../../../components/ArchiveView.astro';
 import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, localeBlogCorpora, termLocaleMap, alternateArchiveLocales, tagBase } from '../../../../lib/blog.mjs';
 
@@ -45,5 +46,5 @@ const labelPosts = posts.filter((p) => p.tags.includes(tag));
 const subhead = archivePrefixes(meta).tag + tag;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
-<ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag} — ${meta.title || ''}`}
+<ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag}${siteTitleSuffix(meta)}`}
   heading={tag} subhead={subhead} pageHref={pageHref} pageNum={1} alternates={alternates} />

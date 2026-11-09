@@ -11,7 +11,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 import PostArticle from './PostArticle.astro';
 import { blogBase, blogSearchOn, tagHref, tagFontSize, sidebarCopy, blogViewLang, blogAlternates, siteDefaultLang, LOCALE_VIEW } from '../lib/blog.mjs';
 import { NEUTRAL_UI_LANG } from '../packages/lingo/locale.mjs';
-import { safeHref } from '@sitetile';
+import { safeHref, siteTitleSuffix } from '@sitetile';
 import { postCtaOf } from '../../../chrome-links.mjs';
 
 // `stamp` (reef#2554, pages/[...path].astro): this page's own noindex: and sitemap listing, for
@@ -68,7 +68,7 @@ const headMeta = {
   'share-title': post.title,
 };
 ---
-<SiteLayout title={`${post.title} — ${meta.title || ''}`} lang={blogViewLang(meta, viewFiles)} meta={headMeta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)} stamp={stamp}>
+<SiteLayout title={`${post.title}${siteTitleSuffix(meta)}`} lang={blogViewLang(meta, viewFiles)} meta={headMeta} bannerLocales={bannerLocales} alternates={blogAlternates(bannerLocales)} stamp={stamp}>
   {sidebar ? (
     <div class="bl-post-layout" data-post-sidebar={sidebar.side}>
       <PostArticle lang={meta[LOCALE_VIEW] ? meta.lang : (siteDefaultLang(meta, viewFiles) || NEUTRAL_UI_LANG)} post={post} meta={meta} newer={newer} older={older} keepReadingCards={keepReadingCards} relatedCards={relatedCards} />

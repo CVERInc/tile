@@ -3556,6 +3556,32 @@ function siteName(meta, fallback = '') {
   return siteNameSource(meta, fallback).name;
 }
 
+/**
+ * The site's name as it may appear INSIDE a page title — the `<title>`, og:title and twitter:title
+ * every route hands SiteLayout, and the footer line that falls back to that title. The same
+ * `routeSiteNameSource` chain og:site_name resolves (a real title → brand → footer-brand), with ONE
+ * difference: a seeded placeholder is never printed. og:site_name keeps the placeholder as the
+ * site's last constant name; a title suffix has a choice, and omits it instead. '' when nothing
+ * real names the site, so the caller drops the suffix rather than print "Search — " or a
+ * placeholder.
+ *
+ * 🩸 reef#3040: blog, post, 404, archive and search routes built ` — ${meta.title}` themselves, so
+ * a site still carrying the seeded placeholder title printed it in every one of those titles (and
+ * in the footer line) after tile#277/#279 had already unset it for og:site_name and JSON-LD.
+ */
+function titleSiteName(meta) {
+  const { name, key } = routeSiteNameSource(meta, '');
+  return key === 'placeholder' ? '' : name;
+}
+
+/** `sep + titleSiteName(meta)`, or '' when the site has no real name — the one way a route appends
+ *  the site to its title. `sep` defaults to ' — '; the paginated archives pass '— ' because their
+ *  page suffix already ends the head. */
+function siteTitleSuffix(meta, sep = ' — ') {
+  const name = titleSiteName(meta);
+  return name ? sep + name : '';
+}
+
 /** The name alone — `routeSiteNameSource(meta, fallback).name`. */
 function routeSiteName(meta, fallback = '') {
   return routeSiteNameSource(meta, fallback).name;
@@ -3630,4 +3656,6 @@ export {
   siteNameSource, routeSiteNameSource, configSiteNameSource,
   // …and every surface a page derives from that one result (header, bubble, og, JSON-LD).
   siteSurfaces,
+  // …and the name a page TITLE may carry: never a placeholder; '' drops the suffix (reef#3040).
+  titleSiteName, siteTitleSuffix,
 };

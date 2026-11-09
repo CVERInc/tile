@@ -15,6 +15,7 @@
 //
 // noindex, because a 404 that gets indexed is a search result that wastes somebody's click. It is
 // passed as a prop rather than written into <head> here — a page cannot reach the layout's head.
+import { siteTitleSuffix } from '@sitetile';
 import SiteLayout from '../layouts/SiteLayout.astro';
 import { siteMeta, siteDefaultLang } from '../lib/blog.mjs';
 import { uiCopy, DEFAULT_LANG } from '../packages/lingo/locale.mjs';
@@ -31,7 +32,7 @@ const copy = uiCopy(lang);
 // the footer link carried `?return=%2F404%2F` and the chooser sent the visitor on to
 // /<locale>/404/, which no build writes. From here the way back is that language's home.
 ---
-<SiteLayout title={`${copy.notFoundTitle} — ${meta.title || ''}`} lang={lang} meta={meta} robots="noindex" languageReturn="/">
+<SiteLayout title={`${copy.notFoundTitle}${siteTitleSuffix(meta)}`} lang={lang} meta={meta} robots="noindex" languageReturn="/">
   <section class="st-section st-notfound">
     <h1>{copy.notFoundTitle}</h1>
     <p>{copy.notFoundBody}</p>
