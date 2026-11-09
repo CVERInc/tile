@@ -23,7 +23,8 @@
 //   withHref(key, value, link, newHref) → string
 //       The value with that one link's href replaced. It writes the readable spelling when that
 //       reads back as the same single link, else percent-encodes the characters that are syntax for
-//       that key (in the path; see encodeFor for why not in a query), and in both cases checks — by re-reading the result with the readers below — that
+//       that key (in the path; see encodeFor for why not in a query) — whitespace and controls are
+//       ALWAYS encoded, wherever they stand (see TOKEN_SPACE for why) — and in both cases checks — by re-reading the result with the readers below — that
 //       the link count, every other link, every label, heading, tree shape and weight are exactly as
 //       they were and only this link's target changed. When no spelling can do that it throws an
 //       Error whose message starts `withHref: `; it never returns a value the layout would read
@@ -282,7 +283,20 @@ const SYNTAX = {
   'header-actions': ';=',
   'blog-post-cta': '',
 };
-const LINE_BREAK = /[\n\r\u2028\u2029]/;
+// 🩸 round 2 (review of #278). Whitespace used to be encoded only when the raw spelling failed to
+// read back, and in a whole-value key (or blog-post-cta) an internal tab DOES read back: the reader
+// only trims the ends. So `/a\tb` was written raw — and a browser's URL parser deletes a tab, LF or
+// CR wherever it stands, so the link went to `/ab`. Re-reading with these readers cannot see that,
+// because the damage happens in the URL parser, not in the grammar.
+//
+// So the always-encoded set is not a hand list: it is the tokenizers' own whitespace class. Every
+// reader in this file cuts on `\s`, `\S`, trim() or split(/\s+/), and in ECMAScript those are ONE
+// set (WhiteSpace ∪ LineTerminator — chrome-links.test.mjs derives it from trim() over the whole BMP
+// and checks the writer encodes every member). Plus the C0 controls and DEL, which a URL parser
+// either deletes (tab, LF, CR) or percent-encodes itself, so writing them encoded changes nothing
+// a browser resolves and keeps every byte of the frontmatter line printable.
+const TOKEN_SPACE = /\s/;
+const alwaysEncoded = (ch) => TOKEN_SPACE.test(ch) || ch <= '\u001f' || ch === '\u007f';
 // A scheme and authority (`https://host:port`, `//host`, `mailto:`) keep their own colons.
 const SCHEME_AUTHORITY = /^(?:[A-Za-z][A-Za-z0-9+.-]*:(?:\/\/[^/?#\s]*)?|\/\/[^/?#\s]*)/;
 // 🔴 Encoding is only safe where the encoded character MEANS the same thing. In a path it does
@@ -294,7 +308,7 @@ const QUERY_DELIMS = ';=:';
 
 function encodeFor(key, href) {
   const syntax = SYNTAX[key] || '';
-  const enc = (s, chars) => s.replace(/[\s\S]/g, (ch) => (/\s/.test(ch) || chars.includes(ch) ? encodeURIComponent(ch) : ch));
+  const enc = (s, chars) => s.replace(/[\s\S]/g, (ch) => (alwaysEncoded(ch) || chars.includes(ch) ? encodeURIComponent(ch) : ch));
   const m = href.match(SCHEME_AUTHORITY);
   const head = m ? m[0] : '';
   const rest = href.slice(head.length);
@@ -315,10 +329,15 @@ export function withHref(key, value, link, newHref) {
   const want = String(newHref ?? '');
   if (!want) throw new Error('withHref: an empty href is not a link');
   const from = links[idx];
-  // A line break is written raw only into a link that already had one (a block-scalar value); into
-  // any other it would end the frontmatter line, which no re-read of the value alone can see.
-  const raw = !LINE_BREAK.test(want) || LINE_BREAK.test(from.href);
-  const candidates = raw ? [want, encodeFor(key, want)] : [encodeFor(key, want)];
+  // Writing a link's own href back is no edit: the bytes stay, whatever they hold (the law).
+  if (want === from.href) return v;
+  // Every reader trims an href's ends and a URL parser strips leading/trailing C0 and space, so a
+  // target that begins or ends in either has no spelling that means it — refuse, never guess.
+  if (want !== want.trim() || /^[\u0000-\u0020]|[\u0000-\u0020]$/.test(want)) {
+    throw new Error(`withHref: ${JSON.stringify(want)} begins or ends in whitespace, which no \`${key}\` link can hold`);
+  }
+  // The readable spelling is a candidate only when it holds nothing from the always-encoded set.
+  const candidates = [...want].some(alwaysEncoded) ? [encodeFor(key, want)] : [want, encodeFor(key, want)];
   for (const href of candidates) {
     const out = v.slice(0, from.start) + href + v.slice(from.end);
     if (readsAs(key, v, idx, href, out)) return out;
