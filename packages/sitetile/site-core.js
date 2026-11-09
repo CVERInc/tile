@@ -3561,8 +3561,29 @@ function routeSiteName(meta, fallback = '') {
   return routeSiteNameSource(meta, fallback).name;
 }
 
+// ── The page's source revision (text-edit coral; dynamic-corals/text-edit) ─────────────────────
+/** The page's source revision: what the frame was rendered from travels with every edit, and an
+ *  edit made against any other revision is refused. A content hash (64 bits, cyrb53-style, plus the
+ *  length), so any host can compute it from the Markdown alone — at build, to stamp the frame's
+ *  `data-revision`, and here, before every edit. */
+function sourceRevision(markdown) {
+  const s = String(markdown == null ? '' : markdown);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const hex = (n) => (n >>> 0).toString(16).padStart(8, '0');
+  return 'r' + s.length.toString(36) + '-' + hex(h2) + hex(h1);
+}
+
 export {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml,
+  // the source revision an editing preview stamps as `data-revision` (text-edit coral)
+  sourceRevision,
   parseParams, splitFrontmatter, slugify,
   // inline/body render helpers — exported so the Astro layer (the production seam) shares ONE
   // inline-markdown source with the reference renderer (structure lives in .astro components,

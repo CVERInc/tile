@@ -1244,7 +1244,10 @@ const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
         <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{breadcrumbLabel}</span>
       </nav>
     )}
-    <main class="rf-main reef-main">
+    <main class="rf-main reef-main" data-revision={/* An editing preview (SITETILE_SOURCE_SPANS=1) only: the
+        source revision of this page's Markdown, for the text-edit coral's mount (the host copies it
+        there). Absent otherwise — and no JSX comment node here, which would add a byte to every page. */
+        stamp && stamp.revision ? stamp.revision : undefined}>
       {isSidebar ? (
         <div class="st-sidebar-layout" data-side={sidebarSide}>
           <aside class="st-sidebar">
