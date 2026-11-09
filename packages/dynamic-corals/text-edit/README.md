@@ -55,6 +55,12 @@ it shows a short "change it in the editor" hint instead, and links keep working 
   carries that `doc` back: an answer with another `doc`, or with none, is ignored. Ids (`e1`, `b1`)
   restart in every document, so a host addresses its answers by `doc`, not by id or by window: the
   frame's window is the same object across a navigation.
+- **1.0.0 is breaking for hosts: echo `doc`.** A host written for 0.1.0 answers without `doc`, and
+  1.0.0 ignores every such answer, so an edit that host saved is shown as unconfirmed (`unknown`,
+  with the old words) and its readback is ignored too. Accepting a missing `doc` would bring back the
+  stale-answer bug, so it is not accepted. 1.0.0 is served on the registry channel **`v1`**; `v0`
+  keeps 0.1.0 and is never repointed to 1.x. A host moves to `v1` in the same change that makes it
+  echo `doc` on every `reef-text-edit-result` and `reef-text-edit-readback-result`.
 - **Message.** `{ type: 'reef-text-edit', doc, id, page, revision, anchor, before, after }` to the parent
   window at `data-parent-origin` only; the answer is
   `{ type: 'reef-text-edit-result', doc, id, ok, hint?, revision?, section? }`, accepted only from that
@@ -84,7 +90,7 @@ it shows a short "change it in the editor" hint instead, and links keep working 
 - **Gestures.** Enter or leaving the element saves; Escape puts the words back; paste is plain text,
   one line. While an IME is composing, Enter and Escape belong to the IME.
 
-Served by the coral registry like every dynamic coral (`/corals/text-edit/v0/text-edit.js`), but not
+Served by the coral registry like every dynamic coral (`/corals/text-edit/v1/text-edit.js`; `v0` stays on 0.1.0), but not
 listed in the public coral catalog (`listed: false` in metadata.json): a host that embeds pages in a
 frame adds the container and the script to its own framed page; a site owner never installs it.
 
@@ -95,7 +101,7 @@ Lets an owner change the words of a plain heading, paragraph or list item in a f
 
 Author: `official`.
 
-Host: `sitetile`. Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, echoing the message's `doc` (the coral ignores an answer with any other `doc`, or none) and relaying `revision` and `section` from a successful apply. It processes the frame's messages in the order received, one at a time, and answers a `reef-text-edit-readback` with `reef-text-edit-readback-result` (same `doc`) (text-edit-source.mjs `readTextAt`). Served by the coral registry (`/corals/text-edit/v0/text-edit.js`): the host adds the mount and the script to its own framed preview.
+Host: `sitetile`. Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, echoing the message's `doc` (the coral ignores an answer with any other `doc`, or none) and relaying `revision` and `section` from a successful apply. It processes the frame's messages in the order received, one at a time, and answers a `reef-text-edit-readback` with `reef-text-edit-readback-result` (same `doc`) (text-edit-source.mjs `readTextAt`). Served by the coral registry on channel `v1` (`/corals/text-edit/v1/text-edit.js`; 1.0.0 needs the host to echo `doc`, and `v0` stays on 0.1.0): the host adds the mount and the script to its own framed preview.
 
 Not listed in the public coral catalog.
 
@@ -103,7 +109,7 @@ Not listed in the public coral catalog.
 
 ```html
 <div hidden data-dynamic-coral="text-edit" data-parent-origin="https://editor.example" data-revision="r1k-0123456789abcdef"></div>
-<script src="https://feelreef.com/corals/text-edit/v0/text-edit.js"></script>
+<script src="https://feelreef.com/corals/text-edit/v1/text-edit.js"></script>
 ```
 
 ### Attributes

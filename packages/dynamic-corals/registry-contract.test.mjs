@@ -104,7 +104,10 @@ function checkRegistryContract({ name, coralDir, registryRoot }) {
   // (2)+(3)+(4) v0 and latest both exist, both resolve to something published, and neither is
   // ahead of the coral's own current version — a channel cannot serve a version its own source
   // does not yet describe. Behind is fine (see the lag-tolerance note at the top of this file).
-  for (const channel of ['v0', 'latest']) {
+  // tile#284 — and the channel of the coral's OWN major: a breaking release is a new major on a new
+  // channel (`v1` for 1.x), while `v0` keeps serving the 0.x contract its hosts were written for.
+  const ownChannel = `v${String(version).split('.')[0]}`;
+  for (const channel of [...new Set(['v0', 'latest', ownChannel])]) {
     const channelVersion = channels[channel];
     assert.ok(channelVersion,
       `${name} has no ${channel} channel in registry/manifest.json — no site can load it`);
@@ -152,6 +155,8 @@ function buildFixture({
   publishPackageVersion = true,
   publishChannelVersionArtifact = true,
   mutateImmutableManifest = null,
+  channels = null,          // the fixture's channel table; default: v0, latest and its own major at channelVersion
+  extraVersions = [],       // more already-published versions (a v0 kept on 0.x while v1 serves 1.x)
 }) {
   const tmp = mkdtempSync(join(tmpdir(), 'registry-contract-fixture-'));
   const coralDir = join(tmp, 'coral');
@@ -194,8 +199,14 @@ function buildFixture({
     writeFileSync(join(dir, 'manifest.json'), JSON.stringify(historicalManifest, null, 2) + '\n');
   }
 
-  writeFileSync(join(registryRoot, 'manifest.json'),
-    JSON.stringify({ [name]: { v0: channelVersion, latest: channelVersion } }, null, 2) + '\n');
+  for (const v of extraVersions) {
+    const dir = join(registryRoot, 'versions', name, v);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${name}.js`), '/* fixture bundle (older major) */\n');
+  }
+
+  const table = channels ?? { v0: channelVersion, latest: channelVersion, [`v${String(packageVersion).split('.')[0]}`]: channelVersion };
+  writeFileSync(join(registryRoot, 'manifest.json'), JSON.stringify({ [name]: table }, null, 2) + '\n');
 
   return { tmp, name, coralDir, registryRoot };
 }
@@ -256,6 +267,23 @@ test('a normalised source manifest that disagrees with the immutable version man
     assert.throws(() =>
       checkRegistryContract({ name: fx.name, coralDir: fx.coralDir, registryRoot: fx.registryRoot }),
       /does not equal its source manifest after build\.mjs's own package-version normalisation/);
+  });
+});
+
+// tile#284 — a breaking release is a new major on a new channel: 1.x needs `v1`, and `v0` keeps the
+// 0.x contract its hosts were written for (text-edit: v0 = 0.1.0, never repointed; v1 = 1.0.0).
+test('tile#284: a 1.x coral with no v1 channel is red, even when v0 and latest exist', () => {
+  withFixture({ packageVersion: '1.0.0', channels: { v0: '1.0.0', latest: '1.0.0' } }, (fx) => {
+    assert.throws(() =>
+      checkRegistryContract({ name: fx.name, coralDir: fx.coralDir, registryRoot: fx.registryRoot }),
+      /has no v1 channel in registry\/manifest\.json/);
+  });
+});
+
+test('tile#284 CONTROL: v0 kept on 0.1.0 while v1 and latest serve 1.0.0 — green', () => {
+  withFixture({ packageVersion: '1.0.0', extraVersions: ['0.1.0'], channels: { v0: '0.1.0', v1: '1.0.0', latest: '1.0.0' } }, (fx) => {
+    assert.doesNotThrow(() =>
+      checkRegistryContract({ name: fx.name, coralDir: fx.coralDir, registryRoot: fx.registryRoot }));
   });
 });
 
