@@ -53,7 +53,7 @@ export async function loadAstroParse() {
 // UTF-16 code units, and every sink after the first non-ASCII character was cut from the wrong
 // place. So the unit is measured: parse a probe whose element sits after a CJK character and an
 // astral emoji (where the three conventions differ), and see which slicing gives the element back.
-const OFFSET_PROBE = '<!-- 漢\u{1F9F8} -->\n<a b="1"/>';
+const OFFSET_PROBE = '<!-- \u6f22\u{1F9F8} -->\n<a b="1"/>';
 const OFFSET_PROBE_ELEMENT = '<a b="1"/>';
 const offsetUnits = new WeakMap();
 export function offsetUnit(parse) {
