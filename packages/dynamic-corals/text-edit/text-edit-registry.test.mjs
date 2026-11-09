@@ -8,7 +8,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CORALS, REGISTRY_CORALS } from '../corals.mjs';
@@ -50,18 +49,19 @@ test('the public catalog does not list text-edit, and lists every other registry
   assert.equal(listedInCatalog({ listed: true }), true);
 });
 
-test('the registry build publishes text-edit@0.1.0: the artifact and its manifest', () => {
+test('the registry build publishes text-edit@0.1.0: the artifact and its manifest', (t) => {
   // build.mjs also rewrites <coral>/<coral>.js where it runs, so it runs on a COPY: inside the repo's
   // gitignored out/ (it stamps the commit with `git rev-parse`), never over the committed artifact.
   const repo = join(HERE, '../../..');
   mkdirSync(join(repo, 'out'), { recursive: true });
   const sandbox = mkdtempSync(join(repo, 'out', 'text-edit-registry-'));
-  const registry = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'text-edit-registry-'));
+  const registry = join(sandbox, 'registry');
   try {
     for (const f of ['build.mjs', 'corals.mjs', 'manifest-schema.mjs', 'normalize-generated-code.mjs', 'package.json']) cpSync(join(HERE, '..', f), join(sandbox, f));
     cpSync(HERE, join(sandbox, 'text-edit'), { recursive: true });
-    const esbuild = [process.env.ESBUILD, join(HERE, '../../sitetile/astro/node_modules/.bin/esbuild'), join(repo, 'node_modules/.bin/esbuild')].find((p) => p && existsSync(p));
-    if (!esbuild) { console.log('  · text-edit registry build SKIPPED — no esbuild (npm install in packages/sitetile/astro)'); return; }
+    // Same candidates, same order, as build.mjs and generated-bundles.test.mjs.
+    const esbuild = [process.env.ESBUILD, join(HERE, '../../sitetile/astro/node_modules/.bin/esbuild'), join(repo, 'node_modules/.bin/esbuild'), join(repo, '../node_modules/.bin/esbuild')].find((p) => p && existsSync(p));
+    if (!esbuild) { t.skip('no esbuild (npm install in packages/sitetile/astro)'); return; }
     const env = { ...process.env, ESBUILD: esbuild };
     delete env.CORAL_REGISTRY;
     execFileSync('node', [join(sandbox, 'build.mjs'), 'text-edit', '--registry', registry], { stdio: 'pipe', env });
@@ -74,6 +74,5 @@ test('the registry build publishes text-edit@0.1.0: the artifact and its manifes
     assert.equal(validateCoralManifest(published, { name: 'text-edit', version: VERSION }).ok, true);
   } finally {
     rmSync(sandbox, { recursive: true, force: true });
-    rmSync(registry, { recursive: true, force: true });
   }
 });
