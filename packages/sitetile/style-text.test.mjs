@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { censusSource, loadAstroParse, SRC } from './style-sink-census.mjs';
+import { censusSource, loadAstroParse, offsetUnit, SRC } from './style-sink-census.mjs';
 import { styleText } from './astro/src/lib/style-text.mjs';
 
 test('no `</style` survives, in any case, however it is nested', () => {
@@ -108,6 +108,15 @@ test('census: every non-canonical sink shape is rejected, for the reason it is w
     ['<Tag><Fragment set:html={authorCss}/></Tag>', UNPROVEN],
     ['<Tag><div set:html={authorCss}/></Tag>', UNPROVEN],
     ['<Tag><slot/></Tag>', UNPROVEN],
+    // round 5: an imported component's name shadowed by a binding that makes the tag "style"
+    ['{((SiteLayout) => <SiteLayout><Fragment set:html={authorCss}/></SiteLayout>)("style")}', UNPROVEN],
+    ['{((SiteLayout) => <SiteLayout><div set:html={authorCss}/></SiteLayout>)("style")}', UNPROVEN],
+    ['{((SiteLayout) => <SiteLayout><slot/></SiteLayout>)("style")}', UNPROVEN],
+    ['{(({ SiteLayout }) => <SiteLayout><div set:html={authorCss}/></SiteLayout>)({ SiteLayout: "style" })}', UNPROVEN],
+    ['{["style"].map((SiteLayout) => <SiteLayout><Fragment set:html={authorCss}/></SiteLayout>)}', UNPROVEN],
+    ['{((SiteLayout) => <SiteLayout set:html={authorCss}/>)("style")}', NOT_PLAIN],
+    ['{((Fragment) => <Fragment set:html={authorCss}/>)("style")}', NOT_PLAIN],                       // the same rule for the built-in
+    ['{((Fragment) => <Fragment><div set:html={authorCss}/></Fragment>)("style")}', UNPROVEN],
     // the parser is the judge: if it complains, the census fails
     ['<div set:html={authorCss}', PARSE],
   ];
@@ -154,6 +163,84 @@ test('census: the canonical shapes are accepted, and so are sinks the AST proves
   ];
   for (const body of safe) assert.deepEqual(run(parse, body).failures, [], body);
   assert.deepEqual(run(parse, safe[0] + safe[1]).sinks.map((s) => s.arg), ['authorCss', 'theme.css']);
+});
+
+test('census: an imported component shadowed in the frontmatter is not trusted either', { skip: SKIP }, async () => {
+  const parse = await astroParse();
+  const body = '<SiteLayout><div set:html={authorCss}/></SiteLayout>';
+  for (const extra of ['const SiteLayout2 = 1;\nfunction f(SiteLayout) { return SiteLayout; }', 'const { SiteLayout: S } = { SiteLayout: 1 };',
+    "import SiteLayout2 from '../layouts/SiteLayout.astro';\nconst alias = SiteLayout;"]) {
+    const { failures } = run(parse, body, HEAD.replace('const x = 1;', extra));
+    assert.ok(failures.some((f) => UNPROVEN.test(f.reason)), `${extra}\n  shadowed component still trusted: ${JSON.stringify(failures)}`);
+  }
+  // a second binding of the same name by another .astro import is not trusted either
+  const twice = HEAD.replace('const x = 1;', "import SiteLayout from '../layouts/SiteLayout.astro';");
+  assert.ok(run(parse, body, twice).failures.length >= 1, 'a name bound by two imports is trusted');
+  // a type-only import binds no runtime component
+  const typeOnly = HEAD.replace("import SiteLayout from", "import type SiteLayout from");
+  assert.ok(run(parse, body, typeOnly).failures.some((f) => UNPROVEN.test(f.reason)), 'a type-only import is trusted as a component');
+  // the control: the same body with the plain import alone is accepted
+  assert.deepEqual(run(parse, body).failures, [], 'the unshadowed import is no longer accepted');
+});
+
+// 🩸 Round 5: node offsets were cut as UTF-8 bytes; compiler-rs 0.5 reports UTF-16 indices, so
+// every sink after a non-ASCII character was misread. Both conventions are exercised here: the
+// installed parser as it is, and the same parser with its offsets rewritten into the other unit.
+const toByteOffsets = (parse) => (src) => {
+  const r = parse(src);
+  const at = (i) => Buffer.byteLength(src.slice(0, i), 'utf8');
+  const fix = (n) => {
+    if (Array.isArray(n)) { n.forEach(fix); return; }
+    if (!n || typeof n !== 'object') return;
+    if (typeof n.start === 'number') n.start = at(n.start);
+    if (typeof n.end === 'number') n.end = at(n.end);
+    for (const k of Object.keys(n)) if (n[k] && typeof n[k] === 'object') fix(n[k]);
+  };
+  fix(r.ast);
+  return r;
+};
+const toCodeUnitOffsets = (parse) => (src) => {
+  const r = parse(src);
+  const bytes = Buffer.from(src, 'utf8');
+  const at = (b) => bytes.subarray(0, b).toString('utf8').length;
+  const fix = (n) => {
+    if (Array.isArray(n)) { n.forEach(fix); return; }
+    if (!n || typeof n !== 'object') return;
+    if (typeof n.start === 'number') n.start = at(n.start);
+    if (typeof n.end === 'number') n.end = at(n.end);
+    for (const k of Object.keys(n)) if (n[k] && typeof n[k] === 'object') fix(n[k]);
+  };
+  fix(r.ast);
+  return r;
+};
+
+test('census: positions and arguments are read correctly after non-ASCII text', { skip: SKIP }, async () => {
+  const parse = await astroParse();
+  const unit = offsetUnit(parse);
+  assert.ok(unit === 'utf16' || unit === 'utf8', `the installed parser's offset unit is unrecognised: ${unit}`);
+  // the other convention, built from the same parser
+  const other = unit === 'utf16' ? toByteOffsets(parse) : toCodeUnitOffsets(parse);
+  assert.equal(offsetUnit(other), unit === 'utf16' ? 'utf8' : 'utf16', 'the offset probe does not tell the two conventions apart');
+  const head = "---\nimport { styleText } from '../lib/style-text.mjs';\nconst css = 'a{}';\n---\n";
+  for (const p of [parse, other]) {
+    for (const prefix of ['<!-- a -->', '<!-- \u6f22 -->', '<!-- \u{1F9F8} -->', '<p>\u6f22\u5b57 \u{1F9F8}\u{1F9F8}</p>\n<p>caf\u00e9</p>']) {
+      const src = `${head}${prefix}\n<style is:inline set:html={styleText(css)}></style>`;
+      const line = src.split('\n').length;
+      const r = censusSource(src, p, { file: FIXTURE, censused: CENSUSED });
+      assert.deepEqual(r, { sinks: [{ line, arg: 'css' }], failures: [] }, `${offsetUnit(p)} offsets, prefix ${JSON.stringify(prefix)}`);
+      // and an unsafe sink in the same place is rejected with its own text quoted
+      const bad = censusSource(src.replace('styleText(css)', 'css'), p, { file: FIXTURE, censused: CENSUSED });
+      assert.deepEqual(bad.sinks, [], `${offsetUnit(p)} offsets, prefix ${JSON.stringify(prefix)}: unsafe sink accepted`);
+      assert.equal(bad.failures.length, 1, JSON.stringify(bad.failures));
+      assert.equal(bad.failures[0].line, line);
+      assert.match(bad.failures[0].reason, /^<style set:html=\{css\}> is not set:html=\{styleText/);
+    }
+  }
+  // a parser whose offsets are in neither unit cannot be read, and the census says so
+  const shifted = (src) => { const r = parse(src); const f = (n) => { if (Array.isArray(n)) return n.forEach(f); if (!n || typeof n !== 'object') return; if (typeof n.start === 'number') { n.start += 1; n.end += 1; } for (const k of Object.keys(n)) if (n[k] && typeof n[k] === 'object') f(n[k]); }; f(r.ast); return r; };
+  const r = censusSource(`${head}<style is:inline set:html={styleText(css)}></style>`, shifted, { file: FIXTURE, censused: CENSUSED });
+  assert.deepEqual(r.sinks, []);
+  assert.ok(r.failures.some((f) => /neither UTF-16 nor UTF-8/.test(f.reason)), JSON.stringify(r.failures));
 });
 
 test('every <style set:html> sink in astro/src goes through styleText', { skip: SKIP }, async () => {

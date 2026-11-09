@@ -18,8 +18,12 @@
 //     variable, `Tag.X`) fails: the AST cannot prove where that HTML lands.
 //   - `set:html` on a plain element or the built-in `<Fragment>`, and any `<slot>`, fails when an
 //     enclosing element is a style element or a tag the AST cannot classify. An enclosing component
-//     is accepted only when it is a relative `.astro` import that the census itself covers (its own
-//     slots are then checked in its own file).
+//     is accepted only when it is a relative `.astro` default import that the census itself covers
+//     (its own slots are then checked in its own file) AND no other identifier of that name appears
+//     anywhere in the file, since a parameter or local of the same name could bind the tag to
+//     "style". The same rule decides whether `<Fragment>` is the built-in.
+//   - Node offsets are read in the unit the installed parser actually uses (measured, see
+//     offsetUnit), so positions and messages hold for non-ASCII sources.
 // A false alarm is fixed by writing the sink in the one allowed shape, never by widening this.
 
 import { createRequire } from 'node:module';
@@ -32,12 +36,36 @@ const STYLE_TEXT_MODULE = join(SRC, 'lib', 'style-text.mjs');
 
 // The parser Astro compiles with, resolved through the renderer's own `astro` install so it is the
 // same copy a build uses. Throws if the renderer's dependencies are absent; callers must fail on it.
+// Astro itself loads it with an ESM `import "@astrojs/compiler-rs"` from its compile module; this
+// resolves the same specifier from astro's package directory, and the package's `exports` map has
+// only a `default` condition, so both resolve to the same file (checked on a clean `npm ci` of the
+// lockfile: the same path, and the same module instance as the one astro imports).
 export async function loadAstroParse() {
   const fromRenderer = createRequire(join(HERE, 'astro', 'package.json'));
   const fromAstro = createRequire(fromRenderer.resolve('astro/package.json'));
   const mod = await import(pathToFileURL(fromAstro.resolve('@astrojs/compiler-rs')).href);
   if (typeof mod.parse !== 'function') throw new Error('@astrojs/compiler-rs has no parse()');
   return mod.parse;
+}
+
+// 🩸 Round 5: the census cut node text out of UTF-8 bytes because the parser installed on the box
+// it was written on (compiler-rs 0.3.1) counted bytes; the lockfile installs 0.5.1, which counts
+// UTF-16 code units, and every sink after the first non-ASCII character was cut from the wrong
+// place. So the unit is measured: parse a probe whose element sits after a CJK character and an
+// astral emoji (where the three conventions differ), and see which slicing gives the element back.
+const OFFSET_PROBE = '<!-- 漢\u{1F9F8} -->\n<a b="1"/>';
+const OFFSET_PROBE_ELEMENT = '<a b="1"/>';
+const offsetUnits = new WeakMap();
+export function offsetUnit(parse) {
+  if (offsetUnits.has(parse)) return offsetUnits.get(parse);
+  let unit = null;
+  try {
+    const el = (parse(OFFSET_PROBE)?.ast?.body ?? []).find((n) => n?.type === 'JSXElement');
+    if (el && OFFSET_PROBE.slice(el.start, el.end) === OFFSET_PROBE_ELEMENT) unit = 'utf16';
+    else if (el && Buffer.from(OFFSET_PROBE, 'utf8').subarray(el.start, el.end).toString('utf8') === OFFSET_PROBE_ELEMENT) unit = 'utf8';
+  } catch { unit = null; }
+  offsetUnits.set(parse, unit);
+  return unit;
 }
 
 const jsxName = (n) => {
@@ -80,23 +108,32 @@ export function censusSource(src, parse, { file = join(SRC, 'Fixture.astro'), ce
     return { sinks, failures: ds.map((d) => ({ line: d.labels?.[0]?.line ?? 0, reason: `parse diagnostic (${d.severity}): ${d.text}` })) };
   }
 
-  // Node offsets are UTF-8 byte offsets (measured: they drift from string indices after the first
-  // non-ASCII character), so text is cut from the bytes. Text is used for messages only.
-  const bytes = Buffer.from(src, 'utf8');
-  const textOf = (n) => bytes.subarray(n.start, n.end).toString('utf8');
-  const lineOf = (n) => (typeof n?.start === 'number' ? bytes.subarray(0, n.start).toString('utf8').split('\n').length : 0);
+  // Node offsets are in whatever unit the installed parser uses (compiler-rs 0.3 counted UTF-8 bytes,
+  // 0.5 counts UTF-16 code units, the same as JS string indices). The unit is measured on this very
+  // parse function, never assumed; a parser whose offsets match neither is a census failure.
+  const unit = offsetUnit(parse);
+  if (!unit) {
+    return { sinks, failures: [{ line: 0, reason: 'the parser\'s node offsets are neither UTF-16 nor UTF-8 offsets; the census cannot read source positions' }] };
+  }
+  const bytes = unit === 'utf8' ? Buffer.from(src, 'utf8') : null;
+  const cut = (a, b) => (bytes ? bytes.subarray(a, b).toString('utf8') : src.slice(a, b));
+  const textOf = (n) => cut(n.start, n.end);
+  const lineOf = (n) => (typeof n?.start === 'number' ? cut(0, n.start).split('\n').length : 0);
   const fail = (node, reason) => failures.push({ line: lineOf(node), reason });
 
   // Bindings the frontmatter's imports establish.
   const imports = (result.ast.frontmatter?.program?.body ?? []).filter((n) => n.type === 'ImportDeclaration');
-  const components = new Set();   // tags proven to be .astro components this census covers
+  const componentImports = new Map();      // local name -> how many trusted specifiers bind it
+  const componentSpecifiers = new Set();
   const canonicalSpecifiers = new Set();
   for (const d of imports) {
     const from = String(d.source?.value ?? '');
     const target = from.startsWith('.') ? resolve(dirname(file), from) : null;
     for (const s of d.specifiers ?? []) {
-      if (s.type === 'ImportDefaultSpecifier' && target && from.endsWith('.astro') && censused.has(target)) {
-        components.add(s.local.name);
+      if (s.type === 'ImportDefaultSpecifier' && target && from.endsWith('.astro') && censused.has(target)
+          && !d.importKind?.startsWith?.('type') && typeof s.local?.name === 'string') {
+        componentSpecifiers.add(s);
+        componentImports.set(s.local.name, (componentImports.get(s.local.name) ?? 0) + 1);
       }
       if (s.type === 'ImportSpecifier' && target === STYLE_TEXT_MODULE && !d.importKind?.startsWith?.('type')
           && (s.imported?.name ?? s.imported?.value) === 'styleText' && s.local?.name === 'styleText') {
@@ -106,15 +143,20 @@ export function censusSource(src, parse, { file = join(SRC, 'Fixture.astro'), ce
   }
   const styleTextImported = canonicalSpecifiers.size === 1;
 
-  // Pass 1: names. `Fragment` is the built-in only if nothing in the file binds or mentions an
-  // identifier of that name; `styleText` may appear only as the canonical import and as a callee.
-  let fragmentRebound = false;
+  // Pass 1: names. A tag is only as trusted as its binding, and the census does not resolve scopes,
+  // so it is conservative instead: `Fragment` is the built-in, and an imported component is that
+  // component, only if no identifier of that name appears anywhere else in the file (a parameter,
+  // a destructured or declared name, even a mere reference). 🩸 Round 5: imported components were
+  // trusted by name alone, so `{((SiteLayout) => <SiteLayout>…</SiteLayout>)("style")}` turned the
+  // "component" into a <style> element and put an unwrapped set:html inside it, census green.
+  // `styleText` may appear only as the canonical import and as a callee.
+  const mentioned = new Set();
   const names = (node, parent, key) => {
     if (Array.isArray(node)) { for (const n of node) names(n, parent, key); return; }
     if (!node || typeof node !== 'object') return;
-    if (canonicalSpecifiers.has(node)) return;
+    if (canonicalSpecifiers.has(node) || componentSpecifiers.has(node)) return;
     if (node.type === 'Identifier') {
-      if (node.name === 'Fragment') fragmentRebound = true;
+      mentioned.add(node.name);
       if (node.name === 'styleText' && !(parent?.type === 'CallExpression' && key === 'callee')) {
         fail(node, '`styleText` is bound or used here other than as the import from lib/style-text.mjs and a direct call');
       }
@@ -122,6 +164,8 @@ export function censusSource(src, parse, { file = join(SRC, 'Fixture.astro'), ce
     for (const k of Object.keys(node)) if (node[k] && typeof node[k] === 'object') names(node[k], node, k);
   };
   names(result.ast, null, null);
+  const fragmentRebound = mentioned.has('Fragment');
+  const components = new Set([...componentImports].filter(([n, count]) => count === 1 && !mentioned.has(n)).map(([n]) => n));
 
   const kindOf = (nameNode) => {
     if (nameNode?.type === 'JSXIdentifier') {
@@ -169,8 +213,8 @@ export function censusSource(src, parse, { file = join(SRC, 'Fixture.astro'), ce
       const attrs = open?.attributes ?? [];
       const sinkAttrs = attrs.filter((a) => a.type === 'JSXAttribute' && jsxName(a.name).toLowerCase() === 'set:html');
       for (const a of sinkAttrs) {
-        // A coordinate check: if offsets ever stop being bytes, messages would point at the wrong
-        // text, so say so instead of reporting confidently from the wrong place.
+        // A coordinate check on real nodes, beyond the probe: if offsets stop lining up, messages
+        // would point at the wrong text, so say so instead of reporting from the wrong place.
         if (!textOf(a).toLowerCase().startsWith('set:html')) fail(a, 'node offsets do not line up with the source; the census cannot report positions');
       }
       if (kind === 'style') {
