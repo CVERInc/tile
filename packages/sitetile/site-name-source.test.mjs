@@ -51,12 +51,25 @@ test('one _site.md, one site name: a content page and a blog index agree (og:sit
   // SiteLayout's own fallback: headerBrand = brand → meta.title.
   const hb = (m) => String(m.brand || m.title || '').trim();
   const og = [core.siteName(content, hb(content)), core.siteName(blog, hb(blog))];
-  const ld = [core.routeSiteName(content, hb(content)), core.routeSiteName(blog, hb(blog))];
+  // JSON-LD is og:site_name (tile#279 r2): SiteLayout's `jsonLdSiteName = ogSiteName`.
+  const ld = og;
   assert.equal(og[0], og[1], `og:site_name differs by route: ${JSON.stringify(og)}`);
   assert.equal(ld[0], ld[1], `JSON-LD name differs by route: ${JSON.stringify(ld)}`);
   assert.equal(og[0], 'Untitled site', 'site-title in _site.md is ignored, so the placeholder is the only name left');
-  assert.equal(Object.prototype.hasOwnProperty.call(metas.cfg, 'site-title'), false, 'loadSite drops the reserved key');
+  assert.equal(metas.cfg['site-title'], 'Untitled site', 'loadSite drops the authored reserved key and stamps the config\'s own title as the stash');
   assert.ok(said.some((m) => /site-title.*content\/_site\.md.*IGNORED/.test(m)), `build log names it: ${JSON.stringify(said)}`);
+});
+
+test('tile#279 r2: the reviewer\'s _site.md (real title + brand + reserved site-title) — one name on every route shape', () => {
+  const warn = console.warn; console.warn = () => {};
+  let metas;
+  try { metas = routeMetas('---\nsitetile-page: _site\ntitle: Atlas Observatory\nbrand: Atlas\nsite-title: Atlas Observatory\npackages: blog\n---\n'); }
+  finally { console.warn = warn; }
+  const hb = (m) => String(m.brand || m.title || '').trim();
+  const post = { ...metas.blog, description: 'A post', 'og-type': 'article' };          // PostView headMeta
+  const chooser = { ...metas.cfg, title: 'Welcome', 'sitetile-page': 'home' };          // editions: { ...cfg, ...home }
+  const names = [metas.content, metas.blog, post, chooser].map((m) => core.siteName(m, hb(m)));
+  assert.deepEqual(names, Array(4).fill('Atlas Observatory'));
 });
 
 test('a _site.md without site-title loads exactly as before (no key dropped, nothing logged)', () => {

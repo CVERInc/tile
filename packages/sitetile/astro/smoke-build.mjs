@@ -839,6 +839,73 @@ const bubbleNameNoBrandPages = buildBubbleNameFixture();
 // One site, one name on every route: a `site-title:` written in `_site.md` is the catch-all's reserved
 // stash key, not a site-layer key, so it is ignored on content pages AND on the blog index alike.
 const siteTitleKeyPages = buildBubbleNameFixture(undefined, 'site-title: Actual Name\npackages: blog\n');
+// ── ONE SITE NAME ON EVERY ROUTE (tile#279) ────────────────────────────────────────────────────────
+// The property, not one route pair: every HTML document a build emits — content pages, the blog
+// index, posts, category/tag archives, search, the 404, the language chooser — carries the same
+// og:site_name, the same JSON-LD WebSite/publisher name and the same header brand as every other
+// document of the same LOCALE (a locale `_site.md` may name the site in its own language).
+function htmlFilesOf(dist) {
+  const out = new Map();
+  const walk = (rel) => {
+    for (const ent of readdirSync(join(dist, rel), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) { if (ent.name !== '_astro') walk(r); }
+      else if (ent.name.endsWith('.html')) out.set(r, readFileSync(join(dist, r), 'utf8'));
+    }
+  };
+  walk('');
+  return out;
+}
+function siteNamesOf(html) {
+  const og = (html.match(/<meta property="og:site_name" content="([^"]*)">/) || [])[1];
+  const ld = jsonLdSiteNames(html).join(' | ');
+  const logo = html.match(/<a\b[^>]*class="[^"]*\brf-logo\b[^"]*"[^>]*>([\s\S]*?)<\/a>/);
+  const header = logo ? (logo[1].match(/<img\b[^>]*\balt="([^"]*)"/) || [])[1] ?? logo[1].replace(/<[^>]*>/g, '').trim() : undefined;
+  return { og, ld, header };
+}
+// → [] when every locale's documents agree; else one line per (locale, field) naming the values.
+function siteNameDisagreements(files, locales) {
+  const groups = new Map();
+  for (const [rel, html] of files) {
+    if (!/<meta property="og:site_name"/.test(html)) continue; // a redirect stub / non-layout document
+    const seg = rel.split('/')[0];
+    const loc = locales.includes(seg) ? seg : '';
+    const names = siteNamesOf(html);
+    for (const field of ['og', 'ld', 'header']) {
+      if (names[field] === undefined) continue;
+      const key = `${loc || '(base)'} ${field}`;
+      if (!groups.has(key)) groups.set(key, new Map());
+      const byValue = groups.get(key);
+      if (!byValue.has(names[field])) byValue.set(names[field], rel);
+    }
+  }
+  return [...groups].filter(([, byValue]) => byValue.size > 1)
+    .map(([key, byValue]) => `${key}: ${[...byValue].map(([v, rel]) => `${JSON.stringify(v)} (${rel})`).join(' vs ')}`);
+}
+// The reviewer's input (tile#279): a real title, a short brand, and the reserved key written out.
+function buildRouteNameFixture(siteMd) {
+  const dir = mkdtempSync(join(HERE, '..', '.smoke-route-names-'));
+  try {
+    cpSync(HERE, dir, { recursive: true, filter: src => !/[\\/](node_modules|\.astro|dist[^\\/]*)(?:[\\/]|$)/.test(src) });
+    symlinkSync(join(HERE, 'node_modules'), join(dir, 'node_modules'), 'dir');
+    for (const folder of ['content', 'blog']) {
+      rmSync(join(dir, folder), { recursive: true, force: true });
+      mkdirSync(join(dir, folder), { recursive: true });
+    }
+    writeFileSync(join(dir, 'content/_site.md'), siteMd);
+    for (const [file, kind, title] of [['home', 'home', 'Welcome'], ['about', 'page', 'About the observatory']]) {
+      writeFileSync(join(dir, 'content', file + '.md'), `---\nsitetile-page: ${kind}\ntitle: ${title}\nlang: en-US\n---\n\n## Fixture\nFixture body.\n`);
+    }
+    writeFileSync(join(dir, 'blog/first-light.md'), '---\ntitle: "First light"\ndescription: "Fixture post."\npubDate: 2026-08-03\ncategories: news\ntags: telescopes\n---\nA post body.\n');
+    const dist = join(dir, 'dist-route-names');
+    execFileSync('npx', ['astro', 'build', '--outDir', dist], { cwd: dir, stdio: 'inherit', env: { ...process.env, SITE_URL: 'https://example.com' } });
+    return htmlFilesOf(dist);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const routeNamePages = buildRouteNameFixture('---\nsitetile-page: _site\ntitle: Atlas Observatory\nbrand: Atlas\nsite-title: Atlas Observatory\npackages: blog\nblog-search: on\nblog-category-routes: on\nlang: en-US\n---\n');
+const ROUTE_KINDS = ['index.html', 'about/index.html', 'devlog/index.html', 'devlog/first-light/index.html', '404.html'];
 const bubbleNameAttrs = page => (page.match(/<div\b[^>]*data-dynamic-coral="inbox-bubble"[^>]*>/g) || []).map(tag =>
   Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value])));
 const bubbleNameHeader = page => ((page.match(/<a\b[^>]*class="[^"]*\brf-logo\b[^"]*"[^>]*>([\s\S]*?)<\/a>/) || [])[1] || '').replace(/<[^>]*>/g, '').trim();
@@ -1350,12 +1417,16 @@ const checks = [
     assert.deepEqual(jsonLdSiteNames(page), ['Example Workshop']);
     return true;
   }],
-  // tile#277 r2 — a route with no content-page stash (blog, archives, search, 404) carries the site
-  // config's own `title`: a REAL one stays first in JSON-LD; only a placeholder gives way to brand.
-  ['JSON-LD site name: an unstashed route keeps a real title first, and only a placeholder gives way', () => {
+  // tile#277 r2 → tile#279 r2 — a hand-written page that hands the layout a meta with NO site config
+  // behind it. Every real route now carries the site's title as the `site-title` stash (loadSite), so
+  // the real-title-first rule is proven on real routes below (the reviewer's _site.md); what holds
+  // here is the other half: JSON-LD and og:site_name are one name, whatever meta arrives.
+  ['JSON-LD site name: a meta with no site config behind it still gives JSON-LD == og:site_name', () => {
+    const og = (page) => (page.match(/<meta property="og:site_name" content="([^"]*)">/) || [])[1];
     for (const pages of [bubbleNamePages, bubbleNameNoBrandPages]) {
-      assert.deepEqual(jsonLdSiteNames(pages['unstashed-title']), ['Atlas Observatory']);
-      assert.deepEqual(jsonLdSiteNames(pages['unstashed-footer']), ['Atlas Observatory']);
+      for (const key of ['unstashed-title', 'unstashed-footer', 'unstashed-placeholder']) {
+        assert.deepEqual(jsonLdSiteNames(pages[key]), [og(pages[key])], key);
+      }
       assert.deepEqual(jsonLdSiteNames(pages['unstashed-placeholder']), ['Atlas']);
     }
     return true;
@@ -1369,8 +1440,43 @@ const checks = [
     assert.ok(!home.includes('Actual Name') && !devlog.includes('Actual Name'), 'the reserved key reaches no page');
     return true;
   }],
+  ['site name: ONE og:site_name, JSON-LD name and header brand per locale on every route of the smoke site', () => {
+    const bad = siteNameDisagreements(htmlFilesOf(DIST), ['zh-tw', 'ko-kr', 'ja-jp']);
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    return true;
+  }],
+  ['site name: ONE name per locale on every route of every other fixture build this smoke made', () => {
+    const root = join(HERE, '..');
+    const dists = readdirSync(root).filter((d) => d.startsWith('.smoke-')).flatMap((d) =>
+      readdirSync(join(root, d)).filter((x) => x.startsWith('dist-')).map((x) => join(root, d, x)));
+    assert.ok(dists.length >= 10, `fixture builds found: ${dists.length}`);
+    // Scope: fixture SITES — a fixture with a `_site.md` (one without is the legacy single-source
+    // shape, where the home page stands in for the site), minus the hand-written .astro test pages a
+    // fixture adds to src/pages, which hand the layout a meta of their own on purpose.
+    const bad = dists.flatMap((dist) => {
+      const fx = dirname(dist);
+      if (!existsSync(join(fx, 'content/_site.md'))) return [];
+      // every top-level .astro page other than the two site routes is a hand-written test page
+      // (`[kind]`-style params become a prefix match)
+      const hand = readdirSync(join(fx, 'src/pages')).filter((f) => f.endsWith('.astro') && f !== '404.astro' && f !== '[...path].astro')
+        .map((f) => f.replace(/\.astro$/, '').replace(/\[[^\]]*\].*$/, ''));
+      const files = new Map([...htmlFilesOf(dist)].filter(([rel]) => !hand.some((h) => rel.split('/')[0].startsWith(h) && h !== '')));
+      return siteNameDisagreements(files, ['zh-tw', 'ko-kr', 'ja-jp']).map((l) => `${dist.split('/').slice(-2).join('/')} ${l}`);
+    });
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    return true;
+  }],
+  ['site name: the reviewer\'s _site.md (title + brand + reserved site-title) — one name on every route kind', () => {
+    for (const rel of ROUTE_KINDS) assert.ok(routeNamePages.has(rel), `route kind built: ${rel} (have ${[...routeNamePages.keys()].slice(0, 12).join(', ')})`);
+    assert.ok([...routeNamePages.keys()].some((r) => /(^|\/)(category|tag|search)\//.test(r)), `an archive or search route was built: ${[...routeNamePages.keys()].join(', ')}`);
+    const bad = siteNameDisagreements(routeNamePages, []);
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    assert.equal(siteNamesOf(routeNamePages.get('devlog/index.html')).og, 'Atlas Observatory', 'the real title names the site; the dropped key changes nothing');
+    return true;
+  }],
   ['bubble site name: sites without brand keep base attribute chains and hand-mounted names survive', () => {
-    for (const [key, header] of [['home', 'Untitled site'], ['about', 'Example article']]) {
+    // tile#279 r2: a brandless site's header is the SITE's title on every page, not each page's own.
+    for (const [key, header] of [['home', 'Untitled site'], ['about', 'Untitled site']]) {
       const page = bubbleNameNoBrandPages[key];
       assert.equal(bubbleNameHeader(page), header);
       bubbleNameNamesMatch(page, 'Untitled site', 'Untitled site');
@@ -1379,7 +1485,8 @@ const checks = [
       assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'));
       assert.deepEqual(jsonLdSiteNames(page), ['Untitled site']);
     }
-    for (const [key, header, name] of [['fallback-meta', 'Fallback site', 'OG fallback site'], ['fallback-prop', 'Fallback prop', 'OG fallback prop']]) {
+    // tile#279 r2: a meta carrying the `site-title` stash names the header by it too — one name.
+    for (const [key, header, name] of [['fallback-meta', 'OG fallback site', 'OG fallback site'], ['fallback-prop', 'OG fallback prop', 'OG fallback prop']]) {
       const page = bubbleNameNoBrandPages[key];
       assert.equal(bubbleNameHeader(page), header);
       bubbleNameNamesMatch(page, name, name);

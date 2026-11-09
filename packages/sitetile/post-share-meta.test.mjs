@@ -139,10 +139,10 @@ check('the layout reads og:site_name from site-core siteName(meta, headerBrand)'
     'the tag must consume ogSiteName; consuming headerBrand is the bug this guards');
 });
 
-check('the JSON-LD WebSite/publisher name reads the shared chain through routeSiteName', () => {
+check('the JSON-LD WebSite/publisher name is og:site_name — one name, one chain', () => {
   assert.match(layout, /pageGraph\(\{[\s\S]*?\n  siteName: jsonLdSiteName,/,
     'JSON-LD must name the site with the shared site-name chain, not its own copy of it');
-  assert.match(layout, /const jsonLdSiteName = routeSiteName\(meta, headerBrand\);/);
+  assert.match(layout, /const jsonLdSiteName = ogSiteName;/);
 });
 
 check('og:site_name still falls back to headerBrand (legacy sites with no _site.md)', () => {

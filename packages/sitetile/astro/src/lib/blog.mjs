@@ -713,6 +713,12 @@ export function loadSite(contentGlob, pagePath) {
   const mode = dynamicCoralCssMode((base || {})[DYNAMIC_CORAL_CSS_KEY], 'content/_site.md');
   if (loc && Object.prototype.hasOwnProperty.call(loc, DYNAMIC_CORAL_CSS_KEY)) warnLocaleCoralCss(seg, mode);
   if (mode) merged[DYNAMIC_CORAL_CSS_KEY] = mode; else delete merged[DYNAMIC_CORAL_CSS_KEY];
+  // tile#279 r2 — the site's own title travels as the `site-title` stash on EVERY route, not only the
+  // content pages the catch-all stashes. Blog posts and indexes, archives, search, the 404 and the
+  // language chooser all receive this config (directly, or under a home page's frontmatter, which
+  // cannot set the reserved key), so the one site-name chain (site-core `siteName`) reads the same
+  // site-level title wherever it runs — never a page's title, never a guess from `meta.title`.
+  merged['site-title'] = merged.title == null ? '' : String(merged.title);
   return merged;
 }
 
