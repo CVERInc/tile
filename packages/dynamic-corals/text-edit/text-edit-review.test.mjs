@@ -1,4 +1,4 @@
-// Review cases for the text-edit coral (rounds 1–6), each one a reproduction that used to pass
+// Review cases for the text-edit coral (rounds 1–7), each one a reproduction that used to pass
 // silently.   run: node --test packages/dynamic-corals/text-edit/text-edit-review.test.mjs
 //
 // Every case here once wrote words onto a line other than the one the owner tapped, or showed words
@@ -493,7 +493,9 @@ test('an unanswered edit is marked pending, then unknown with the saved words, a
   assert.equal(mark(f), null);
 });
 
-test('an edit the host saved but whose answer was lost: the readback finds it and the frame carries on', () => {
+test('an edit the host saved but whose answer was lost: the readback cannot vouch for the frame, so it is `changed`', () => {
+  // Round 6 adopted the revision read back here. That revision certifies the whole page, and the
+  // frame cannot tell its own saved edit from somebody else's change (round 7), so it is not adopted.
   const host = makeHost('## About\n\nOriginal\n');
   const root = render(host.md);
   const ed = editor(host);
@@ -503,11 +505,98 @@ test('an edit the host saved but whose answer was lost: the readback finds it an
   host.clock.tick(PENDING_TIMEOUT_MS);
   assert.equal(f.el.textContent, 'Original');
   host.answer(ed);
-  assert.equal(ed.stateOf(f.el), 'idle');
-  assert.equal(f.el.textContent, 'First');
-  assert.equal(mark(f), null);
-  ed.begin(f); f.el.textContent = 'Second'; ed.commit(); host.drain(ed);
-  assert.equal(host.md, '## About\n\nSecond\n', 'the next edit is made against the revision read back');
+  assert.equal(ed.stateOf(f.el), 'changed');
+  assert.equal(mark(f), 'changed', 'not presented as saved: the host may hold First');
+  assert.equal(f.el.textContent, 'Original');
+  assert.equal(ed.begin(f), false, 'reload the preview to edit it');
+});
+
+// ── Round 7: a readback after somebody else changed the page ────────────────────────────────────
+// A readback answers what the span holds NOW, with the page's revision NOW. It settles the lost
+// edit only when that revision is the one the edit was sent against: then nothing has changed and
+// the edit did not land. Any other revision means the page moved (by this edit, or by anyone), the
+// frame's spans can no longer be trusted, and nothing read there may become this element's words.
+const insertAt = (host, line, text) => { const ls = host.md.split('\n'); ls.splice(line, 0, text, ''); host.md = ls.join('\n'); };
+
+test('reviewer round 6: a paragraph inserted above the lost edit — the readback is never adopted, no edit re-targets', () => {
+  const host = makeHost('## About\n\nOriginal\n\nOther\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const [f, other] = offered(root).filter((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  host.inbox.shift();                 // e1 never reaches the host
+  insertAt(host, 2, 'Inserted');      // another editor, meanwhile
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  host.answer(ed);                    // the readback: line 2 is `Inserted`, at a new revision
+  assert.equal(ed.stateOf(f.el), 'changed');
+  assert.equal(f.el.textContent, 'Original', 'rolled back; `Inserted` is never shown as this element\'s words');
+  assert.equal(mark(f), 'changed');
+  assert.equal(ed.begin(f), false);
+  ed.begin(other); other.el.textContent = 'Else'; const m = ed.commit();
+  assert.equal(m.revision, sourceRevision('## About\n\nOriginal\n\nOther\n'), 'still the revision the frame was rendered from');
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nInserted\n\nOriginal\n\nOther\n', 'nothing was written: the stale frame is refused');
+  assert.equal(ed.stateOf(other.el), 'refused');
+});
+
+test('the words at the span equal `before` but the revision moved: still `changed` (the edit may have landed, and then been shifted)', () => {
+  // e1 is saved (its answer lost), then another editor inserts a paragraph that happens to read
+  // `Original` above it. Line 2 shows `before` again, yet the owner's paragraph holds `First`.
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  applySilently(host);
+  insertAt(host, 2, 'Original');
+  assert.equal(host.md, '## About\n\nOriginal\n\nFirst\n');
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  host.answer(ed);
+  assert.equal(ed.stateOf(f.el), 'changed', 'not `refused`: that would show Original as saved');
+  assert.equal(mark(f), 'changed');
+});
+
+test('the readback reports the revision the edit was sent against: nothing moved, the edit did not land, and the draft goes next', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  ed.begin(f); f.el.textContent = 'Second';
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  host.inbox.shift(); host.answer(ed);
+  assert.equal(ed.stateOf(f.el), 'pending', 'the kept draft is the next edit');
+  assert.deepEqual([host.inbox[0].before, host.inbox[0].after, host.inbox[0].revision], ['Original', 'Second', sourceRevision('## About\n\nOriginal\n')]);
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nSecond\n');
+});
+
+test('a page changed and changed back reads back the same revision, so the span is the same element again', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  host.inbox.shift();
+  const before = host.md;
+  insertAt(host, 2, 'Inserted'); host.md = before; // the revision is a hash of the content
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  host.answer(ed);
+  assert.equal(ed.stateOf(f.el), 'refused');
+  assert.equal(f.el.textContent, 'Original');
+});
+
+test('readback words that differ from `before` at the same revision are a host fault: `changed`, never adopted', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  const rb = host.inbox[1];
+  assert.equal(ed.onResult({ type: READBACK_RESULT_MESSAGE, id: rb.id, ok: true, words: 'Elsewhere', revision: sourceRevision(host.md), section: 's1-about' }), true);
+  assert.equal(ed.stateOf(f.el), 'changed');
+  assert.equal(f.el.textContent, 'Original');
 });
 
 test('a late answer to the lost edit is honoured before the readback, and the readback answer is then ignored', () => {
@@ -699,7 +788,8 @@ test('in the frame: pending words are marked, and the stylesheet marks pending a
   f.click(); f.p.textContent = 'New'; f.key({ key: 'Enter' });
   assert.equal(f.p.getAttribute('data-text-edit'), 'pending');
   assert.match(f.css(), /\[data-text-edit="pending"\]\{[^}]*text-decoration[^}]*\}/);
-  assert.match(f.css(), /\[data-text-edit="unknown"\]\{[^}]*\}/);
+  assert.match(f.css(), /\[data-text-edit="unknown"\][^{]*\{[^}]*text-decoration[^}]*\}/);
+  assert.match(f.css(), /\[data-text-edit="changed"\][^{]*\{[^}]*text-decoration[^}]*\}/);
   assert.doesNotMatch(f.css().match(/\[data-text-edit[^{]*\{[^}]*\}/g).join(''), /margin|padding|border|font-size|display|position/, 'no layout shift');
   f.reply({ type: RESULT_MESSAGE, id: 'e1', ok: true, revision: 'r2' }, { origin: 'https://editor.example', source: f.parent });
   assert.equal(f.p.getAttribute('data-text-edit'), null);

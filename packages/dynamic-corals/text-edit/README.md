@@ -26,20 +26,29 @@ it shows a short "change it in the editor" hint instead, and links keep working 
   refusal puts the saved words back, even while the owner has the element focused again, unless
   newer words were typed over the refused ones; those stay and are sent next. A refused edit is
   never sent again without a new keystroke: focusing and leaving the element sends nothing. Each
-  element is `idle`, `editing`, `pending` or `refused` (`STATES` in text-edit-core.mjs). Only the
+  element is `idle`, `editing`, `pending`, `unknown`, `changed` or `refused` (`STATES` in
+  text-edit-core.mjs). Only the
   host's answer ends `pending`: words typed while an edit of that element is outstanding are a
   draft, sent after a success against the new revision (Escape drops the draft, not the edit), so
   the preview never shows words as saved that the host did not save.
 - **Unconfirmed words are marked.** The element carries its state in `data-text-edit` (absent
-  when idle); the coral's stylesheet marks `pending` and `unknown` with a dotted or wavy underline
+  when idle); the coral's stylesheet marks `pending`, and `unknown`/`changed`, with a dotted or wavy underline
   and lower opacity, without changing size or position.
 - **Bounded wait.** An edit not answered within `PENDING_TIMEOUT_MS` (10 s) makes its element
   `unknown`: it shows the saved words, keeps anything being typed aside as a draft, takes no
   clicks, and the coral asks the host to read the span back. A late answer to the edit is still
-  taken if it comes before the readback's answer; after that it is ignored. The readback's words
-  settle the edit: the sent words mean it landed (`idle`), anything else is a refusal. A readback
-  that is not answered in time either leaves the element `unknown` and ends editing in that frame.
-  Nothing else is sent while a readback is outstanding.
+  taken if it comes before the readback's answer; after that it is ignored. A readback that is not
+  answered in time either leaves the element `unknown` and ends editing in that frame. Nothing else
+  is sent while a readback is outstanding.
+- **A readback settles an edit only at the sent revision.** If the revision read back is the one
+  the edit was sent against, the page is exactly as it was: the span is the same paragraph, it
+  shows `before`, and the edit did not land (`refused`; a kept draft is sent next). Any other
+  revision means the page moved, by this frame's lost edit or by somebody else, so the frame's
+  spans may now name other paragraphs: the element becomes `changed` (marked like `unknown`, shows
+  the words it had, takes no clicks; only a fresh preview edits it). The revision and words read
+  back are never adopted, and later edits keep the frame's own revision, which the host refuses
+  if the page moved. Words equal to `before` at a moved revision do not settle it either: a
+  duplicate paragraph inserted above can show them while the edited one holds the new words.
 - **Message.** `{ type: 'reef-text-edit', id, page, revision, anchor, before, after }` to the parent
   window at `data-parent-origin` only; the answer is
   `{ type: 'reef-text-edit-result', id, ok, hint?, revision?, section? }`, accepted only from that
@@ -53,7 +62,8 @@ it shows a short "change it in the editor" hint instead, and links keep working 
   `anchor.end` shows in the page as saved now, `revision` that page's `sourceRevision`, `section`
   the id of the section holding the span now (find the span by its lines: a title edit that landed
   changed the section's id). `text-edit-source.mjs` `readTextAt` is the reference. Anything but
-  `ok: true` with words and a revision counts as no answer.
+  `ok: true` with words and a revision counts as no answer. The host answers for the span as the
+  page is now and need not check that it is the same paragraph; the coral does that by revision.
 - **Host contract.** The host processes the frame's messages in the order it receives them, one
   at a time: an edit is applied or refused before a later readback is read, and an edit it has not
   answered is never applied after it has answered a later readback. (Answers may be lost or late;

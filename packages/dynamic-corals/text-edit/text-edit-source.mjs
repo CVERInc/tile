@@ -168,11 +168,15 @@ export function applyTextEdit(markdown, edit) {
  * sent when an edit's answer never came. `request` = { anchor: { section, start, end } }.
  * → { ok: true, words, revision, section } | { ok: false, reason: 'malformed' | 'not-found' }
  *   words    — the words the element stamped with that span shows in this Markdown, rendered the
- *              way the preview is (so the coral can tell whether its lost edit landed);
- *   revision — sourceRevision of this Markdown: the coral's next edit is made against it;
+ *              way the preview is;
+ *   revision — sourceRevision of this Markdown. The coral uses the answer only if this is the
+ *              revision its lost edit was sent against (then the span is the same paragraph and
+ *              the edit did not land); after any other change the span may hold another
+ *              paragraph, and the coral marks the element `changed` instead (core: readBack);
  *   section  — the id of the section that holds the span now (a title edit that landed changed it,
  *              so the section in the request is not used to find the span).
- * An edit rewrites one line into one line, so the span a frame holds stays valid across edits.
+ * This reads whatever the span holds now; it does not, and cannot, say whether that is the same
+ * paragraph the frame's element was rendered from.
  */
 export function readTextAt(markdown, request) {
   const a = request && request.anchor;

@@ -160,6 +160,10 @@ export function anchorFor(el, section, before = cleanText(el.textContent)) {
  *   pending  — one edit of it waits for the host (sent, or queued behind another element's edit);
  *   unknown  — its edit was not answered in time: it shows the saved words while the coral asks
  *              the host to read the span back (or until a late answer to the edit arrives);
+ *   changed  — the readback found the page changed since that edit was sent: whether the edit
+ *              landed, and which paragraph the span now holds, cannot be known from this frame. It
+ *              shows the words it had (the draft is kept aside), stays marked, and takes no clicks:
+ *              only a fresh preview can edit it;
  *   refused  — its last edit was refused (or did not land) and its saved words are back.
  * The element carries its state in `data-text-edit` (absent when idle), and the coral's stylesheet
  * marks `pending` and `unknown`: words the host has not confirmed never look like saved words.
@@ -173,10 +177,18 @@ export function anchorFor(el, section, before = cleanText(el.textContent)) {
  * known), and is left by the readback answer or by a late answer to the edit itself, whichever
  * comes first. If the readback is not answered in time either, the element stays `unknown` and the
  * frame stops sending: no revision can be proven fresh after that.
+ * A readback answer settles the edit only when its revision is the one the edit was sent against:
+ * the page is then exactly as it was, so the span is the same paragraph, it must still show
+ * `before`, and the edit did not land (→ refused). Any other revision — whether this frame's own
+ * lost edit landed or somebody else changed the page — goes to `changed`: the revision read back
+ * is never adopted (it vouches for the whole page, and the frame's spans may have moved) and the
+ * words read back are never taken as this element's (they may be another paragraph's). Edits sent
+ * after that still carry the frame's own revision, which the host refuses if the page moved. So a
+ * readback can never point a later edit at a different line.
  * Nothing leaves `refused` or `idle` by itself: only the owner typing again makes a new edit, so a
  * refused edit is never retried behind their back. */
-export const STATES = Object.freeze({ IDLE: 'idle', EDITING: 'editing', PENDING: 'pending', UNKNOWN: 'unknown', REFUSED: 'refused' });
-const { IDLE, EDITING, PENDING, UNKNOWN, REFUSED } = STATES;
+export const STATES = Object.freeze({ IDLE: 'idle', EDITING: 'editing', PENDING: 'pending', UNKNOWN: 'unknown', CHANGED: 'changed', REFUSED: 'refused' });
+const { IDLE, EDITING, PENDING, UNKNOWN, CHANGED, REFUSED } = STATES;
 /** The attribute an element's state is written to (absent when idle). */
 export const STATE_ATTR = 'data-text-edit';
 /** How long an edit, and then a readback, waits for the host's answer. */
@@ -226,13 +238,15 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
   // state has no row for changes nothing. User events: focus (click), commit (Enter or blur),
   // cancel (Escape). Host events: ok and refuse, with { after: the words that edit sent, text },
   // and read, with { words: what the host reads back at the span }. Clock: timeout.
-  // Every user row of PENDING returns PENDING; UNKNOWN has no user rows.
+  // Every user row of PENDING returns PENDING; UNKNOWN and CHANGED have no user rows, and CHANGED
+  // has no rows at all: nothing the host or the owner does in this frame makes it editable again.
   const TRANSITIONS = {
     [IDLE]: { focus: startTyping },
     [REFUSED]: { focus: startTyping },
     [EDITING]: { commit: commitEdit, cancel: cancelEdit },
     [PENDING]: { focus: watchDraft, commit: commitDraft, cancel: dropDraft, ok: saved, refuse: refused, timeout: notAnswered },
     [UNKNOWN]: { ok: saved, refuse: refused, read: readBack },
+    [CHANGED]: {},
   };
 
   function startTyping(el, k) { k.base = cleanText(el.textContent); return EDITING; }
@@ -283,14 +297,19 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
     return UNKNOWN;
   }
 
-  // The host read the span back: its words are the saved words now. The edit landed if they are
-  // the words it sent; otherwise it is settled as a refusal.
-  function readBack(el, k, { words: now }) {
-    const landed = now === k.sent;
-    k.ack = now;
-    k.sent = null;
-    if (!landed) hint(refusedHint(null), el);
-    return settle(el, k, !landed);
+  // The host read the span back. At the revision the edit was sent against, nothing has changed:
+  // the span still holds this paragraph, showing `before` (ack), and the edit did not land — a
+  // refusal. At any other revision the page moved; nothing read there is this element's (→ changed:
+  // the words it had stay, marked, and the draft stays aside). The same goes for a host that reports
+  // the sent revision with other words: it cannot be squared with `before`.
+  function readBack(el, k, { words: now, revision: at, sentRevision }) {
+    if (at === sentRevision && now === k.ack) {
+      k.sent = null;
+      hint(refusedHint(null), el);
+      return settle(el, k, true);
+    }
+    hint(unknownHint(), el);
+    return CHANGED;
   }
 
   // After the edit is settled. While the owner is typing in it, what it shows is their draft
@@ -319,7 +338,7 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
 
   function begin(found) {
     if (!found) return false;
-    if (known.has(found.el) && known.get(found.el).state === UNKNOWN) { hint(unknownHint(), found.el); return false; }
+    if (known.has(found.el) && (known.get(found.el).state === UNKNOWN || known.get(found.el).state === CHANGED)) { hint(unknownHint(), found.el); return false; }
     if (!found.plain) { hint(editorHint(), found.el); return false; }
     if (active === found.el) return true;
     if (active) commit();
@@ -375,7 +394,7 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
     const { el, after, anchor, revision: sentRev } = inflight;
     inflight = null;
     const readId = 'b' + (++readSeq);
-    lost = { id, el, after, readId, timer: null };
+    lost = { id, el, after, readId, timer: null, sentRevision: sentRev };
     step(el, 'timeout');
     try {
       post({ type: READBACK_MESSAGE, id: readId, page, revision: sentRev, anchor });
@@ -430,10 +449,10 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
         readFailed();
         return true;
       }
-      const { el } = lost;
+      const { el, sentRevision } = lost;
       lost = null;
-      takeRevision(msg, known.get(el));
-      step(el, 'read', { words: cleanText(msg.words) });
+      // The revision is taken only through the `read` row's own rule: it is the sent one or nothing.
+      step(el, 'read', { words: cleanText(msg.words), revision: msg.revision, sentRevision });
       pump();
       return true;
     }
@@ -454,7 +473,7 @@ const CSS = '.st-prose[id] :is(h1,h2,p,li).dc-text-edit-ok{cursor:text}'
   + '.dc-text-edit-on{outline:2px solid currentColor;outline-offset:2px}'
   // Words the host has not confirmed: marked, never moved (no box, size or position change).
   + '.st-prose [data-text-edit="pending"]{text-decoration:underline dotted;text-underline-offset:.2em;opacity:.65}'
-  + '.st-prose [data-text-edit="unknown"]{text-decoration:underline wavy;text-underline-offset:.2em;opacity:.65}'
+  + '.st-prose :is([data-text-edit="unknown"],[data-text-edit="changed"]){text-decoration:underline wavy;text-underline-offset:.2em;opacity:.65}'
   + '.dc-text-edit-hint{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:90vw;'
   + 'padding:8px 12px;border-radius:8px;background:#222;color:#fff;font:14px/1.4 system-ui,sans-serif;z-index:2147483647}';
 

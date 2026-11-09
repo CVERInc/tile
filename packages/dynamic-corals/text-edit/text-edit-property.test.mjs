@@ -1,4 +1,4 @@
-// Property test for the text-edit editing session (rounds 5–6): random event sequences — click,
+// Property test for the text-edit editing session (rounds 5–7): random event sequences — click,
 // type, Enter/blur, Escape, host replies that save or refuse, replies that come late, out of order
 // or never, stray replies with the wrong id, and the coral's own bounded wait running out — driven
 // through createEditor against a host that applies each edit to its own copy of the page with the
@@ -8,8 +8,9 @@
 //
 // The properties:
 //  1. After every event, an element that is not being typed in and is not marked unconfirmed
-//     (`data-text-edit` absent or `refused`) shows exactly the words the saved page has for it:
-//     words the host has not confirmed never look like saved words.
+//     (`data-text-edit` absent or `refused`) shows exactly the words the saved page has for IT —
+//     for that paragraph, followed through lines other editors inserted above it, not for whatever
+//     now sits at its old line: words the host has not confirmed never look like saved words.
 //  2. After every event, `data-text-edit` is the element's state (absent when idle).
 //  3. No user event (click, typing, Enter/blur, Escape) moves an element out of `pending`.
 //  4. Every edit sent for an element carries words the owner typed into it AFTER the typing that
@@ -19,12 +20,15 @@
 //  5. A reply with an id the coral is not waiting for is ignored and changes nothing.
 //  6. At rest (nobody typing, every message answered or dropped, every timer run), no element is
 //     pending; idle and refused ones show the saved page word for word, and any other is marked
-//     `unknown`.
+//     `unknown` or `changed`.
 //
 // The host keeps the contract the README states: it PROCESSES what it receives in order, one
 // message at a time (an edit is applied or refused before a later readback is read). What is not
 // promised is modelled freely: a message can be lost before the host gets it, and an answer can be
-// lost, delayed past the coral's wait, or delivered out of order.
+// lost, delayed past the coral's wait, or delivered out of order. And the page is not the frame's
+// alone (round 7): another editor can insert a paragraph above the frame's paragraphs at any time
+// — between a send and its readback too, so a readback answers for a span that has moved — and
+// take it out again (the page then has the revision it had before).
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -92,12 +96,27 @@ function run(seed, steps) {
   const root = render(md);
   const els = offered(root);
 
-  const saved = () => offered(render(md)).map((f) => cleanText(f.el.textContent));
+  // Where each frame element's own paragraph is in the saved page now (other editors move it).
+  const lineOf = els.map((f) => Number(f.el.getAttribute('data-src').split('-')[0]));
+  const inserted = [];          // words of paragraphs other editors inserted at line 2, newest last
+  const saved = () => lineOf.map((line) => { const r = readTextAt(md, { anchor: { start: line, end: line } }); assert.ok(r.ok, `line ${line} of ${JSON.stringify(md)}`); return r.words; });
+  function insertAbove(words) {
+    const ls = md.split('\n'); ls.splice(2, 0, words, ''); md = ls.join('\n');
+    lineOf.forEach((line, i) => { if (line >= 2) lineOf[i] = line + 2; });
+    inserted.push(words);
+  }
+  function takeOut() {
+    const ls = md.split('\n');
+    if (!inserted.length || ls[2] !== inserted[inserted.length - 1]) return false; // edited since: leave it
+    ls.splice(2, 2); md = ls.join('\n');
+    lineOf.forEach((line, i) => { if (line >= 4) lineOf[i] = line - 2; });
+    inserted.pop();
+    return true;
+  }
   const snapshot = () => els.map((f) => [ed.stateOf(f.el), f.el.textContent, f.el.getAttribute('data-text-edit')].join('|')).join(';') + '#' + inbox.length + '/' + outbox.length;
   function check(event) {
     if (violations.length) fail(`after ${event}, ${violations[0]}`);
     const want = saved();
-    assert.equal(want.length, els.length, 'every edit replaces one line with one line');
     els.forEach((f, i) => {
       const state = ed.stateOf(f.el);
       const attr = f.el.getAttribute('data-text-edit');
@@ -148,7 +167,14 @@ function run(seed, steps) {
       else if (outbox.length) event = 'answer-lost:' + outbox.splice(Math.floor(r() * outbox.length), 1)[0].id;
       else continue;
     }
-    else if (roll < 0.95) { event = 'tick'; clock.tick(PENDING_TIMEOUT_MS); }
+    else if (roll < 0.93) { event = 'tick'; clock.tick(PENDING_TIMEOUT_MS); }
+    else if (roll < 0.96) { // another editor: a paragraph above, sometimes with words the frame shows
+      if (inserted.length && r() < 0.4) { if (!takeOut()) continue; event = 'other-editor:take-out'; }
+      else { // half the time a duplicate of a paragraph the page has: words alone cannot tell them apart
+        const w = r() < 0.5 ? pick(saved()) : pick(['Inserted', 'Original', 'First', 'Item']);
+        insertAbove(w); event = `other-editor:insert(${w})`;
+      }
+    }
     else {
       const id = answered.length && r() < 0.5 ? pick(answered) : 'e' + (900 + Math.floor(r() * 99));
       const type = r() < 0.5 ? RESULT_MESSAGE : READBACK_RESULT_MESSAGE;
@@ -178,7 +204,7 @@ function run(seed, steps) {
   els.forEach((f, i) => {
     const state = ed.stateOf(f.el);
     if (state === 'pending' || state === 'editing') fail(`at rest element ${i} is ${state}`);
-    if (state !== 'unknown' && cleanText(f.el.textContent) !== want[i]) fail(`at rest element ${i} shows ${JSON.stringify(f.el.textContent)}, the page saved ${JSON.stringify(want[i])}`);
+    if (state !== 'unknown' && state !== 'changed' && cleanText(f.el.textContent) !== want[i]) fail(`at rest element ${i} shows ${JSON.stringify(f.el.textContent)}, the page saved ${JSON.stringify(want[i])}`);
   });
 }
 
