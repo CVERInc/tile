@@ -7,8 +7,9 @@
 // their <title> as `${heading} — ${meta.title}`. A site still carrying the placeholder printed it in
 // <title>, og:title, twitter:title and the footer line on every one of those routes.
 //
-// The rule, one helper for every route: site-core `titleSiteName(meta)` (the routeSiteNameSource
-// chain — real title → brand → footer-brand — with a placeholder treated as no name at all) and
+// The rule, one helper for every route: site-core `titleSiteName(meta)` (tile#279's
+// configSiteNameSource chain — the route's real title → brand → footer-brand — with a placeholder
+// treated as no name at all) and
 // `siteTitleSuffix(meta, sep)` (that name after `sep`, or '' so the suffix is omitted). The real
 // builds are measured in the astro smoke ("title suffix (reef#3040)"); this file holds the chain's
 // rows and the CENSUS: no route may compose the suffix from `meta.title` itself again.
@@ -34,6 +35,8 @@ test('titleSiteName / siteTitleSuffix: the site-name chain, with a placeholder n
     [{ title: 'Untitled site', 'site-title': 'Untitled site', 'footer-brand': 'Atlas Footer' }, 'Atlas Footer'],
     [{ 'site-title': '' }, ''],
     [{ 'site-title': '', brand: 'Atlas' }, 'Atlas'],
+    // an edition's system page (/<loc>/404, /language): its home's title names that edition
+    [{ title: 'Atlas 天文台', 'site-title': '', brand: 'Atlas' }, 'Atlas 天文台'],
     // a meta without the stash (a site with no _site.md: the home page stands in): `title` names it
     [{ title: 'Legacy Home' }, 'Legacy Home'],
     [{ title: 'Untitled site' }, ''],
