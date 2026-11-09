@@ -569,9 +569,14 @@ function splitTypeInner(inner) {
 // model's own documentation named neither, which is part of why a dropped field stayed invisible.
 // Anything the parser collects has to have a home here AND a line in serializeSite, or it is
 // deleted on the next save. site-core-roundtrip.test.mjs is the ruler that says so.
-function parseSite(text) {
+function parseSite(text, opts) {
   const { meta, body } = splitFrontmatter(String(text || ''));
   const lines = body.split('\n');
+  // `{ sourceLines: true }` (an editing preview, never a production build): each section also
+  // carries `srcLines: { head, body }` — the 0-based lines of the page Markdown its `## ` line and
+  // its body start on — and the renderers stamp what they draw from that body with `data-src`
+  // (see srcAttr). Without the option nothing here or in any output changes.
+  const src = opts && opts.sourceLines ? (String(text || '').slice(0, String(text || '').length - body.length).match(/\n/g) || []).length : null;
 
   // Pass 1 — fence-aware split into sections by `## ` headings. Preamble (before the first `##`) is
   // dropped on re-serialize, same as book-core (authoring keeps everything under a section).
@@ -582,7 +587,7 @@ function parseSite(text) {
     if (RE_FENCE.test(line)) { fence = !fence; if (cur) cur.lines.push(line); continue; }
     if (!fence) {
       const h2 = RE_H2.exec(line);
-      if (h2) { cur = { title: (h2[1] || '').trim(), lines: [] }; rawSections.push(cur); continue; }
+      if (h2) { cur = { title: (h2[1] || '').trim(), lines: [], head: i }; rawSections.push(cur); continue; }
     }
     if (cur) cur.lines.push(line);
   }
@@ -609,10 +614,12 @@ function parseSite(text) {
     const t = /^[\t ]*$/.test(source.slice(lineStart, at))
       ? typeLineInner(source.slice(at, end)) : null;
     let beforeTypeLine = '';
+    let consumed = 0;   // lines of rs.lines before `rest` (the type line and anything above it)
     if (t !== null) {
       const st = splitTypeInner(t);
       type = st.type; params = st.params; hasTypeLine = true;
       beforeTypeLine = source.slice(0, at);
+      consumed = (source.slice(0, Math.min(end + 1, source.length)).match(/\n/g) || []).length;
       rest = source.slice(Math.min(end + 1, source.length)).split('\n');
     }
 
@@ -844,11 +851,15 @@ function parseSite(text) {
     } else {
       body = blockOf(rest);
     }
+    // blockOf drops only leading empty lines, so the body starts that many lines into `rest`.
+    let lead = 0;
+    while (lead < rest.length && rest[lead] === '') lead++;
 
     return {
       id: 's' + (si + 1) + (rs.title ? '-' + slugify(rs.title, '') : ''),
       title: rs.title, type, params, hasTypeLine, body, cells, groups, entries, faqs, fields,
       ...(beforeTypeLine ? { beforeTypeLine } : {}),
+      ...(src !== null ? { srcLines: { head: src + rs.head, body: src + rs.head + 1 + consumed + lead } } : {}),
     };
   });
 
@@ -1739,7 +1750,7 @@ function renderList(items) {
     // leak through some OTHER route) — with no children to hold either, an `<li></li>` would be exactly
     // the empty-block leak issue #496 is about. A comment-only item that DOES have nested children still
     // needs its `<li>` — that's where the children's `<ul>`/`<ol>` lives.
-    if (it.text.trim() || children) html += '<li>' + inlineHtml(it.text) + children + '</li>';
+    if (it.text.trim() || children) html += '<li' + (it.src || '') + '>' + inlineHtml(it.text) + children + '</li>';
     i = j;
   }
   return html + '</' + tag + '>';
@@ -2183,6 +2194,15 @@ function softJoin(lines, br, cjk) {
 // opts.dialogue: a dialogueContext() shared across every bodyHtml call that makes up ONE page, so
 // bubble sides are decided per page (#68). Absent → one per call, which is one per page for
 // every caller that renders a body in a single call (all of renderSiteToHtml's sections).
+// `data-src="<first>-<last>"`: the 0-based, inclusive lines of the page Markdown a block was drawn
+// from, for an editing preview that must map a tapped element back to its source (the text-edit
+// coral). Only when the caller passes `srcLine` — the page line the body's first line is on, i.e.
+// a section parsed with `{ sourceLines: true }` — and '' otherwise, so every other render is
+// byte-identical. `at`/`to` are indexes into the body's own lines.
+function srcAttr(opts, at, to) {
+  return opts && typeof opts.srcLine === 'number' ? ' data-src="' + (opts.srcLine + at) + '-' + (opts.srcLine + to) + '"' : '';
+}
+
 function bodyHtml(body, opts) {
   if (!body) return '';
   const dialogue = (opts && opts.dialogue) || dialogueContext();
@@ -2266,7 +2286,7 @@ function bodyHtml(body, opts) {
         }
         if (!RE_LIST_ITEM.test(lines[i])) break;
         const m = RE_LIST_ITEM.exec(lines[i]);
-        items.push({ indent: m[1].length, ordered: /^\d+[.)]/.test(m[2]), text: m[3] });
+        items.push({ indent: m[1].length, ordered: /^\d+[.)]/.test(m[2]), text: m[3], src: srcAttr(opts, i, i) });
         i++;
       }
       out.push(renderList(items));
@@ -2299,11 +2319,11 @@ function bodyHtml(body, opts) {
       // content is removed — drop it entirely (no `<h1></h1>`, and the line is NOT reprocessed as a
       // paragraph either: it consumed its own `#` marker as a heading, full stop). A heading with any
       // other content — including one that merely CONTAINS a comment alongside real text — still emits.
-      if (html.trim()) out.push('<h' + lv + '>' + html + '</h' + lv + '>');
+      if (html.trim()) out.push('<h' + lv + srcAttr(opts, i, i) + '>' + html + '</h' + lv + '>');
       i++; continue;
     }
 
-    const para = [];                                                          // paragraph / figure
+    const para = [], paraAt = i;                                              // paragraph / figure
     while (i < lines.length && lines[i].trim() && !isBlockStart(lines, i, nextCloser)) { para.push(lines[i]); i++; }
     // `linkRows` (a prose body): a paragraph that is ONLY links is a button row, here, where it was
     // written — read off the paragraph's source lines, the same test a hero's CTA row uses. Decided
@@ -2371,7 +2391,7 @@ function bodyHtml(body, opts) {
       out.push('<figure class="st-figure">' + inlineHtml(src, indented ? { stripComments: false } : undefined) + '</figure>');
       continue;
     }
-    out.push('<p>' + html + '</p>');
+    out.push('<p' + srcAttr(opts, paraAt, i - 1) + '>' + html + '</p>');
   }
   return out.join('\n');
 }
@@ -2673,9 +2693,9 @@ function orderedProseHtml(body) {
 // blank-line split does not know a code fence — a `[A](/a)` line inside a fenced block became a
 // button and an `![x](…)` line inside it left the code for the image group. The paragraphs here are
 // the ones bodyHtml finds after it has taken fences, lists, quotes and tables whole.
-function proseBodyHtml(body, ordered) {
+function proseBodyHtml(body, ordered, srcLines) {
   if (ordered) return orderedProseHtml(body);
-  return bodyHtml(body, { linkRows: 'st-prose' });
+  return bodyHtml(body, srcLines ? { linkRows: 'st-prose', srcLine: srcLines.body } : { linkRows: 'st-prose' });
 }
 
 // reef#2857: a TEXT-FREE hero — empty (or whitespace-only) title, and no `logo=` image standing in
@@ -3257,7 +3277,7 @@ function renderSection(s, hero, ctx) {
       const ordered = pm.ordered != null;
       // `eyebrow="…"` — the small label above the heading, as in the hero branch above.
       const prEyebrow = pm.eyebrow ? '<p class="st-prose-eyebrow">' + inlineHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
-      return '<section class="st-prose"' + align + prSurface + (ordered ? ' data-ordered=""' : '') + '>' + prEyebrow + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + proseBodyHtml(s.body, ordered) + '</section>';
+      return '<section class="st-prose"' + align + prSurface + (ordered ? ' data-ordered=""' : '') + '>' + prEyebrow + (s.title ? '<' + H + (s.srcLines ? srcAttr({ srcLine: s.srcLines.head }, 0, 0) : '') + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + proseBodyHtml(s.body, ordered, s.srcLines) + '</section>';
     }
   }
 }
@@ -3497,7 +3517,7 @@ export {
   // inline/body render helpers — exported so the Astro layer (the production seam) shares ONE
   // inline-markdown source with the reference renderer (structure lives in .astro components,
   // inline text rendering stays here via cssmd). Additive; behavior unchanged.
-  inlineHtml, bodyHtml, gridCellBodyHtml, orderedProseHtml, proseBodyHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
+  inlineHtml, bodyHtml, gridCellBodyHtml, orderedProseHtml, proseBodyHtml, srcAttr, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
   // #68: the page-scoped dialogue side state a caller threads through several bodyHtml calls.
   dialogueContext,
   heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks, linksParts,

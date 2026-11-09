@@ -112,7 +112,9 @@ export function getStaticPaths() {
     // effective meta = { ...siteConfig(locale-aware), ...pageFrontmatter } — page keys override
     // site defaults. Absent _site → site is unchanged (legacy). This is what makes header/nav/
     // blog-search etc. consistent across ALL pages instead of each page duplicating the chrome.
-    const site = parseSite(raw);
+    // SITETILE_SOURCE_SPANS=1 (an editing preview build only): sections carry their source lines and
+    // prose blocks are stamped `data-src` for the text-edit coral. Unset → byte-identical output.
+    const site = parseSite(raw, typeof process !== 'undefined' && process.env && process.env.SITETILE_SOURCE_SPANS === '1' ? { sourceLines: true } : undefined);
     const siteConfig = loadSite(files, rel);
     // A page may carry its own `locales:`. Under a site-config layer that is a PAGE's line: a bad
     // one is warned about against this file and dropped (lingo/locale.mjs → pageLocalesOrWarn).
