@@ -737,8 +737,9 @@ const shareImage = absUrl(authoredShareImage
 // or REEF with PWA's gen-icons.sh output — shadows the route (Astro skips a route a public/ file
 // already claims) and must never be marked as ours, regardless of what `packages:` declares.
 const ICON_PUBLIC_DIR = join(typeof process !== 'undefined' ? process.cwd() : '.', 'public');
-// …and only the paths where the route drew the BADGE: with `favicon:` set, /apple-touch-icon.png
-// carries the owner's own PNG and the .ico/.svg are not written at all (icon-core's badgePaths).
+// …and only the paths where the route drew the BADGE: with `favicon:` set to a PNG,
+// /apple-touch-icon.png and /favicon.ico carry the owner's own PNG, and /favicon.svg carries the
+// owner's SVG or is not written at all (icon-core's badgePaths).
 const iconBadge = badgePaths(meta, readPublic, safeSrc);
 const iconWritten = new Set(Object.values(ICON_PATHS).filter((p) => {
   try { return !existsSync(join(ICON_PUBLIC_DIR, p)); } catch { return true; }
