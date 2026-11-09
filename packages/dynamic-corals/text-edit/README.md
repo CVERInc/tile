@@ -7,17 +7,31 @@ it shows a short "change it in the editor" hint instead, and links keep working 
 
 - **Anchor.** The renderer stamps every section with a stable id (`s<n>-<slug>`). An edit names
   `{ section, kind: 'title' | 'p' | 'li', occurrence }` plus the words it replaces (`before`):
-  `occurrence` counts only same-kind elements in that section with exactly those words, so a
-  renderer layout detail can never move an edit onto another line. Words that are not in the source
-  any more (a stale preview, a concurrent edit) are refused, never written somewhere else.
-- **Message.** `{ type: 'reef-text-edit', id, page, anchor, before, after }` to the parent, at
-  `data-parent-origin` only; the answer is `{ type: 'reef-text-edit-result', id, ok, hint? }` from
-  that origin only. A refusal puts the old words back and shows the hint.
+  `occurrence` counts only same-kind elements in that section showing exactly those words. The
+  applier counts in the same population: it renders each source block with the real renderer, so a
+  fragment whose comment vanishes or whose lines join stays in the count with the words the owner
+  sees, and is refused as formatted. If the whole rendered page still counts differently, the edit is
+  refused (`ambiguous`), never written somewhere else.
+- **Revision.** The host stamps `data-revision` (`sourceRevision` of the Markdown it rendered). Every
+  edit carries the revision it was computed against; any other one is refused (`changed`), so a
+  stale preview or a concurrent edit never lands on a renumbered duplicate. A successful answer
+  carries the next revision, and the section's new id (a title edit changes it).
+- **One at a time.** The owner can keep typing; the next edit is computed and sent only after the
+  previous one is answered, against acknowledged words. A pending edit shows in the preview but
+  never counts as an occurrence, and a refusal puts the old words back only when nothing newer was
+  typed over them.
+- **Message.** `{ type: 'reef-text-edit', id, page, revision, anchor, before, after }` to the parent
+  window at `data-parent-origin` only; the answer is
+  `{ type: 'reef-text-edit-result', id, ok, hint?, revision?, section? }`, accepted only from that
+  origin AND from the parent window itself. The origin must be one explicit http(s) origin (a
+  trailing `/` is dropped); `*`, `null` and other spellings do not mount. A refusal puts the old
+  words back and shows the hint. A success without `revision` ends editing in that frame.
 - **Source rule.** `text-edit-source.mjs` resolves an edit against the page Markdown and rewrites
   exactly one line, keeping its indent, list marker or `## `. Only `prose` sections; only fragments
-  written as plain words on one line; `after` must be plain words too.
+  written as plain words on one line that render exactly as written; `after` must be plain words
+  the renderer shows as written, too.
 - **Gestures.** Enter or leaving the element saves; Escape puts the words back; paste is plain text,
-  one line.
+  one line. While an IME is composing, Enter and Escape belong to the IME.
 
 Local-only (no registry channel): a host that embeds pages in a frame serves the built `text-edit.js`
 itself and adds the container to the framed page.
@@ -29,12 +43,12 @@ Lets an owner change the words of a plain heading, paragraph or list item in a f
 
 Author: `official`.
 
-Host: `sitetile`. Renderer output inside a frame. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host applies edits with text-edit-source.mjs (or a port measured against it) and answers with `reef-text-edit-result`.
+Host: `sitetile`. Renderer output inside a frame. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, relaying `revision` and `section` from a successful apply.
 
 ### Embed
 
 ```html
-<div hidden data-dynamic-coral="text-edit" data-parent-origin="https://editor.example"></div>
+<div hidden data-dynamic-coral="text-edit" data-parent-origin="https://editor.example" data-revision="r1k-0123456789abcdef"></div>
 <script src="text-edit.js"></script>
 ```
 
@@ -43,7 +57,8 @@ Host: `sitetile`. Renderer output inside a frame. Only `prose` sections (the ren
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
 | `data-dynamic-coral` | enum | yes | — | Selects the text-edit coral. One per page. Values: `text-edit`. |
-| `data-parent-origin` | string | yes | — | The only origin edits are posted to and answers are accepted from. No default: the coral does not mount without it. |
+| `data-parent-origin` | string | yes | — | The only origin edits are posted to and answers are accepted from (answers must also come from the parent window itself). One http(s) origin written as the origin, a trailing slash allowed; `*`, `null`, paths and other spellings are refused. No default: the coral does not mount without it. |
+| `data-revision` | string | yes | — | The source revision the page was rendered from (text-edit-source.mjs `sourceRevision`). Every edit carries it and the applier refuses any other; a successful answer carries the next one. No default: the coral does not mount without it. |
 | `data-page` | string | no | — | The page path the host saves to. Absent: the frame's location.pathname. |
 | `data-hint-editor` | string | no | — | The host's sentence for text that has formatting or structure (use the editor). |
 | `data-hint-refused` | string | no | — | The host's sentence for a refused edit, when its answer carries none. |

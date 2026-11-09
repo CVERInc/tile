@@ -2,7 +2,7 @@
   "id": "text-edit",
   "author": "official",
   "summary": "Lets an owner change the words of a plain heading, paragraph or list item in a framed preview; posts a text-only edit to the host.",
-  "embed": "<div hidden data-dynamic-coral=\"text-edit\" data-parent-origin=\"https://editor.example\"></div>\n<script src=\"text-edit.js\"></script>",
+  "embed": "<div hidden data-dynamic-coral=\"text-edit\" data-parent-origin=\"https://editor.example\" data-revision=\"r1k-0123456789abcdef\"></div>\n<script src=\"text-edit.js\"></script>",
   "attributes": [
     {
       "name": "data-dynamic-coral",
@@ -19,7 +19,14 @@
       "type": "string",
       "required": true,
       "default": null,
-      "description": "The only origin edits are posted to and answers are accepted from. No default: the coral does not mount without it."
+      "description": "The only origin edits are posted to and answers are accepted from (answers must also come from the parent window itself). One http(s) origin written as the origin, a trailing slash allowed; `*`, `null`, paths and other spellings are refused. No default: the coral does not mount without it."
+    },
+    {
+      "name": "data-revision",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "The source revision the page was rendered from (text-edit-source.mjs `sourceRevision`). Every edit carries it and the applier refuses any other; a successful answer carries the next one. No default: the coral does not mount without it."
     },
     {
       "name": "data-page",
@@ -44,5 +51,5 @@
     }
   ],
   "host": "sitetile",
-  "requirements": "Renderer output inside a frame. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host applies edits with text-edit-source.mjs (or a port measured against it) and answers with `reef-text-edit-result`."
+  "requirements": "Renderer output inside a frame. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, relaying `revision` and `section` from a successful apply."
 }
