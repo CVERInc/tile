@@ -38,11 +38,25 @@
 //   { type: 'reef-text-edit-result', id, ok, hint?, revision?, section? }
 // A refused edit puts the old words back and shows the host's hint (or the coral's own default).
 // A success without a revision ends editing in this frame: nothing after it could prove freshness.
+//
+// An answer that does not come within PENDING_TIMEOUT_MS makes the element `unknown` (it shows
+// the saved words) and the coral asks the host to read the span back:
+//   { type: 'reef-text-edit-readback', id, page, revision, anchor: { section, start, end } }
+//     (revision: the one the unanswered edit was made against; the host finds the span by its
+//     lines, since a title edit that landed changed the section's id)
+// answered, from the same origin and window, with what the saved page holds there now:
+//   { type: 'reef-text-edit-readback-result', id, ok, words?, revision?, section? }
+// (text-edit-source.mjs readTextAt is the reference). A late answer to the edit itself is still
+// taken if it comes before the readback's; after that it is nobody's answer. A readback that is
+// not answered in time either leaves the element unknown and ends editing in this frame.
 
 export const EDIT_MESSAGE = 'reef-text-edit';
 export const RESULT_MESSAGE = 'reef-text-edit-result';
 export const DEFAULT_HINT = 'This text has formatting or structure. Change it in the editor.';
 export const DEFAULT_REFUSED = 'That change could not be saved here. Open the editor to change it.';
+export const DEFAULT_UNKNOWN = 'That change is not confirmed. It may not have been saved; reload the preview to check.';
+export const READBACK_MESSAGE = 'reef-text-edit-readback';
+export const READBACK_RESULT_MESSAGE = 'reef-text-edit-readback-result';
 
 // Sections the coral takes text from. Only `prose` in this slice: every other section type renders
 // its words through a component (a hero, a grid cell, a form label), and those stay untouchable —
@@ -144,53 +158,81 @@ export function anchorFor(el, section, before = cleanText(el.textContent)) {
  *   idle     — it shows its saved words, and nothing about it is outstanding;
  *   editing  — the owner is typing in it, and nothing about it is outstanding;
  *   pending  — one edit of it waits for the host (sent, or queued behind another element's edit);
- *   refused  — its last edit was refused and its saved words are back.
- * `pending` has exactly two exits and both are the host's reply: a success (→ idle, the saved words
- * as base) and a refusal (→ the rollback below). No click, blur, Enter, Escape or typing leaves it.
- * Typing into a pending element edits a DRAFT, kept until the reply: a success then sends the draft
- * against the new revision, a refusal keeps it as newer words. Escape during pending drops the
- * draft only. So a draft is never shown as saved, and the frame never forgets an answer it is owed.
+ *   unknown  — its edit was not answered in time: it shows the saved words while the coral asks
+ *              the host to read the span back (or until a late answer to the edit arrives);
+ *   refused  — its last edit was refused (or did not land) and its saved words are back.
+ * The element carries its state in `data-text-edit` (absent when idle), and the coral's stylesheet
+ * marks `pending` and `unknown`: words the host has not confirmed never look like saved words.
+ *
+ * `pending` is left only by the host or the clock: a success (→ idle, the saved words as base), a
+ * refusal (→ the rollback below), or PENDING_TIMEOUT_MS without either (→ unknown). No click, blur,
+ * Enter, Escape or typing leaves it. Typing into a pending element edits a DRAFT, kept until the
+ * edit is settled: a success sends it against the new revision, a refusal keeps it as newer words,
+ * and an edit that turns out not to have landed is a refusal. Escape during pending drops the draft
+ * only. `unknown` takes no user event at all (the owner cannot type into words whose fate is not
+ * known), and is left by the readback answer or by a late answer to the edit itself, whichever
+ * comes first. If the readback is not answered in time either, the element stays `unknown` and the
+ * frame stops sending: no revision can be proven fresh after that.
  * Nothing leaves `refused` or `idle` by itself: only the owner typing again makes a new edit, so a
  * refused edit is never retried behind their back. */
-export const STATES = Object.freeze({ IDLE: 'idle', EDITING: 'editing', PENDING: 'pending', REFUSED: 'refused' });
-const { IDLE, EDITING, PENDING, REFUSED } = STATES;
+export const STATES = Object.freeze({ IDLE: 'idle', EDITING: 'editing', PENDING: 'pending', UNKNOWN: 'unknown', REFUSED: 'refused' });
+const { IDLE, EDITING, PENDING, UNKNOWN, REFUSED } = STATES;
+/** The attribute an element's state is written to (absent when idle). */
+export const STATE_ATTR = 'data-text-edit';
+/** How long an edit, and then a readback, waits for the host's answer. */
+export const PENDING_TIMEOUT_MS = 10000;
+
+// Node's timers keep a process alive; a frame's do not matter. The editor never needs to.
+const defaultSetTimer = (fn, ms) => { const t = setTimeout(fn, ms); if (t && typeof t.unref === 'function') t.unref(); return t; };
+const defaultClearTimer = (t) => clearTimeout(t);
 
 /**
  * The editing session. DOM-free apart from the elements it is handed, so node can drive it:
  *   page           — the page path the host saves to
  *   revision       — the source revision the frame was rendered from (data-revision)
- *   post(message)  — send an edit to the host
+ *   post(message)  — send an edit (or a readback request) to the host
  *   hint(text, el) — show a short hint next to an element
+ *   setTimer(fn, ms) / clearTimer(t) — the clock for the bounded wait (default: setTimeout)
+ *   stop(el)       — end typing in an element the coral takes back (the wait ran out while typing)
  */
-export function createEditor({ page, revision, post, hint, words = {} }) {
+export function createEditor({ page, revision, post, hint, words = {}, setTimer = defaultSetTimer, clearTimer = defaultClearTimer, stop = () => {}, timeoutMs = PENDING_TIMEOUT_MS }) {
   let active = null;            // the element the owner is typing in (editing, or a pending draft)
-  let seq = 0;
+  let seq = 0, readSeq = 0;
   let rev = typeof revision === 'string' && revision ? revision : null;
   // element → { section, kind, state,
   //             ack   — the saved words;
-  //             sent  — the words of its one outstanding edit (pending only), else null;
-  //             draft — words committed while pending, for after the reply, else null;
+  //             sent  — the words of its one outstanding edit (pending/unknown only), else null;
+  //             draft — words committed while pending, for after the edit is settled, else null;
   //             base  — the words it showed when the owner focused it, or the coral last wrote }
   const known = new Map();
   const queue = [];             // pending elements whose edit is not sent yet, oldest first
-  let inflight = null;          // { id, el, after } — the one edit the host has not answered
+  let inflight = null;          // { id, el, after, timer } — the one edit the host has not answered
+  let lost = null;              // { id, el, after, readId, timer } — the edit whose answer did not
+                                //   come in time (its element is unknown) and the readback for it
   const sectionIds = new Map(); // section element → its id in the source since a title edit
   const refusedHint = (text) => (typeof text === 'string' && text ? text : (words.refused || DEFAULT_REFUSED));
   const editorHint = () => words.useEditor || DEFAULT_HINT;
+  const unknownHint = () => words.unknown || DEFAULT_UNKNOWN;
 
   const show = (el, k, text) => { el.textContent = text; k.base = text; };
   const send = (el, k, text) => { k.sent = text; queue.push(el); return PENDING; };
   const pendingWords = (k) => (k.draft !== null ? k.draft : k.sent);
+  const mark = (el, state) => {
+    if (typeof el.setAttribute !== 'function') return;
+    if (state === IDLE) el.removeAttribute(STATE_ATTR); else el.setAttribute(STATE_ATTR, state);
+  };
 
   // ── The transitions. state → event → handler(el, k, arg) returning the next state. An event a
   // state has no row for changes nothing. User events: focus (click), commit (Enter or blur),
-  // cancel (Escape). Host events: ok and refuse, with { after: the words that edit sent, text }.
-  // Every row of PENDING except ok and refuse returns PENDING.
+  // cancel (Escape). Host events: ok and refuse, with { after: the words that edit sent, text },
+  // and read, with { words: what the host reads back at the span }. Clock: timeout.
+  // Every user row of PENDING returns PENDING; UNKNOWN has no user rows.
   const TRANSITIONS = {
     [IDLE]: { focus: startTyping },
     [REFUSED]: { focus: startTyping },
     [EDITING]: { commit: commitEdit, cancel: cancelEdit },
-    [PENDING]: { focus: watchDraft, commit: commitDraft, cancel: dropDraft, ok: saved, refuse: refused },
+    [PENDING]: { focus: watchDraft, commit: commitDraft, cancel: dropDraft, ok: saved, refuse: refused, timeout: notAnswered },
+    [UNKNOWN]: { ok: saved, refuse: refused, read: readBack },
   };
 
   function startTyping(el, k) { k.base = cleanText(el.textContent); return EDITING; }
@@ -207,12 +249,22 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
 
   function watchDraft(el, k) { k.base = cleanText(el.textContent); return PENDING; }
 
-  function commitDraft(el, k) {
-    if (unsafeText(el.textContent)) { show(el, k, pendingWords(k)); hint(refusedHint(null), el); return PENDING; }
+  // The words being typed into a pending element, as its draft; false when they cannot be one.
+  function takeDraft(el, k) {
+    if (unsafeText(el.textContent)) return false;
     const after = cleanText(el.textContent);
-    if (!after) { show(el, k, pendingWords(k)); hint(editorHint(), el); return PENDING; }
+    if (!after) return false;
     k.draft = after === k.sent ? null : after;
-    show(el, k, after);
+    return true;
+  }
+
+  function commitDraft(el, k) {
+    if (!takeDraft(el, k)) {
+      hint(unsafeText(el.textContent) ? refusedHint(null) : editorHint(), el);
+      show(el, k, pendingWords(k));
+      return PENDING;
+    }
+    show(el, k, pendingWords(k));
     return PENDING;
   }
 
@@ -222,11 +274,30 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
 
   function refused(el, k, { text }) { hint(refusedHint(text), el); k.sent = null; return settle(el, k, true); }
 
-  // After the reply. While the owner is typing in it, what it shows is their draft against the
-  // saved words: it stays, unless the edit was refused and nothing was typed or drafted since the
-  // element was focused (it still shows the refused words) — then the saved words come back.
-  // Otherwise a draft different from the saved words is the next edit; without one, the element
-  // shows its saved words.
+  // The wait ran out. Whatever is being typed is kept aside as the draft, typing ends, and the
+  // element shows its saved words — the host may or may not have the sent ones.
+  function notAnswered(el, k) {
+    if (active === el) { takeDraft(el, k); active = null; stop(el); }
+    show(el, k, k.ack);
+    hint(unknownHint(), el);
+    return UNKNOWN;
+  }
+
+  // The host read the span back: its words are the saved words now. The edit landed if they are
+  // the words it sent; otherwise it is settled as a refusal.
+  function readBack(el, k, { words: now }) {
+    const landed = now === k.sent;
+    k.ack = now;
+    k.sent = null;
+    if (!landed) hint(refusedHint(null), el);
+    return settle(el, k, !landed);
+  }
+
+  // After the edit is settled. While the owner is typing in it, what it shows is their draft
+  // against the saved words: it stays, unless the edit was refused and nothing was typed or
+  // drafted since the element was focused (it still shows the refused words) — then the saved
+  // words come back. Otherwise a draft different from the saved words is the next edit; without
+  // one, the element shows its saved words.
   function settle(el, k, wasRefused) {
     const draft = k.draft;
     k.draft = null;
@@ -242,12 +313,13 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
   function step(el, event, arg) {
     const k = known.get(el);
     const handler = k && TRANSITIONS[k.state][event];
-    if (handler) k.state = handler(el, k, arg || {});
+    if (handler) { k.state = handler(el, k, arg || {}); mark(el, k.state); }
     return k ? k.state : IDLE;
   }
 
   function begin(found) {
     if (!found) return false;
+    if (known.has(found.el) && known.get(found.el).state === UNKNOWN) { hint(unknownHint(), found.el); return false; }
     if (!found.plain) { hint(editorHint(), found.el); return false; }
     if (active === found.el) return true;
     if (active) commit();
@@ -268,27 +340,6 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
     step(el, 'cancel');
   }
 
-  // Send the next queued edit, with the saved words as `before`. Returns what it posted.
-  function pump() {
-    while (!inflight && queue.length) {
-      const el = queue.shift();
-      const k = known.get(el);
-      if (k.state !== PENDING || k.sent === null) continue;
-      const anchor = rev && anchorFor(el, k.section, k.ack);
-      if (!anchor) { step(el, 'refuse', { after: k.sent, text: null }); continue; }
-      const id = 'e' + (++seq);
-      const message = {
-        type: EDIT_MESSAGE, id, page, revision: rev,
-        anchor: { section: sectionIds.get(k.section) || anchor.section, start: anchor.start, end: anchor.end },
-        before: k.ack, after: k.sent,
-      };
-      inflight = { id, el, after: k.sent };
-      try { post(message); } catch { inflight = null; step(el, 'refuse', { after: message.after, text: null }); continue; }
-      return message;
-    }
-    return null;
-  }
-
   /** Ends the session. Returns the message posted now, or null (nothing changed, or it waits its turn). */
   function commit() {
     if (!active) return null;
@@ -298,19 +349,95 @@ export function createEditor({ page, revision, post, hint, words = {} }) {
     return pump();
   }
 
-  /** The host's answer to the edit in flight; anything else is nobody's answer. */
-  function onResult(msg) {
-    if (!msg || msg.type !== RESULT_MESSAGE || !inflight || msg.id !== inflight.id) return false;
-    const { el, after } = inflight;
+  const anchorOf = (el, k, a) => ({ section: sectionIds.get(k.section) || a.section, start: a.start, end: a.end });
+
+  // Send the next queued edit, with the saved words as `before`. Returns what it posted. Nothing
+  // is sent while an edit or a readback is outstanding.
+  function pump() {
+    while (!inflight && !(lost && lost.timer !== null) && queue.length) {
+      const el = queue.shift();
+      const k = known.get(el);
+      if (k.state !== PENDING || k.sent === null) continue;
+      const anchor = rev && anchorFor(el, k.section, k.ack);
+      if (!anchor) { step(el, 'refuse', { after: k.sent, text: null }); continue; }
+      const id = 'e' + (++seq);
+      const message = { type: EDIT_MESSAGE, id, page, revision: rev, anchor: anchorOf(el, k, anchor), before: k.ack, after: k.sent };
+      inflight = { id, el, after: k.sent, anchor: message.anchor, revision: rev, timer: null };
+      try { post(message); } catch { inflight = null; step(el, 'refuse', { after: message.after, text: null }); continue; }
+      inflight.timer = setTimer(() => editTimedOut(id), timeoutMs);
+      return message;
+    }
+    return null;
+  }
+
+  function editTimedOut(id) {
+    if (!inflight || inflight.id !== id) return;
+    const { el, after, anchor, revision: sentRev } = inflight;
     inflight = null;
-    const k = known.get(el);
-    if (msg.ok === true) {
-      rev = typeof msg.revision === 'string' && msg.revision ? msg.revision : null;
-      if (typeof msg.section === 'string' && msg.section) sectionIds.set(k.section, msg.section);
-      step(el, 'ok', { after });
-    } else step(el, 'refuse', { after, text: msg.hint });
+    const readId = 'b' + (++readSeq);
+    lost = { id, el, after, readId, timer: null };
+    step(el, 'timeout');
+    try {
+      post({ type: READBACK_MESSAGE, id: readId, page, revision: sentRev, anchor });
+      lost.timer = setTimer(() => readTimedOut(readId), timeoutMs);
+    } catch { readFailed(); }
+  }
+
+  function readTimedOut(readId) {
+    if (!lost || lost.readId !== readId || lost.timer === null) return;
+    lost.timer = null;
+    readFailed();
+  }
+
+  // No readback: nothing the frame sends from now on could prove it is fresh. The element stays
+  // unknown (a late answer to its edit is still taken), and everything queued is refused.
+  function readFailed() {
+    if (lost) { lost.timer = null; lost.readId = null; hint(unknownHint(), lost.el); }
+    rev = null;
     pump();
-    return true;
+  }
+
+  function takeRevision(msg, k) {
+    rev = typeof msg.revision === 'string' && msg.revision ? msg.revision : null;
+    if (typeof msg.section === 'string' && msg.section) sectionIds.set(k.section, msg.section);
+  }
+
+  /** The host's answer to the edit in flight, to an edit whose answer came late, or to a readback;
+   *  anything else is nobody's answer. Returns whether it was taken. */
+  function onResult(msg) {
+    if (!msg) return false;
+    if (msg.type === RESULT_MESSAGE) {
+      let el, after;
+      if (inflight && msg.id === inflight.id) {
+        ({ el, after } = inflight);
+        clearTimer(inflight.timer);
+        inflight = null;
+      } else if (lost && msg.id === lost.id) { // late, and no readback has settled it first
+        ({ el, after } = lost);
+        if (lost.timer !== null) clearTimer(lost.timer);
+        lost = null;
+      } else return false;
+      const k = known.get(el);
+      if (msg.ok === true) { takeRevision(msg, k); step(el, 'ok', { after }); }
+      else step(el, 'refuse', { after, text: msg.hint });
+      pump();
+      return true;
+    }
+    if (msg.type === READBACK_RESULT_MESSAGE) {
+      if (!lost || lost.readId === null || msg.id !== lost.readId) return false;
+      if (lost.timer !== null) clearTimer(lost.timer);
+      if (msg.ok !== true || typeof msg.words !== 'string' || unsafeText(msg.words) || typeof msg.revision !== 'string' || !msg.revision) {
+        readFailed();
+        return true;
+      }
+      const { el } = lost;
+      lost = null;
+      takeRevision(msg, known.get(el));
+      step(el, 'read', { words: cleanText(msg.words) });
+      pump();
+      return true;
+    }
+    return false;
   }
 
   /** The state of an element (see STATES); `idle` for one the owner never touched. */
@@ -325,6 +452,9 @@ const STYLE_ID = 'dc-text-edit-style';
 const CSS = '.st-prose[id] :is(h1,h2,p,li).dc-text-edit-ok{cursor:text}'
   + '.st-prose[id] :is(h1,h2,p,li).dc-text-edit-ok:hover{outline:1px dashed currentColor;outline-offset:2px}'
   + '.dc-text-edit-on{outline:2px solid currentColor;outline-offset:2px}'
+  // Words the host has not confirmed: marked, never moved (no box, size or position change).
+  + '.st-prose [data-text-edit="pending"]{text-decoration:underline dotted;text-underline-offset:.2em;opacity:.65}'
+  + '.st-prose [data-text-edit="unknown"]{text-decoration:underline wavy;text-underline-offset:.2em;opacity:.65}'
   + '.dc-text-edit-hint{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:90vw;'
   + 'padding:8px 12px;border-radius:8px;background:#222;color:#fff;font:14px/1.4 system-ui,sans-serif;z-index:2147483647}';
 
@@ -350,6 +480,7 @@ export function parentOriginOf(value) {
  *   data-page           the page path the host saves to (default: location.pathname)
  *   data-hint-editor    the "change it in the editor" sentence, in the host's language
  *   data-hint-refused   the sentence for a refused edit, when the host's answer carries none
+ *   data-hint-unknown   the sentence for an edit whose answer did not come in time
  * Only runs inside a frame: the coral is an editing aid for a host that embeds the page.
  */
 export function mountAll(doc) {
@@ -379,7 +510,14 @@ export function mountAll(doc) {
     revision,
     post: (m) => win.parent.postMessage(m, parentOrigin),
     hint,
-    words: { useEditor: box.getAttribute('data-hint-editor') || '', refused: box.getAttribute('data-hint-refused') || '' },
+    words: {
+      useEditor: box.getAttribute('data-hint-editor') || '',
+      refused: box.getAttribute('data-hint-refused') || '',
+      unknown: box.getAttribute('data-hint-unknown') || '',
+    },
+    setTimer: (fn, ms) => win.setTimeout(fn, ms),
+    clearTimer: (t) => win.clearTimeout(t),
+    stop: (el) => { stop(el); if (typeof el.blur === 'function') el.blur(); }, // called only after the listeners below exist
   });
 
   // Mark what is editable, so hover shows it and nothing else changes cursor.

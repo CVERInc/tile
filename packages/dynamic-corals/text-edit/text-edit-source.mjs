@@ -80,6 +80,8 @@ export class El {
   get children() { return this.nodes.filter((n) => n instanceof El); }
   hasAttribute(n) { return n in this.attrs; }
   getAttribute(n) { return n in this.attrs ? this.attrs[n] : null; }
+  setAttribute(n, v) { this.attrs[n] = String(v); }
+  removeAttribute(n) { delete this.attrs[n]; }
   get textContent() { return this.nodes.map((n) => (n instanceof El ? n.textContent : n)).join(''); }
   set textContent(v) { this.nodes = [String(v)]; }
   *all() { for (const c of this.children) { yield c; yield* c.all(); } }
@@ -159,4 +161,29 @@ export function applyTextEdit(markdown, edit) {
   const next = lines.join('\n');
   const moved = parseSite(next).sections[si];
   return { ok: true, markdown: next, line: a.start, revision: sourceRevision(next), section: moved ? moved.id : a.section };
+}
+
+/**
+ * Read back what the page holds at a span — the host's answer to the coral's `readback` request,
+ * sent when an edit's answer never came. `request` = { anchor: { section, start, end } }.
+ * → { ok: true, words, revision, section } | { ok: false, reason: 'malformed' | 'not-found' }
+ *   words    — the words the element stamped with that span shows in this Markdown, rendered the
+ *              way the preview is (so the coral can tell whether its lost edit landed);
+ *   revision — sourceRevision of this Markdown: the coral's next edit is made against it;
+ *   section  — the id of the section that holds the span now (a title edit that landed changed it,
+ *              so the section in the request is not used to find the span).
+ * An edit rewrites one line into one line, so the span a frame holds stays valid across edits.
+ */
+export function readTextAt(markdown, request) {
+  const a = request && request.anchor;
+  if (!a || !Number.isInteger(a.start) || !Number.isInteger(a.end) || a.start < 0 || a.end < a.start) return { ok: false, reason: 'malformed' };
+  const md = String(markdown == null ? '' : markdown);
+  const span = a.start + '-' + a.end;
+  const hits = [];
+  for (const sec of htmlTree(renderSiteToHtml(parseSite(md, { sourceLines: true }))).all()) {
+    if (sec.tagName !== 'SECTION' || !sec.id) continue;
+    for (const el of sec.all()) if (el.getAttribute('data-src') === span && kindOf(el, sec)) hits.push({ el, sec });
+  }
+  if (hits.length !== 1) return { ok: false, reason: 'not-found' };
+  return { ok: true, words: cleanText(hits[0].el.textContent), revision: sourceRevision(md), section: hits[0].sec.id };
 }

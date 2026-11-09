@@ -30,12 +30,35 @@ it shows a short "change it in the editor" hint instead, and links keep working 
   host's answer ends `pending`: words typed while an edit of that element is outstanding are a
   draft, sent after a success against the new revision (Escape drops the draft, not the edit), so
   the preview never shows words as saved that the host did not save.
+- **Unconfirmed words are marked.** The element carries its state in `data-text-edit` (absent
+  when idle); the coral's stylesheet marks `pending` and `unknown` with a dotted or wavy underline
+  and lower opacity, without changing size or position.
+- **Bounded wait.** An edit not answered within `PENDING_TIMEOUT_MS` (10 s) makes its element
+  `unknown`: it shows the saved words, keeps anything being typed aside as a draft, takes no
+  clicks, and the coral asks the host to read the span back. A late answer to the edit is still
+  taken if it comes before the readback's answer; after that it is ignored. The readback's words
+  settle the edit: the sent words mean it landed (`idle`), anything else is a refusal. A readback
+  that is not answered in time either leaves the element `unknown` and ends editing in that frame.
+  Nothing else is sent while a readback is outstanding.
 - **Message.** `{ type: 'reef-text-edit', id, page, revision, anchor, before, after }` to the parent
   window at `data-parent-origin` only; the answer is
   `{ type: 'reef-text-edit-result', id, ok, hint?, revision?, section? }`, accepted only from that
   origin AND from the parent window itself. The origin must be one explicit http(s) origin (a
   trailing `/` is dropped); `*`, `null` and other spellings do not mount. A refusal puts the old
   words back and shows the hint. A success without `revision` ends editing in that frame.
+- **Readback.** `{ type: 'reef-text-edit-readback', id, page, revision, anchor }`, sent only when an
+  edit's answer did not come in time (`revision` is the one that edit was made against). The host
+  answers `{ type: 'reef-text-edit-readback-result', id, ok, words?, revision?, section? }`, same
+  origin and window rules: `words` is what the element stamped with the span `anchor.start`–
+  `anchor.end` shows in the page as saved now, `revision` that page's `sourceRevision`, `section`
+  the id of the section holding the span now (find the span by its lines: a title edit that landed
+  changed the section's id). `text-edit-source.mjs` `readTextAt` is the reference. Anything but
+  `ok: true` with words and a revision counts as no answer.
+- **Host contract.** The host processes the frame's messages in the order it receives them, one
+  at a time: an edit is applied or refused before a later readback is read, and an edit it has not
+  answered is never applied after it has answered a later readback. (Answers may be lost or late;
+  the coral copes with that. Reordered processing would let a readback report words a later
+  save then changes.)
 - **Source rule.** `text-edit-source.mjs` resolves an edit against the page Markdown and rewrites
   exactly one line, keeping its indent, list marker or `## `. Only `prose` sections; only fragments
   written as plain words on one line that render exactly as written; `after` must be plain words
@@ -55,7 +78,7 @@ Lets an owner change the words of a plain heading, paragraph or list item in a f
 
 Author: `official`.
 
-Host: `sitetile`. Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, relaying `revision` and `section` from a successful apply.
+Host: `sitetile`. Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, relaying `revision` and `section` from a successful apply. It processes the frame's messages in the order received, one at a time, and answers a `reef-text-edit-readback` with `reef-text-edit-readback-result` (text-edit-source.mjs `readTextAt`).
 
 ### Embed
 
@@ -74,5 +97,6 @@ Host: `sitetile`. Renderer output inside a frame, rendered with source spans (`p
 | `data-page` | string | no | — | The page path the host saves to. Absent: the frame's location.pathname. |
 | `data-hint-editor` | string | no | — | The host's sentence for text that has formatting or structure (use the editor). |
 | `data-hint-refused` | string | no | — | The host's sentence for a refused edit, when its answer carries none. |
+| `data-hint-unknown` | string | no | — | The host's sentence for an edit whose answer did not come in time (its words are not confirmed, and the coral is reading them back). |
 
 <!-- coral metadata: end -->

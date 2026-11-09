@@ -1,4 +1,4 @@
-// Review cases for the text-edit coral (rounds 1–4), each one a reproduction that used to pass
+// Review cases for the text-edit coral (rounds 1–6), each one a reproduction that used to pass
 // silently.   run: node --test packages/dynamic-corals/text-edit/text-edit-review.test.mjs
 //
 // Every case here once wrote words onto a line other than the one the owner tapped, or showed words
@@ -14,10 +14,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseSite, renderSiteToHtml } from '../../sitetile/site-core.js';
-import { editableAt, anchorFor, createEditor, cleanText, mountAll, RESULT_MESSAGE } from './text-edit-core.mjs';
+import { editableAt, anchorFor, createEditor, cleanText, mountAll, RESULT_MESSAGE, READBACK_MESSAGE, READBACK_RESULT_MESSAGE, PENDING_TIMEOUT_MS } from './text-edit-core.mjs';
 import * as source from './text-edit-source.mjs';
 
-const { applyTextEdit, sourceRevision } = source;
+const { applyTextEdit, sourceRevision, readTextAt } = source;
 
 // ── The applier's own element tree, plus the few DOM calls mountAll makes ──────────────────────
 class DomEl extends source.El {
@@ -51,13 +51,40 @@ const editOf = (f, after, md) => {
 };
 const find = (md, kind, text, nth = 0) => offered(render(md)).filter((f) => f.kind === kind && cleanText(f.el.textContent) === text)[nth];
 
+// A fake clock for the coral's bounded wait: tick(ms) runs every timer that falls due.
+function makeClock() {
+  let now = 0, n = 0;
+  const timers = new Map();
+  return {
+    setTimer: (fn, ms) => { timers.set(++n, { at: now + ms, fn }); return n; },
+    clearTimer: (id) => { timers.delete(id); },
+    tick(ms) {
+      const end = now + ms;
+      for (;;) {
+        const due = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        timers.delete(due[0]); now = due[1].at; due[1].fn();
+      }
+      now = end;
+    },
+    get pending() { return timers.size; },
+  };
+}
+
 // A host that applies what the coral posts to its own copy of the page, the way a real host does,
-// and answers only when told to (replies are asynchronous in a browser).
+// and answers only when told to (replies are asynchronous in a browser). A readback request is
+// answered with readTextAt, the reference for what a host reads back.
 function makeHost(md) {
-  const host = { md, inbox: [], refuse: new Set(), results: [] };
+  const host = { md, inbox: [], refuse: new Set(), results: [], clock: makeClock() };
   host.post = (m) => host.inbox.push(m);
   host.answer = (ed, pick = 'first') => {
     const m = pick === 'last' ? host.inbox.pop() : host.inbox.shift();
+    if (m.type === READBACK_MESSAGE) {
+      const r = readTextAt(host.md, m);
+      host.results.push({ id: m.id, ok: r.ok, readback: true });
+      ed.onResult({ type: READBACK_RESULT_MESSAGE, id: m.id, ok: r.ok, words: r.words, revision: r.revision, section: r.section });
+      return;
+    }
     const res = host.refuse.has(m.id) ? { ok: false, reason: 'refused-by-test' } : applyTextEdit(host.md, m);
     if (res.ok) host.md = res.markdown;
     host.results.push({ id: m.id, ok: res.ok, reason: res.reason });
@@ -68,7 +95,10 @@ function makeHost(md) {
   host.drain = (ed, pick) => { while (host.inbox.length) host.answer(ed, pick); };
   return host;
 }
-const editor = (host) => createEditor({ page: '/', revision: sourceRevision(host.md), post: host.post, hint: () => {} });
+const editor = (host, extra = {}) => createEditor({ page: '/', revision: sourceRevision(host.md), post: host.post, hint: () => {},
+  setTimer: host.clock.setTimer, clearTimer: host.clock.clearTimer, ...extra });
+// The host applies an edit but its answer never arrives (a dropped message, a closed tab).
+const applySilently = (host) => { const m = host.inbox.shift(); const res = applyTextEdit(host.md, m); assert.ok(res.ok, JSON.stringify(res)); host.md = res.markdown; return m; };
 
 // ── The anchor is the renderer's own source span ──────────────────────────────────────────────────
 test('a production render carries no spans, and nothing in it is offered', () => {
@@ -423,6 +453,156 @@ test('no user event leaves pending: click, blur, Enter, Escape and typing all ke
   assert.equal(host.inbox.length, 0, 'nothing was drafted, so nothing more is sent');
 });
 
+// ── Round 6: an unanswered edit never looks saved ───────────────────────────────────────────────
+// Change `Original` to `First`, press Enter, and the host never answers. The words were not
+// confirmed, so they are marked as pending while they wait, and after PENDING_TIMEOUT_MS the
+// element shows the saved words, is marked `unknown`, and asks the host to read the span back.
+const mark = (f) => f.el.getAttribute('data-text-edit');
+
+test('an unanswered edit is marked pending, then unknown with the saved words, and a readback is sent', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  assert.equal(mark(f), null, 'idle shows nothing');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  assert.equal(ed.stateOf(f.el), 'pending');
+  assert.equal(mark(f), 'pending', 'words the host has not confirmed are marked');
+  assert.equal(ed.onResult({ type: RESULT_MESSAGE, id: 'e999', ok: true, revision: 'bogus' }), false, 'a wrong id is nobody\'s answer');
+  assert.equal(mark(f), 'pending');
+  host.clock.tick(PENDING_TIMEOUT_MS - 1);
+  assert.equal(ed.stateOf(f.el), 'pending');
+  host.clock.tick(1);
+  assert.equal(ed.stateOf(f.el), 'unknown');
+  assert.equal(mark(f), 'unknown');
+  assert.equal(f.el.textContent, 'Original', 'unconfirmed words are not shown as the page');
+  assert.equal(host.inbox.length, 2);
+  const rb = host.inbox[1];
+  assert.equal(rb.type, READBACK_MESSAGE);
+  assert.deepEqual(rb.anchor, { section: 's1-about', start: 2, end: 2 });
+  assert.equal(rb.revision, sourceRevision('## About\n\nOriginal\n'));
+  host.inbox.shift(); // e1 is lost: never applied, never answered
+  host.answer(ed);    // the readback: the page still says Original
+  assert.equal(ed.stateOf(f.el), 'refused');
+  assert.equal(f.el.textContent, 'Original');
+  assert.notEqual(mark(f), 'pending'); assert.notEqual(mark(f), 'unknown');
+  ed.begin(f); f.el.textContent = 'Second'; const m = ed.commit();
+  assert.deepEqual([m.before, m.after, m.revision], ['Original', 'Second', sourceRevision(host.md)]);
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nSecond\n');
+  assert.equal(mark(f), null);
+});
+
+test('an edit the host saved but whose answer was lost: the readback finds it and the frame carries on', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  applySilently(host);
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  assert.equal(f.el.textContent, 'Original');
+  host.answer(ed);
+  assert.equal(ed.stateOf(f.el), 'idle');
+  assert.equal(f.el.textContent, 'First');
+  assert.equal(mark(f), null);
+  ed.begin(f); f.el.textContent = 'Second'; ed.commit(); host.drain(ed);
+  assert.equal(host.md, '## About\n\nSecond\n', 'the next edit is made against the revision read back');
+});
+
+test('a late answer to the lost edit is honoured before the readback, and the readback answer is then ignored', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  assert.equal(ed.stateOf(f.el), 'unknown');
+  host.answer(ed); // e1, late
+  assert.equal(ed.stateOf(f.el), 'idle');
+  assert.equal(f.el.textContent, 'First');
+  assert.equal(host.md, '## About\n\nFirst\n');
+  host.answer(ed); // the readback answer, no longer awaited
+  assert.equal(ed.stateOf(f.el), 'idle');
+  assert.equal(f.el.textContent, 'First');
+});
+
+test('once the readback has answered, a late answer to the lost edit is ignored', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  const lost = host.inbox.shift();
+  host.answer(ed); // readback: Original
+  assert.equal(ed.stateOf(f.el), 'refused');
+  assert.equal(ed.onResult({ type: RESULT_MESSAGE, id: lost.id, ok: true, revision: 'r-late' }), false);
+  assert.equal(f.el.textContent, 'Original');
+  assert.equal(ed.stateOf(f.el), 'refused');
+});
+
+test('a readback that is never answered: the element stays unknown and untouchable, and queued edits roll back', () => {
+  const host = makeHost('## About\n\nOne\n\nTwo\n');
+  const root = render(host.md);
+  const hints = [];
+  const ed = editor(host, { hint: (t) => hints.push(t) });
+  const [a, b] = offered(root).filter((g) => g.kind === 'p');
+  ed.begin(a); a.el.textContent = 'Uno'; ed.commit();
+  ed.begin(b); b.el.textContent = 'Dos'; ed.commit();
+  assert.equal(mark(b), 'pending', 'queued words are pending too');
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  assert.equal(ed.stateOf(a.el), 'unknown');
+  assert.equal(ed.stateOf(b.el), 'pending', 'it waits for the readback');
+  host.clock.tick(PENDING_TIMEOUT_MS); // the readback is not answered either
+  assert.equal(ed.stateOf(a.el), 'unknown');
+  assert.equal(a.el.textContent, 'One');
+  assert.equal(ed.stateOf(b.el), 'refused');
+  assert.equal(b.el.textContent, 'Two');
+  assert.equal(host.clock.pending, 0, 'nothing is left waiting');
+  assert.equal(ed.begin(a), false, 'an element whose fate is unknown cannot be edited');
+  assert.equal(host.inbox.length, 2, 'e1 and the readback; nothing else was sent');
+});
+
+test('while a readback is outstanding nothing else is sent; it goes once the readback is answered', () => {
+  const host = makeHost('## About\n\nOne\n\nTwo\n');
+  const root = render(host.md);
+  const ed = editor(host);
+  const [a, b] = offered(root).filter((g) => g.kind === 'p');
+  ed.begin(a); a.el.textContent = 'Uno'; ed.commit();
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  ed.begin(b); b.el.textContent = 'Dos'; assert.equal(ed.commit(), null, 'it waits its turn');
+  assert.equal(ed.stateOf(b.el), 'pending');
+  assert.deepEqual(host.inbox.map((m) => m.type), ['reef-text-edit', READBACK_MESSAGE]);
+  host.inbox.shift(); host.answer(ed); // e1 lost; the readback says One
+  assert.equal(host.inbox.length, 1);
+  assert.deepEqual([host.inbox[0].before, host.inbox[0].after], ['Two', 'Dos']);
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nOne\n\nDos\n');
+});
+
+test('words being typed when the wait runs out are kept aside, and sent once the readback says the edit did not land', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const root = render(host.md);
+  const stopped = [];
+  const ed = editor(host, { stop: (el) => stopped.push(el) });
+  const f = offered(root).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  ed.begin(f); f.el.textContent = 'Second';
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  assert.deepEqual(stopped, [f.el], 'typing is ended');
+  assert.equal(ed.active, null);
+  assert.equal(f.el.textContent, 'Original');
+  host.inbox.shift(); // e1 lost
+  host.answer(ed);    // readback: Original
+  assert.equal(host.inbox.length, 1);
+  assert.deepEqual([host.inbox[0].before, host.inbox[0].after], ['Original', 'Second']);
+  host.drain(ed);
+  assert.equal(host.md, '## About\n\nSecond\n');
+  assert.equal(f.el.textContent, 'Second');
+  assert.equal(ed.stateOf(f.el), 'idle');
+});
+
 // ── Mounting: a double of the frame, its parent and a sibling ─────────────────────────────────────
 function frame(attrs, md = '## About\n\nOld\n') {
   const root = render(md);
@@ -431,8 +611,9 @@ function frame(attrs, md = '## About\n\nOld\n') {
   const docListeners = {}, winListeners = {}, sent = [];
   const parent = { postMessage: (m, targetOrigin) => { if (targetOrigin === 'null') throw new SyntaxError("Invalid target origin 'null'"); sent.push({ m, targetOrigin }); } };
   const win = { parent, top: {}, location: { pathname: '/' }, addEventListener: (n, f) => { winListeners[n] = f; }, clearTimeout() {}, setTimeout() { return 1; } };
+  const head = new DomEl('head', {}, null);
   const doc = {
-    defaultView: win, head: new DomEl('head', {}, null), body: root,
+    defaultView: win, head, body: root,
     querySelector: (sel) => (sel === '[data-dynamic-coral="text-edit"]' ? box : null),
     querySelectorAll: (sel) => root.querySelectorAll(sel),
     getElementById: () => null,
@@ -446,7 +627,8 @@ function frame(attrs, md = '## About\n\nOld\n') {
   const click = () => docListeners.click({ target: p });
   const focusout = () => docListeners.focusout({ target: p });
   const reply = (data, from) => winListeners.message({ data, origin: from.origin, source: from.source });
-  return { editor: ed, sent, p, parent, key, click, focusout, reply };
+  const css = () => head.nodes.map((n) => n.textContent).join('');
+  return { editor: ed, sent, p, parent, key, click, focusout, reply, css };
 }
 const REV = 'r-test';
 
@@ -510,4 +692,15 @@ test('in the frame: Enter, click again, refusal, leave — the old words are bac
   assert.equal(f.sent.length, 1, 'leaving the field does not retry the refused edit');
   f.click(); f.key({ key: 'Enter' });
   assert.equal(f.sent.length, 1, 'neither does Enter without typing');
+});
+
+test('in the frame: pending words are marked, and the stylesheet marks pending and unknown without moving anything', () => {
+  const f = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  f.click(); f.p.textContent = 'New'; f.key({ key: 'Enter' });
+  assert.equal(f.p.getAttribute('data-text-edit'), 'pending');
+  assert.match(f.css(), /\[data-text-edit="pending"\]\{[^}]*text-decoration[^}]*\}/);
+  assert.match(f.css(), /\[data-text-edit="unknown"\]\{[^}]*\}/);
+  assert.doesNotMatch(f.css().match(/\[data-text-edit[^{]*\{[^}]*\}/g).join(''), /margin|padding|border|font-size|display|position/, 'no layout shift');
+  f.reply({ type: RESULT_MESSAGE, id: 'e1', ok: true, revision: 'r2' }, { origin: 'https://editor.example', source: f.parent });
+  assert.equal(f.p.getAttribute('data-text-edit'), null);
 });
