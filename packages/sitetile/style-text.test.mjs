@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { censusSource, loadAstroParse, SRC } from './style-sink-census.mjs';
 import { styleText } from './astro/src/lib/style-text.mjs';
 
 test('no `</style` survives, in any case, however it is nested', () => {
@@ -36,77 +36,133 @@ test('null/undefined are the empty string', () => {
 });
 
 // Every inline <style> the renderer fills with set:html must route its text through styleText,
-// including any added later. A static census: a `<style … set:html={X}>` whose X does not start
-// with `styleText(` is a sink that can be closed by whatever X carries.
-const SRC = fileURLToPath(new URL('./astro/src', import.meta.url));
+// including any added later. The census reads each `.astro` file through the Astro compiler's own
+// parser (style-sink-census.mjs says what it checks and why it no longer reads text). Without the
+// renderer's dependencies the parser cannot load, and the census FAILS rather than skipping: a
+// census that cannot look must not report that it found nothing.
 const walk = (dir) => readdirSync(dir).flatMap((n) => {
   const p = join(dir, n);
   return statSync(p).isDirectory() ? walk(p) : (p.endsWith('.astro') ? [p] : []);
 });
-
-// Conservative census. Every `set:html` token in a template (found as plain text, so quotes,
-// template literals and comments cannot hide one) is classified by the opening tag it sits in: the
-// text from the nearest preceding `<` up to the token must be a SIMPLE opening tag, meaning a tag name
-// followed only by bare attributes, quoted values without `<`, or brace values without `{`, `}` or `<`.
-// Anything else (a closer-like string, a nested expression, a comment, a stray quote) cannot be
-// classified and FAILS. A `<style>` sink must be exactly
-// `set:html={styleText(<identifier or member path>)}`. A false alarm is fixed by writing the sink in
-// that simple shape, never by teaching this scanner more syntax.
-const ALLOWED_SINK = /^set:html\s*=\s*\{\s*styleText\(\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\)\s*\}/;
-const SIMPLE_OPEN = /^<([A-Za-z][\w.:-]*)((?:\s+[A-Za-z_:@][\w.:@-]*(?:\s*=\s*(?:"[^"<]*"|'[^'<]*'|\{[^{}<]*\}))?|\s+\{\.\.\.[^{}<]*\})*)\s+$/;
-function styleSinks(src) {
-  const out = [];
-  for (const m of src.matchAll(/set:html/g)) {
-    const lt = src.lastIndexOf('<', m.index);
-    const head = lt === -1 ? '' : src.slice(lt, m.index);
-    const open = SIMPLE_OPEN.exec(head);
-    const value = src.slice(m.index);
-    if (!open) { out.push({ index: m.index, value, tag: null }); continue; }
-    if (open[1].toLowerCase() === 'style') out.push({ index: m.index, value, tag: 'style' });
-  }
-  return out;
+const parserLoad = loadAstroParse().then((parse) => ({ parse }), (error) => ({ error }));
+async function astroParse() {
+  const { parse, error } = await parserLoad;
+  if (error) assert.fail(`the style-sink census cannot load the Astro parser (@astrojs/compiler-rs via packages/sitetile/astro/node_modules): ${error.message}`);
+  return parse;
 }
-const wrapped = (hit) => hit.tag === 'style' && ALLOWED_SINK.test(hit.value);
+const FILES = walk(SRC);
+const CENSUSED = new Set(FILES);
+const FIXTURE = join(SRC, 'components', 'Fixture.astro');
+// Every fixture gets the canonical import, so a rejection below is about the sink's shape and not
+// merely about a missing import.
+const HEAD = "---\nimport { styleText } from '../lib/style-text.mjs';\nimport SiteLayout from '../layouts/SiteLayout.astro';\nconst authorCss = 'a{}</style><i>injected</i>';\nconst x = 1;\n---\n";
+const run = (parse, body, head = HEAD) => censusSource(head + body, parse, { file: FIXTURE, censused: CENSUSED });
 
-test('census scanner: every non-canonical sink shape is found and rejected', () => {
+const SHAPE = /is not set:html=\{styleText/;
+const NOT_PLAIN = /not a plain element/;
+const UNPROVEN = /cannot prove is not style/;
+const PARSE = /parse diagnostic|parse\(\) threw/;
+const BOUND = /`styleText` is bound or used here/;
+
+test('census: every non-canonical sink shape is rejected, for the reason it is wrong', async () => {
+  const parse = await astroParse();
   const unsafe = [
-    '<style is:inline set:html = {authorCss}></style>',
-    '<style is:inline data-label=">" set:html={authorCss}></style>',
-    '<style set:html={authorCss}></style>',
-    '<style is:inline data-x={`a${`"`}z`} set:html={authorCss}/>',
-    '<style is:inline data-x={x /* } " */} set:html={authorCss}/>',
-    '<style is:inline set:html={styleText("") + authorCss}/>',
-    '<style is:inline set:html={styleText(a)(b)}/>',
-    '<style is:inline data-label="</style>" set:html={authorCss}></style>',
-    '<style is:inline data-x={"</style>"} set:html={authorCss}></style>',
-    '<style is:inline data-x={x /* </style */} set:html={authorCss}></style>',
-    '<style data-x="<i" set:html={authorCss}></style>',
+    // rounds 2–4 (the text scanner's regression list, unchanged)
+    ['<style is:inline set:html = {authorCss}></style>', SHAPE],
+    ['<style is:inline data-label=">" set:html={authorCss}></style>', SHAPE],
+    ['<style set:html={authorCss}></style>', SHAPE],
+    ['<style is:inline data-x={`a${`"`}z`} set:html={authorCss}/>', SHAPE],
+    ['<style is:inline data-x={x /* } " */} set:html={authorCss}/>', SHAPE],
+    ['<style is:inline set:html={styleText("") + authorCss}/>', SHAPE],
+    ['<style is:inline set:html={styleText(a)(b)}/>', SHAPE],
+    ['<style is:inline data-label="</style>" set:html={authorCss}></style>', SHAPE],
+    ['<style is:inline data-x={"</style>"} set:html={authorCss}></style>', SHAPE],
+    ['<style is:inline data-x={x /* </style */} set:html={authorCss}></style>', SHAPE],
+    ['<style data-x="<i" set:html={authorCss}></style>', SHAPE],
+    // round 4: attribute text impersonating a non-style opening tag
+    ['<style is:inline data-x={"<div a={"} set:html={authorCss}></style>', SHAPE],
+    ['<style is:inline data-x={`<div a={`} set:html={authorCss}></style>', SHAPE],
+    ['<style is:inline data-x={x /* <div a={ */} set:html={authorCss}></style>', SHAPE],
+    // shapes the AST makes it possible to name
+    ['<STYLE set:html={authorCss}></STYLE>', SHAPE],
+    ['<svg><style set:html={authorCss}/></svg>', SHAPE],
+    ['{[authorCss].map((c) => <style is:inline set:html={c}/>)}', SHAPE],
+    ['<style set:html="a{}"/>', SHAPE],
+    ['<style set:html/>', SHAPE],
+    ['<style set:html={styleText(authorCss[0])}/>', SHAPE],
+    ['<style set:html={styleText?.(authorCss)}/>', SHAPE],
+    ['<style set:html={styleText(authorCss, x)}/>', SHAPE],
+    ['<style set:html={styleText(String(authorCss))}/>', SHAPE],
+    ['<style set:html={styleText(authorCss)} set:html={authorCss}/>', /carries 2 set:html/],
+    ['<style {...{}} set:html={styleText(authorCss)}/>', /spread attributes/],
+    // a tag the AST cannot prove is not style
+    ['<Tag set:html={authorCss}/>', NOT_PLAIN],
+    ['<Tag.X set:html={authorCss}/>', NOT_PLAIN],
+    ['<SiteLayout set:html={authorCss}/>', NOT_PLAIN],
+    ['<Tag><Fragment set:html={authorCss}/></Tag>', UNPROVEN],
+    ['<Tag><div set:html={authorCss}/></Tag>', UNPROVEN],
+    ['<Tag><slot/></Tag>', UNPROVEN],
+    // the parser is the judge: if it complains, the census fails
+    ['<div set:html={authorCss}', PARSE],
   ];
-  for (const src of unsafe) {
-    const hits = styleSinks(src);
-    assert.ok(hits.length >= 1, `no sink found in ${src}`);
-    assert.ok(hits.some((h) => !wrapped(h)), `unsafe sink accepted: ${src}`);
+  for (const [body, why] of unsafe) {
+    const { failures } = run(parse, body);
+    assert.ok(failures.length >= 1, `unsafe sink accepted: ${body}`);
+    assert.ok(failures.some((f) => why.test(f.reason)), `${body}\n  rejected, but not for ${why}: ${JSON.stringify(failures)}`);
   }
-  const safe = '<style is:inline set:html = { styleText(a) }></style><style data-x="ok" set:html={styleText(theme.css)}></style><div set:html={x}></div>';
-  assert.deepEqual(styleSinks(safe).map((h) => wrapped(h)), [true, true]);
 });
 
-test('every <style set:html> sink in astro/src goes through styleText', () => {
-  const sinks = [];
-  const bare = [];
-  for (const file of walk(SRC)) {
-    const src = readFileSync(file, 'utf8');
-    // Only the template is markup; the frontmatter (between the first two `---` lines) is JS whose
-    // comments may mention `<style set:html>`.
-    const fence = src.startsWith('---') ? src.indexOf('\n---', 3) : -1;
-    const body = fence === -1 ? src : src.slice(fence + 4);
-    const offset = src.length - body.length;
-    for (const hit of styleSinks(body).map((h) => ({ ...h, index: h.index + offset }))) {
-      const at = `${relative(SRC, file)}:${src.slice(0, hit.index).split('\n').length}`;
-      sinks.push(at);
-      if (!wrapped(hit)) bare.push(at);
-    }
+test('census: `styleText` must be the real helper, not a local of the same name', async () => {
+  const parse = await astroParse();
+  const sink = '<style is:inline set:html={styleText(authorCss)}></style>';
+  const heads = [
+    ["---\nconst authorCss = 'x';\nconst styleText = (c) => c;\n---\n", BOUND],                       // the r4 fixtures' own frontmatter
+    ["---\nimport { styleText } from './style-text.mjs';\nconst authorCss = 'x';\n---\n", BOUND],     // a different module
+    ["---\nimport { identity as styleText } from '../lib/style-text.mjs';\nconst authorCss = 'x';\n---\n", BOUND],
+    ["---\nconst authorCss = 'x';\n---\n", /not the named import/],                                     // no import at all
+    [HEAD.replace('const x = 1;', 'let y = (styleText) => styleText;'), BOUND],                         // a shadowing parameter
+  ];
+  for (const [head, why] of heads) {
+    const { failures } = run(parse, sink, head);
+    assert.ok(failures.some((f) => why.test(f.reason)), `${head}\n  not rejected for ${why}: ${JSON.stringify(failures)}`);
   }
-  assert.ok(sinks.length >= 5, `the census found only ${sinks.length} sinks; the scanner no longer matches the layout`);
-  assert.deepEqual(bare, [], 'inline <style set:html> sinks not wrapped in styleText(…)');
+  assert.ok(run(parse, '{((styleText) => <style set:html={styleText(authorCss)}/>)((c) => c)}').failures.some((f) => BOUND.test(f.reason)),
+    'a template-level parameter named styleText shadows the import');
+  // the reviewer's round-4 fixtures, byte for byte
+  for (const v of ['"<div a={"', '`<div a={`', 'x /* <div a={ */']) {
+    const src = `---\nconst authorCss = "a{}</style><i data-probe=escaped>injected</i>";\nconst x = 1;\nconst a = "";\nconst styleText = x => x;\n---\n<style is:inline data-x={${v}} set:html={authorCss}></style>`;
+    const { failures } = censusSource(src, parse, { file: FIXTURE, censused: CENSUSED });
+    assert.ok(failures.some((f) => SHAPE.test(f.reason)), `reviewer fixture accepted: ${v}`);
+  }
+});
+
+test('census: the canonical shapes are accepted, and so are sinks the AST proves are not style', async () => {
+  const parse = await astroParse();
+  const safe = [
+    '<style is:inline set:html = { styleText(authorCss) }></style>',
+    '<style data-x="ok" data-y={"<div a={"} set:html={styleText(theme.css)}></style>',
+    '{x && <style is:inline set:html={styleText(authorCss)}></style>}',
+    '<div set:html={authorCss}></div><Fragment set:html={authorCss}/>',
+    '<SiteLayout><section><Fragment set:html={authorCss}/></section></SiteLayout>',
+    '<section><slot/></section>',
+  ];
+  for (const body of safe) assert.deepEqual(run(parse, body).failures, [], body);
+  assert.deepEqual(run(parse, safe[0] + safe[1]).sinks.map((s) => s.arg), ['authorCss', 'theme.css']);
+});
+
+test('every <style set:html> sink in astro/src goes through styleText', async () => {
+  const parse = await astroParse();
+  const sinks = [];
+  const bad = [];
+  for (const file of FILES) {
+    const { sinks: s, failures } = censusSource(readFileSync(file, 'utf8'), parse, { file, censused: CENSUSED });
+    for (const k of s) sinks.push({ at: `${relative(SRC, file)}:${k.line}`, arg: k.arg });
+    for (const f of failures) bad.push(`${relative(SRC, file)}:${f.line} ${f.reason}`);
+  }
+  assert.ok(FILES.length >= 20, `the census saw only ${FILES.length} .astro files`);
+  assert.deepEqual(bad, [], 'style sinks the census cannot prove safe');
+  // The six inline sheets SiteLayout fills today, by the identifier each one passes. A census
+  // that finds fewer has stopped seeing the layout.
+  const layout = sinks.filter((k) => k.at.startsWith('layouts/SiteLayout.astro:')).map((k) => k.arg).sort();
+  assert.deepEqual(layout, ['APPBAR_CSS', 'layerOrder', 'localeBannerBlock', 'pkgCssBlock', 'routeCssText', 'themeCssBlock']);
 });
