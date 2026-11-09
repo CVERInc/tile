@@ -1,12 +1,17 @@
 // chrome-links.mjs — THE reader, and the one writer, of every link-bearing chrome key a site's
 // frontmatter (`_site.md`, or a page that overrides it) carries.
 //
-// 🔴 PURE AND IMPORT-FREE. The renderer imports it (SiteLayout.astro, PostView.astro, lib/announce.mjs)
-// and anything outside this repo that has to know where a chrome link's target sits — a tool that
+// 🔴 PURE AND IMPORT-FREE. The renderer imports it (SiteLayout.astro, PostView.astro) and anything
+// outside this repo that has to know where a chrome link's target sits — a tool that
 // rewrites links when pages move — vendors this file verbatim. There is no second copy of these
 // grammars anywhere in this repo, and there must not be one anywhere else: two review rounds of a
 // re-implementation elsewhere found it disagreeing with the layout, and the only fix that stays
 // fixed is that both sides run THIS code.
+//
+// Two readers of the same rules stay where they are, pinned to this file by chrome-links.test.mjs
+// over the whole corpus on every run: site-core.js's parseSidebarNav (the reference renderer the
+// editor previews with) and lib/announce.mjs's `announce-href` trim (that module is also bundled
+// into a client script, and importing this file there adds a JS chunk to every announce page).
 //
 // A VALUE is what `meta[key]` holds — the frontmatter value as splitFrontmatter (site-core.js)
 // returns it, block scalars already joined. Every offset below is into that string.

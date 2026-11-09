@@ -5,10 +5,12 @@
 //   1. PARITY. Every chrome value this repo holds — the frontmatter of every tracked .md file, every
 //      `key: value` line in a tracked test or fixture source, a hand-written edge corpus, and a seeded
 //      fuzz over each grammar's own alphabet — is read by the renderer's OLD inline readers (frozen
-//      verbatim below, from SiteLayout.astro / PostView.astro / lib/announce.mjs as they stood before
-//      they were replaced by imports of chrome-links.mjs) and by the module, and the two must agree on
-//      every field. 🔴 The frozen copies are temporary: they are the oracle for the move, and can go
-//      once nobody needs to see that the move changed nothing.
+//      verbatim below, from SiteLayout.astro / PostView.astro as they stood before they were
+//      replaced by imports of chrome-links.mjs) and by the module, and the two must agree on every
+//      field. 🔴 The frozen copies are temporary: they are the oracle for the move, and can go once
+//      nobody needs to see that the move changed nothing. Two entries are NOT frozen copies but the
+//      live second readers chrome-links.mjs's header names — site-core.js's parseSidebarNav and
+//      lib/announce.mjs's `announce-href` — and those stay as a standing pin.
 //   2. SPANS. Every link parseChromeLinks reports names the exact characters of its href in the raw
 //      value, and every href the old reader took from the value is reported, in order.
 //   3. THE ROUND-TRIP LAW. withHref(key, v, link, link.href) === v for every link of every value, and
@@ -24,6 +26,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { splitFrontmatter, parseSidebarNav } from './site-core.js';
+import { announceModel } from './astro/src/lib/announce.mjs';
 import {
   CHROME_LINK_KEYS, parseChromeLinks, withHref,
   navMenuOf, footerLinksOf, footerColsOf, labelHrefListOf, headerCtaOf, headerActionsOf, postCtaOf,
@@ -108,7 +111,7 @@ const OLD = (() => {
     'language-href': (v) => (v ? String(v).trim() : ''),
     'header-actions-cart-href': (v) => (v ? String(v).trim() : ''),
     'age-gate-back-url': (v) => String(v || '').trim(),
-    'announce-href': (v) => String(v || '').trim(),
+    'announce-href': (v) => announceModel({ announce: 'x', 'announce-href': v }, { safeHref: (h) => h }).href,
   };
 })();
 
