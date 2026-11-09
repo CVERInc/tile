@@ -1,0 +1,17 @@
+{
+  "name": "text-edit",
+  "version": "0.1.0",
+  "author": "CVER Inc.",
+  "license": "MIT",
+  "source": "https://feelreef.com/corals/text-edit/0.1.0/text-edit.js",
+  "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/text-edit",
+  "requires": [],
+  "calls": [],
+  "stores": [
+    "none"
+  ],
+  "paid": false,
+  "funding": null,
+  "without": "requires nothing and calls nothing; it only posts messages to its parent frame at data-parent-origin. Without the script, or outside a frame, or without data-parent-origin and data-revision, nothing is mounted and the page reads exactly as rendered.",
+  "capabilities": []
+}
