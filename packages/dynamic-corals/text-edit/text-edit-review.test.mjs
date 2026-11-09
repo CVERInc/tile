@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseSite, renderSiteToHtml } from '../../sitetile/site-core.js';
-import { editableAt, anchorFor, createEditor, cleanText, mountAll, RESULT_MESSAGE, READBACK_MESSAGE, READBACK_RESULT_MESSAGE, PENDING_TIMEOUT_MS } from './text-edit-core.mjs';
+import { editableAt, anchorFor, createEditor, cleanText, mountAll, mintDoc, RESULT_MESSAGE, READBACK_MESSAGE, READBACK_RESULT_MESSAGE, READY_MESSAGE, EDIT_MESSAGE, DOC_SHAPE, PENDING_TIMEOUT_MS } from './text-edit-core.mjs';
 import * as source from './text-edit-source.mjs';
 
 const { applyTextEdit, sourceRevision, readTextAt } = source;
@@ -82,15 +82,15 @@ function makeHost(md) {
     if (m.type === READBACK_MESSAGE) {
       const r = readTextAt(host.md, m);
       host.results.push({ id: m.id, ok: r.ok, readback: true });
-      ed.onResult({ type: READBACK_RESULT_MESSAGE, id: m.id, ok: r.ok, words: r.words, revision: r.revision, section: r.section });
+      ed.onResult({ type: READBACK_RESULT_MESSAGE, doc: m.doc, id: m.id, ok: r.ok, words: r.words, revision: r.revision, section: r.section });
       return;
     }
     const res = host.refuse.has(m.id) ? { ok: false, reason: 'refused-by-test' } : applyTextEdit(host.md, m);
     if (res.ok) host.md = res.markdown;
     host.results.push({ id: m.id, ok: res.ok, reason: res.reason });
     ed.onResult(res.ok
-      ? { type: RESULT_MESSAGE, id: m.id, ok: true, revision: res.revision, section: res.section }
-      : { type: RESULT_MESSAGE, id: m.id, ok: false });
+      ? { type: RESULT_MESSAGE, doc: m.doc, id: m.id, ok: true, revision: res.revision, section: res.section }
+      : { type: RESULT_MESSAGE, doc: m.doc, id: m.id, ok: false });
   };
   host.drain = (ed, pick) => { while (host.inbox.length) host.answer(ed, pick); };
   return host;
@@ -256,7 +256,7 @@ test('a late refusal does not overwrite newer words typed into the same element'
   ed.begin(f); f.el.textContent = 'First'; ed.commit();
   ed.begin(f); f.el.textContent = 'Second'; ed.commit();
   host.refuse.add('e1');
-  assert.equal(ed.onResult({ type: RESULT_MESSAGE, id: 'e2', ok: true }), false, 'a reply to an id not sent yet is nobody\'s answer');
+  assert.equal(ed.onResult({ type: RESULT_MESSAGE, doc: ed.doc, id: 'e2', ok: true }), false, 'a reply to an id not sent yet is nobody\'s answer');
   host.drain(ed, 'last');
   assert.equal(cleanText(f.el.textContent), 'Second');
   assert.deepEqual(shown(render(host.md), 'p'), ['Second']);
@@ -468,7 +468,7 @@ test('an unanswered edit is marked pending, then unknown with the saved words, a
   ed.begin(f); f.el.textContent = 'First'; ed.commit();
   assert.equal(ed.stateOf(f.el), 'pending');
   assert.equal(mark(f), 'pending', 'words the host has not confirmed are marked');
-  assert.equal(ed.onResult({ type: RESULT_MESSAGE, id: 'e999', ok: true, revision: 'bogus' }), false, 'a wrong id is nobody\'s answer');
+  assert.equal(ed.onResult({ type: RESULT_MESSAGE, doc: ed.doc, id: 'e999', ok: true, revision: 'bogus' }), false, 'a wrong id is nobody\'s answer');
   assert.equal(mark(f), 'pending');
   host.clock.tick(PENDING_TIMEOUT_MS - 1);
   assert.equal(ed.stateOf(f.el), 'pending');
@@ -594,7 +594,7 @@ test('readback words that differ from `before` at the same revision are a host f
   ed.begin(f); f.el.textContent = 'First'; ed.commit();
   host.clock.tick(PENDING_TIMEOUT_MS);
   const rb = host.inbox[1];
-  assert.equal(ed.onResult({ type: READBACK_RESULT_MESSAGE, id: rb.id, ok: true, words: 'Elsewhere', revision: sourceRevision(host.md), section: 's1-about' }), true);
+  assert.equal(ed.onResult({ type: READBACK_RESULT_MESSAGE, doc: ed.doc, id: rb.id, ok: true, words: 'Elsewhere', revision: sourceRevision(host.md), section: 's1-about' }), true);
   assert.equal(ed.stateOf(f.el), 'changed');
   assert.equal(f.el.textContent, 'Original');
 });
@@ -626,7 +626,7 @@ test('once the readback has answered, a late answer to the lost edit is ignored'
   const lost = host.inbox.shift();
   host.answer(ed); // readback: Original
   assert.equal(ed.stateOf(f.el), 'refused');
-  assert.equal(ed.onResult({ type: RESULT_MESSAGE, id: lost.id, ok: true, revision: 'r-late' }), false);
+  assert.equal(ed.onResult({ type: RESULT_MESSAGE, doc: ed.doc, id: lost.id, ok: true, revision: 'r-late' }), false);
   assert.equal(f.el.textContent, 'Original');
   assert.equal(ed.stateOf(f.el), 'refused');
 });
@@ -697,8 +697,8 @@ function frame(attrs, md = '## About\n\nOld\n') {
   const root = render(md);
   const box = new DomEl('div', { 'data-dynamic-coral': 'text-edit', ...attrs }, root);
   root.appendChild(box);
-  const docListeners = {}, winListeners = {}, sent = [];
-  const parent = { postMessage: (m, targetOrigin) => { if (targetOrigin === 'null') throw new SyntaxError("Invalid target origin 'null'"); sent.push({ m, targetOrigin }); } };
+  const docListeners = {}, winListeners = {}, sent = [], readies = [];
+  const parent = { postMessage: (m, targetOrigin) => { if (targetOrigin === 'null') throw new SyntaxError("Invalid target origin 'null'"); (m && m.type === READY_MESSAGE ? readies : sent).push({ m, targetOrigin }); } };
   const win = { parent, top: {}, location: { pathname: '/' }, addEventListener: (n, f) => { winListeners[n] = f; }, clearTimeout() {}, setTimeout() { return 1; } };
   const head = new DomEl('head', {}, null);
   const doc = {
@@ -715,9 +715,10 @@ function frame(attrs, md = '## About\n\nOld\n') {
   const key = (init) => { const e = { target: p, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...init }; docListeners.keydown(e); return e; };
   const click = () => docListeners.click({ target: p });
   const focusout = () => docListeners.focusout({ target: p });
-  const reply = (data, from) => winListeners.message({ data, origin: from.origin, source: from.source });
+  // A host's answer echoes this document's `doc` unless the test says otherwise (tile#283).
+  const reply = (data, from) => winListeners.message({ data: { doc: ed && ed.doc, ...data }, origin: from.origin, source: from.source });
   const css = () => head.nodes.map((n) => n.textContent).join('');
-  return { editor: ed, sent, p, parent, key, click, focusout, reply, css };
+  return { editor: ed, sent, readies, p, parent, key, click, focusout, reply, css };
 }
 const REV = 'r-test';
 
@@ -793,4 +794,87 @@ test('in the frame: pending words are marked, and the stylesheet marks pending a
   assert.doesNotMatch(f.css().match(/\[data-text-edit[^{]*\{[^}]*\}/g).join(''), /margin|padding|border|font-size|display|position/, 'no layout shift');
   f.reply({ type: RESULT_MESSAGE, id: 'e1', ok: true, revision: 'r2' }, { origin: 'https://editor.example', source: f.parent });
   assert.equal(f.p.getAttribute('data-text-edit'), null);
+});
+
+// ── tile#283: a per-document nonce on every message, a ready, and answers addressed by it ─────────
+// Ids restart at e1/b1 in every document and the frame's window is the same object across a
+// navigation, so a host can only address an answer to the document that asked by `doc`.
+
+test('tile#283: mintDoc is 128 random bits as 32 lowercase hex digits, different every time', () => {
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) {
+    const d = mintDoc();
+    assert.match(d, DOC_SHAPE);
+    seen.add(d);
+  }
+  assert.equal(seen.size, 200);
+  const fixed = mintDoc({ getRandomValues: (b) => b.fill(0xab) });
+  assert.equal(fixed, 'ab'.repeat(16));
+});
+
+test('tile#283: every message the editor posts carries its doc — the edit and the readback — and ready() names it', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const ed = editor(host, { doc: 'd'.repeat(32) });
+  assert.equal(ed.doc, 'd'.repeat(32));
+  assert.deepEqual(ed.ready(), { type: READY_MESSAGE, doc: 'd'.repeat(32) });
+  const f = offered(render(host.md)).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  assert.deepEqual(Object.keys(host.inbox[0]).sort(), ['after', 'anchor', 'before', 'doc', 'id', 'page', 'revision', 'type']);
+  assert.equal(host.inbox[0].type, EDIT_MESSAGE);
+  assert.equal(host.inbox[0].doc, ed.doc);
+  host.inbox.length = 0; // the answer is lost
+  host.clock.tick(PENDING_TIMEOUT_MS);
+  assert.equal(host.inbox.length, 1);
+  assert.deepEqual(Object.keys(host.inbox[0]).sort(), ['anchor', 'doc', 'id', 'page', 'revision', 'type']);
+  assert.equal(host.inbox[0].type, READBACK_MESSAGE);
+  assert.equal(host.inbox[0].doc, ed.doc);
+  assert.match(editor(host).doc, DOC_SHAPE, 'without a doc given, one is minted');
+});
+
+test('tile#283: an answer whose doc is not its own — another document\'s, or none — is ignored, for edits and readbacks', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const ed = editor(host, { doc: 'a'.repeat(32) });
+  const f = offered(render(host.md)).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  const m = host.inbox[0];
+  for (const doc of ['b'.repeat(32), undefined, '', null, 'A'.repeat(32)]) {
+    assert.equal(ed.onResult({ type: RESULT_MESSAGE, doc, id: m.id, ok: false, hint: 'Not yours' }), false, String(doc));
+    assert.equal(f.el.textContent, 'First');
+    assert.equal(ed.stateOf(f.el), 'pending');
+  }
+  host.clock.tick(PENDING_TIMEOUT_MS); // unanswered: unknown, and a readback goes out
+  const rb = host.inbox.at(-1);
+  assert.equal(rb.type, READBACK_MESSAGE);
+  for (const doc of ['b'.repeat(32), undefined])
+    assert.equal(ed.onResult({ type: READBACK_RESULT_MESSAGE, doc, id: rb.id, ok: true, words: 'Original', revision: m.revision, section: 's1-about' }), false);
+  assert.equal(ed.stateOf(f.el), 'unknown');
+  assert.equal(ed.onResult({ type: READBACK_RESULT_MESSAGE, doc: ed.doc, id: rb.id, ok: true, words: 'Original', revision: m.revision, section: 's1-about' }), true, 'its own doc is taken');
+});
+
+test('tile#283: in the frame, the coral posts exactly one ready with its doc at mount, before any edit, and only when mounted', () => {
+  const f = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  assert.equal(f.readies.length, 1);
+  assert.deepEqual(f.readies[0], { m: { type: READY_MESSAGE, doc: f.editor.doc }, targetOrigin: 'https://editor.example' });
+  assert.equal(f.sent.length, 0, 'nothing else at mount');
+  f.click(); f.p.textContent = 'New'; f.key({ key: 'Enter' });
+  assert.equal(f.sent[0].m.doc, f.editor.doc);
+  assert.equal(f.readies.length, 1, 'an edit does not repeat the ready');
+  for (const attrs of [{ 'data-parent-origin': '*', 'data-revision': REV }, { 'data-parent-origin': 'https://editor.example' }])
+    assert.deepEqual(frame(attrs).readies, [], 'not mounted: no ready');
+});
+
+test('tile#283: two documents in the same frame have different docs; an answer to A\'s e1 is not B\'s e1', () => {
+  const a = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  const b = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  assert.notEqual(a.editor.doc, b.editor.doc);
+  a.click(); a.p.textContent = 'A words'; a.key({ key: 'Enter' });
+  b.click(); b.p.textContent = 'B words'; b.key({ key: 'Enter' });
+  assert.equal(a.sent[0].m.id, 'e1');
+  assert.equal(b.sent[0].m.id, 'e1', 'the same id in both documents');
+  // A's answer, posted into B's window (the frame navigated): ignored.
+  b.reply({ type: RESULT_MESSAGE, doc: a.editor.doc, id: 'e1', ok: false, hint: 'A refused' }, { origin: 'https://editor.example', source: b.parent });
+  assert.equal(b.p.textContent, 'B words');
+  assert.equal(b.p.getAttribute('data-text-edit'), 'pending');
+  b.reply({ type: RESULT_MESSAGE, id: 'e1', ok: false }, { origin: 'https://editor.example', source: b.parent });
+  assert.equal(b.p.textContent, 'Old', 'its own doc is taken');
 });

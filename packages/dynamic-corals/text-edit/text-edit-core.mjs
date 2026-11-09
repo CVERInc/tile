@@ -57,6 +57,15 @@ export const DEFAULT_REFUSED = 'That change could not be saved here. Open the ed
 export const DEFAULT_UNKNOWN = 'That change is not confirmed. It may not have been saved; reload the preview to check.';
 export const READBACK_MESSAGE = 'reef-text-edit-readback';
 export const READBACK_RESULT_MESSAGE = 'reef-text-edit-readback-result';
+/** Posted once when the coral is installed in a document: `{ type: READY_MESSAGE, doc }`. */
+export const READY_MESSAGE = 'reef-text-edit-ready';
+/** A per-document nonce: 128 random bits as 32 lowercase hex digits. Minted once per mount. */
+export const DOC_SHAPE = /^[0-9a-f]{32}$/;
+export function mintDoc(random = globalThis.crypto) {
+  const bytes = new Uint8Array(16);
+  random.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 // Sections the coral takes text from. Only `prose` in this slice: every other section type renders
 // its words through a component (a hero, a grid cell, a form label), and those stay untouchable —
@@ -201,13 +210,15 @@ const defaultClearTimer = (t) => clearTimeout(t);
 /**
  * The editing session. DOM-free apart from the elements it is handed, so node can drive it:
  *   page           — the page path the host saves to
+ *   doc            — this document's nonce (mintDoc), on every message; an answer carrying any
+ *                    other `doc`, or none, is nobody's answer
  *   revision       — the source revision the frame was rendered from (data-revision)
  *   post(message)  — send an edit (or a readback request) to the host
  *   hint(text, el) — show a short hint next to an element
  *   setTimer(fn, ms) / clearTimer(t) — the clock for the bounded wait (default: setTimeout)
  *   stop(el)       — end typing in an element the coral takes back (the wait ran out while typing)
  */
-export function createEditor({ page, revision, post, hint, words = {}, setTimer = defaultSetTimer, clearTimer = defaultClearTimer, stop = () => {}, timeoutMs = PENDING_TIMEOUT_MS }) {
+export function createEditor({ page, doc = mintDoc(), revision, post, hint, words = {}, setTimer = defaultSetTimer, clearTimer = defaultClearTimer, stop = () => {}, timeoutMs = PENDING_TIMEOUT_MS }) {
   let active = null;            // the element the owner is typing in (editing, or a pending draft)
   let seq = 0, readSeq = 0;
   let rev = typeof revision === 'string' && revision ? revision : null;
@@ -380,7 +391,7 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
       const anchor = rev && anchorFor(el, k.section, k.ack);
       if (!anchor) { step(el, 'refuse', { after: k.sent, text: null }); continue; }
       const id = 'e' + (++seq);
-      const message = { type: EDIT_MESSAGE, id, page, revision: rev, anchor: anchorOf(el, k, anchor), before: k.ack, after: k.sent };
+      const message = { type: EDIT_MESSAGE, doc, id, page, revision: rev, anchor: anchorOf(el, k, anchor), before: k.ack, after: k.sent };
       inflight = { id, el, after: k.sent, anchor: message.anchor, revision: rev, timer: null };
       try { post(message); } catch { inflight = null; step(el, 'refuse', { after: message.after, text: null }); continue; }
       inflight.timer = setTimer(() => editTimedOut(id), timeoutMs);
@@ -397,7 +408,7 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
     lost = { id, el, after, readId, timer: null, sentRevision: sentRev };
     step(el, 'timeout');
     try {
-      post({ type: READBACK_MESSAGE, id: readId, page, revision: sentRev, anchor });
+      post({ type: READBACK_MESSAGE, doc, id: readId, page, revision: sentRev, anchor });
       lost.timer = setTimer(() => readTimedOut(readId), timeoutMs);
     } catch { readFailed(); }
   }
@@ -424,7 +435,7 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
   /** The host's answer to the edit in flight, to an edit whose answer came late, or to a readback;
    *  anything else is nobody's answer. Returns whether it was taken. */
   function onResult(msg) {
-    if (!msg) return false;
+    if (!msg || msg.doc !== doc) return false; // another document's answer (or a host that did not echo doc)
     if (msg.type === RESULT_MESSAGE) {
       let el, after;
       if (inflight && msg.id === inflight.id) {
@@ -462,7 +473,10 @@ export function createEditor({ page, revision, post, hint, words = {}, setTimer 
   /** The state of an element (see STATES); `idle` for one the owner never touched. */
   const stateOf = (el) => (known.has(el) ? known.get(el).state : IDLE);
 
-  return { begin, commit, cancel, onResult, stateOf, get active() { return active ? { el: active } : null; } };
+  /** The one `ready` message this document posts when it is installed. */
+  const ready = () => ({ type: READY_MESSAGE, doc });
+
+  return { doc, ready, begin, commit, cancel, onResult, stateOf, get active() { return active ? { el: active } : null; } };
 }
 
 // ── Mounting (the browser half; text-edit-client.mjs calls this) ─────────────────────────────────
@@ -581,5 +595,7 @@ export function mountAll(doc) {
     if (e.source !== win.parent || e.origin !== parentOrigin) return; // the parent itself, nobody else
     editor.onResult(e.data);
   });
+  // Installed: tell the host which document this is. Every later message carries the same `doc`.
+  try { win.parent.postMessage(editor.ready(), parentOrigin); } catch { /* no host listening: nothing to edit for */ }
   return editor;
 }

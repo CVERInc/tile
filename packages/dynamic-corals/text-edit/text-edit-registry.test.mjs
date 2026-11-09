@@ -19,10 +19,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const metadataOf = (name) => JSON.parse(readFileSync(join(HERE, '..', name, 'metadata.json'), 'utf8'));
 const VERSION = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version;
 
-test('text-edit is a registry participant at 0.1.0, with a valid source manifest', () => {
+test('text-edit is a registry participant at 0.2.0, with a valid source manifest', () => {
   assert.equal(CORALS['text-edit'].registry, true);
   assert.ok(REGISTRY_CORALS.includes('text-edit'));
-  assert.equal(VERSION, '0.1.0');
+  assert.equal(VERSION, '0.2.0');
   const manifest = JSON.parse(readFileSync(join(HERE, 'manifest.json'), 'utf8'));
   assert.deepEqual(validateCoralManifest(manifest, { name: 'text-edit', version: VERSION }), { ok: true, missing: [], mismatches: [] });
   assert.equal(manifest.source, `https://feelreef.com/corals/text-edit/${VERSION}/text-edit.js`);
@@ -49,7 +49,7 @@ test('the public catalog does not list text-edit, and lists every other registry
   assert.equal(listedInCatalog({ listed: true }), true);
 });
 
-test('the registry build publishes text-edit@0.1.0: the artifact and its manifest', (t) => {
+test('the registry build publishes text-edit@0.2.0: the artifact and its manifest', (t) => {
   // build.mjs also rewrites <coral>/<coral>.js where it runs, so it runs on a COPY: inside the repo's
   // gitignored out/ (it stamps the commit with `git rev-parse`), never over the committed artifact.
   const repo = join(HERE, '../../..');
@@ -66,7 +66,7 @@ test('the registry build publishes text-edit@0.1.0: the artifact and its manifes
     delete env.CORAL_REGISTRY;
     execFileSync('node', [join(sandbox, 'build.mjs'), 'text-edit', '--registry', registry], { stdio: 'pipe', env });
     const dir = join(registry, 'versions', 'text-edit', VERSION);
-    assert.ok(existsSync(join(dir, 'text-edit.js')), 'versions/text-edit/0.1.0/text-edit.js');
+    assert.ok(existsSync(join(dir, 'text-edit.js')), 'versions/text-edit/0.2.0/text-edit.js');
     const norm = (text) => normalizeGeneratedCode(text, 'text-edit', VERSION);
     assert.equal(norm(readFileSync(join(dir, 'text-edit.js'), 'utf8')), norm(readFileSync(join(HERE, 'text-edit.js'), 'utf8')),
       'the published code is the committed local artifact (the commit stamp aside)');

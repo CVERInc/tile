@@ -132,11 +132,11 @@ function run(seed, steps) {
     const m = inbox.shift();
     if (m.type === READBACK_MESSAGE) {
       const res = ok ? readTextAt(md, m) : { ok: false };
-      outbox.push({ type: READBACK_RESULT_MESSAGE, id: m.id, ok: res.ok, words: res.words, revision: res.revision, section: res.section });
+      outbox.push({ type: READBACK_RESULT_MESSAGE, doc: m.doc, id: m.id, ok: res.ok, words: res.words, revision: res.revision, section: res.section });
     } else {
       const res = ok ? applyTextEdit(md, m) : { ok: false };
       if (res.ok) md = res.markdown;
-      outbox.push(res.ok ? { type: RESULT_MESSAGE, id: m.id, ok: true, revision: res.revision, section: res.section } : { type: RESULT_MESSAGE, id: m.id, ok: false });
+      outbox.push(res.ok ? { type: RESULT_MESSAGE, doc: m.doc, id: m.id, ok: true, revision: res.revision, section: res.section } : { type: RESULT_MESSAGE, doc: m.doc, id: m.id, ok: false });
     }
     return m.id;
   }
@@ -181,7 +181,7 @@ function run(seed, steps) {
       event = `stray(${id})`;
       const before = snapshot();
       if (inbox.some((m) => m.id === id) || outbox.some((a) => a.id === id)) continue; // that would be a real answer
-      const took = ed.onResult({ type, id, ok: r() < 0.5, revision: 'r-stray', words: 'Stray', section: 's1-about' });
+      const took = ed.onResult({ type, doc: ed.doc, id, ok: r() < 0.5, revision: 'r-stray', words: 'Stray', section: 's1-about' });
       if (took) fail(`a ${type} for ${id} was taken, but nothing was waiting for it`);
       if (snapshot() !== before) fail(`a stray ${type} for ${id} changed something`);
     }
@@ -229,7 +229,7 @@ test('the reviewer\'s round-4 sequence, as a fixed event list through the same c
     const res = applyTextEdit(md, m);
     assert.ok(res.ok, JSON.stringify(res));
     md = res.markdown;
-    ed.onResult({ type: RESULT_MESSAGE, id: m.id, ok: true, revision: res.revision, section: res.section });
+    ed.onResult({ type: RESULT_MESSAGE, doc: m.doc, id: m.id, ok: true, revision: res.revision, section: res.section });
   }
   assert.equal(md, '## About\n\nOriginal\n');
   assert.equal(cleanText(f.el.textContent), 'Original');
@@ -243,7 +243,7 @@ test('the reviewer\'s round-5 sequence: Enter, then the host never answers', () 
   const ed = createEditor({ page: '/', revision: sourceRevision(md), post: (m) => inbox.push(m), hint: () => {}, setTimer: clock.setTimer, clearTimer: clock.clearTimer });
   const f = offered(render(md)).find((g) => g.kind === 'p');
   ed.begin(f); f.el.textContent = 'First'; ed.commit();
-  assert.equal(ed.onResult({ type: RESULT_MESSAGE, id: 'e999', ok: true, revision: 'bogus' }), false);
+  assert.equal(ed.onResult({ type: RESULT_MESSAGE, doc: ed.doc, id: 'e999', ok: true, revision: 'bogus' }), false);
   assert.equal(f.el.getAttribute('data-text-edit'), 'pending', 'unconfirmed words are marked while they wait');
   clock.tick(PENDING_TIMEOUT_MS);
   assert.equal(cleanText(f.el.textContent), 'Original', 'and after the wait the saved words are back');
