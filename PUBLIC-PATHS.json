@@ -97,9 +97,16 @@
     },
     "packages/sitetile/astro/src/layouts/SiteLayout.astro": {
       "namedBy": [
-        "reef  apps/reef-mcp/tests/vendor-freshness.test.js:62,216 and tests/theme-schema.test.js:19"
+        "reef  apps/reef-mcp/tests/vendor-freshness.test.js:62,216 and tests/theme-schema.test.js:19",
+        "reef  apps/reef-mcp/scripts/vendor-tile.sh — cut parseNavPart…`const navRaw` out of this file's text into vendor/sitetile/nav-parse.js. Those functions now live in packages/sitetile/chrome-links.mjs, so that cut throws 'parseNavPart not found' (loudly, by design) until the script vendors chrome-links.mjs instead"
       ],
       "breaks": "same three test files"
+    },
+    "packages/sitetile/chrome-links.mjs": {
+      "namedBy": [
+        "reef  apps/reef-mcp — to be vendored verbatim as vendor/sitetile/chrome-links.mjs (scripts/vendor-tile.sh, `tile_show sitetile/chrome-links.mjs`, the way query-redirects.mjs is) for move_pages' chrome link rewrite and for nav-parse.js's three nav readers"
+      ],
+      "breaks": "reef-mcp cannot re-vendor the chrome link grammar, so its link rewrite and its menu before/after reports would be left reading a grammar the layout no longer uses — the exact divergence this file exists to end"
     },
     "packages/sitetile/og/build-og.mjs": {
       "namedBy": [
