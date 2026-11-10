@@ -18,6 +18,7 @@
 import { createFlowLoader } from '../../../../../pagetile/flow-loader.js';
 import { createFlowReader } from '../../../../../pagetile/flow-reader.js';
 
+const END_HASH = '__end';   // reader.js's sentinel: open this chapter on its LAST page (Prev from the next chapter)
 const PAD = 24;   // the flow page's inner padding, px, each side (matches .ptr-flow-page in the route CSS)
 
 // The chapter's pages as a book: what flow-core's paginateBook and positionAt read.
@@ -58,6 +59,16 @@ async function mountFlowReader(root, deps) {
   const book = bookFromDom(root);
   const stage = root.querySelector('.ptr-stage');
   const figs = Array.from(root.querySelectorAll('.ptr-page'));
+  // Whatever this function adds to the page is registered here. If mounting fails at ANY point the
+  // list is run backwards and the error rethrown, so reader.js's fallback (initReader) starts from
+  // the chapter exactly as the server drew it: no empty overlay, no hidden track, no stolen clicks.
+  const undo = [];
+  try { return await mount(); } catch (e) {
+    for (const f of undo.reverse()) { try { f(); } catch (e2) {} }
+    throw e;
+  }
+
+  async function mount() {
 
   // the surface the computed page is drawn on: it carries the font, so it is made before measuring
   const surface = doc.createElement('article');
@@ -67,6 +78,7 @@ async function mountFlowReader(root, deps) {
     width: Math.max(120, (stage ? stage.clientWidth : 360) - 2 * PAD),
     height: Math.max(120, (stage ? stage.clientHeight : 560) - 2 * PAD),
   };
+  undo.push(() => { if (surface.remove) surface.remove(); });
   let measure = d.measure;
   if (!measure) {
     if (stage) stage.append(surface);   // in the document, so its computed font is the real one
@@ -79,11 +91,21 @@ async function mountFlowReader(root, deps) {
     store: d.store || localStore(win),
     key: 'ptr-flow:' + (root.dataset.book || 'book') + ':' + (root.dataset.chapter || ''),
   });
-  const first = await reader.open();
+  let first = await reader.open();
   if (!first) { surface.remove && surface.remove(); return null; }
 
   root.dataset.flow = 'on';
+  undo.push(() => { delete root.dataset.flow; });
   if (stage && surface.parentNode !== stage) stage.append(surface);
+  // The stage was measured BEFORE data-flow="on": in a scroll-mode book that is the whole scrolling
+  // track, far taller than the screen, and the first page would be laid out for that height with
+  // its lower half cut off and unreachable. Now that the flow CSS has fixed the stage, measure again.
+  first = reader.resize(viewportNow()) || first;
+
+  // where to open: end sentinel > #pageId > the saved text position (already applied by open())
+  const hash = String((win && win.location && win.location.hash) || '').replace(/^#/, '');
+  if (hash === END_HASH) first = reader.goToEnd() || first;
+  else if (hash && figs.some((f) => f.dataset.page === hash)) first = reader.goToPage(hash) || first;
 
   // font controls, added to the toolbar only for a flow chapter — a fixed chapter's chrome is untouched
   const tools = root.querySelector('.ptr-tools');
@@ -92,6 +114,7 @@ async function mountFlowReader(root, deps) {
     b.type = 'button'; b.className = 'ptr-btn ptr-btn-font'; b.dataset.act = act;
     b.textContent = label; b.setAttribute('aria-label', title); b.title = title;
     if (tools) tools.prepend(b);
+    undo.push(() => { if (b.remove) b.remove(); });
     return b;
   };
   const larger = fontBtn('font-larger', 'A+', 'Larger text');
@@ -102,6 +125,11 @@ async function mountFlowReader(root, deps) {
   const nextBtn = root.querySelector('[data-act="next"]');
   const prevChapterUrl = root.dataset.prevChapter || '';
   const endcap = root.querySelector('.ptr-endcap');
+  const rtl = root.dataset.direction === 'rtl';
+  // the book-wide "Continue reading" link (preview/index) reads this key; reader.js writes the same shape
+  const store = d.store || localStore(win);
+  const posKey = 'ptr-pos:' + (root.dataset.book || 'book');
+  const chapterId = root.dataset.chapter || '';
 
   function render(v) {
     surface.textContent = '';
@@ -124,6 +152,7 @@ async function mountFlowReader(root, deps) {
       const im = fig && fig.querySelector('img');
       if (im) { const c = doc.createElement('img'); c.src = im.currentSrc || im.src; c.alt = im.alt || ''; c.className = 'ptr-flow-fixed'; surface.append(c); }
     }
+    if (v.page.pageId) store.set(posKey, JSON.stringify({ chapter: chapterId, page: v.page.pageId }));
     if (progress) progress.textContent = v.label;
     if (prevBtn) prevBtn.disabled = reader.atStart() && !prevChapterUrl;
     if (nextBtn) nextBtn.disabled = reader.atEnd() && !endcap;
@@ -138,14 +167,19 @@ async function mountFlowReader(root, deps) {
       return;
     }
     if (!forward && reader.atStart()) {
-      if (prevChapterUrl) win.location.href = prevChapterUrl;
+      if (prevChapterUrl) win.location.href = prevChapterUrl + '#' + END_HASH;   // → previous chapter, last page
       return;
     }
     render(reader.step(forward ? 1 : -1));
   }
 
   // capture phase, so the fixed reader's handlers (not attached for a flow chapter) can never also run
-  const on = (el, fn) => el && el.addEventListener('click', (e) => { if (e.stopImmediatePropagation) e.stopImmediatePropagation(); fn(); }, true);
+  const listen = (target, type, fn, capture) => {
+    if (!target || !target.addEventListener) return;
+    target.addEventListener(type, fn, !!capture);
+    undo.push(() => { if (target.removeEventListener) target.removeEventListener(type, fn, !!capture); });
+  };
+  const on = (el, fn) => listen(el, 'click', (e) => { if (e.stopImmediatePropagation) e.stopImmediatePropagation(); fn(); }, true);
   on(nextBtn, () => step(true));
   on(prevBtn, () => step(false));
   on(root.querySelector('.ptr-tap-fwd'), () => step(true));
@@ -158,26 +192,44 @@ async function mountFlowReader(root, deps) {
     if (!doc.body) return;
     const now = doc.body.classList.toggle('ptr-immersive');
     if (immersiveBtn) immersiveBtn.setAttribute('aria-pressed', now ? 'true' : 'false');
+    remeasure();   // the chrome just appeared or went: the stage is a different height
   };
   on(immersiveBtn, toggleImmersive);
   on(root.querySelector('.ptr-tap-center'), toggleImmersive);
   on(root.querySelector('[data-act="close"]'), () => { if (doc.body && doc.body.classList.contains('ptr-immersive')) toggleImmersive(); });
-  doc.addEventListener('keydown', (e) => {
+  listen(doc, 'keydown', (e) => {
     if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || '')) return;
-    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); step(true); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); step(false); }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;   // Cmd/Ctrl +/− is the browser's zoom, not ours
+    // ←/→ follow the reading direction, as reader.js does
+    if (e.key === 'ArrowRight') { e.preventDefault(); step(!rtl); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); step(rtl); }
+    else if (e.key === ' ') { e.preventDefault(); step(true); }
     else if (e.key === '+' || e.key === '=') render(reader.nudgeFont(1));
     else if (e.key === '-') render(reader.nudgeFont(-1));
     else if (e.key === 'f' || e.key === 'F') toggleImmersive();
     else if (e.key === 'Escape' && doc.body && doc.body.classList.contains('ptr-immersive')) toggleImmersive();
   });
-  if (win && win.addEventListener && !d.viewport) {
-    let t = null;
-    win.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(() => render(reader.resize(viewportNow())), 120); });
+  // Re-measure whenever the STAGE changes size, not only the window: immersive mode, a toolbar
+  // that wraps, the mobile URL bar. reader.resize() is a no-op when the size did not change.
+  let t = null;
+  function remeasure() {
+    if (d.viewport) return;
+    clearTimeout(t);
+    t = setTimeout(() => render(reader.resize(viewportNow())), 120);
+  }
+  undo.push(() => clearTimeout(t));
+  if (!d.viewport) {
+    if (stage && win && typeof win.ResizeObserver === 'function') {
+      const ro = new win.ResizeObserver(remeasure);
+      ro.observe(stage);
+      undo.push(() => ro.disconnect());
+    }
+    listen(win, 'resize', remeasure);
   }
 
   render(first);
   return { reader, render, surface };
+  }
 }
 
 export { mountFlowReader, bookFromDom, canvasMeasure };

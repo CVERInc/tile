@@ -57,10 +57,12 @@ class El {
   querySelectorAll(sel) { const out = []; const walk = (e) => { for (const c of e.children) { if (c.matches(sel)) out.push(c); walk(c); } }; walk(this); return out; }
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
   addEventListener(type, fn) { this.listeners.push({ type, fn }); }
+  removeEventListener(type, fn) { this.listeners = this.listeners.filter((l) => !(l.type === type && l.fn === fn)); }
   click() { const e = { type: 'click', stopImmediatePropagation() {} }; this.listeners.filter((l) => l.type === 'click').forEach((l) => l.fn(e)); }
 }
 function makeDoc() {
-  const doc = { listeners: [], createElement: (t) => new El(t, doc), addEventListener(type, fn) { doc.listeners.push({ type, fn }); } };
+  const doc = { listeners: [], createElement: (t) => new El(t, doc), addEventListener(type, fn) { doc.listeners.push({ type, fn }); },
+    removeEventListener(type, fn) { doc.listeners = doc.listeners.filter((l) => !(l.type === type && l.fn === fn)); } };
   return doc;
 }
 const h = (doc, tag, cls, data, kids) => { const e = doc.createElement(tag); e.className = cls || ''; Object.assign(e.dataset, data || {}); (kids || []).forEach((k) => e.append(k)); return e; };
@@ -195,6 +197,93 @@ const readerSrc = fs.readFileSync(path.join(HERE, '..', 'packages/sitetile/astro
 const staticImports = [...readerSrc.matchAll(/^\s*import\s[^;]*?from\s*['"]([^'"]+)['"]/gm)].map((m) => m[1]);
 ok(!staticImports.some((s) => /flow-(view|core|reader|loader)/.test(s)), 'reader.js imports nothing of the flow reader statically');
 ok(/\.ptr-page\[data-kind="flow"\]/.test(readerSrc) && /import\(['"]\.\/flow-view\.js['"]\)/.test(readerSrc), 'reader.js hands a chapter with a flow page to flow-view.js through import()');
+
+// ── 4. the stage is measured again once the flow layout is on ──────────────────────────────
+// In a scroll-mode book the stage is the whole scrolling track until data-flow="on" fixes it to
+// the screen. A page laid out for the first measurement would run far below the screen, cut off.
+const key = (d, k, extra) => d.listeners.filter((l) => l.type === 'keydown').forEach((l) => l.fn(Object.assign({ key: k, preventDefault() {} }, extra)));
+const fresh = (hash, data) => {
+  const d = makeDoc(); const r = chapterDom(d, proj, 'morning-ferry'); Object.assign(r.dataset, data || {});
+  return { d, r, win: { location: { hash: hash || '', href: '' } } };
+};
+{
+  const { d, r, win } = fresh('');
+  const stage = r.querySelector('.ptr-stage');
+  stage.clientWidth = VIEWPORT.width + 48;
+  Object.defineProperty(stage, 'clientHeight', { get: () => (r.dataset.flow === 'on' ? VIEWPORT.height + 48 : 5000) });
+  const m = await mountFlowReader(r, { doc: d, win, measure: defaultMeasure, store: memStore(), loader: countingLoader().loader });
+  eq(m.reader.view().total, expectTotal, 'a stage that was taller before the flow layout is measured again: page count is for the real screen');
+  r.querySelector('[data-act="next"]').click();
+  const ls = r.querySelector('.ptr-flow-page').querySelectorAll('.ptr-flow-line');
+  const hgt = ls.reduce((a, l) => a + parseFloat(l.style.height) + (parseFloat(l.style.marginBottom) || 0), 0) - (parseFloat(ls[ls.length - 1].style.marginBottom) || 0);
+  ok(hgt <= VIEWPORT.height + 1e-6, 'and no drawn page runs below the screen (' + hgt + ' ≤ ' + VIEWPORT.height + ')');
+}
+
+// ── 5. chapter boundaries and resume follow the fixed reader's rules ─────────────────────────
+{
+  const { d, r, win } = fresh('#__end');
+  await mountFlowReader(r, { doc: d, win, measure: defaultMeasure, viewport: VIEWPORT, store: memStore(), loader: countingLoader().loader });
+  eq(r.querySelector('.ptr-progress').textContent, expectTotal + ' / ' + expectTotal, '#__end (Prev from the next chapter) opens the LAST computed page');
+}
+{
+  const { d, r, win } = fresh('#' + flowEntry.id);
+  const st = memStore();
+  const m = await mountFlowReader(r, { doc: d, win, measure: defaultMeasure, viewport: VIEWPORT, store: st, loader: countingLoader().loader });
+  eq(r.querySelector('.ptr-progress').textContent, '2 / ' + expectTotal, '#pageId opens the first computed page of that book page');
+  eq(JSON.parse(st.get('ptr-pos:morning-ferry')), { chapter: proj.id, page: flowEntry.id }, 'the book-wide "Continue reading" key is written, in reader.js\'s shape');
+  for (let i = 0; i < 3; i++) r.querySelector('[data-act="next"]').click();
+  const at = m.reader.view().index;
+  const again = fresh('#' + flowEntry.id);
+  const m2 = await mountFlowReader(again.r, { doc: again.d, win: again.win, measure: defaultMeasure, viewport: VIEWPORT, store: st, loader: countingLoader().loader });
+  eq(m2.reader.view().index, at, 'the resume link (#pageId) keeps the saved place INSIDE that page, not its first screen');
+}
+{
+  const { d, r, win } = fresh('', { prevChapter: '/preview/ch0' });
+  await mountFlowReader(r, { doc: d, win, measure: defaultMeasure, viewport: VIEWPORT, store: memStore(), loader: countingLoader().loader });
+  r.querySelector('[data-act="prev"]').click();
+  eq(win.location.href, '/preview/ch0#__end', 'Prev on the first page goes to the previous chapter\'s LAST page');
+}
+
+// ── 6. keyboard: reading direction, and the browser's own zoom keys ──────────────────────────
+{
+  const { d, r, win } = fresh('', { direction: 'rtl' });
+  const m = await mountFlowReader(r, { doc: d, win, measure: defaultMeasure, viewport: VIEWPORT, store: memStore(), loader: countingLoader().loader });
+  key(d, 'ArrowLeft');
+  eq(m.reader.view().index, 1, 'in an rtl book ← is forward');
+  key(d, 'ArrowRight');
+  eq(m.reader.view().index, 0, 'and → is back');
+  const size = m.reader.view().fontSize;
+  key(d, '+', { metaKey: true }); key(d, '-', { ctrlKey: true });
+  eq(m.reader.view().fontSize, size, 'Cmd/Ctrl +/− (browser zoom) does not change the reader\'s font size');
+  key(d, '+');
+  ok(m.reader.view().fontSize > size, 'a bare + still does');
+}
+
+// ── 7. a mount that fails hands back the chapter as the server drew it ───────────────────────
+{
+  const { d, r, win } = fresh('');
+  const shot = (x) => JSON.stringify(x, (k, v) => (k === 'parentNode' || k === 'ownerDocument' || k === 'listeners' ? undefined : v));
+  const before7 = shot(r);
+  const progress = r.querySelector('.ptr-progress');
+  let armed = true;   // the LAST step of mounting (the first render) fails, after everything was set up
+  Object.defineProperty(progress, 'textContent', { get: () => '1 / 2', set() { if (armed) throw new Error('boom'); }, configurable: true });
+  let threw = false;
+  try { await mountFlowReader(r, { doc: d, win, measure: defaultMeasure, viewport: VIEWPORT, store: memStore(), loader: countingLoader().loader }); } catch (e) { threw = true; }
+  armed = false;
+  ok(threw, 'a failure while mounting is reported (reader.js then falls back to initReader)');
+  eq(r.dataset.flow, undefined, 'the flow flag is taken back, so the fixed track is not left hidden');
+  eq(r.querySelector('.ptr-flow-page'), null, 'no empty flow surface is left over the pages');
+  eq(r.querySelectorAll('.ptr-btn-font').length, 0, 'the font buttons are taken back');
+  const left = [r, ...r.querySelectorAll('button')].reduce((n, e) => n + e.listeners.length, 0) + d.listeners.length;
+  eq(left, 0, 'no click or key listener is left to swallow the fixed reader\'s own');
+  eq(shot(r).replace(/"_text":"[^"]*"/g, ''), before7.replace(/"_text":"[^"]*"/g, ''), 'the chapter\'s DOM is as the server drew it');
+}
+{
+  const { d, r, win } = fresh('');
+  let threw = false;
+  try { await mountFlowReader(r, { doc: d, win, measure: defaultMeasure, viewport: VIEWPORT, store: memStore(), loader: { open: async () => { throw new Error('engine did not load'); } } }); } catch (e) { threw = true; }
+  ok(threw && r.dataset.flow === undefined && r.querySelector('.ptr-flow-page') === null, 'an engine that fails to load leaves nothing behind either');
+}
 
 console.log(`pagetile-flow-reader: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

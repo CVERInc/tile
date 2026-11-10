@@ -110,6 +110,17 @@ function createFlowReader(opts) {
     view,
     goTo,
     step: (d) => goTo(cur + (d < 0 ? -1 : 1)),
+    // the LAST computed page (arriving from the next chapter with Prev)
+    goToEnd: () => (paged ? goTo(paged.total - 1) : null),
+    // the first computed page of a book page — unless the reader is already somewhere inside that
+    // book page, in which case the exact text position it holds is kept (a "#pageId" link that
+    // the resume link built must not throw away the place within the page)
+    goToPage(pageId) {
+      if (!paged) return null;
+      if (paged.pages[cur] && paged.pages[cur].pageId === pageId) return view();
+      const i = paged.pages.findIndex((x) => x.pageId === pageId);
+      return i < 0 ? view() : goTo(i);
+    },
     atStart: () => cur <= 0,
     atEnd: () => !!paged && cur >= paged.total - 1,
     position: () => anchor && Object.assign({}, anchor),
