@@ -3078,13 +3078,19 @@ export function relatedLinks(related, rows, pageHref) {
 	return out;
 }
 
-/** The list under the refusal sentence, or '' when there is nothing to show. Everything is escaped. */
-export function relatedListHtml(links, heading) {
+/** The heading and the links, without their wrapper; '' when there is nothing to show. Escaped. */
+export function relatedListInnerHtml(links, heading) {
 	if (!Array.isArray(links) || !links.length) return '';
 	const items = links
 		.map((l) => `<li class="${PREFIX}-related-item"><a href="${escHtml(l.href)}">${escHtml(l.label)}</a></li>`)
 		.join('');
-	return `<div class="${PREFIX}-related"><p class="${PREFIX}-related-heading">${escHtml(heading)}</p><ul class="${PREFIX}-related-list">${items}</ul></div>`;
+	return `<p class="${PREFIX}-related-heading">${escHtml(heading)}</p><ul class="${PREFIX}-related-list">${items}</ul>`;
+}
+
+/** The list under the refusal sentence, or '' when there is nothing to show. Everything is escaped. */
+export function relatedListHtml(links, heading) {
+	const inner = relatedListInnerHtml(links, heading);
+	return inner ? `<div class="${PREFIX}-related">${inner}</div>` : '';
 }
 
 /**
@@ -3657,8 +3663,11 @@ async function askKaito(apiBase, kind, id, query, copy) {
 	if (body && typeof body.text === 'string' && body.text) {
 		// The page URLs the server may attach to a refusal (strings only; `relatedLinks` decides
 		// which of them are shown).
+		// The server sends `{ url }` objects; a bare URL string is accepted as well (Tile #288 r1).
 		const related = body.kind === 'refused' && Array.isArray(body.related)
-			? body.related.map((r) => (r && typeof r.url === 'string' ? r.url : null)).filter(Boolean)
+			? body.related
+				.map((r) => (typeof r === 'string' ? r : r && typeof r.url === 'string' ? r.url : null))
+				.filter(Boolean)
 			: [];
 		return { kind: 'refused', text: copy.refused || body.text, related };
 	}
@@ -4532,10 +4541,15 @@ export async function mount(el, handoff = null) {
 					: answer ? answer.text : copy.error;
 				// Only a refusal that names pages gets the list, under the unchanged sentence. Titles come
 				// from the site's own search index when the host named one; otherwise the path is shown.
+				// 🔴 NEVER WAIT FOR THE INDEX (Tile #288 r1). The refusal, the person button and the list
+				// render now, with whatever titles the index already has (decoded paths otherwise). An
+				// index still loading swaps its titles into THIS list when it lands; one that fails or
+				// never settles leaves the paths.
 				let related = '';
-				if (answer && answer.kind === 'refused' && answer.related && answer.related.length) {
-					const rows = searchIndexUrl ? await ensureSearchIndex() : [];
-					related = relatedListHtml(relatedLinks(answer.related, rows, location.href), copy.relatedHeading);
+				const hasRelated = Boolean(answer && answer.kind === 'refused' && answer.related && answer.related.length);
+				const pageHref = location.href;
+				if (hasRelated) {
+					related = relatedListHtml(relatedLinks(answer.related, searchRows || [], pageHref), copy.relatedHeading);
 				}
 				log.insertAdjacentHTML(
 					'beforeend',
@@ -4543,6 +4557,16 @@ export async function mount(el, handoff = null) {
 						related +
 						(askOnly ? '' : `<button type="button" class="${PREFIX}-tohuman">${escHtml(copy.toHumanAfterRefusal)}</button>`)
 				);
+				if (related && searchIndexUrl && !searchRows) {
+					// The element is taken now, so a later answer's list is never the one rewritten.
+					const box = log.querySelector(`.${PREFIX}-related`);
+					const pending = answer.related;
+					ensureSearchIndex().then((rows) => {
+						if (!box || !Array.isArray(rows) || !rows.length) return;
+						const inner = relatedListInnerHtml(relatedLinks(pending, rows, pageHref), copy.relatedHeading);
+						if (inner) box.innerHTML = inner;
+					}, () => {});
+				}
 			}
 			log.scrollTop = log.scrollHeight;
 			if (askOnly) return true;

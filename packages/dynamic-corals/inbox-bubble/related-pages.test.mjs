@@ -67,6 +67,7 @@ Object.defineProperty(globalThis, 'navigator', {
 
 const requests = [];
 let kaito = null; // what POST /api/kaito does: returns a response or throws
+let indexMode = 'ok'; // how /search-index.json answers: 'ok' | 'never' | 'delay' (300 ms) | 'fail'
 const INDEX = [
 	{ t: 'Shipping FAQ', u: '/faq/', g: [], d: '', i: '', e: '' },
 	{ t: 'Prices <b>2026</b>', u: 'https://example.test/prices', g: [], d: '', i: '', e: '' },
@@ -75,7 +76,15 @@ const INDEX = [
 globalThis.fetch = async (url, init = {}) => {
 	requests.push({ url, init });
 	if (String(url).includes('/api/kaito')) return kaito();
-	if (String(url).includes('/search-index.json')) return { ok: true, status: 200, json: async () => INDEX };
+	if (String(url).includes('/search-index.json')) {
+		if (indexMode === 'never') return new Promise(() => {});
+		if (indexMode === 'fail') return { ok: false, status: 500, json: async () => ({}) };
+		if (indexMode === 'delay') {
+			await new Promise((r) => setTimeout(r, 300));
+			return { ok: true, status: 200, json: async () => INDEX };
+		}
+		return { ok: true, status: 200, json: async () => INDEX };
+	}
 	if (String(url).includes('/api/inbox/session') && init.method !== 'POST') {
 		const id = new URL(url).searchParams.get('id');
 		return { ok: true, status: 200, json: async () => ({ ok: true, claimed: !id.startsWith('off-') }) };
@@ -96,7 +105,7 @@ const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, 
 
 let seq = 0;
 /** One visit: mount, open, ask one question while KAITO behaves as `respond`. `off-` ids have no Inbox. */
-async function ask(respond, { askOnly = false, index = false } = {}) {
+async function ask(respond, { askOnly = false, index = false, boundMs = 0 } = {}) {
 	kaito = respond;
 	const attrs = { 'data-kind': 'site', 'data-id': `${askOnly ? 'off-' : 't'}u${++seq}`, 'data-kaito': '1' };
 	if (index) attrs['data-search-index'] = 'https://example.test/search-index.json';
@@ -107,8 +116,14 @@ async function ask(respond, { askOnly = false, index = false } = {}) {
 	await root.querySelector('.dc-inbox-open').emit('click');
 	root.querySelector('.dc-inbox-form').querySelector('textarea').value = 'do you ship to Japan?';
 	root.nodes.set('textarea', root.querySelector('.dc-inbox-form').querySelector('textarea'));
-	await root.querySelector('.dc-inbox-form').emit('submit');
-	await drain();
+	if (boundMs) {
+		// The reviewer's probe: the answer must be on screen within the bound, whatever the index does.
+		root.querySelector('.dc-inbox-form').emit('submit');
+		await new Promise((r) => setTimeout(r, boundMs));
+	} else {
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await drain();
+	}
 	const log = root.querySelector('.dc-inbox-log');
 	return { root, log, shown: log.innerHTML };
 }
@@ -232,4 +247,52 @@ test('every COPY table carries relatedHeading; zh-tw and ja are their own, the r
 	assert.notEqual(COPY['zh-tw'].relatedHeading, COPY.en.relatedHeading);
 	assert.notEqual(COPY.ja.relatedHeading, COPY.en.relatedHeading);
 	for (const locale of ['zh-cn', 'de', 'fr', 'es', 'pt-br', 'ko']) assert.equal(COPY[locale].relatedHeading, COPY.en.relatedHeading, locale);
+});
+
+// ── Tile #288 r1 ─────────────────────────────────────────────────────────────
+
+test('r1 finding 1: string entries in `related` are shown too (the server sends {url}; both are accepted)', async () => {
+	const { shown } = await ask(refusal(['https://example.test/faq/']), { index: true });
+	assert.ok(shown.includes(esc(COPY.en.relatedHeading)), shown);
+	assert.ok(shown.includes('<a href="https://example.test/faq/">Shipping FAQ</a>'), shown);
+	const mixed = (await ask(refusal(['https://example.test/a/', { url: 'https://example.test/b/' }, 7, null]))).shown;
+	assert.ok(mixed.includes('<a href="https://example.test/a/">/a/</a>'), mixed);
+	assert.ok(mixed.includes('<a href="https://example.test/b/">/b/</a>'), mixed);
+});
+
+test('r1 finding 2: a never-settling search index does not withhold the refusal (200 ms bound)', async () => {
+	indexMode = 'never';
+	try {
+		const { shown } = await ask(refusal([{ url: 'https://example.test/faq/' }]), { index: true, boundMs: 200 });
+		assert.ok(shown.includes(esc(COPY.en.refused)), `the refusal is not on screen: ${shown}`);
+		assert.ok(shown.includes('dc-inbox-tohuman'), 'the person button is not on screen');
+		assert.ok(shown.includes('<a href="https://example.test/faq/">/faq/</a>'), `path label missing: ${shown}`);
+	} finally {
+		indexMode = 'ok';
+	}
+});
+
+test('an index that arrives later swaps the titles in place; until then the path labels show', async () => {
+	indexMode = 'delay';
+	try {
+		const { log, shown } = await ask(refusal([{ url: 'https://example.test/faq/' }]), { index: true, boundMs: 100 });
+		assert.ok(shown.includes('<a href="https://example.test/faq/">/faq/</a>'), shown);
+		await new Promise((r) => setTimeout(r, 600));
+		const box = log.querySelector('.dc-inbox-related').innerHTML;
+		assert.ok(box.includes('<a href="https://example.test/faq/">Shipping FAQ</a>'), box);
+		assert.ok(box.includes(esc(COPY.en.relatedHeading)), box);
+	} finally {
+		indexMode = 'ok';
+	}
+});
+
+test('an index that fails leaves the path labels as they are', async () => {
+	indexMode = 'fail';
+	try {
+		const { log, shown } = await ask(refusal([{ url: 'https://example.test/faq/' }]), { index: true });
+		assert.ok(shown.includes('<a href="https://example.test/faq/">/faq/</a>'), shown);
+		assert.equal(log.querySelector('.dc-inbox-related').innerHTML.includes('Shipping FAQ'), false);
+	} finally {
+		indexMode = 'ok';
+	}
 });
