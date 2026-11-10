@@ -14,7 +14,12 @@
 //     photo's own shape, through the same book-core rule the model documents
 import { defaultKind } from '../../../../../pagetile/book-core.js';
 const root = document.querySelector('.ptr');
-if (root) initReader(root);
+// A chapter holding a flow page (reef#2279) is read by flow-view.js, reached ONLY through import(),
+// so a comic, PDF or photobook chapter never loads it and runs initReader exactly as before. If the
+// flow view cannot start (the engine failed to load), the fixed reader still makes the chapter readable.
+if (root && root.querySelector('.ptr-page[data-kind="flow"]')) {
+  import('./flow-view.js').then((m) => m.mountFlowReader(root)).then((r) => { if (!r) initReader(root); }, () => initReader(root));
+} else if (root) initReader(root);
 
 function initReader(root) {
   const track = root.querySelector('.ptr-track');

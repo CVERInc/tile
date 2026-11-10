@@ -91,7 +91,7 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
                 loading={p.pageInChapter <= 2 ? 'eager' : 'lazy'}
                 decoding="async"
               />
-            )}
+            )}{p.kind === 'flow' && <div class="ptr-flow-src">{p.caption}</div>}
           </figure>
         ))}
         {/* end-of-chapter endcap: a trailing panel (NOT a .ptr-page, so it's outside page
@@ -229,6 +229,25 @@ const bookKey = (book.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-')
      "Correct by symmetry, to re-verify when an RTL book ships" — no RTL book had shipped, so it
      never was; a screenshot of an RTL test book on 2026-10-20 was the first look. */
   .ptr[data-direction="rtl"][data-mode="paged"] .ptr-track { direction: rtl; }
+
+  /* ── flow pages (reef#2279) ─────────────────────────────────────────────────
+     Only a chapter with a `kind: flow` page has a .ptr-flow-src or a [data-flow] root; a comic,
+     PDF or photobook matches none of these rules. Before (or without) JS the text reads in place,
+     scrolling inside its page. flow-view.js then hides the track and draws ONE computed page on
+     the stage, line by line as the engine broke it: white-space: pre, because the browser must
+     not re-wrap what was counted. Its 24px padding is flow-view.js's PAD. */
+  .ptr-flow-src { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 40em; margin: 0 auto;
+    padding: 24px; font-family: Georgia, 'Noto Serif', serif; font-size: 18px; line-height: 1.5; }
+  .ptr[data-mode="paged"] .ptr-flow-src { max-height: 100%; overflow-y: auto; }
+  .ptr[data-flow="on"] .ptr-track { display: none; }
+  .ptr[data-flow="on"] .ptr-stage { height: calc(100svh - var(--ptr-chrome)); min-height: 360px; }
+  .ptr :global(.ptr-flow-page) { position: absolute; inset: 0; box-sizing: border-box; padding: 24px;
+    overflow: hidden; font-family: Georgia, 'Noto Serif', serif; color: var(--gd-text, #34303c); }
+  .ptr :global(.ptr-flow-line) { white-space: pre; overflow: hidden; line-height: 1.5; }
+  .ptr :global(.ptr-flow-fixed) { display: block; max-width: 100%; max-height: 100%; margin: 0 auto; object-fit: contain; }
+  .ptr[data-flow="on"] .ptr-scrub, .ptr[data-flow="on"] [data-act="spread"],
+  .ptr[data-flow="on"] [data-act="turn"], .ptr[data-flow="on"] [data-act="mode"] { display: none; }
+  .ptr :global(.ptr-btn-font) { min-width: 2.6em; justify-content: center; }
 
   /* ── photobook composition (book-core: kind full | mat, focus) ─────────────────
      Every rule is under [data-source="photobook"], which only a photobook's root carries — a
