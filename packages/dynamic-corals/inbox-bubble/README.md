@@ -526,14 +526,22 @@ just this coral, without changing any deployment's channels:
 
 ```sh
 node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
-sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.8.0/inbox-bubble.js
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.8.1/inbox-bubble.js
 ```
 
 The registry directory passed to the build belongs to the caller. `out/` above is ignored
 scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
 repository described in [the registry README](../registry/README.md). A published version
-is immutable: if that deployment already has different bytes at 0.8.0, stop and choose a
+is immutable: if that deployment already has different bytes at 0.8.1, stop and choose a
 new version before publishing.
+
+**0.8.1 lists possibly related pages under a KAITO refusal** (tile#288, reef#3133). On a refusal
+whose response carries `related` (page URLs, as `{ url }` objects or plain strings), the panel shows
+up to three same-origin links under the unchanged refusal sentence, each labelled with the page's
+title from the site's search index, or with its own decoded path when the index does not list it.
+The list draws at once, without waiting for the index, and titles swap in when it arrives. No
+passage text is shown. A patch version: every attribute keeps its meaning, and a response without
+`related` renders exactly as in 0.8.0.
 
 **0.8.0 is the corner dock** (reef#2790; see "In the corner dock" above) on top of 0.7.17 and the two
 fixes that landed after 0.7.17 without a bump (the KAITO-unavailable sentence and the zh-TW search
