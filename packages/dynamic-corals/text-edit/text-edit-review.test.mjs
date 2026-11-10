@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseSite, renderSiteToHtml } from '../../sitetile/site-core.js';
-import { editableAt, anchorFor, createEditor, cleanText, mountAll, mintDoc, RESULT_MESSAGE, READBACK_MESSAGE, READBACK_RESULT_MESSAGE, READY_MESSAGE, EDIT_MESSAGE, DOC_SHAPE, PENDING_TIMEOUT_MS } from './text-edit-core.mjs';
+import { editableAt, anchorFor, createEditor, cleanText, mountAll, mintDoc, RESULT_MESSAGE, READBACK_MESSAGE, READBACK_RESULT_MESSAGE, READY_MESSAGE, PROBE_MESSAGE, EDIT_MESSAGE, DOC_SHAPE, PENDING_TIMEOUT_MS } from './text-edit-core.mjs';
 import * as source from './text-edit-source.mjs';
 
 const { applyTextEdit, sourceRevision, readTextAt } = source;
@@ -717,8 +717,15 @@ function frame(attrs, md = '## About\n\nOld\n') {
   const focusout = () => docListeners.focusout({ target: p });
   // A host's answer echoes this document's `doc` unless the test says otherwise (tile#283).
   const reply = (data, from) => winListeners.message({ data: { doc: ed && ed.doc, ...data }, origin: from.origin, source: from.source });
+  // Delivers a message to the frame's window the way a browser does: to whatever 'message' listener
+  // is registered, or to nobody. Returns whether anything was listening (`reply` throws instead).
+  const deliver = (data, from) => {
+    const listener = winListeners.message;
+    if (listener) listener({ data, origin: from.origin, source: from.source });
+    return !!listener;
+  };
   const css = () => head.nodes.map((n) => n.textContent).join('');
-  return { editor: ed, sent, readies, p, parent, key, click, focusout, reply, css };
+  return { editor: ed, sent, readies, p, parent, key, click, focusout, reply, deliver, css };
 }
 const REV = 'r-test';
 
@@ -877,4 +884,71 @@ test('tile#283: two documents in the same frame have different docs; an answer t
   assert.equal(b.p.getAttribute('data-text-edit'), 'pending');
   b.reply({ type: RESULT_MESSAGE, id: 'e1', ok: false }, { origin: 'https://editor.example', source: b.parent });
   assert.equal(b.p.textContent, 'Old', 'its own doc is taken');
+});
+
+// ── The probe (1.1.0): a host asks which document the frame shows now ───────────────────────────
+// After a navigation the frame's window is the same object, and a document without the coral says
+// nothing. So a host probes on every load: the coral answers with its ready and the probe's nonce;
+// silence means the frame shows something that cannot edit.
+
+test('probe: the editor answers a probe with its ready and the same nonce, and nothing else is a probe', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const ed = editor(host, { doc: 'e'.repeat(32) });
+  assert.deepEqual(ed.probe({ type: PROBE_MESSAGE, nonce: 'n-1_AZ' }), { type: READY_MESSAGE, doc: 'e'.repeat(32), probe: 'n-1_AZ' });
+  for (const m of [null, {}, { type: PROBE_MESSAGE }, { type: PROBE_MESSAGE, nonce: '' }, { type: PROBE_MESSAGE, nonce: 'x'.repeat(65) },
+    { type: PROBE_MESSAGE, nonce: 'a b' }, { type: PROBE_MESSAGE, nonce: 7 }, { type: RESULT_MESSAGE, nonce: 'n1' }])
+    assert.equal(ed.probe(m), null, JSON.stringify(m));
+});
+
+test('probe: answering a probe changes nothing in the editing session', () => {
+  const host = makeHost('## About\n\nOriginal\n');
+  const ed = editor(host);
+  const f = offered(render(host.md)).find((g) => g.kind === 'p');
+  ed.begin(f); f.el.textContent = 'First'; ed.commit();
+  assert.equal(ed.stateOf(f.el), 'pending');
+  ed.probe({ type: PROBE_MESSAGE, nonce: 'n1' });
+  assert.equal(ed.stateOf(f.el), 'pending');
+  assert.equal(host.inbox.length, 1, 'no message besides the edit');
+  host.drain(ed);
+  assert.equal(ed.stateOf(f.el), 'idle', 'the edit is still answered normally');
+});
+
+test('probe: in the frame, a probe from the parent is answered once with the ready and its nonce, to the parent origin', () => {
+  const f = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  assert.equal(f.readies.length, 1, 'the ready at mount');
+  f.reply({ type: PROBE_MESSAGE, nonce: 'load-1' }, { origin: 'https://editor.example', source: f.parent });
+  assert.equal(f.readies.length, 2);
+  assert.deepEqual(f.readies[1], { m: { type: READY_MESSAGE, doc: f.editor.doc, probe: 'load-1' }, targetOrigin: 'https://editor.example' });
+  assert.equal(f.sent.length, 0, 'no edit or readback');
+});
+
+test('probe: a probe from another origin, or from a sibling window at the parent origin, is ignored', () => {
+  const f = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  f.reply({ type: PROBE_MESSAGE, nonce: 'evil' }, { origin: 'https://evil.example', source: f.parent });
+  f.reply({ type: PROBE_MESSAGE, nonce: 'sibling' }, { origin: 'https://editor.example', source: {} });
+  f.reply({ type: PROBE_MESSAGE, nonce: 'null' }, { origin: 'null', source: {} });
+  assert.equal(f.readies.length, 1, 'only the ready at mount');
+});
+
+test('probe: a document where the coral did not mount answers no probe — a probe is delivered, and nothing is posted', () => {
+  // Each way mounting fails: a wildcard or malformed parent origin, no revision. The probe is sent
+  // from the parent at every origin a host could be at; `deliver` reaches any listener the window has.
+  for (const [attrs, origins] of [
+    [{ 'data-parent-origin': '*', 'data-revision': REV }, ['https://editor.example', 'null', '*']],
+    [{ 'data-parent-origin': 'https://editor.example/path', 'data-revision': REV }, ['https://editor.example']],
+    [{ 'data-parent-origin': 'https://editor.example' }, ['https://editor.example']],
+  ]) {
+    const f = frame(attrs);
+    assert.equal(f.editor, null, JSON.stringify(attrs));
+    for (const origin of origins) {
+      const listening = f.deliver({ type: PROBE_MESSAGE, nonce: 'load-1' }, { origin, source: f.parent });
+      assert.equal(listening, false, `${JSON.stringify(attrs)}: no message listener after a failed mount`);
+    }
+    assert.deepEqual(f.readies, [], `${JSON.stringify(attrs)}: no ready, at mount or to the probe`);
+    assert.deepEqual(f.sent, [], `${JSON.stringify(attrs)}: nothing else posted`);
+  }
+  // CONTROL: the same delivery reaches a mounted coral, which answers.
+  const ok = frame({ 'data-parent-origin': 'https://editor.example', 'data-revision': REV });
+  assert.equal(ok.deliver({ type: PROBE_MESSAGE, nonce: 'load-1' }, { origin: 'https://editor.example', source: ok.parent }), true);
+  assert.deepEqual(ok.readies.map((r) => r.m.probe), [undefined, 'load-1']);
 });

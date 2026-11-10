@@ -281,7 +281,8 @@ test('a normalised source manifest that disagrees with the immutable version man
 });
 
 // tile#284 — a breaking release is a new major on a new channel: 1.x needs `v1`, and `v0` keeps the
-// 0.x contract its hosts were written for (text-edit: v0 = 0.1.0, never repointed; v1 = 1.0.0).
+// 0.x contract its hosts were written for. (text-edit itself was never published on v0: it is on v1
+// and latest only. The fixtures below are synthetic.)
 test('tile#284: a 1.x coral with no v1 channel is red, even when v0 and latest exist', () => {
   withFixture({ packageVersion: '1.0.0', channels: { v0: '1.0.0', latest: '1.0.0' } }, (fx) => {
     assert.throws(() =>

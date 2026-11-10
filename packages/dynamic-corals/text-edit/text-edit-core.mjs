@@ -59,6 +59,11 @@ export const READBACK_MESSAGE = 'reef-text-edit-readback';
 export const READBACK_RESULT_MESSAGE = 'reef-text-edit-readback-result';
 /** Posted once when the coral is installed in a document: `{ type: READY_MESSAGE, doc }`. */
 export const READY_MESSAGE = 'reef-text-edit-ready';
+/** The host asks which document the frame is showing: `{ type: PROBE_MESSAGE, nonce }`. The coral
+ *  answers with its ready carrying the same nonce: `{ type: READY_MESSAGE, doc, probe: nonce }`. */
+export const PROBE_MESSAGE = 'reef-text-edit-probe';
+/** A probe nonce: 1–64 characters of [A-Za-z0-9_-]. Anything else is not a probe. */
+export const PROBE_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
 /** A per-document nonce: 128 random bits as 32 lowercase hex digits. Minted once per mount. */
 export const DOC_SHAPE = /^[0-9a-f]{32}$/;
 export function mintDoc(random = globalThis.crypto) {
@@ -475,8 +480,14 @@ export function createEditor({ page, doc = mintDoc(), revision, post, hint, word
 
   /** The one `ready` message this document posts when it is installed. */
   const ready = () => ({ type: READY_MESSAGE, doc });
+  /** The answer to a host's probe — this document's ready, carrying the probe's nonce — or null
+   *  when the message is not a probe. Answering changes nothing in the editing session. */
+  const probe = (msg) =>
+    msg && msg.type === PROBE_MESSAGE && typeof msg.nonce === 'string' && PROBE_SHAPE.test(msg.nonce)
+      ? { type: READY_MESSAGE, doc, probe: msg.nonce }
+      : null;
 
-  return { doc, ready, begin, commit, cancel, onResult, stateOf, get active() { return active ? { el: active } : null; } };
+  return { doc, ready, probe, begin, commit, cancel, onResult, stateOf, get active() { return active ? { el: active } : null; } };
 }
 
 // ── Mounting (the browser half; text-edit-client.mjs calls this) ─────────────────────────────────
@@ -593,6 +604,8 @@ export function mountAll(doc) {
   });
   win.addEventListener('message', (e) => {
     if (e.source !== win.parent || e.origin !== parentOrigin) return; // the parent itself, nobody else
+    const answer = editor.probe(e.data);
+    if (answer) { try { win.parent.postMessage(answer, parentOrigin); } catch { /* the host is gone */ } return; }
     editor.onResult(e.data);
   });
   // Installed: tell the host which document this is. Every later message carries the same `doc`.
