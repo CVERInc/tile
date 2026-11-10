@@ -6,6 +6,7 @@
 // heading, and pageHref before delegating to the shared archive shell. Day archives (/YYYY/MM/DD/)
 // are intentionally absent — verified 404 on a live WP source, so replicating the capability faithfully
 // means NOT inventing them.
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from './ArchiveView.astro';
 import { dateHeading } from '../packages/lingo/locale.mjs';
 import { archivePrefixes } from '../lib/blog.mjs';
@@ -21,5 +22,5 @@ const heading = dateHeading(meta.lang, year, month);
 const subhead = archivePrefixes(meta).date + heading;
 const pageHref = (n) => (n === 1 ? base : `${base}/page/${n}`);
 ---
-<ArchiveView posts={filtered} corpus={posts} meta={meta} title={`${heading} — ${meta.title || ''}`}
+<ArchiveView posts={filtered} corpus={posts} meta={meta} title={`${heading}${siteTitleSuffix(meta)}`}
   heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} stamp={stamp} />

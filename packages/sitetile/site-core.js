@@ -569,9 +569,14 @@ function splitTypeInner(inner) {
 // model's own documentation named neither, which is part of why a dropped field stayed invisible.
 // Anything the parser collects has to have a home here AND a line in serializeSite, or it is
 // deleted on the next save. site-core-roundtrip.test.mjs is the ruler that says so.
-function parseSite(text) {
+function parseSite(text, opts) {
   const { meta, body } = splitFrontmatter(String(text || ''));
   const lines = body.split('\n');
+  // `{ sourceLines: true }` (an editing preview, never a production build): each section also
+  // carries `srcLines: { head, body }` — the 0-based lines of the page Markdown its `## ` line and
+  // its body start on — and the renderers stamp what they draw from that body with `data-src`
+  // (see srcAttr). Without the option nothing here or in any output changes.
+  const src = opts && opts.sourceLines ? (String(text || '').slice(0, String(text || '').length - body.length).match(/\n/g) || []).length : null;
 
   // Pass 1 — fence-aware split into sections by `## ` headings. Preamble (before the first `##`) is
   // dropped on re-serialize, same as book-core (authoring keeps everything under a section).
@@ -582,7 +587,7 @@ function parseSite(text) {
     if (RE_FENCE.test(line)) { fence = !fence; if (cur) cur.lines.push(line); continue; }
     if (!fence) {
       const h2 = RE_H2.exec(line);
-      if (h2) { cur = { title: (h2[1] || '').trim(), lines: [] }; rawSections.push(cur); continue; }
+      if (h2) { cur = { title: (h2[1] || '').trim(), lines: [], head: i }; rawSections.push(cur); continue; }
     }
     if (cur) cur.lines.push(line);
   }
@@ -609,10 +614,12 @@ function parseSite(text) {
     const t = /^[\t ]*$/.test(source.slice(lineStart, at))
       ? typeLineInner(source.slice(at, end)) : null;
     let beforeTypeLine = '';
+    let consumed = 0;   // lines of rs.lines before `rest` (the type line and anything above it)
     if (t !== null) {
       const st = splitTypeInner(t);
       type = st.type; params = st.params; hasTypeLine = true;
       beforeTypeLine = source.slice(0, at);
+      consumed = (source.slice(0, Math.min(end + 1, source.length)).match(/\n/g) || []).length;
       rest = source.slice(Math.min(end + 1, source.length)).split('\n');
     }
 
@@ -844,11 +851,15 @@ function parseSite(text) {
     } else {
       body = blockOf(rest);
     }
+    // blockOf drops only leading empty lines, so the body starts that many lines into `rest`.
+    let lead = 0;
+    while (lead < rest.length && rest[lead] === '') lead++;
 
     return {
       id: 's' + (si + 1) + (rs.title ? '-' + slugify(rs.title, '') : ''),
       title: rs.title, type, params, hasTypeLine, body, cells, groups, entries, faqs, fields,
       ...(beforeTypeLine ? { beforeTypeLine } : {}),
+      ...(src !== null ? { srcLines: { head: src + rs.head, body: src + rs.head + 1 + consumed + lead } } : {}),
     };
   });
 
@@ -1739,7 +1750,7 @@ function renderList(items) {
     // leak through some OTHER route) — with no children to hold either, an `<li></li>` would be exactly
     // the empty-block leak issue #496 is about. A comment-only item that DOES have nested children still
     // needs its `<li>` — that's where the children's `<ul>`/`<ol>` lives.
-    if (it.text.trim() || children) html += '<li>' + inlineHtml(it.text) + children + '</li>';
+    if (it.text.trim() || children) html += '<li' + (it.src || '') + '>' + inlineHtml(it.text) + children + '</li>';
     i = j;
   }
   return html + '</' + tag + '>';
@@ -2183,6 +2194,15 @@ function softJoin(lines, br, cjk) {
 // opts.dialogue: a dialogueContext() shared across every bodyHtml call that makes up ONE page, so
 // bubble sides are decided per page (#68). Absent → one per call, which is one per page for
 // every caller that renders a body in a single call (all of renderSiteToHtml's sections).
+// `data-src="<first>-<last>"`: the 0-based, inclusive lines of the page Markdown a block was drawn
+// from, for an editing preview that must map a tapped element back to its source (the text-edit
+// coral). Only when the caller passes `srcLine` — the page line the body's first line is on, i.e.
+// a section parsed with `{ sourceLines: true }` — and '' otherwise, so every other render is
+// byte-identical. `at`/`to` are indexes into the body's own lines.
+function srcAttr(opts, at, to) {
+  return opts && typeof opts.srcLine === 'number' ? ' data-src="' + (opts.srcLine + at) + '-' + (opts.srcLine + to) + '"' : '';
+}
+
 function bodyHtml(body, opts) {
   if (!body) return '';
   const dialogue = (opts && opts.dialogue) || dialogueContext();
@@ -2266,7 +2286,7 @@ function bodyHtml(body, opts) {
         }
         if (!RE_LIST_ITEM.test(lines[i])) break;
         const m = RE_LIST_ITEM.exec(lines[i]);
-        items.push({ indent: m[1].length, ordered: /^\d+[.)]/.test(m[2]), text: m[3] });
+        items.push({ indent: m[1].length, ordered: /^\d+[.)]/.test(m[2]), text: m[3], src: srcAttr(opts, i, i) });
         i++;
       }
       out.push(renderList(items));
@@ -2299,11 +2319,11 @@ function bodyHtml(body, opts) {
       // content is removed — drop it entirely (no `<h1></h1>`, and the line is NOT reprocessed as a
       // paragraph either: it consumed its own `#` marker as a heading, full stop). A heading with any
       // other content — including one that merely CONTAINS a comment alongside real text — still emits.
-      if (html.trim()) out.push('<h' + lv + '>' + html + '</h' + lv + '>');
+      if (html.trim()) out.push('<h' + lv + srcAttr(opts, i, i) + '>' + html + '</h' + lv + '>');
       i++; continue;
     }
 
-    const para = [];                                                          // paragraph / figure
+    const para = [], paraAt = i;                                              // paragraph / figure
     while (i < lines.length && lines[i].trim() && !isBlockStart(lines, i, nextCloser)) { para.push(lines[i]); i++; }
     // `linkRows` (a prose body): a paragraph that is ONLY links is a button row, here, where it was
     // written — read off the paragraph's source lines, the same test a hero's CTA row uses. Decided
@@ -2371,7 +2391,7 @@ function bodyHtml(body, opts) {
       out.push('<figure class="st-figure">' + inlineHtml(src, indented ? { stripComments: false } : undefined) + '</figure>');
       continue;
     }
-    out.push('<p>' + html + '</p>');
+    out.push('<p' + srcAttr(opts, paraAt, i - 1) + '>' + html + '</p>');
   }
   return out.join('\n');
 }
@@ -2673,9 +2693,9 @@ function orderedProseHtml(body) {
 // blank-line split does not know a code fence — a `[A](/a)` line inside a fenced block became a
 // button and an `![x](…)` line inside it left the code for the image group. The paragraphs here are
 // the ones bodyHtml finds after it has taken fences, lists, quotes and tables whole.
-function proseBodyHtml(body, ordered) {
+function proseBodyHtml(body, ordered, srcLines) {
   if (ordered) return orderedProseHtml(body);
-  return bodyHtml(body, { linkRows: 'st-prose' });
+  return bodyHtml(body, srcLines ? { linkRows: 'st-prose', srcLine: srcLines.body } : { linkRows: 'st-prose' });
 }
 
 // reef#2857: a TEXT-FREE hero — empty (or whitespace-only) title, and no `logo=` image standing in
@@ -3257,7 +3277,7 @@ function renderSection(s, hero, ctx) {
       const ordered = pm.ordered != null;
       // `eyebrow="…"` — the small label above the heading, as in the hero branch above.
       const prEyebrow = pm.eyebrow ? '<p class="st-prose-eyebrow">' + inlineHtml(typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) + '</p>' : '';
-      return '<section class="st-prose"' + align + prSurface + (ordered ? ' data-ordered=""' : '') + '>' + prEyebrow + (s.title ? '<' + H + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + proseBodyHtml(s.body, ordered) + '</section>';
+      return '<section class="st-prose"' + align + prSurface + (ordered ? ' data-ordered=""' : '') + '>' + prEyebrow + (s.title ? '<' + H + (s.srcLines ? srcAttr({ srcLine: s.srcLines.head }, 0, 0) : '') + '>' + inlineHtml(s.title) + '</' + H + '>' : '') + proseBodyHtml(s.body, ordered, s.srcLines) + '</section>';
     }
   }
 }
@@ -3426,13 +3446,177 @@ function deriveDescription(sections, max = DESC_MAX) {
   return '';
 }
 
+// ── The site's name, and the placeholder a site is born with ─────────────────────────────────────
+//
+// 🩸 A hosting platform seeds a new site's `_site.md` with a placeholder `title:` in the owner's UI
+// language ("Untitled site", 未命名網站…). Owners name the site in `brand:` and leave `title:` alone,
+// and the site-name chain read `title` first — so og:site_name and the JSON-LD WebSite/publisher
+// name went live as 「未命名網站」 on a site whose `brand:` was filled in. Measured on a live site:
+// `title: 未命名網站`, a real `brand:`, and every share card and search result named it 未命名網站.
+//
+// 🔴 ONE LIST, read by both sides. The platform's create step writes `title:` from this table and its
+// verify step names a site still carrying one of these values; the layout below treats a title
+// equal to any of them as UNSET. Kept here, in the editing model the platform vendors, so the
+// writer and the reader cannot drift: a new language or a reworded placeholder is one edit.
+// Keyed by the nine UI locale codes the platform seeds in (lower-case BCP 47).
+const PLACEHOLDER_SITE_TITLES = Object.freeze({
+  'en-us': 'Untitled site',
+  'zh-tw': '未命名網站',
+  'ja-jp': '無題のサイト',
+  'zh-hans': '未命名网站',
+  'ko-kr': '제목 없는 사이트',
+  'es-es': 'Sitio sin título',
+  'de-de': 'Unbenannte Website',
+  'fr-fr': 'Site sans titre',
+  'pt-br': 'Site sem título',
+});
+const PLACEHOLDER_SITE_TITLE_SET = new Set(Object.values(PLACEHOLDER_SITE_TITLES).map((t) => t.normalize('NFC')));
+
+/** True when `value` is exactly one of the seeded placeholder titles (trimmed, NFC). */
+function isPlaceholderSiteTitle(value) {
+  if (value == null) return false;
+  const s = String(value).trim().normalize('NFC');
+  return s !== '' && PLACEHOLDER_SITE_TITLE_SET.has(s);
+}
+
+/**
+ * The NAME OF THE SITE — a per-site constant (og:site_name, JSON-LD WebSite/publisher name), never
+ * whatever one page calls itself — and WHICH key it came from. `meta['site-title']` is the site
+ * config's own `title:` stashed by the catch-all before the page merge; `fallback` is the layout's
+ * last resort (its header brand) for sites with no site-level name at all.
+ *
+ * Order: a real site title (`site-title`) → `brand` → `footer-brand` → the placeholder title
+ * (`placeholder`: still the site's one constant name when nothing better exists, so a page's own
+ * title never stands in for it) → `fallback`. `key` names the rung that answered, so a caller (a
+ * platform's verify step) reports the chain's own choice instead of re-deriving it.
+ *
+ * @returns {{ name: string, key: 'site-title'|'title'|'brand'|'footer-brand'|'placeholder'|'fallback' }}
+ */
+function siteNameSource(meta, fallback = '', titleKey = 'site-title') {
+  const m = meta || {};
+  const str = (v) => (v == null ? '' : String(v).trim());
+  const title = str(m['site-title']);
+  if (title && !isPlaceholderSiteTitle(title)) return { name: title, key: titleKey };
+  if (str(m.brand)) return { name: str(m.brand), key: 'brand' };
+  if (str(m['footer-brand'])) return { name: str(m['footer-brand']), key: 'footer-brand' };
+  if (title) return { name: title, key: 'placeholder' };
+  return { name: str(fallback), key: 'fallback' };
+}
+
+/**
+ * `siteNameSource` for a meta that MAY lack the `site-title` stash, reading such a meta's `title` as
+ * the site title (reported as key `title`). Since tile#279 r2 every route of a site that has a
+ * `_site.md` carries the stash (loadSite stamps the config's own title), so the layout does not call
+ * this; it remains for a raw site config (configSiteNameSource) and for callers holding a meta with
+ * no stash. A placeholder is still unset either way.
+ */
+function routeSiteNameSource(meta, fallback = '') {
+  const m = meta || {};
+  if (Object.prototype.hasOwnProperty.call(m, 'site-title')) return siteNameSource(m, fallback);
+  return siteNameSource({ ...m, 'site-title': m.title }, fallback, 'title');
+}
+
+/**
+ * The name a raw SITE CONFIG (`_site.md` frontmatter, as a platform parses it) gives the site — the
+ * same answer the build gives on every route: the reserved `site-title` key is ignored, exactly as
+ * loadSite ignores it, and `title` is the site title.
+ */
+function configSiteNameSource(config, fallback = '') {
+  const { 'site-title': _reserved, ...rest } = config || {};
+  return routeSiteNameSource(rest, fallback);
+}
+
+/**
+ * EVERY site-name surface a page carries, from ONE `siteNameSource` result (tile#279 r3): og:site_name
+ * and the JSON-LD WebSite/publisher name are `name`; the header wordmark and the inbox bubble's
+ * data-title / data-site-name are `header` — the site's `brand:` when it has one (the short wordmark
+ * a site picks for its own header), else that same `name`.
+ *
+ * The fallback, when nothing site-level names the site:
+ *   · a site WITH a `_site.md` (its meta carries the `site-title` stash, possibly ''): `host`, the
+ *     site's own hostname — constant on every route, never a page's title;
+ *   · a site with NO `_site.md` (no stash; the home page stands in for the site config): the meta's
+ *     own `title`, then `pageTitle` — that legacy shape has nothing site-level to prefer.
+ *
+ * @param {object} meta  what the route hands the layout
+ * @param {{ pageTitle?: string, host?: string }} [o]
+ * @returns {{ name: string, key: string, header: string }}
+ */
+function siteSurfaces(meta, { pageTitle = '', host = '' } = {}) {
+  const m = meta || {};
+  const str = (v) => (v == null ? '' : String(v).trim());
+  const stashed = Object.prototype.hasOwnProperty.call(m, 'site-title');
+  const fallback = stashed ? str(host) : (str(m.title) || str(pageTitle));
+  const { name, key } = siteNameSource(m, fallback);
+  return { name, key, header: str(m.brand) || name };
+}
+
+/** The name alone — `siteNameSource(meta, fallback).name`. */
+function siteName(meta, fallback = '') {
+  return siteNameSource(meta, fallback).name;
+}
+
+/**
+ * The site's name as it may appear INSIDE a page title — the `<title>`, og:title and twitter:title
+ * every route hands SiteLayout, and the footer line that falls back to that title. tile#279's chain
+ * for the meta a route holds, `configSiteNameSource`: the route's own `title` (the site config's, or
+ * on /language and /<loc>/404 the edition home's, which names that edition) → brand → footer-brand,
+ * with a seeded placeholder treated as unset. ONE difference from og:site_name: when only the
+ * placeholder is left it is never printed — og:site_name keeps it as the site's last constant name,
+ * a title suffix has a choice and omits it. '' when nothing real names the site, so the caller drops
+ * the suffix rather than print "Search — " or a placeholder. A site with a real `title:` gets
+ * exactly the suffix it had before.
+ *
+ * 🩸 reef#3040: blog, post, 404, archive and search routes built ` — ${meta.title}` themselves, so
+ * a site still carrying the seeded placeholder title printed it in every one of those titles (and
+ * in the footer line) after tile#277/#279 had already unset it for og:site_name and JSON-LD.
+ */
+function titleSiteName(meta) {
+  const { name, key } = configSiteNameSource(meta, '');
+  return key === 'placeholder' ? '' : name;
+}
+
+/** `sep + titleSiteName(meta)`, or '' when the site has no real name — the one way a route appends
+ *  the site to its title. `sep` defaults to ' — '; the paginated archives pass '— ' because their
+ *  page suffix already ends the head. */
+function siteTitleSuffix(meta, sep = ' — ') {
+  const name = titleSiteName(meta);
+  return name ? sep + name : '';
+}
+
+/** The name alone — `routeSiteNameSource(meta, fallback).name`. */
+function routeSiteName(meta, fallback = '') {
+  return routeSiteNameSource(meta, fallback).name;
+}
+
+// ── The page's source revision (text-edit coral; dynamic-corals/text-edit) ─────────────────────
+/** The page's source revision: what the frame was rendered from travels with every edit, and an
+ *  edit made against any other revision is refused. A content hash (64 bits, cyrb53-style, plus the
+ *  length), so any host can compute it from the Markdown alone — at build, to stamp the frame's
+ *  `data-revision`, and here, before every edit. */
+function sourceRevision(markdown) {
+  const s = String(markdown == null ? '' : markdown);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const hex = (n) => (n >>> 0).toString(16).padStart(8, '0');
+  return 'r' + s.length.toString(36) + '-' + hex(h2) + hex(h1);
+}
+
 export {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml,
+  // the source revision an editing preview stamps as `data-revision` (text-edit coral)
+  sourceRevision,
   parseParams, splitFrontmatter, slugify,
   // inline/body render helpers — exported so the Astro layer (the production seam) shares ONE
   // inline-markdown source with the reference renderer (structure lives in .astro components,
   // inline text rendering stays here via cssmd). Additive; behavior unchanged.
-  inlineHtml, bodyHtml, gridCellBodyHtml, orderedProseHtml, proseBodyHtml, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
+  inlineHtml, bodyHtml, gridCellBodyHtml, orderedProseHtml, proseBodyHtml, srcAttr, ctaHtml, ctaButtonsHtml, ctaCaptionFirst, escAttr,
   // #68: the page-scoped dialogue side state a caller threads through several bodyHtml calls.
   dialogueContext,
   heroParts, socialParts, linkButtonsHtml, firstImage, imgTag, tagcloudLinks, linksParts,
@@ -3468,4 +3652,12 @@ export {
   // the link/image matcher and its shapes, exported so their test can hold each shape against the
   // regex it replaced — see bracketMatches' own comment.
   bracketMatches, replaceMatches, BRACKET_SHAPES,
+  // the seeded placeholder site titles and the site-name chain that treats one as unset.
+  PLACEHOLDER_SITE_TITLES, isPlaceholderSiteTitle, siteName, routeSiteName,
+  // …and which key answered: { name, key } (see siteNameSource).
+  siteNameSource, routeSiteNameSource, configSiteNameSource,
+  // …and every surface a page derives from that one result (header, bubble, og, JSON-LD).
+  siteSurfaces,
+  // …and the name a page TITLE may carry: never a placeholder; '' drops the suffix (reef#3040).
+  titleSiteName, siteTitleSuffix,
 };

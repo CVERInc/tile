@@ -25,6 +25,7 @@
 // live nav links these percent-encoded (`/search/label/%e9%a3%9f`) and raw
 // (`/search/label/活動`) alike; both decode to the same dir, and trailingSlash:'ignore'
 // + build.format:'directory' serve them with or without the trailing slash.
+import { siteTitleSuffix } from '@sitetile';
 import SiteLayout from '../../../../layouts/SiteLayout.astro';
 import { cardImgAttrs } from '@emit/card-img.mjs';
 import { allPosts, listedPosts, siteMeta, systemPageLang, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy, indexDateLang, entryDateSpec, entryDateHtml } from '../../../../lib/blog.mjs';
@@ -81,7 +82,7 @@ const dateSpec = entryDateSpec(dateFormat, lang, meta.lang);
 // not scoped to this label.
 const recentPosts = posts.slice(0, 5);
 const archive = showSidebar ? groupByArchive(posts) : [];
-const title = `${tag} — ${meta.title || ''}`;
+const title = `${tag}${siteTitleSuffix(meta)}`;
 // Pager hrefs: page 1 is this route, page 2+ is the nested /page/<n> route. Raw tag
 // segment matches the UTF-8 dir the build emits (browsers percent-encode on request).
 const pageHref = (n) => (n === 1 ? `/search/label/${tag}` : `/search/label/${tag}/page/${n}`);

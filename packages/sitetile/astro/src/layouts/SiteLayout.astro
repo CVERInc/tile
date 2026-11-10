@@ -31,8 +31,17 @@ import { bubbleLoaderScript } from '../lib/inbox-bubble-loader.mjs';
 import { APPBAR_CSS, APPBAR_HEAD_SCRIPT, APPBAR_CORAL_FLOOR, isCurrent as appbarCurrent, flatten as appbarFlatten, moreLabel as appbarMoreLabel, navLabel as appbarNavLabel } from '../lib/appbar.mjs';
 import { bubbleKaitoOn } from '../lib/bubble-kaito.mjs';
 import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
+// Every inline <style set:html> below goes through styleText, so its text cannot close the element
+// whatever the producer stripped (the theme compiler strips too; neither relies on the other).
+import { styleText } from '../lib/style-text.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import NavNode from '../components/NavNode.astro';
+// Every link-bearing chrome key (nav, footer, footer-cols, the `Label=href` lists, header-cta,
+// header-actions, sidebar-nav, the whole-value hrefs) is read by chrome-links.mjs and nothing else —
+// the same file a tool that rewrites those links vendors, so the grammar it edits is this layout's.
+import {
+  navMenuOf, footerLinksOf, footerColsOf, labelHrefListOf, headerCtaOf, headerActionsOf, sidebarNavOf, hrefValueOf,
+} from '../../../chrome-links.mjs';
 import signetLocaleBannerCss from '@cvernet/signet/locale-banner.css?raw';
 // Swappable design-system shell: site.css is the DEFAULT (reef) skin; a page opts into another skin
 // with `theme: <name>` in frontmatter, which overrides the --gd-* token surface (and may add family
@@ -94,10 +103,8 @@ const hasResidue = /reef:has-custom-css/.test(themeRaw);
 const customTheme = !!themeRaw.trim() && (!compiled || hasResidue);
 // IR-driven footer (substrate rule: single-line frontmatter): `footer: Label /href | Label2 /href2`
 // and `copyright: …`. Any site can set them; absent → the footer falls back to the title.
-const footerLinks = String(meta.footer || '').split('|').map((s) => s.trim()).filter(Boolean)
-  // footer is flat: a `>>` dropdown (header-only) collapses to just its parent link here.
-  .map((s) => { const di = s.indexOf('>>'); return di >= 0 ? s.slice(0, di).trim() : s; })
-  .map((part) => { const m = part.match(/^(.*\S)\s+(\S+)$/); return m ? { label: m[1], href: m[2] } : { label: part, href: '#' }; });
+// The footer is flat: a `>>` dropdown (header-only) collapses to just its parent link here.
+const footerLinks = footerLinksOf(meta.footer);
 const copyright = meta.copyright ? String(meta.copyright).trim() : '';
 // `footer-social: Label=url ; Label2=url2` — an icon row (facebook/instagram/x/youtube/threads
 // recognized by URL host, else a generic link glyph) instead of the text-link footer nav. OPT-IN:
@@ -119,9 +126,7 @@ const ACTION_ICON = {
 };
 ACTION_ICON.hamburger = ACTION_ICON.bars;
 ACTION_ICON.search = ACTION_ICON.magnifier;
-const footerSocial = String(meta['footer-social'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
-  .filter(Boolean)
+const footerSocial = labelHrefListOf(meta['footer-social'])
   .map((it) => {
     const host = (it.href.match(/^https?:\/\/(?:www\.)?([^\/]+)/i) || [])[1] || '';
     return { ...it, icon: BRAND_ICON[host] || GENERIC_ICON };
@@ -129,34 +134,12 @@ const footerSocial = String(meta['footer-social'] || '').split(';').map((s) => s
 // Optional HEADER nav menu (substrate rule: single line): `nav: Label /href | Label2 /href2`.
 // Same syntax as `footer:`. Renders as the top primary menu. OPT-IN: absent → the header keeps just
 // the logo + CTA (a non-opted site is unaffected). For multi-page sites with a top menu (e.g. a WordPress nav).
-// A nav item may carry a DROPDOWN submenu via ` >> ` (parent >> child ; child2). Each child is the
-// same `Label /href` form, separated by ` ; `. Backward-compatible: parts without `>>` stay flat
-// (a non-opted site is unaffected). The submenu renders in the DOM as a `.rf-nav-sub` (theme decides whether
-// to show on hover); its text is always present so multi-page WP mega-menus stay faithful.
-const parseNavPart = (part) => { const m = part.match(/^(.*\S)\s+(\S+)$/); return m ? { label: m[1], href: m[2] } : { label: part, href: '#' }; };
-// A nav is a TREE, spelled by its shape:
-//  • one line, FLAT: `nav: A /a | B /b` — the common top-bar case (`|` separates items).
-//  • indented markdown list, ANY depth (dropdowns / mega-menus): a `nav: |` block scalar, one
-//    `- Label /href` per line, indentation = depth. Whitespace is the tree; it reads at a glance.
-// There is exactly ONE way to nest (the indented list). An earlier inline ` >> `/` ; ` submenu
-// spelling was removed once its last user migrated — two spellings for one thing is a tax.
-const parseNavIndented = (text) => {
-  const root = { children: [] };
-  const stack = [{ node: root, indent: -1 }];
-  for (const raw of text.split('\n')) {
-    if (!raw.trim()) continue;
-    const indent = (raw.match(/^[ \t]*/)[0] || '').replace(/\t/g, '  ').length;
-    const item = { ...parseNavPart(raw.replace(/^[ \t]*-?[ \t]*/, '').trim()), children: [] };
-    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
-    stack[stack.length - 1].node.children.push(item);
-    stack.push({ node: item, indent });
-  }
-  return root.children;
-};
-const parseNavFlat = (text) => text.split('|').map((s) => s.trim()).filter(Boolean)
-  .map((part) => ({ ...parseNavPart(part), children: [] }));
-const navRaw = String(meta.nav || '');
-const navMenu = navRaw.includes('\n') ? parseNavIndented(navRaw) : parseNavFlat(navRaw);
+// A nav is a TREE, spelled by its shape (chrome-links.mjs, navMenuOf): one line is flat
+// (`A /a | B /b`); a `nav: |` block scalar is an indented markdown list, ANY depth (dropdowns /
+// mega-menus), one `- Label /href` per line, indentation = depth. Nested items render in the DOM as
+// a `.rf-nav-sub` (the theme decides whether to show it on hover); its text is always present so
+// multi-page WP mega-menus stay faithful.
+const navMenu = navMenuOf(meta.nav);
 // Optional COLUMNED footer (substrate rule: single line). `footer-brand:` = a wordmark in the
 // footer's left block; `footer-cols:` = `Heading: Label=href ; Label2 ; … ;; Heading2: …` —
 // `;;` separates columns, `;` separates items, `Label=href` links (href omitted → a plain span,
@@ -166,16 +149,9 @@ const footerTagline = String(meta['footer-tagline'] ?? '').trim();
 const footerBrand = meta['footer-brand'] ? String(meta['footer-brand']).trim() : '';
 // Columns keep .rf-foot-col and add --<1-based position> plus --<ASCII heading slug>.
 // Empty, positional, and repeated slugs have only the positional modifier.
-const footerColParts = String(meta['footer-cols'] || '').split(';;').map((c) => c.trim()).filter(Boolean);
+const footerColParts = footerColsOf(meta['footer-cols']);
 const footerColSlugs = new Set(footerColParts.map((_, index) => String(index + 1)));
-const footerCols = footerColParts.map((col, index) => {
-  const firstColon = col.indexOf(':');
-  const ci = firstColon >= 0 && !col.slice(0, firstColon).includes('=') ? firstColon : -1;
-  const head = ci >= 0 ? col.slice(0, ci).trim() : '';
-  const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
-  const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
-    const m = it.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : { label: it, href: '' };
-  });
+const footerCols = footerColParts.map(({ head, items }, index) => {
   const slug = head.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   const nameClass = slug && !footerColSlugs.has(slug) ? ` rf-foot-col--${slug}` : '';
   if (slug) footerColSlugs.add(slug);
@@ -209,13 +185,18 @@ const generatorTag = (() => {
 const ext = (h) => /^https?:\/\//i.test(h || '') ? { target: '_blank', rel: 'noopener' } : {};
 // `brand:` = the header wordmark TEXT (when there's no image logo) — lets the <title> stay the
 // full SEO string while the visible wordmark is short (e.g. title "Studio Lilac — comics", brand "Lilac").
-// Falls back to `meta.title` (the site's own frontmatter title), NOT the `title` prop passed in —
-// callers like the /language chooser override `title` with a page-specific string ("Language" /
-// "言語") for the <title> tag, and that must never leak into the logo/wordmark's brand identity.
-const headerBrand = meta.brand ? String(meta.brand).trim() : (meta.title ? String(meta.title).trim() : title);
+// Without a brand it falls back to the SITE's name, never a page's: callers like the /language chooser
+// override `title` with a page-specific string ("Language" / "言語") for the <title> tag, and after the
+// catch-all merge `meta.title` is the page's own title, so neither may stand in for the wordmark.
+// tile#279 r3 — the header wordmark is one of the site-name surfaces, all derived from ONE
+// site-core `siteNameSource` result (`siteSurfaces`): `brand:`, else the site's name (title →
+// footer-brand → placeholder → the site's host). Never a page's own title on a site with a
+// `_site.md`; a site without one keeps its home/page title as the last resort, as before.
+const siteNames = siteSurfaces(meta, { pageTitle: title, host: Astro.site ? Astro.site.hostname : '' });
+const headerBrand = siteNames.header;
 // `header-cta: Label=href` — an optional primary action button in the header's right side
 // (e.g. a "Subscribe" pill). General; absent → the header stays as-is.
-const headerCta = (() => { const m = String(meta['header-cta'] || '').match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })();
+const headerCta = headerCtaOf(meta['header-cta']);
 // round 4 (R3-P3-2): hoisted alongside the declaration — was three safeHref(headerCta.href)
 // calls in the template below for the same destination, each a separate drop-warning entry.
 const headerCtaHrefOk = headerCta ? safeHref(headerCta.href) : null;
@@ -236,25 +217,12 @@ const headerCtaHrefOk = headerCta ? safeHref(headerCta.href) : null;
 //              desktop sidebar is always-on) · `badge:<n>` (count badge, hidden at 0).
 // OPT-IN + zero-byte-when-absent: absent → no button, no overlay, no drawer, no CSS
 // effect, no script (every non-opted page renders byte-identical).
-const parseHeaderAction = (label, spec) => {
-  const t = String(spec || '').trim().split(/\s+/).filter(Boolean);
-  const iconName = t[0] || '';
-  const type = (t[1] === 'toggle') ? 'toggle' : 'link';
-  const target = t[2] || '';
-  let reveal = '', badge = null, mobile = false;
-  for (const tok of t.slice(3)) {
-    if (tok === 'mobile') mobile = true;
-    else if (tok === 'dropdown' || tok === 'drawer' || tok.startsWith('drawer:')) reveal = tok;
-    else if (tok === 'badge' || tok.startsWith('badge:')) badge = tok.indexOf(':') >= 0 ? tok.slice(tok.indexOf(':') + 1) : '';
-  }
-  const side = reveal.startsWith('drawer:') ? reveal.slice(7) : (reveal === 'drawer' ? 'right' : 'right');
-  const key = target || iconName;
-  return { label, icon: ACTION_ICON[iconName] || GENERIC_ICON, iconName, type, target, reveal, side, badge, mobile,
-           id: `st-ha-${key}`, drawerId: `st-ha-drawer-${key}` };
-};
-const headerActions = String(meta['header-actions'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S.*)$/); return m ? parseHeaderAction(m[1].trim(), m[2].trim()) : null; })
-  .filter(Boolean);
+// The words are read by chrome-links.mjs (headerActionsOf); the layout adds the icon and the ids.
+const headerActions = headerActionsOf(meta['header-actions'])
+  .map(({ label, iconName, type, target, reveal, side, badge, mobile, key }) => ({
+    label, icon: ACTION_ICON[iconName] || GENERIC_ICON, iconName, type, target, reveal, side, badge, mobile,
+    id: `st-ha-${key}`, drawerId: `st-ha-drawer-${key}`,
+  }));
 const toggleActions = headerActions.filter((a) => a.type === 'toggle');
 const hasSidebarAction = toggleActions.some((a) => a.target === 'sidebar');
 // cart drawer copy (localizable, defaults are English/neutral).
@@ -272,7 +240,7 @@ const cartGuild = (meta['header-actions-cart-guild'] ? String(meta['header-actio
 // exactly like a live `href`. Gate here, at the value's one declaration point (alongside
 // `siteLogo`/`copyrightHref` above), so the `data-cart-href` attribute below and the client
 // script that reads it can never see anything but a validated destination.
-const cartHref = (meta['header-actions-cart-href'] ? (safeHref(String(meta['header-actions-cart-href']).trim()) || '') : '');
+const cartHref = (meta['header-actions-cart-href'] ? (safeHref(hrefValueOf(meta['header-actions-cart-href'])) || '') : '');
 const cartWired = toggleActions.some((a) => a.target === 'cart') && !!cartGuild;
 // `nav-mobile: hamburger` — responsive nav collapse (the real gap: `.rf-nav` had zero
 // breakpoint collapse). Pure CSS below; here it only flips a body attribute + renders
@@ -324,19 +292,17 @@ const breadcrumbHome = meta['breadcrumb-home'] ? String(meta['breadcrumb-home'])
 // `breadcrumb-trail: Label=href ; Label2=href2` — opt-in middle crumb(s) between Home and the
 // page label (WP category-archive convention, e.g. "Home » Category » The post's title").
 // General; absent → trail is just Home » label, unchanged for every other consumer.
-const breadcrumbTrail = String(meta['breadcrumb-trail'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-  .map((s) => { const m = s.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
-  .filter(Boolean);
+const breadcrumbTrail = labelHrefListOf(meta['breadcrumb-trail']);
 // round 3 (Astro consumers, R2-P3-5): `copyright-href` is a raw frontmatter destination; safeHref
 // shares the same policy every other emitter uses (gated once here, at the source).
-const copyrightHref = meta['copyright-href'] ? safeHref(String(meta['copyright-href']).trim()) : '';
+const copyrightHref = meta['copyright-href'] ? safeHref(hrefValueOf(meta['copyright-href'])) : '';
 // round 3 (Astro consumers, R2-P3-5): `language-href` is a raw frontmatter destination (used
 // verbatim as `computedLanguageHref` below when Lingo is off); safeHref shares the same policy
 // every other emitter uses, falling back to the safe default rather than going live unfiltered.
 // 🩸 reef#1910. "The owner wrote a link" is decided on what safeHref LET THROUGH, not on the
 // key having a value: a refused value fell back to `/language`, and on a one-locale site (which
 // builds no chooser) that put a dead link on every page while reading as the owner's own.
-const ownLanguageHref = meta['language-href'] ? (safeHref(String(meta['language-href']).trim()) || '') : '';
+const ownLanguageHref = meta['language-href'] ? (safeHref(hrefValueOf(meta['language-href'])) || '') : '';
 const languageHref = ownLanguageHref || '/language';
 // A theme can declare a webfont stylesheet URL via `fonts:` — emitted as preconnect + <link> (the
 // healthy way), NOT a render-blocking @import inside the theme CSS.
@@ -531,11 +497,11 @@ const showTopBanner = !!(bleed && bleed.topBanner && locales.length > 0);
 //   right: `.st-sidebar-main` carries the normal <slot /> content
 // All other values (or absent) fall through to the current single-column rf-main.
 // sidebar-nav syntax mirrors footer-cols: `;;` = group separator, `;` = item, `Label=url`.
-import { parseSidebarNav, safeHref, safeSrc } from '../../../site-core.js';
+import { safeHref, safeSrc, siteSurfaces, titleSiteName } from '../../../site-core.js';
 import { groupByArchive, footerWidgets, blogSearchOn, postUrl, loadSite } from '../lib/blog.mjs';
 const pageLayout = meta.layout ? String(meta.layout).trim() : 'stack';
 const isSidebar = pageLayout === 'sidebar';
-const sidebarNavGroups = isSidebar ? parseSidebarNav(meta['sidebar-nav']) : [];
+const sidebarNavGroups = isSidebar ? sidebarNavOf(meta['sidebar-nav']) : [];
 // `sidebar-archive: true` — opt-in year→month post archive tree (Blogger/WP-widget convention),
 // fed by `blogPosts` (see [...slug].astro). Absent/false → no tree (a non-opted site is unaffected).
 const wantArchive = isSidebar && String(meta['sidebar-archive'] || '').trim() === 'true';
@@ -554,9 +520,7 @@ const sidebarSide = isSidebar && String(meta['sidebar-side'] || '').trim() === '
 // commonly end with a social-profile icon row pinned to the column bottom. OPT-IN + sidebar-only,
 // reusing the
 // same host→SVG map as footer-social: absent → nothing renders (existing sidebars are unaffected).
-const sidebarSocial = isSidebar ? String(meta['sidebar-social'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-  .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
-  .filter(Boolean)
+const sidebarSocial = isSidebar ? labelHrefListOf(meta['sidebar-social'])
   .map((it) => { const host = (it.href.match(/^https?:\/\/(?:www\.)?([^\/]+)/i) || [])[1] || ''; return { ...it, icon: BRAND_ICON[host] || GENERIC_ICON }; }) : [];
 
 // blog — REEF with Blog. When installed it MOUNTS the blog (index + /<slug> detail,
@@ -667,10 +631,8 @@ const ageGate = ageGateOn ? {
   title: String(meta['age-gate-title'] || '').trim(),
   body: String(meta['age-gate-body'] || '').trim(),
   note: String(meta['age-gate-note'] || '').trim(),
-  noteLinks: String(meta['age-gate-note-links'] || '').split(';').map((s) => s.trim()).filter(Boolean)
-    .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
-    .filter(Boolean),
-  backUrl: safeHref(String(meta['age-gate-back-url'] || '').trim()) || '/',
+  noteLinks: labelHrefListOf(meta['age-gate-note-links']),
+  backUrl: safeHref(hrefValueOf(meta['age-gate-back-url'])) || '/',
   // 🩸 the two button labels defaulted to Japanese for every tenant. They are the only words in
   // this dialog the site does not have to write, so they are the only ones that could be wrong
   // in a language nobody chose. Locale table now, override keys unchanged.
@@ -734,8 +696,9 @@ const shareImage = absUrl(authoredShareImage
 // or REEF with PWA's gen-icons.sh output — shadows the route (Astro skips a route a public/ file
 // already claims) and must never be marked as ours, regardless of what `packages:` declares.
 const ICON_PUBLIC_DIR = join(typeof process !== 'undefined' ? process.cwd() : '.', 'public');
-// …and only the paths where the route drew the BADGE: with `favicon:` set, /apple-touch-icon.png
-// carries the owner's own PNG and the .ico/.svg are not written at all (icon-core's badgePaths).
+// …and only the paths where the route drew the BADGE: with `favicon:` set to a PNG,
+// /apple-touch-icon.png and /favicon.ico carry the owner's own PNG, and /favicon.svg carries the
+// owner's SVG or is not written at all (icon-core's badgePaths).
 const iconBadge = badgePaths(meta, readPublic, safeSrc);
 const iconWritten = new Set(Object.values(ICON_PATHS).filter((p) => {
   try { return !existsSync(join(ICON_PUBLIC_DIR, p)); } catch { return true; }
@@ -761,8 +724,9 @@ const ogType = meta['og-type'] ? String(meta['og-type']).trim() : 'website';
 const canonicalHref = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : '';
 const bubbleSiteId = String(process.env.SITE_ID || process.env.SITE_KEY || meta['site-key'] || '').trim();
 const platformOrigin = String(process.env.PLATFORM_ORIGIN || 'https://feelreef.com').replace(/\/+$/, '');
-const bubbleTitle = String(meta['site-title'] || meta.title || title || '').trim();
-const bubbleBrand = String(meta.brand || '').trim();
+// The bubble's panel title and site name are the header's name (siteSurfaces), one surface each.
+const bubbleTitle = siteNames.header;
+const bubbleBrand = siteNames.header;
 // assistant-name: the owner-chosen visitor-facing name for the Q&A assistant (default KAITO,
 // applied by the coral itself when this attribute is absent/empty). Single line — a raw multi-line
 // value would otherwise leak into the attribute and the coral's copy.
@@ -782,27 +746,6 @@ const bubbleOn = !!bubbleSiteId && inboxBubbleOn(meta, Astro.url.pathname, rende
 // too (../lib/public-artifacts.mjs), so the attribute never points at a file that is `[]` on purpose.
 const hasBlogPosts = Object.keys(import.meta.glob('../../blog/*.md')).length > 0;
 const bubbleSearch = (hasBlog || hasBlogPosts) && bubbleSearchOn(meta);
-// Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
-// already named. No new copy, no new default to get wrong in somebody else's language.
-const feedLinkTitle = `${String(meta['blog-title'] || meta.title || '').trim() || 'Feed'}`;
-// JSON-LD graph for THIS page. `article` only when the page said so — PostView sets og-type, so a
-// content page can never accidentally claim to be a blog post.
-const jsonLd = jsonLdScript(pageGraph({
-  kind: ogType === 'article' ? 'article' : 'website',
-  url: canonicalHref,
-  siteName: String(meta['site-title'] || meta.title || '').trim(),
-  siteUrl: Astro.site ? new URL('/', Astro.site).href : '',
-  logo: absUrl(String(meta['site-logo'] || meta['footer-logo'] || '').trim()),
-  title: String(meta['share-title'] || title || '').trim(),
-  description: String(meta.description || '').trim(),
-  image: shareImage,
-  datePublished: String(meta['article-published-time'] || '').trim(),
-  author: String(meta['article-author'] || meta['blog-author'] || '').trim(),
-  // Only when search is really on — advertising a SearchAction for a route that no longer exists
-  // would be the same defect as the hreflang above.
-  searchUrl: blogSearchOn(meta) && hasBlog && Astro.site ? new URL('/search', Astro.site).href : '',
-  inLanguage: htmlLang,
-}));
 // og:site_name is the NAME OF THE SITE, so it must be identical on every page. It used to reuse
 // `headerBrand`, which is a per-page value (meta.brand → meta.title → title) and therefore drifted
 // to whatever the page called itself. `site-title` is stashed by the [...path] catch-all before the
@@ -823,10 +766,39 @@ const jsonLd = jsonLdScript(pageGraph({
 // to `headerBrand`'s page-title tail. `headerBrand` itself stays the LAST resort, kept for legacy
 // sites with no _site.md at all (no site-title key, no brand, no footer-brand set anywhere) —
 // there is nothing site-level left to prefer there, which is the old behaviour, not a regression.
-const ogSiteName = (meta['site-title'] ? String(meta['site-title']).trim() : '')
-  || (meta.brand ? String(meta.brand).trim() : '')
-  || (meta['footer-brand'] ? String(meta['footer-brand']).trim() : '')
-  || headerBrand;
+//
+// 🩸 reef#3040 (measured live): a new site is born with a placeholder `title:` (未命名網站, "Untitled
+// site"…), owners fill `brand:` and leave `title:` alone, and this chain read the placeholder first —
+// og:site_name and the JSON-LD below named the site 未命名網站 on every share card and search result.
+// The chain now lives in site-core.js (`siteName`), next to the placeholder list the platform seeds
+// from: a title equal to a placeholder is UNSET there, so brand / footer-brand win over it, and it is
+// still the site's one constant name when neither exists (a page's own title never stands in).
+const ogSiteName = siteNames.name;
+// JSON-LD's WebSite/publisher name IS og:site_name (tile#279 r2). Every route that has a site config
+// now carries its title as the `site-title` stash (loadSite), so no route needs its own reading of
+// `meta.title` — the second reading (tile#277 r2) is what let the two names disagree by route.
+const jsonLdSiteName = ogSiteName;
+// Feed link title — WordPress renders "<site> &raquo; Feed"; ours just names the feed the site
+// already named. No new copy, no new default to get wrong in somebody else's language.
+const feedLinkTitle = `${String(meta['blog-title'] || titleSiteName(meta) || '').trim() || 'Feed'}`;
+// JSON-LD graph for THIS page. `article` only when the page said so — PostView sets og-type, so a
+// content page can never accidentally claim to be a blog post.
+const jsonLd = jsonLdScript(pageGraph({
+  kind: ogType === 'article' ? 'article' : 'website',
+  url: canonicalHref,
+  siteName: jsonLdSiteName,
+  siteUrl: Astro.site ? new URL('/', Astro.site).href : '',
+  logo: absUrl(String(meta['site-logo'] || meta['footer-logo'] || '').trim()),
+  title: String(meta['share-title'] || title || '').trim(),
+  description: String(meta.description || '').trim(),
+  image: shareImage,
+  datePublished: String(meta['article-published-time'] || '').trim(),
+  author: String(meta['article-author'] || meta['blog-author'] || '').trim(),
+  // Only when search is really on — advertising a SearchAction for a route that no longer exists
+  // would be the same defect as the hreflang above.
+  searchUrl: blogSearchOn(meta) && hasBlog && Astro.site ? new URL('/search', Astro.site).href : '',
+  inLanguage: htmlLang,
+}));
 // Where this site's dynamic-coral package CSS sits in the cascade — stamped on the DOCUMENT ROOT,
 // not <body>, because a registry-served widget reads it as `document.documentElement` and most
 // coral mounts are authored page markdown this layout never renders, so there is no per-mount
@@ -863,6 +835,12 @@ const siteEmbed = typeof siteEmbedRaw === 'string' && siteEmbedRaw.trim() !== ''
 const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
   ? '@layer reef.base, reef.corals, reef.theme, reef.responsive;'
   : '@layer reef.base, reef.theme, reef.responsive;';
+// Inline-style bodies, computed here so every <style set:html> below is the one census-allowed
+// shape `set:html={styleText(<identifier>)}` (packages/sitetile/style-text.test.mjs).
+const pkgCssBlock = pkgCss ? `@layer reef.theme {\n${pkgCss}\n}` : '';
+const localeBannerBlock = localeBannerCss ? `@layer reef.theme {\n${localeBannerCss}\n}` : '';
+const routeCssText = routeCss ? (typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss)) : '';
+const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
 ---
 <!doctype html>
 <html lang={htmlLang} data-lingo-root data-dynamic-coral-css={dynamicCoralCss || undefined} class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
@@ -984,7 +962,7 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         🔴 Which is why the statement above is the site's, not the renderer's: an undeclared site
         emits the three-name statement character for character, so declaring is the only thing
         that can name `reef.corals` on a page. */}
-    <style is:inline set:html={layerOrder}></style>
+    <style is:inline set:html={styleText(layerOrder)}></style>
     <style is:inline>@view-transition { navigation: auto; }</style>
     {/* hreflang — ABSOLUTE URLs when a `site` is configured (Astro.site), matching a real
         <head>; falls back to root-relative when unset. `localePath` is page-aware (same page,
@@ -1018,20 +996,20 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         enough: while these sheets were still unlayered, they outranked the theme regardless of
         order or specificity once the theme itself moved into a layer. The intent was always this;
         the mechanism now matches it. */}
-    {pkgCss && <style is:inline set:html={`@layer reef.theme {\n${pkgCss}\n}`}></style>}{appbar && <style is:inline set:html={APPBAR_CSS}></style>}{appbar && <script is:inline set:html={APPBAR_HEAD_SCRIPT}></script>}
-    {localeBannerCss && <style is:inline set:html={`@layer reef.theme {\n${localeBannerCss}\n}`}></style>}
+    {pkgCss && <style is:inline set:html={styleText(pkgCssBlock)}></style>}{appbar && <style is:inline set:html={styleText(APPBAR_CSS)}></style>}{appbar && <script is:inline set:html={APPBAR_HEAD_SCRIPT}></script>}
+    {localeBannerCss && <style is:inline set:html={styleText(localeBannerBlock)}></style>}
     {/* A platform-drawn route's own sheet (the language chooser). It names its layers itself: the
         look in `reef.theme` — here, ahead of the theme, so the theme wins ties like it does against
         every package above — and the box in `reef.responsive`, except for the heading block or
         the list when this site's theme names it; the page's own box never moves (`themeCss` is all
         the CSS a site's author supplies: the one theme file, compiled tokens and hand-written rules
         together). See lingo/language-page.css. */}
-    {routeCss && <style is:inline set:html={typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss)}></style>}
+    {routeCss && <style is:inline set:html={styleText(routeCssText)}></style>}
     {/* The site's own CSS. It wins over the renderer because `reef.theme` is the later LAYER —
         not because of where this tag sits. The previous comment here claimed it won by being last
         in <head>; the served HTML disagreed (theme at ~1.3k, Astro's site.css <link> at ~12.8k),
         and that wrong-but-confident comment is part of how the trap survived being looked at. */}
-    {themeCss && <style is:inline set:html={`@layer reef.theme {\n${themeCss}\n}`}></style>}
+    {themeCss && <style is:inline set:html={styleText(themeCssBlock)}></style>}
     {themeToggle && (
       <script is:inline define:vars={{ storageKey: 'rf-theme' }}>
         (function () {
@@ -1222,10 +1200,10 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
       {headerActions.length > 0 && (
         <div class="rf-header-actions" data-cart-guild={cartWired ? cartGuild : undefined} data-cart-href={cartWired && cartHref ? cartHref : undefined}>
           {headerActions.map((a) => a.type === 'link'
-            ? <a class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} href={safeHref(a.target) || '#'} aria-label={a.label} set:html={a.icon}></a>
+            ? <a class={a.mobile ? 'rf-ha-btn rf-ha-btn--mobile' : 'rf-ha-btn'} href={safeHref(a.target) || '#'} aria-label={a.label} set:html={a.icon}></a>
             : <Fragment>
                 <input type="checkbox" id={a.id} class="rf-ha-check" hidden data-ha-toggle />
-                <label class={`rf-ha-btn${a.mobile ? ' rf-ha-btn--mobile' : ''}`} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
+                <label class={a.mobile ? 'rf-ha-btn rf-ha-btn--mobile' : 'rf-ha-btn'} for={a.id} role="button" tabindex="0" aria-label={a.label} aria-haspopup="dialog" aria-controls={a.target === 'sidebar' ? undefined : a.drawerId} data-ha-key>
                   <span class="rf-ha-icon" set:html={a.icon}></span>
                   {a.badge != null && <span class="rf-ha-badge" data-count={a.badge}>{a.badge}</span>}
                 </label>
@@ -1266,7 +1244,10 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
         <span class="rf-breadcrumb-sep" aria-hidden="true">»</span><span>{breadcrumbLabel}</span>
       </nav>
     )}
-    <main class="rf-main reef-main">
+    <main class="rf-main reef-main" data-revision={/* An editing preview (SITETILE_SOURCE_SPANS=1) only: the
+        source revision of this page's Markdown, for the text-edit coral's mount (the host copies it
+        there). Absent otherwise — and no JSX comment node here, which would add a byte to every page. */
+        stamp && stamp.revision ? stamp.revision : undefined}>
       {isSidebar ? (
         <div class="st-sidebar-layout" data-side={sidebarSide}>
           <aside class="st-sidebar">

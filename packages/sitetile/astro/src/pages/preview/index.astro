@@ -8,6 +8,7 @@
 // frontmatter). The renderer owns the interstitial, the chapter list and the resume pill; it owns
 // none of the copy. A book with no `notice` gets no interstitial — the reader lands straight on the
 // chapters, rather than on a notice we invented for them.
+import { siteTitleSuffix } from '@sitetile';
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { siteMeta, systemPageLang } from '../../lib/blog.mjs';
 import { loadFirstReaderBook } from '../../lib/pagetile.mjs';
@@ -24,7 +25,7 @@ const bookKey = (book?.title || 'book').toLowerCase().replace(/[^a-z0-9]+/g, '-'
 const notice = book?.notice || '';
 const blurb = book?.blurb || null;
 ---
-<SiteLayout title={`Preview — ${meta.title || ''}`} lang={systemPageLang(meta, sysFiles)} meta={meta}>
+<SiteLayout title={`Preview${siteTitleSuffix(meta)}`} lang={systemPageLang(meta, sysFiles)} meta={meta}>
   {notice && (
     <Fragment>
       <noscript><style>#pv-gate {'{'} display: flex !important; {'}'}</style></noscript>

@@ -28,6 +28,7 @@
 // pageHref/base carry the `/<loc>` prefix explicitly (metaL['blog-category-base'] itself stays
 // UNPREFIXED — see lib/blog.mjs's sitemap.xml.js note: the physical archive directory is a literal
 // `category` segment, prefixed here, not derived from that meta key at build time).
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from '../../../../components/ArchiveView.astro';
 import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, localeBlogCorpora, termLocaleMap, alternateArchiveLocales, categoryBase } from '../../../../lib/blog.mjs';
 
@@ -67,5 +68,5 @@ const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
 const subhead = archivePrefixes(meta).category + heading;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
-<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading} — ${meta.title || ''}`}
+<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading}${siteTitleSuffix(meta)}`}
   heading={heading} subhead={subhead} pageHref={pageHref} pageNum={1} alternates={alternates} />

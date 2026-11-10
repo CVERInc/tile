@@ -1,0 +1,63 @@
+{
+  "id": "text-edit",
+  "author": "official",
+  "summary": "Lets an owner change the words of a plain heading, paragraph or list item in a framed preview; posts a text-only edit to the host.",
+  "embed": "<div hidden data-dynamic-coral=\"text-edit\" data-parent-origin=\"https://editor.example\" data-revision=\"r1k-0123456789abcdef\"></div>\n<script src=\"https://feelreef.com/corals/text-edit/v1/text-edit.js\"></script>",
+  "listed": false,
+  "attributes": [
+    {
+      "name": "data-dynamic-coral",
+      "type": "enum",
+      "required": true,
+      "default": null,
+      "description": "Selects the text-edit coral. One per page.",
+      "values": [
+        "text-edit"
+      ]
+    },
+    {
+      "name": "data-parent-origin",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "The only origin edits are posted to and answers are accepted from (answers must also come from the parent window itself). One http(s) origin written as the origin, a trailing slash allowed; `*`, `null`, paths and other spellings are refused. No default: the coral does not mount without it."
+    },
+    {
+      "name": "data-revision",
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "The source revision the page was rendered from (text-edit-source.mjs `sourceRevision`). Every edit carries it and the applier refuses any other; a successful answer carries the next one. No default: the coral does not mount without it."
+    },
+    {
+      "name": "data-page",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "The page path the host saves to. Absent: the frame's location.pathname."
+    },
+    {
+      "name": "data-hint-editor",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "The host's sentence for text that has formatting or structure (use the editor)."
+    },
+    {
+      "name": "data-hint-refused",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "The host's sentence for a refused edit, when its answer carries none."
+    },
+    {
+      "name": "data-hint-unknown",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "The host's sentence for an edit whose answer did not come in time (its words are not confirmed, and the coral is reading them back)."
+    }
+  ],
+  "host": "sitetile",
+  "requirements": "Renderer output inside a frame, rendered with source spans (`parseSite(md, { sourceLines: true })`, or `SITETILE_SOURCE_SPANS=1` for the Astro build) so editable elements carry `data-src`; elements without it are not offered. Only `prose` sections (the renderer's `section.st-prose[id]`) are offered; every other section's text is component text and stays untouchable. The host stamps `data-revision` from the Markdown it rendered, applies edits with text-edit-source.mjs (or a port measured against it), and answers with `reef-text-edit-result`, echoing the message's `doc` (the coral ignores an answer with any other `doc`, or none) and relaying `revision` and `section` from a successful apply. It processes the frame's messages in the order received, one at a time, and answers a `reef-text-edit-readback` with `reef-text-edit-readback-result` (same `doc`) (text-edit-source.mjs `readTextAt`). It answers a host's `reef-text-edit-probe` (`nonce`) from the parent origin with its ready, `{ type: 'reef-text-edit-ready', doc, probe: nonce }` (1.1.0). Served by the coral registry on channel `v1` (`/corals/text-edit/v1/text-edit.js`; the host must echo `doc`; text-edit has never been published on `v0`): the host adds the mount and the script to its own framed preview."
+}

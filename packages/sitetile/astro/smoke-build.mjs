@@ -34,6 +34,7 @@ import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-
 import { fileForPath } from './noindex-pass.mjs';
 import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
 import { encodePng, APPLE_TOUCH_PX } from '../icon-core.mjs';
+import { PLACEHOLDER_SITE_TITLES } from '../site-core.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
@@ -778,7 +779,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 }
 
 // Separate content keeps placeholder/brand fixtures out of the existing smoke expectations.
-function buildBubbleNameFixture(brand) {
+function buildBubbleNameFixture(brand, extraSiteLines = '') {
   const dir = mkdtempSync(join(HERE, '..', '.smoke-bubble-name-'));
   try {
     cpSync(HERE, dir, { recursive: true, filter: src => !/[\\/](node_modules|\.astro|dist[^\\/]*)(?:[\\/]|$)/.test(src) });
@@ -790,7 +791,7 @@ function buildBubbleNameFixture(brand) {
     writeFileSync(join(dir, 'content/_site.md'), `---
 sitetile-page: _site
 title: Untitled site
-${brand ? 'brand: ' + brand + '\n' : ''}lang: en-US
+${brand ? 'brand: ' + brand + '\n' : ''}${extraSiteLines}lang: en-US
 ---
 `);
     for (const [file, title] of [['home', 'Untitled site'], ['about', 'Example article']]) {
@@ -816,7 +817,12 @@ lang: en-US
 `);
     for (const [file, title, meta] of [
       ['fallback-meta', 'Fallback page', { title: 'Fallback site', 'site-title': 'OG fallback site', lang: 'en-US' }],
-      ['fallback-prop', 'Fallback prop', { 'site-title': 'OG fallback prop', lang: 'en-US' }]
+      ['fallback-prop', 'Fallback prop', { 'site-title': 'OG fallback prop', lang: 'en-US' }],
+      // tile#277 r2: the shape blog/archive/search/404 routes hand the layout — the site config itself
+      // (blog.mjs siteMeta), `title` with no `site-title` stash.
+      ['unstashed-title', 'Unstashed title', { title: 'Atlas Observatory', brand: 'Atlas', lang: 'en-US' }],
+      ['unstashed-footer', 'Unstashed footer', { title: 'Atlas Observatory', 'footer-brand': 'Atlas Footer', lang: 'en-US' }],
+      ['unstashed-placeholder', 'Unstashed placeholder', { title: 'Untitled site', brand: 'Atlas', lang: 'en-US' }]
     ]) {
       writeFileSync(join(dir, 'src/pages', file + '.astro'), `---
 import SiteLayout from '../layouts/SiteLayout.astro';
@@ -829,7 +835,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       cwd: dir, stdio: 'inherit',
       env: { ...process.env, SITE_ID: 'bubble-name', PLATFORM_ORIGIN: 'https://platform.example', SITE_URL: 'https://example.com' },
     });
-    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop'].map(page => [page, page + '/index.html'])]
+    return Object.fromEntries([['home', 'index.html'], ...['about', 'hand', 'fallback-meta', 'fallback-prop', 'unstashed-title', 'unstashed-footer', 'unstashed-placeholder'].map(page => [page, page + '/index.html']), ...(extraSiteLines ? [['devlog', 'devlog/index.html']] : [])]
       .map(([key, file]) => [key, readFileSync(join(dist, file), 'utf8')]));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -837,6 +843,128 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 }
 const bubbleNamePages = buildBubbleNameFixture('Example Workshop');
 const bubbleNameNoBrandPages = buildBubbleNameFixture();
+// One site, one name on every route: a `site-title:` written in `_site.md` is the catch-all's reserved
+// stash key, not a site-layer key, so it is ignored on content pages AND on the blog index alike.
+const siteTitleKeyPages = buildBubbleNameFixture(undefined, 'site-title: Actual Name\npackages: blog\n');
+// ── ONE SITE NAME ON EVERY ROUTE (tile#279) ────────────────────────────────────────────────────────
+// The property, not one route pair: every HTML document a build emits — content pages, the blog
+// index, posts, category/tag archives, search, the 404, the language chooser — carries the same
+// og:site_name, the same JSON-LD WebSite/publisher name and the same header brand as every other
+// document of the same LOCALE (a locale `_site.md` may name the site in its own language).
+function htmlFilesOf(dist) {
+  const out = new Map();
+  const walk = (rel) => {
+    for (const ent of readdirSync(join(dist, rel), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${ent.name}` : ent.name;
+      if (ent.isDirectory()) { if (ent.name !== '_astro') walk(r); }
+      else if (ent.name.endsWith('.html')) out.set(r, readFileSync(join(dist, r), 'utf8'));
+    }
+  };
+  walk('');
+  return out;
+}
+function siteNamesOf(html) {
+  const og = (html.match(/<meta property="og:site_name" content="([^"]*)">/) || [])[1];
+  const ld = jsonLdSiteNames(html).join(' | ');
+  const logo = html.match(/<a\b[^>]*class="[^"]*\brf-logo\b[^"]*"[^>]*>([\s\S]*?)<\/a>/);
+  const header = logo ? (logo[1].match(/<img\b[^>]*\balt="([^"]*)"/) || [])[1] ?? logo[1].replace(/<[^>]*>/g, '').trim() : undefined;
+  // the LAYOUT's site-wide inbox bubble (rendered after the footer, only when the build has a SITE_ID);
+  // a mount the author wrote into a page body is the author's own words, not a site-name surface
+  const tail = html.slice(html.lastIndexOf('</footer>') + 1 || 0);
+  const bubble = html.lastIndexOf('</footer>') < 0 ? null : tail.match(/<div\b[^>]*data-dynamic-coral="inbox-bubble"[^>]*data-kind="site"[^>]*>/);
+  const attr = (n) => (bubble ? (bubble[0].match(new RegExp(` ${n}="([^"]*)"`)) || [])[1] : undefined);
+  return { og, ld, header, bubbleTitle: attr('data-title'), bubbleName: attr('data-site-name') };
+}
+const SITE_NAME_FIELDS = ['og', 'ld', 'header', 'bubbleTitle', 'bubbleName'];
+// → [] when every locale's documents agree; else one line per (locale, field) naming the values.
+function siteNameDisagreements(files, locales) {
+  const groups = new Map();
+  for (const [rel, html] of files) {
+    if (!/<meta property="og:type"/.test(html)) continue; // a redirect stub / non-layout document
+    const seg = rel.split('/')[0];
+    const loc = locales.includes(seg) ? seg : '';
+    const names = siteNamesOf(html);
+    // within one document, too: JSON-LD names the site exactly as og:site_name does
+    if (names.og !== undefined && names.ld !== names.og) {
+      const key = `${loc || '(base)'} og≠ld`;
+      if (!groups.has(key)) groups.set(key, new Map([['', '']]));
+      groups.get(key).set(`${names.og} / ${names.ld}`, rel);
+    }
+    for (const field of SITE_NAME_FIELDS) {
+      if (names[field] === undefined) continue;
+      const key = `${loc || '(base)'} ${field}`;
+      if (!groups.has(key)) groups.set(key, new Map());
+      const byValue = groups.get(key);
+      if (!byValue.has(names[field])) byValue.set(names[field], rel);
+    }
+  }
+  return [...groups].filter(([, byValue]) => byValue.size > 1)
+    .map(([key, byValue]) => `${key}: ${[...byValue].map(([v, rel]) => `${JSON.stringify(v)} (${rel})`).join(' vs ')}`);
+}
+// The reviewer's input (tile#279): a real title, a short brand, and the reserved key written out.
+function buildRouteNameFixture(siteMd, extraContent = {}, extraBlog = {}) {
+  const dir = mkdtempSync(join(HERE, '..', '.smoke-route-names-'));
+  try {
+    cpSync(HERE, dir, { recursive: true, filter: src => !/[\\/](node_modules|\.astro|dist[^\\/]*)(?:[\\/]|$)/.test(src) });
+    symlinkSync(join(HERE, 'node_modules'), join(dir, 'node_modules'), 'dir');
+    for (const folder of ['content', 'blog']) {
+      rmSync(join(dir, folder), { recursive: true, force: true });
+      mkdirSync(join(dir, folder), { recursive: true });
+    }
+    writeFileSync(join(dir, 'content/_site.md'), siteMd);
+    for (const [file, kind, title] of [['home', 'home', 'Welcome'], ['about', 'page', 'About the observatory']]) {
+      writeFileSync(join(dir, 'content', file + '.md'), `---\nsitetile-page: ${kind}\ntitle: ${title}\nlang: en-US\n---\n\n## Fixture\nFixture body.\n`);
+    }
+    for (const [rel, body] of Object.entries(extraContent)) { mkdirSync(dirname(join(dir, 'content', rel)), { recursive: true }); writeFileSync(join(dir, 'content', rel), body); }
+    writeFileSync(join(dir, 'blog/first-light.md'), '---\ntitle: "First light"\ndescription: "Fixture post."\npubDate: 2026-08-03\ncategories: news\ntags: telescopes\n---\nA post body.\n');
+    for (const [rel, body] of Object.entries(extraBlog)) { mkdirSync(dirname(join(dir, 'blog', rel)), { recursive: true }); writeFileSync(join(dir, 'blog', rel), body); }
+    const dist = join(dir, 'dist-route-names');
+    execFileSync('npx', ['astro', 'build', '--outDir', dist], { cwd: dir, stdio: 'inherit', env: { ...process.env, SITE_URL: 'https://example.com', SITE_ID: 'route-names' } });
+    return htmlFilesOf(dist);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const routeNamePages = buildRouteNameFixture('---\nsitetile-page: _site\ntitle: Atlas Observatory\nbrand: Atlas\nsite-title: Atlas Observatory\npackages: blog\nblog-search: on\nblog-category-routes: on\nblog-tag-routes: on\nblog-date-routes: on\nlang: en-US\n---\n');
+const ROUTE_KINDS = ['index.html', 'about/index.html', 'devlog/index.html', 'devlog/first-light/index.html', '404.html'];
+// ── THE SITE NAME IN A PAGE TITLE (reef#3040) ─────────────────────────────────────────────────────
+// Every title surface a route carries: <title>, og:title, twitter:title, and the footer line that
+// falls back to the title (SiteLayout: no footer links and no copyright → <p>{title}</p>).
+function titleSurfacesOf(html) {
+  const unesc = (v) => v == null ? v : v.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  const footer = (html.match(/<footer\b[^>]*class="[^"]*\brf-footer\b[^"]*"[^>]*>([\s\S]*?)<\/footer>/) || [])[1];
+  return {
+    title: unesc((html.match(/<title>([^<]*)<\/title>/) || [])[1]),
+    og: unesc((html.match(/<meta property="og:title" content="([^"]*)">/) || [])[1]),
+    twitter: unesc((html.match(/<meta name="twitter:title" content="([^"]*)">/) || [])[1]),
+    footer: footer == null ? undefined : unesc((footer.match(/<p>([^<]*)<\/p>/) || [])[1]),
+  };
+}
+// The route kinds that append the site's name to their own heading, as built by these fixtures.
+const SUFFIX_ROUTES = ['devlog/index.html', 'devlog/first-light/index.html', '404.html', 'tag/telescopes/index.html',
+  'category/news/index.html', '2026/index.html', '2026/08/index.html', 'search/index.html'];
+const SUFFIX_ROUTES_JA = ['ja-jp/404.html', 'ja-jp/devlog/index.html', 'ja-jp/devlog/first-light/index.html', 'ja-jp/tag/telescopes/index.html', 'ja-jp/category/news/index.html'];
+// tile#279 r3 — the argon review's inputs: no title and no brand (footer-brand only; nothing but a
+// theme key), a seeded placeholder title beside a footer-brand, and a home page that writes the
+// reserved `site-title` itself on a two-locale site (the /language and /<loc>/404 routes read home
+// frontmatter OVER the site config).
+const SITE_HEAD = '---\nsitetile-page: _site\npackages: blog\nblog-search: on\nblog-category-routes: on\nlang: en-US\n';
+const routeNameInputs = {
+  'footer-brand only': buildRouteNameFixture(SITE_HEAD + 'footer-brand: HOSHIYA\n---\n'),
+  'theme only': buildRouteNameFixture(SITE_HEAD + 'theme: warm\n---\n'),
+  'placeholder + footer-brand': buildRouteNameFixture(SITE_HEAD + 'title: Untitled site\nfooter-brand: HOSHIYA\n---\n'),
+  // reef#3040: the seeded placeholder is the ONLY name (base and a second locale), with every
+  // archive kind routed — the title-suffix check below reads this build.
+  'placeholder only (two locales, every archive)': buildRouteNameFixture(
+    SITE_HEAD.replace('lang: en-US\n', 'lang: en-US\nlocales: en-US, ja-JP\n') + 'title: Untitled site\nblog-tag-routes: on\nblog-date-routes: on\n---\n',
+    { 'ja-jp/_site.md': '---\nsitetile-page: _site\ntitle: 無題のサイト\n---\n', 'ja-jp.md': '---\nsitetile-page: home\ntitle: ようこそ\nlang: ja-JP\n---\n\n## JA\nJA body.\n' },
+    { 'ja-jp/first-light.md': '---\ntitle: "初光"\ndescription: "Fixture post."\npubDate: 2026-08-04\ncategories: news\ntags: telescopes\n---\n本文。\n' }),
+  'home writes site-title (two locales)': buildRouteNameFixture(SITE_HEAD.replace('lang: en-US\n', 'lang: en-US\nlocales: en-US, ja-JP\n') + 'title: Atlas Observatory\n---\n', {
+    'home.md': '---\nsitetile-page: home\ntitle: Welcome\nsite-title: Leaked From Home\nlang: en-US\n---\n\n## Home\nHome body.\n',
+    'ja-jp/_site.md': '---\nsitetile-page: _site\ntitle: アトラス天文台\n---\n',
+    'ja-jp.md': '---\nsitetile-page: home\ntitle: ようこそ\nsite-title: Leaked From JA Home\nlang: ja-JP\n---\n\n## JA\nJA body.\n',
+  }),
+};
 const bubbleNameAttrs = page => (page.match(/<div\b[^>]*data-dynamic-coral="inbox-bubble"[^>]*>/g) || []).map(tag =>
   Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value])));
 const bubbleNameHeader = page => ((page.match(/<a\b[^>]*class="[^"]*\brf-logo\b[^"]*"[^>]*>([\s\S]*?)<\/a>/) || [])[1] || '').replace(/<[^>]*>/g, '').trim();
@@ -855,6 +983,18 @@ function bubbleNameNamesMatch(page, title, siteName) {
   const el = { getAttribute: name => attrs[0][name] || null };
   assert.equal(bubbleNameResolve(el, { querySelector: () => ({ getAttribute: () => 'Other OG name' }) }, { hostname: 'fallback.example' }), siteName);
   assert.equal(bubbleNameDialog(el, { ask: 'Ask…', title: 'Message' }, true), title);
+}
+// Every distinct site name the page's JSON-LD carries (WebSite.name and the publisher's name).
+function jsonLdSiteNames(page) {
+  const names = new Set();
+  for (const [, raw] of page.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
+    const graph = JSON.parse(raw);
+    for (const node of graph['@graph'] || [graph]) {
+      if (node['@type'] === 'WebSite' && node.name) names.add(node.name);
+      if (node.publisher && node.publisher.name) names.add(node.publisher.name);
+    }
+  }
+  return [...names];
 }
 function bubbleNameNamesFollowHeader(page) {
   const header = bubbleNameHeader(page);
@@ -883,8 +1023,9 @@ const OWNER_MARK_BYTES = (() => {
   return encodePng(px, OWNER_MARK_PX);
 })();
 // `name` picks the sibling directory, `favicon` is the value written into `_site.md` verbatim, and
-// `files` are extra public/ files planted before the build.
-function buildOwnerFaviconFixture(name, favicon, files = {}) {
+// `files` are extra public/ files planted before the build. `key` is the `_site.md` key that value
+// is written under: `favicon` unless a build is about one of the older marks (`site-logo:`).
+function buildOwnerFaviconFixture(name, favicon, files = {}, key = 'favicon') {
   const ODIR = join(HERE, '..', `.smoke-${name}`);
   const SKIP_RE = /[\\/](node_modules|\.astro|dist-[^\\/]*|\.smoke-[^\\/]*)(?:[\\/]|$)/;
   rmSync(ODIR, { recursive: true, force: true });
@@ -898,7 +1039,7 @@ function buildOwnerFaviconFixture(name, favicon, files = {}) {
 sitetile-page: _site
 brand: Example Studio
 lang: en-US
-favicon: ${favicon}
+${key}: ${favicon}
 ---
 `, 'utf8');
   writeFileSync(join(ODIR, 'content', 'home.md'), `---
@@ -940,6 +1081,43 @@ const handPlacedHome = readFileSync(join(HPDIST, 'index.html'), 'utf8');
 console.log('▸ astro build → .smoke-owner-favicon-malformed/ (`favicon: https://[`, refused by the layout)…');
 const MFDIST = buildOwnerFaviconFixture('owner-favicon-malformed', 'https://[');
 const malformedHome = readFileSync(join(MFDIST, 'index.html'), 'utf8');
+// The two icon configurations the builds above do not cover: an SVG `favicon:`, and a site whose
+// only mark is the older `site-logo:` (which <head> links, but which takes no generated file away).
+const OWNER_SVG_REL = 'brand/owner-mark.svg';
+const OWNER_SVG_BYTES = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><!-- the owner\'s own mark --><rect width="16" height="16" fill="#c82828"/></svg>\n', 'utf8');
+console.log('▸ astro build → .smoke-owner-favicon-svg/ (a site-level `favicon:` SVG)…');
+const SVGDIST = buildOwnerFaviconFixture('owner-favicon-svg', `/${OWNER_SVG_REL}`, { [OWNER_SVG_REL]: OWNER_SVG_BYTES });
+const svgOwnerHome = readFileSync(join(SVGDIST, 'index.html'), 'utf8');
+console.log('▸ astro build → .smoke-site-logo-only/ (`site-logo:` a PNG, no `favicon:`)…');
+const SLDIST = buildOwnerFaviconFixture('site-logo-only', `/${OWNER_MARK_REL}`, {}, 'site-logo');
+const siteLogoHome = readFileSync(join(SLDIST, 'index.html'), 'utf8');
+// 🔴 THE ICON INVARIANT, one question asked of every icon configuration this file builds: does
+// every `<link rel=icon|apple-touch-icon>` on every page name a file that build wrote, and does
+// /favicon.ico exist? 🩸 It was asked per fixture before, with each fixture's own idea of which
+// files it should have. The PNG `favicon:` fixture's idea was "no /favicon.ico", so /favicon.ico —
+// the one path every browser and crawler requests with no <link> telling it to — answered 404 on
+// every site that set a PNG favicon, and the check for that fixture asserted the 404.
+// `exists` is handed in so the control below can show the gate firing without a broken build.
+function iconInvariantViolations(dist, exists = existsSync) {
+  const out = [];
+  if (!exists(join(dist, 'favicon.ico'))) out.push('/favicon.ico is not in dist');
+  for (const f of allHtmlPages(dist)) {
+    const page = f.slice(dist.length);
+    for (const [tag] of readFileSync(f, 'utf8').matchAll(/<link\b[^>]*>/g)) {
+      const attrs = Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+      if (!['icon', 'apple-touch-icon'].includes(attrs.rel)) continue;
+      const href = String(attrs.href || '').split(/[?#]/)[0];
+      // Every mark these fixtures configure is a root path, so anything else is unresolvable here.
+      if (!/^\/(?!\/)/.test(href)) { out.push(`${page}: ${attrs.rel} → ${attrs.href} is not a root path`); continue; }
+      if (!exists(join(dist, decodeURIComponent(href.slice(1))))) out.push(`${page}: ${attrs.rel} → ${href} is not in dist`);
+    }
+  }
+  return out;
+}
+const ICON_CONFIGS = [['none', DIST], ['png', ODIST], ['png quoted + hand-placed apple-touch', HPDIST],
+  ['png refused by safeSrc', MFDIST], ['svg', SVGDIST], ['site-logo only', SLDIST]];
+/** The ICO's first directory entry's image, as bytes. */
+const icoImage = (b) => b.subarray(b.readUInt32LE(18), b.readUInt32LE(18) + b.readUInt32LE(14));
 const ownerHome = readFileSync(join(ODIST, 'index.html'), 'utf8');
 const manifestIconSrcs = (dist) => JSON.parse(readFileSync(join(dist, 'manifest.webmanifest'), 'utf8')).icons.map((i) => i.src);
 // Every .html the build emitted — not only index.html, because 404.html is exactly the kind of
@@ -1247,23 +1425,46 @@ const checks = [
   // -- a site-level `favicon:` PNG (buildOwnerFaviconFixture) --
   ['🔴 icons: with `favicon:` set to a PNG, /apple-touch-icon.png IS the owner\'s PNG, byte for byte', () =>
     readFileSync(join(ODIST, 'apple-touch-icon.png')).equals(OWNER_MARK_BYTES)],
-  ['🔴 icons: with `favicon:` set, no generated /favicon.ico or /favicon.svg is written (the <link> names the mark)', () =>
-    !existsSync(join(ODIST, 'favicon.ico')) && !existsSync(join(ODIST, 'favicon.svg'))
+  ['🔴 icons: in EVERY icon configuration (none, PNG, SVG, site-logo only, …), /favicon.ico is in dist and every icon <link> on every page names a file in dist', () => {
+    assert.deepEqual(ICON_CONFIGS.flatMap(([name, d]) => iconInvariantViolations(d).map((v) => `${name}: ${v}`)), []);
+    return true;
+  }],
+  ['icons: CONTROL — the invariant fires when a file is missing (a gate that cannot go red proves nothing)', () => {
+    const v = iconInvariantViolations(ODIST, () => false);
+    return v.includes('/favicon.ico is not in dist') && v.some((x) => x.includes(`/${OWNER_MARK_REL} is not in dist`));
+  }],
+  ['🔴 icons: with `favicon:` set to a PNG, /favicon.ico is that PNG, byte for byte, inside an ICO at its real size', () => {
+    const b = readFileSync(join(ODIST, 'favicon.ico'));
+    return b.readUInt16LE(0) === 0 && b.readUInt16LE(2) === 1 && b.readUInt16LE(4) === 1
+      && b[6] === OWNER_MARK_PX && b[7] === OWNER_MARK_PX && icoImage(b).equals(OWNER_MARK_BYTES)
+      && b.length === 22 + OWNER_MARK_BYTES.length;
+  }],
+  ['🔴 icons: with `favicon:` set to a PNG, no badge /favicon.svg is written and nothing links one (the <link> names the mark)', () =>
+    !existsSync(join(ODIST, 'favicon.svg')) && !ownerHome.includes('/favicon.svg')
     && ownerHome.includes(`<link rel="icon" type="image/png" href="/${OWNER_MARK_REL}">`)],
+  ['🔴 icons: with `favicon:` set to an SVG, /favicon.svg IS the owner\'s SVG, byte for byte, and /favicon.ico is the badge', () => {
+    const ico = readFileSync(join(SVGDIST, 'favicon.ico'));
+    return readFileSync(join(SVGDIST, 'favicon.svg')).equals(OWNER_SVG_BYTES)
+      && svgOwnerHome.includes(`<link rel="icon" type="image/svg+xml" href="/${OWNER_SVG_REL}">`)
+      && ico.readUInt16LE(2) === 1 && ico[6] === 32 && icoImage(ico).subarray(1, 4).toString('latin1') === 'PNG';
+  }],
+  ['icons: with only `site-logo:` set, <head> links the logo and the build still writes all three generated files', () =>
+    siteLogoHome.includes(`<link rel="icon" type="image/png" href="/${OWNER_MARK_REL}">`)
+    && ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png'].every((f) => existsSync(join(SLDIST, f)))],
   ['icons: with `favicon:` set, no icon link on the page is labelled our badge', () =>
     !/<link rel="(?:icon|apple-touch-icon)"[^>]*data-generated/.test(ownerHome)],
   ['🔴 manifest: lists the owner\'s PNG at its real size, and only it', () =>
     JSON.stringify(JSON.parse(readFileSync(join(ODIST, 'manifest.webmanifest'), 'utf8')).icons)
       === JSON.stringify([{ src: `/${OWNER_MARK_REL}`, sizes: `${OWNER_MARK_PX}x${OWNER_MARK_PX}`, type: 'image/png', purpose: 'any' }])],
   ['🔴 manifest: every icon it names exists in that build (primary and owner-favicon builds)', () =>
-    [DIST, ODIST, HPDIST, MFDIST].every((d) => manifestIconSrcs(d).every((src) => existsSync(join(d, src.slice(1)))))],
+    [DIST, ODIST, HPDIST, MFDIST, SVGDIST, SLDIST].every((d) => manifestIconSrcs(d).every((src) => existsSync(join(d, src.slice(1)))))],
   ['🔴 icons: a hand-placed public/apple-touch-icon.png keeps the path even with `favicon:` set to a PNG (precedence)', () =>
     readFileSync(join(HPDIST, 'apple-touch-icon.png')).equals(STALE_APPLE_TOUCH)],
-  ['🔴 icons: a QUOTED `favicon:` is linked without its quotes, and still replaces the generated .ico/.svg', () =>
+  ['🔴 icons: a QUOTED `favicon:` is linked without its quotes, and still replaces the badges (the .ico carries the owner PNG, no .svg)', () =>
     handPlacedHome.includes(`<link rel="icon" type="image/png" href="/${OWNER_MARK_REL}">`)
     && handPlacedHome.includes(`<link rel="apple-touch-icon" href="/${OWNER_MARK_REL}">`)
     && !/href="(?:&quot;|&#34;)/.test(handPlacedHome)
-    && !existsSync(join(HPDIST, 'favicon.ico')) && !existsSync(join(HPDIST, 'favicon.svg'))],
+    && icoImage(readFileSync(join(HPDIST, 'favicon.ico'))).equals(OWNER_MARK_BYTES) && !existsSync(join(HPDIST, 'favicon.svg'))],
   ['manifest: with a hand-placed apple-touch-icon.png but no gen-icons.sh output, the owner PNG is the icon', () =>
     JSON.stringify(manifestIconSrcs(HPDIST)) === JSON.stringify([`/${OWNER_MARK_REL}`])],
   ['🔴 icons: `favicon: https://[` (refused by the layout) → <head> links the generated pair AND the build wrote both', () =>
@@ -1317,7 +1518,11 @@ const checks = [
     const page = bubbleNamePages.home;
     assert.equal(bubbleNameNamesFollowHeader(page), 'Example Workshop');
     assert.ok(page.includes('<title>Untitled site</title>'));
-    assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'), 'head precedence remains independent of the bubble');
+    // The seeded placeholder title is UNSET for the site's name: with `brand:` filled in, the share
+    // card and the structured data carry the brand, never the placeholder (site-core siteName).
+    assert.ok(page.includes('<meta property="og:site_name" content="Example Workshop">'), 'a placeholder title must fall back to brand for og:site_name');
+    assert.ok(!page.includes('<meta property="og:site_name" content="Untitled site">'));
+    assert.deepEqual(jsonLdSiteNames(page), ['Example Workshop'], 'JSON-LD WebSite and publisher names follow og:site_name');
     const attrs = bubbleNameAttrs(page)[0];
     assert.equal(attrs['data-id'], 'bubble-name');
     assert.equal(attrs['data-api-base'], 'https://platform.example');
@@ -1327,18 +1532,128 @@ const checks = [
     const page = bubbleNamePages.about;
     assert.equal(bubbleNameNamesFollowHeader(page), 'Example Workshop');
     assert.ok(page.includes('<title>Example article</title>'));
-    assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'));
-    assert.ok(!page.includes('<meta property="og:site_name" content="Example Workshop">'));
+    assert.ok(page.includes('<meta property="og:site_name" content="Example Workshop">'));
+    assert.ok(!page.includes('<meta property="og:site_name" content="Untitled site">'));
+    assert.deepEqual(jsonLdSiteNames(page), ['Example Workshop']);
+    return true;
+  }],
+  // tile#277 r2 → tile#279 r2 — a hand-written page that hands the layout a meta with NO site config
+  // behind it. Every real route now carries the site's title as the `site-title` stash (loadSite), so
+  // the real-title-first rule is proven on real routes below (the reviewer's _site.md); what holds
+  // here is the other half: JSON-LD and og:site_name are one name, whatever meta arrives.
+  ['JSON-LD site name: a meta with no site config behind it still gives JSON-LD == og:site_name', () => {
+    const og = (page) => (page.match(/<meta property="og:site_name" content="([^"]*)">/) || [])[1];
+    for (const pages of [bubbleNamePages, bubbleNameNoBrandPages]) {
+      for (const key of ['unstashed-title', 'unstashed-footer', 'unstashed-placeholder']) {
+        assert.deepEqual(jsonLdSiteNames(pages[key]), [og(pages[key])], key);
+      }
+      assert.deepEqual(jsonLdSiteNames(pages['unstashed-placeholder']), ['Atlas']);
+    }
+    return true;
+  }],
+  ['site name: a `site-title:` in _site.md is ignored on every route — the home page and the blog index agree', () => {
+    const og = (page) => (page.match(/<meta property="og:site_name" content="([^"]*)">/) || [])[1];
+    const { home, devlog } = siteTitleKeyPages;
+    assert.equal(og(home), og(devlog), `og:site_name by route: ${og(home)} / ${og(devlog)}`);
+    assert.deepEqual(jsonLdSiteNames(home), jsonLdSiteNames(devlog));
+    assert.equal(og(devlog), 'Untitled site');
+    assert.ok(!home.includes('Actual Name') && !devlog.includes('Actual Name'), 'the reserved key reaches no page');
+    return true;
+  }],
+  ['site name: ONE og:site_name, JSON-LD name and header brand per locale on every route of the smoke site', () => {
+    const bad = siteNameDisagreements(htmlFilesOf(DIST), ['zh-tw', 'ko-kr', 'ja-jp']);
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    return true;
+  }],
+  ['site name: ONE name per locale on every route of every other fixture build this smoke made', () => {
+    const root = join(HERE, '..');
+    const dists = readdirSync(root).filter((d) => d.startsWith('.smoke-')).flatMap((d) =>
+      readdirSync(join(root, d)).filter((x) => x.startsWith('dist-')).map((x) => join(root, d, x)));
+    assert.ok(dists.length >= 10, `fixture builds found: ${dists.length}`);
+    // Scope: fixture SITES — a fixture with a `_site.md` (one without is the legacy single-source
+    // shape, where the home page stands in for the site), minus the hand-written .astro test pages a
+    // fixture adds to src/pages, which hand the layout a meta of their own on purpose.
+    const bad = dists.flatMap((dist) => {
+      const fx = dirname(dist);
+      if (!existsSync(join(fx, 'content/_site.md'))) return [];
+      // every top-level .astro page other than the two site routes is a hand-written test page
+      // (`[kind]`-style params become a prefix match)
+      const hand = readdirSync(join(fx, 'src/pages')).filter((f) => f.endsWith('.astro') && f !== '404.astro' && f !== '[...path].astro')
+        .map((f) => f.replace(/\.astro$/, '').replace(/\[[^\]]*\].*$/, ''));
+      const files = new Map([...htmlFilesOf(dist)].filter(([rel]) => !hand.some((h) => rel.split('/')[0].startsWith(h) && h !== '')));
+      return siteNameDisagreements(files, ['zh-tw', 'ko-kr', 'ja-jp']).map((l) => `${dist.split('/').slice(-2).join('/')} ${l}`);
+    });
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    return true;
+  }],
+  ...Object.entries(routeNameInputs).map(([label, pages]) => [`site name (tile#279 r3, ${label}): header, bubble, og and JSON-LD agree on every route kind`, () => {
+    for (const rel of ROUTE_KINDS) assert.ok(pages.has(rel), `route kind built: ${rel}`);
+    const bad = siteNameDisagreements(pages, ['ja-jp']);
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    const home = siteNamesOf(pages.get('index.html'));
+    for (const f of SITE_NAME_FIELDS) assert.ok(home[f] !== undefined && home[f] !== '', `${f} rendered on the home page: ${JSON.stringify(home)}`);
+    assert.ok(![...pages.values()].some((h) => /Leaked From/.test(h)), 'a page\'s own site-title never reaches any route');
+    assert.ok(!/Welcome|About/.test(home.header), `header is a site name, not a page title: ${home.header}`);
+    return true;
+  }]),
+  ['title suffix (reef#3040): the placeholder site title never reaches <title>, og:title, twitter:title or the footer line on any route', () => {
+    const pages = routeNameInputs['placeholder only (two locales, every archive)'];
+    const have = [...pages.keys()];
+    for (const rel of [...SUFFIX_ROUTES, ...SUFFIX_ROUTES_JA]) assert.ok(pages.has(rel), `route built: ${rel} (have ${have.join(', ')})`);
+    const placeholders = Object.values(PLACEHOLDER_SITE_TITLES);
+    const bad = [];
+    let docs = 0;
+    for (const [rel, html] of pages) {
+      if (!/<meta property="og:type"/.test(html)) continue; // a redirect stub / non-layout document
+      docs++;
+      const t = titleSurfacesOf(html);
+      for (const [field, v] of Object.entries(t)) {
+        if (v == null) continue;
+        if (placeholders.some((p) => v.includes(p))) bad.push(`${rel} ${field}: ${JSON.stringify(v)}`);
+        // no real name → the suffix is omitted, not left dangling
+        if (/—\s*$/.test(v)) bad.push(`${rel} ${field} dangles: ${JSON.stringify(v)}`);
+      }
+    }
+    assert.ok(docs >= SUFFIX_ROUTES.length + SUFFIX_ROUTES_JA.length, `layout documents checked: ${docs}`);
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    // the heading alone stands: the post's own title, the 404's own words
+    assert.equal(titleSurfacesOf(pages.get('devlog/first-light/index.html')).title, 'First light');
+    assert.equal(titleSurfacesOf(pages.get('ja-jp/devlog/first-light/index.html')).title, '初光');
+    return true;
+  }],
+  ['title suffix (reef#3040): a real site name is still the suffix on every route that carries one', () => {
+    const bad = [];
+    for (const rel of SUFFIX_ROUTES) {
+      assert.ok(routeNamePages.has(rel), `route built: ${rel} (have ${[...routeNamePages.keys()].join(', ')})`);
+      const t = titleSurfacesOf(routeNamePages.get(rel));
+      for (const field of ['title', 'og', 'twitter']) if (!String(t[field]).endsWith(' — Atlas Observatory')) bad.push(`${rel} ${field}: ${JSON.stringify(t[field])}`);
+      if (t.footer !== undefined && t.footer !== t.title) bad.push(`${rel} footer ≠ title: ${JSON.stringify(t.footer)}`);
+    }
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    assert.equal(titleSurfacesOf(routeNamePages.get('devlog/first-light/index.html')).title, 'First light — Atlas Observatory');
+    return true;
+  }],
+  ['site name: the reviewer\'s _site.md (title + brand + reserved site-title) — one name on every route kind', () => {
+    for (const rel of ROUTE_KINDS) assert.ok(routeNamePages.has(rel), `route kind built: ${rel} (have ${[...routeNamePages.keys()].slice(0, 12).join(', ')})`);
+    assert.ok([...routeNamePages.keys()].some((r) => /(^|\/)(category|tag|search)\//.test(r)), `an archive or search route was built: ${[...routeNamePages.keys()].join(', ')}`);
+    const bad = siteNameDisagreements(routeNamePages, []);
+    assert.deepEqual(bad, [], bad.join(' ;; '));
+    assert.equal(siteNamesOf(routeNamePages.get('devlog/index.html')).og, 'Atlas Observatory', 'the real title names the site; the dropped key changes nothing');
     return true;
   }],
   ['bubble site name: sites without brand keep base attribute chains and hand-mounted names survive', () => {
-    for (const [key, header] of [['home', 'Untitled site'], ['about', 'Example article']]) {
+    // tile#279 r2: a brandless site's header is the SITE's title on every page, not each page's own.
+    for (const [key, header] of [['home', 'Untitled site'], ['about', 'Untitled site']]) {
       const page = bubbleNameNoBrandPages[key];
       assert.equal(bubbleNameHeader(page), header);
       bubbleNameNamesMatch(page, 'Untitled site', 'Untitled site');
+      // No brand and no footer-brand: the placeholder is still the site's one constant name, so a
+      // page's own title (Example article) never stands in for it.
       assert.ok(page.includes('<meta property="og:site_name" content="Untitled site">'));
+      assert.deepEqual(jsonLdSiteNames(page), ['Untitled site']);
     }
-    for (const [key, header, name] of [['fallback-meta', 'Fallback site', 'OG fallback site'], ['fallback-prop', 'Fallback prop', 'OG fallback prop']]) {
+    // tile#279 r2: a meta carrying the `site-title` stash names the header by it too — one name.
+    for (const [key, header, name] of [['fallback-meta', 'OG fallback site', 'OG fallback site'], ['fallback-prop', 'OG fallback prop', 'OG fallback prop']]) {
       const page = bubbleNameNoBrandPages[key];
       assert.equal(bubbleNameHeader(page), header);
       bubbleNameNamesMatch(page, name, name);
@@ -2603,8 +2918,11 @@ const checks = [
 let fail = 0;
 for (const [name, fn] of checks) {
   let ok = false;
-  try { ok = fn(); } catch { ok = false; }
+  let why = '';
+  try { ok = fn(); } catch (e) { ok = false; why = String(e?.message || e).split('\n')[0]; }
   console.log(`  ${ok ? '✓' : '✗'} ${name}`);
+  // An assertion's own message is the reason a red check is red; printed so a failure names itself.
+  if (!ok && why) console.log(`      ${why}`);
   if (!ok) fail++;
 }
 if (unaccounted.length) console.log('  ⚠ unaccounted scripts:\n    ' + unaccounted.join('\n    '));

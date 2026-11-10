@@ -9,6 +9,7 @@
 // post count, so a 576-post label emits many /page/<n> pages while a 3-post label emits
 // none. No-op (zero output) unless `blog-label-routes` is truthy AND `blog-page-size` is
 // set — so non-Blogger sites and unpaginated sites generate nothing here.
+import { siteTitleSuffix } from '@sitetile';
 import SiteLayout from '../../../../../layouts/SiteLayout.astro';
 import { cardImgAttrs } from '@emit/card-img.mjs';
 import { allPosts, listedPosts, siteMeta, systemPageLang, buildIndexView, groupByArchive, postUrl, blogBase, blogSearchOn, archivePrefixes, tagHref, routedCategories, sidebarCopy, indexDateLang, entryDateSpec, entryDateHtml } from '../../../../../lib/blog.mjs';
@@ -65,7 +66,7 @@ const lang = indexDateLang(dateFormat, meta, systemPageLang(meta, sysFiles));
 const dateSpec = entryDateSpec(dateFormat, lang, meta.lang);
 const recentPosts = posts.slice(0, 5);
 const archive = showSidebar ? groupByArchive(posts) : [];
-const title = `${tag} — ${meta.title || ''}`;
+const title = `${tag}${siteTitleSuffix(meta)}`;
 const pageHref = (n) => (n === 1 ? `/search/label/${tag}` : `/search/label/${tag}/page/${n}`);
 ---
 <SiteLayout title={title} lang={systemPageLang(meta, sysFiles)} meta={meta}>

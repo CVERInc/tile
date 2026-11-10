@@ -9,6 +9,7 @@
 // existing is not implied by the base (or a third locale's) page N existing, and this feature does
 // not attempt that cross-locale page-count reconciliation. Page 1 (../index.astro) carries the
 // verified hreflang; every other locale's own page 2+ is reachable from there.
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from '../../../../../components/ArchiveView.astro';
 import { uiCopy } from '../../../../../packages/lingo/locale.mjs';
 import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, localeBlogCorpora, categoryBase } from '../../../../../lib/blog.mjs';
@@ -50,5 +51,5 @@ const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
 const subhead = archivePrefixes(meta).category + heading;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
-<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading}${uiCopy(meta.lang).pageSuffix(pageNum)}— ${meta.title || ''}`}
+<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading}${uiCopy(meta.lang).pageSuffix(pageNum)}${siteTitleSuffix(meta, '— ')}`}
   heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />

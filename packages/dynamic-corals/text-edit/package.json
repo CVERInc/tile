@@ -1,0 +1,10 @@
+{
+  "name": "@cver/coral-text-edit",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Click-to-edit words inside a rendered sitetile page, for a host that embeds the page in a frame. Emits text-only edits anchored to the source; never edits structure. Version covers the UNIT: the client JS + the data-* contract + the edit message.",
+  "scripts": {
+    "build": "node ../build.mjs text-edit"
+  }
+}

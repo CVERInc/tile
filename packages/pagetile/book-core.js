@@ -207,6 +207,19 @@ function parseBook(text) {
 // serializeBook: Book model → raw Markdown. Round-trips parseBook (modulo whitespace normalization).
 function serializeBook(book) {
   const out = [];
+  // A flow page's body is the author's text, verbatim (blank-line runs and fenced blank lines
+  // included), so the whitespace normalisation at the end must not touch it. Each flow body goes out
+  // as a one-line placeholder that the normalisation leaves alone and is put back afterwards; fixed
+  // pages produce exactly the output they always have. The placeholder is built from a character
+  // run no string in the book contains (titles, meta, images, captions), so it never matches author text.
+  const flowBodies = [];
+  const strings = [];
+  (function collect(v) {
+    if (typeof v === 'string') strings.push(v);
+    else if (v && typeof v === 'object') Object.keys(v).forEach((k) => { strings.push(k); collect(v[k]); });
+  })(book);
+  let mark = '\u0000';
+  while (strings.some((t) => t.includes(mark))) mark += '\u0000';
   const meta = Object.assign({}, book.meta);
   meta[FRONTMATTER_KEY] = 'true';
   if (book.title) meta.title = book.title;
@@ -220,11 +233,14 @@ function serializeBook(book) {
       if (p.kind) out.push('kind: ' + p.kind);
       if (p.focus) out.push('focus: ' + p.focus);
       (p.images || []).forEach((img) => out.push(serializeImage(img)));
-      if (p.caption) out.push(p.caption);
+      if (p.caption && p.kind === FLOW_KIND) { out.push(mark + flowBodies.length + mark); flowBodies.push(p.caption); }
+      else if (p.caption) out.push(p.caption);
       out.push('');
     });
   });
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/,'') + '\n';
+  const text = out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/,'') + '\n';
+  if (!flowBodies.length) return text;
+  return text.replace(new RegExp(mark + '(\\d+)' + mark, 'g'), (_, i) => flowBodies[Number(i)]);
 }
 
 // isBookFile: cheap detector for "is this Markdown a pagetile book?" (frontmatter flag), so a host can

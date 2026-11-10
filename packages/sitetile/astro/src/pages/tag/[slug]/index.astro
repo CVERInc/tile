@@ -18,6 +18,7 @@
 // Lingo sibling: pages/[...loc]/tag/[slug]/index.astro emits the SAME slug set for each translated
 // locale that routes it. `alternates` is that reciprocal hreflang — see category/[slug]/index.astro's
 // header (same mechanism, termLocaleMap/alternateArchiveLocales, kind='tag').
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from '../../../components/ArchiveView.astro';
 import { allPosts, listedPosts, siteMeta, tagSlugMap, archivePrefixes, termLocaleMap, alternateArchiveLocales, tagBase } from '../../../lib/blog.mjs';
 
@@ -53,5 +54,5 @@ const labelPosts = posts.filter((p) => p.tags.includes(tag));
 const subhead = archivePrefixes(meta).tag + tag;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
-<ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag} — ${meta.title || ''}`}
+<ArchiveView posts={labelPosts} corpus={posts} meta={meta} title={`${tag}${siteTitleSuffix(meta)}`}
   heading={tag} subhead={subhead} pageHref={pageHref} pageNum={1} alternates={alternates} />

@@ -24,6 +24,7 @@ import {
   siteMark, markType, siteInitial, badgeColors, iconHrefs, monogramKey,
   badgeSvg, badgePixels, appleTouchPng, faviconIco,
   ownerFavicon, publicFilePath, pngSize, ownerPng, badgePaths, appleTouchFile,
+  ownerSvg, faviconIcoFile, faviconSvgFile, encodeIco,
 } from './icon-core.mjs';
 import { safeSrc } from './site-core.js';
 
@@ -332,31 +333,57 @@ test('🔴 CONTROL: with no `favicon:`, the three files are exactly what the rou
   const read = publicDir({ 'favicon.png': OWNER_PNG });          // a file on disk is not a setting
   assert.deepEqual([...badgePaths(meta, read)].sort(), Object.values(ICON_PATHS).sort(), 'all three still carry the badge');
   assert.ok(appleTouchFile(meta, read).equals(appleTouchPng(meta)), 'apple-touch-icon body is the badge, byte for byte');
+  assert.ok(faviconIcoFile(meta, read).equals(faviconIco(meta)), 'favicon.ico body is the badge, byte for byte');
+  assert.equal(faviconSvgFile(meta, read), badgeSvg(meta), 'favicon.svg body is the badge, byte for byte');
   // pinned from tile 466a0ece (before this change): the same md5 its build wrote at /favicon.svg
   assert.equal(md5(badgeSvg(meta)), 'b26d7ff9e6762387f4a3e3febf2b6de5', 'favicon.svg bytes unchanged');
   // site-logo alone is a <link> fallback, not `favicon:`, and changes no file
   assert.equal(badgePaths({ ...meta, 'site-logo': '/logo.png' }, read).size, 3);
 });
 
-test("🔴 `favicon:` naming a PNG in public/ → apple-touch-icon IS that PNG, and no generated .ico/.svg", () => {
+test("🔴 `favicon:` naming a PNG in public/ → apple-touch-icon IS that PNG, favicon.ico wraps it, no .svg", () => {
   const meta = { brand: 'Example Studio', favicon: '/favicon.png' };
   const read = publicDir({ 'favicon.png': OWNER_PNG });
   const body = appleTouchFile(meta, read);
   assert.ok(Buffer.from(body).equals(OWNER_PNG), `apple-touch-icon must be the owner's bytes (got md5 ${md5(body)}, owner ${md5(OWNER_PNG)})`);
   assert.deepEqual([...badgePaths(meta, read)], [], 'no path carries the badge');
+  // 🩸 /favicon.ico used to be skipped here, so the path every browser asks for unprompted was a 404.
+  const ico = faviconIcoFile(meta, read);
+  assert.ok(ico, 'favicon.ico is always written');
+  assert.deepEqual([ico.readUInt16LE(0), ico.readUInt16LE(2), ico.readUInt16LE(4)], [0, 1, 1], 'an ICO holding one image');
+  assert.deepEqual([ico[6], ico[7]], [64, 48], 'the directory entry records the PNG\'s real size');
+  assert.equal(ico.readUInt32LE(14), OWNER_PNG.length);
+  assert.equal(ico.readUInt32LE(18), 22);
+  assert.ok(ico.subarray(22).equals(OWNER_PNG), 'the image IS the owner\'s PNG, not resampled');
+  assert.equal(faviconSvgFile(meta, read), null, 'no badge SVG: <head> links the mark, never /favicon.svg');
+  assert.deepEqual([...encodeIco(OWNER_PNG, 300, 256).subarray(6, 8)], [0, 0], '256 and up is written as 0, as the format says');
   assert.deepEqual(ownerPng(meta, read) && { ...ownerPng(meta, read), bytes: '…' },
     { href: '/favicon.png', bytes: '…', width: 64, height: 48 }, 'the real size, read from IHDR');
   // quotes and a cache-buster are the same file
   assert.ok(Buffer.from(appleTouchFile({ favicon: '"/favicon.png?v=3"' }, read)).equals(OWNER_PNG));
 });
 
-test('`favicon:` the build cannot read as a PNG → no .ico/.svg, apple-touch-icon keeps the badge', () => {
+test('`favicon:` the build cannot read as a PNG → favicon.ico and apple-touch-icon keep the badge, no badge .svg', () => {
   const read = publicDir({ 'mark.svg': Buffer.from('<svg/>'), 'fake.png': Buffer.from('not a png') });
   for (const favicon of ['https://cdn.example/mark.png', '/mark.svg', '/missing.png', '/fake.png']) {
     const meta = { brand: 'Example Studio', favicon };
-    assert.deepEqual([...badgePaths(meta, read)], [ICON_PATHS.apple], favicon);
+    assert.deepEqual([...badgePaths(meta, read)].sort(), [ICON_PATHS.apple, ICON_PATHS.ico].sort(), favicon);
     assert.ok(appleTouchFile(meta, read).equals(appleTouchPng(meta)), `${favicon}: badge, not someone's bytes`);
+    assert.ok(faviconIcoFile(meta, read).equals(faviconIco(meta)), `${favicon}: /favicon.ico still exists, as the badge`);
   }
+});
+
+test('🔴 `favicon:` naming an SVG in public/ → favicon.svg IS that file; anything else that is not one writes no .svg', () => {
+  const svg = Buffer.from('<?xml version="1.0"?>\n<!-- mark -->\n<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
+  const read = publicDir({ 'brand/mark.svg': svg, 'brand/fake.svg': Buffer.from('not an svg at all'), 'brand/mark.png': OWNER_PNG });
+  const meta = { brand: 'Example Studio', favicon: '/brand/mark.svg?v=2' };
+  assert.deepEqual(ownerSvg(meta, read) && { ...ownerSvg(meta, read), bytes: '…' }, { href: '/brand/mark.svg', bytes: '…' });
+  assert.ok(Buffer.from(faviconSvgFile(meta, read)).equals(svg), 'the owner\'s bytes, byte for byte');
+  assert.ok(!badgePaths(meta, read).has(ICON_PATHS.svg), 'and it is never labelled our badge');
+  for (const favicon of ['/brand/fake.svg', '/brand/missing.svg', 'https://cdn.example/mark.svg', '/brand/mark.png']) {
+    assert.equal(faviconSvgFile({ favicon }, read), null, favicon);
+  }
+  assert.equal(ownerSvg({ 'site-logo': '/brand/mark.svg' }, read), null, 'site-logo: is a <link> fallback, not `favicon:`');
 });
 
 // ownerFavicon accepts a strict subset of what the layout's safeSrc links. A value safeSrc refuses
@@ -380,19 +407,21 @@ test('🔴 the .ico/.svg are suppressed ONLY when <head> links the owner mark in
   for (const favicon of inputs) {
     const meta = { brand: 'Example Studio', favicon };
     const icon = iconHrefs(meta, { safe: safeSrc }).icon;
-    const suppressed = !badgePaths(meta, read, safeSrc).has(ICON_PATHS.ico);
-    assert.equal(!badgePaths(meta, read, safeSrc).has(ICON_PATHS.svg), suppressed, `${favicon}: .ico and .svg move together`);
+    // /favicon.ico is written for every input (the owner's PNG or the badge); only the .svg can go.
+    assert.ok(faviconIcoFile(meta, read, safeSrc), `${favicon}: /favicon.ico is always written`);
+    const suppressed = faviconSvgFile(meta, read, safeSrc) == null;
     if (suppressed) {
       assert.deepEqual(icon.map((l) => l.href), [ownerFavicon(meta, safeSrc)], `${favicon}: suppressed, so <head> must link the mark`);
     }
-    if (icon.some((l) => l.href === ICON_PATHS.ico || l.href === ICON_PATHS.svg)) {
-      assert.ok(!suppressed, `${favicon}: <head> links a generated file, so it must be written`);
+    if (icon.some((l) => l.href === ICON_PATHS.svg)) {
+      assert.ok(!suppressed, `${favicon}: <head> links /favicon.svg, so it must be written`);
     }
   }
   // the reviewer's two inputs, by name
   const bad = { favicon: 'https://[' };
   assert.deepEqual(iconHrefs(bad, { safe: safeSrc }).icon.map((l) => l.href), [ICON_PATHS.ico, ICON_PATHS.svg]);
   assert.equal(badgePaths(bad, read, safeSrc).size, 3, 'a mark the layout refuses keeps all three generated files');
+  assert.ok(faviconIcoFile(bad, read, safeSrc).equals(faviconIco(bad)) && faviconSvgFile(bad, read, safeSrc) === badgeSvg(bad));
   const quoted = { favicon: '"/brand/mark.png"' };
   assert.deepEqual(iconHrefs(quoted, { safe: safeSrc }).icon.map((l) => l.href), ['/brand/mark.png'], 'the <link> carries no quotes');
   assert.equal(iconHrefs(quoted, { safe: safeSrc }).appleTouch.href, '/brand/mark.png');
@@ -487,8 +516,9 @@ test('🔴 the public/ reader stays inside public/ and reads only regular files'
 test('🔴 the routes and the layout read the rule from the model', () => {
   const route = (p) => readFileSync(join(ASTRO, 'src/pages', p), 'utf8');
   assert.match(route('apple-touch-icon.png.js'), /appleTouchFile\(meta, readPublic, safeSrc\)/, 'apple-touch route serves appleTouchFile');
-  assert.match(route('favicon.ico.js'), /if \(!badgePaths\(meta, null, safeSrc\)\.has\(ICON_PATHS\.ico\)\) return new Response\(null/, '.ico skips itself');
-  assert.match(route('favicon.svg.js'), /if \(!badgePaths\(meta, null, safeSrc\)\.has\(ICON_PATHS\.svg\)\) return new Response\(null/, '.svg skips itself');
+  assert.match(route('favicon.ico.js'), /new Response\(faviconIcoFile\(meta, readPublic, safeSrc\)/, '.ico route serves faviconIcoFile, with no skip');
+  assert.ok(!/status: 404/.test(route('favicon.ico.js')), '/favicon.ico never answers 404');
+  assert.match(route('favicon.svg.js'), /const body = faviconSvgFile\(meta, readPublic, safeSrc\);\n  if \(body == null\) return new Response\(null, \{ status: 404 \}\);/, '.svg route serves faviconSvgFile, and skips itself only on null');
   assert.match(route('manifest.webmanifest.js'), /ownerPng\(meta, readPublic, safeSrc\)/, 'manifest lists the same owner PNG');
   assert.match(layout, /\.filter\(\(p\) => iconBadge\.has\(p\)\)/, '`generated` follows badgePaths, so an owner PNG is never labelled a badge');
   // tile#203 r1 P1: the SAME gate on both sides. A layout that gated its links any other way could

@@ -9,6 +9,7 @@
 // than omitting hreflang, per this codebase's own rule (see lingo/locale.mjs's alternateLocales
 // header). Page 1 (../index.astro) carries the real, verified cross-locale link; a reader or crawler
 // reaches every other locale's page 2+ from there.
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from '../../../../components/ArchiveView.astro';
 import { uiCopy } from '../../../../packages/lingo/locale.mjs';
 import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, categoryBase } from '../../../../lib/blog.mjs';
@@ -50,5 +51,5 @@ const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
 const subhead = archivePrefixes(meta).category + heading;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
-<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading}${uiCopy(meta.lang).pageSuffix(pageNum)}— ${meta.title || ''}`}
+<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading}${uiCopy(meta.lang).pageSuffix(pageNum)}${siteTitleSuffix(meta, '— ')}`}
   heading={heading} subhead={subhead} pageHref={pageHref} pageNum={pageNum} />

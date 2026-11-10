@@ -9,7 +9,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 import { cardImgAttrs } from '@emit/card-img.mjs';
 import Section from './Section.astro';
 import { buildIndexView, postUrl, indexUrl, blogBase, homeSections, blogSearchOn, tagHref, tagFontSize, routedCategories, sidebarCopy, blogViewLang, blogAlternates, indexDateLang, entryDateSpec, entryDateHtml } from '../lib/blog.mjs';
-import { safeHref } from '@sitetile';
+import { safeHref, siteTitleSuffix, titleSiteName } from '@sitetile';
 import Arrow from '@cvernet/signet/Arrow.astro';
 // reef#2874: this page's markdown twin — what it lists, recorded for the post-build pass.
 import { recordListTwin } from '../../agent-list-twins.mjs';
@@ -63,8 +63,8 @@ const homeCards = isHome
 // explicitly now (blog-title/blog-tagline/blog-label in its own ir/_site.md), so its output is
 // unchanged; every other site either names its blog or gets a plain generic.
 const title = isHome
-  ? (meta.title || meta['blog-title'] || 'Blog')
-  : ((meta['blog-title'] || 'Blog') + ' — ' + (meta.title || ''));
+  ? (titleSiteName(meta) || meta['blog-title'] || 'Blog')
+  : ((meta['blog-title'] || 'Blog') + siteTitleSuffix(meta));
 // reef#2874: exactly the cards this page shows, and its pager neighbours. '' outside a gated build.
 // A root-mounted home shows no heading, so its twin is titled the way its <title> is.
 const twinMark = recordListTwin({

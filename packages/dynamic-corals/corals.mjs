@@ -41,6 +41,11 @@ export const CORALS = {
   'grid-filter': { src: 'grid-filter-client.mjs', bundle: true, registry: false },
   'hero-parallax': { src: 'hero-parallax-client.mjs', bundle: true, registry: false },
   'carousel': { src: 'carousel-client.mjs', bundle: true, registry: false },
+  // Click-to-edit words in a framed preview: mounting over a core node drives against real renders.
+  // A registry participant: the host that frames the page loads it from the registry channel like
+  // any other coral. Its metadata says `listed: false`, so a public catalog does not offer it — a
+  // host injects it into its own preview; a site owner never installs it on a page.
+  'text-edit': { src: 'text-edit-client.mjs', bundle: true, registry: true },
 };
 
 export const REGISTRY_CORALS = Object.keys(CORALS).filter((name) => CORALS[name].registry);

@@ -9,6 +9,7 @@
 // translated locale that routes it. `alternates` below is that reciprocal hreflang — computed by
 // termLocaleMap so this file and its sibling can never advertise a locale the other side doesn't
 // also route (see lib/blog.mjs's header on localizeArchiveHref/alternateArchiveLocales for why).
+import { siteTitleSuffix } from '@sitetile';
 import ArchiveView from '../../../components/ArchiveView.astro';
 import { allPosts, listedPosts, siteMeta, kvMap, archivePrefixes, termLocaleMap, alternateArchiveLocales, categoryBase } from '../../../lib/blog.mjs';
 
@@ -47,5 +48,5 @@ const catPosts = posts.filter((p) => (p.categories || []).includes(slug));
 const subhead = archivePrefixes(meta).category + heading;
 const pageHref = (n) => (n === 1 ? `${base}/${slug}` : `${base}/${slug}/page/${n}`);
 ---
-<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading} — ${meta.title || ''}`}
+<ArchiveView posts={catPosts} corpus={posts} meta={meta} title={`${heading}${siteTitleSuffix(meta)}`}
   heading={heading} subhead={subhead} pageHref={pageHref} pageNum={1} alternates={alternates} />
