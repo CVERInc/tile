@@ -550,6 +550,14 @@ it is above the 0.7.12 floor.
 
 ### 🔴 Rolling out 0.8.0 and the installed-app bar — coral first, in this order
 
+> **Historical for the version steps.** The first three steps are done: checked 2026-11-10, the
+> public registry serves `inbox-bubble` v0 = latest = 0.8.0 and `dock` v0 = latest = 0.1.0
+> (`X-Coral-Resolved`). Don't re-run them for a later version. To publish 0.8.1 (or any later
+> patch), publish it as a new immutable version, repoint `latest` and then `v0` to it, and verify
+> `X-Coral-Resolved` and the body stamp name that version, as in "Publishing" above. The last two
+> steps are about the dock embed and the appbar engine, not a version number. They were not
+> checked here.
+
 The coral alone is safe on every page: it never creates a bar, so an installed PWA without
 sitetile's bar keeps its bubble in the corner, as with 0.7.x. The sitetile engine that writes the bar
 needs the coral that joins it (an older bubble sits fixed over the bar's right-hand tab). And the
@@ -561,11 +569,11 @@ channels point at 0.1.0 from its first publish; when they did, no page loaded `d
 and inbox 0.8.0 carry the dock base inside their own bundles). Keep that window short: don't document
 or suggest the `dock` embed to sites until `v0` serves 0.8.0. Each step gates the next:
 
-- [ ] **Publish `inbox-bubble@0.8.0` and `dock@0.1.0`** as immutable versions, with `dock`'s
+- [x] **Publish `inbox-bubble@0.8.0` and `dock@0.1.0`** as immutable versions, with `dock`'s
       `latest` and `v0` → 0.1.0 (required by the registry contract; see above).
-- [ ] **Repoint `latest` → 0.8.0** and **compare on a real site** (the corner, the panel, the bubble as ×
+- [x] **Repoint `latest` → 0.8.0** and **compare on a real site** (the corner, the panel, the bubble as ×
       with no panel × in the corner, Esc/focus, a wrapper-themed bubble) against `v0`.
-- [ ] **Repoint `v0` → 0.8.0**, wait out the channel cache as for 0.7.12 below (3,900 s plus
+- [x] **Repoint `v0` → 0.8.0**, wait out the channel cache as for 0.7.12 below (3,900 s plus
       propagation), and verify `X-Coral-Resolved: 0.8.0` and the body's `['inbox-bubble']='0.8.0'`.
 - [ ] **Only then document the `dock` embed** (`/corals/dock/v0/dock.js`) to sites. From here a page
       that loads the dock through a channel gets an inbox that joins it.
