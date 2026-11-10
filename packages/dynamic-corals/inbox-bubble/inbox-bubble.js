@@ -580,6 +580,9 @@ function dockInk(bg) {
 // 🔴 The status line keeps carrying `AI_CHIP_TOKEN` and the assistant-name slot. Shorter copy is
 // exactly where a disclosure gets dropped by accident, and the 2026-09-05 ruling did not move:
 // the name may change, the reply is always marked AI.
+/** The en heading over KAITO's related-page links; the locales not yet translated show it as is. */
+const RELATED_HEADING_EN = 'Possibly related pages';
+
 export const COPY = {
 	en: {
 		ask: 'Ask about this site…',
@@ -620,7 +623,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'Typing only searches inside your browser. Nothing is sent until you press the button.',
 		askAi: 'Ask AI',
-		sendOwner: 'Send to a person'
+		sendOwner: 'Send to a person',
+		// Heading over the page links a KAITO refusal may carry. They are search results, not an answer.
+		relatedHeading: RELATED_HEADING_EN
 	},
 	'zh-tw': {
 		ask: '問這個站的事…',
@@ -661,7 +666,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '打字時只在你的瀏覽器裡找，按下按鈕才會送出。',
 		askAi: '問 AI',
-		sendOwner: '傳給真人'
+		sendOwner: '傳給真人',
+		// Heading over the page links a KAITO refusal may carry. They are search results, not an answer.
+		relatedHeading: '可能相關的頁面'
 	},
 	ja: {
 		ask: 'このサイトについて質問…',
@@ -702,7 +709,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '入力中はブラウザの中だけで探します。ボタンを押すまで何も送信されません。',
 		askAi: 'AI に聞く',
-		sendOwner: '担当者に送る'
+		sendOwner: '担当者に送る',
+		// Heading over the page links a KAITO refusal may carry. They are search results, not an answer.
+		relatedHeading: '関連する可能性のあるページ'
 	},
 	'zh-cn': {
 		ask: '问这个网站的事…',
@@ -743,7 +752,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '打字时只在你的浏览器里找，按下按钮才会送出。',
 		askAi: '问 AI',
-		sendOwner: '传给真人'
+		sendOwner: '传给真人',
+		// English until this locale is translated.
+		relatedHeading: RELATED_HEADING_EN
 	},
 	// 🔴 The five below arrived 2026-09-27 (tile #14): a German site set its own title and
 	// placeholder through data-*, and every other word in the panel — Send, the errors, the status
@@ -790,7 +801,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'Beim Tippen wird nur in Ihrem Browser gesucht. Erst mit dem Knopf wird etwas gesendet.',
 		askAi: 'KI fragen',
-		sendOwner: 'An eine Person senden'
+		sendOwner: 'An eine Person senden',
+		// English until this locale is translated.
+		relatedHeading: RELATED_HEADING_EN
 	},
 	fr: {
 		ask: 'Une question sur ce site…',
@@ -831,7 +844,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'En tapant, la recherche reste dans votre navigateur. Rien n’est envoyé avant d’appuyer sur le bouton.',
 		askAi: 'Demander à l’IA',
-		sendOwner: 'Envoyer à une personne'
+		sendOwner: 'Envoyer à une personne',
+		// English until this locale is translated.
+		relatedHeading: RELATED_HEADING_EN
 	},
 	es: {
 		ask: 'Pregunta sobre este sitio…',
@@ -872,7 +887,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'Al escribir, solo se busca en tu navegador. No se envía nada hasta que pulses el botón.',
 		askAi: 'Preguntar a la IA',
-		sendOwner: 'Enviar a una persona'
+		sendOwner: 'Enviar a una persona',
+		// English until this locale is translated.
+		relatedHeading: RELATED_HEADING_EN
 	},
 	'pt-br': {
 		ask: 'Pergunte sobre este site…',
@@ -913,7 +930,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: 'Ao digitar, a busca fica só no seu navegador. Nada é enviado até você apertar o botão.',
 		askAi: 'Perguntar à IA',
-		sendOwner: 'Enviar para uma pessoa'
+		sendOwner: 'Enviar para uma pessoa',
+		// English until this locale is translated.
+		relatedHeading: RELATED_HEADING_EN
 	},
 	ko: {
 		ask: '이 사이트에 대해 물어보세요…',
@@ -956,7 +975,9 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '입력하는 동안은 브라우저 안에서만 찾아요. 버튼을 누르기 전에는 아무것도 보내지 않아요.',
 		askAi: 'AI에게 묻기',
-		sendOwner: '사람에게 보내기'
+		sendOwner: '사람에게 보내기',
+		// English until this locale is translated.
+		relatedHeading: RELATED_HEADING_EN
 	}
 };
 
@@ -2993,6 +3014,90 @@ function escHtml(s) {
 	);
 }
 
+/** At most this many related-page links under a KAITO refusal (the server sends at most 3). */
+export const RELATED_MAX = 3;
+
+/** The fallback label: the URL's own path, decoded when it decodes, never re-shaped (/manual.pdf stays /manual.pdf). */
+function relatedPathLabel(pathname) {
+	const p = String(pathname || '/');
+	try {
+		return decodeURIComponent(p);
+	} catch {
+		return p; /* keep it encoded */
+	}
+}
+
+/** The index lookup key only: the decoded path, normalised to end in `/` so /faq and /faq/ find the same row. */
+function relatedPathKey(pathname) {
+	const p = relatedPathLabel(pathname);
+	return p.endsWith('/') ? p : `${p}/`;
+}
+
+/**
+ * The links a KAITO refusal may show under its sentence: the server's `related` page URLs, each
+ * labelled with its title from the site's own search index, or with its decoded path when the
+ * index does not list it. Pure — `rows` is the loaded index (or `[]`), `pageHref` the current page.
+ *
+ * Only http(s) URLs on the page's own origin survive, without their #fragment, deduplicated and
+ * capped at `RELATED_MAX`. Labels are plain strings; the caller escapes them. No passage text is
+ * ever involved: the response carries URLs only.
+ */
+export function relatedLinks(related, rows, pageHref) {
+	let origin;
+	try {
+		origin = new URL(String(pageHref)).origin;
+	} catch {
+		return [];
+	}
+	if (!Array.isArray(related) || origin === 'null') return [];
+	const titles = new Map();
+	for (const r of Array.isArray(rows) ? rows : []) {
+		if (!r || typeof r.t !== 'string' || !r.t.trim()) continue;
+		try {
+			const u = new URL(String(r.u || ''), pageHref);
+			if (u.origin !== origin) continue;
+			const key = relatedPathKey(u.pathname);
+			if (!titles.has(key)) titles.set(key, r.t.trim());
+		} catch {
+			/* an unparseable row has no title to give */
+		}
+	}
+	const out = [];
+	for (const item of related) {
+		const raw = item && typeof item === 'object' ? item.url : item;
+		if (!safeHref(raw)) continue;
+		let u;
+		try {
+			u = new URL(String(raw));
+		} catch {
+			continue;
+		}
+		if (u.origin !== origin) continue;
+		u.hash = '';
+		const href = u.toString();
+		if (out.some((l) => l.href === href)) continue;
+		const key = relatedPathKey(u.pathname);
+		out.push({ href, label: titles.get(key) || relatedPathLabel(u.pathname) });
+		if (out.length === RELATED_MAX) break;
+	}
+	return out;
+}
+
+/** The heading and the links, without their wrapper; '' when there is nothing to show. Escaped. */
+export function relatedListInnerHtml(links, heading) {
+	if (!Array.isArray(links) || !links.length) return '';
+	const items = links
+		.map((l) => `<li class="${PREFIX}-related-item"><a href="${escHtml(l.href)}">${escHtml(l.label)}</a></li>`)
+		.join('');
+	return `<p class="${PREFIX}-related-heading">${escHtml(heading)}</p><ul class="${PREFIX}-related-list">${items}</ul>`;
+}
+
+/** The list under the refusal sentence, or '' when there is nothing to show. Everything is escaped. */
+export function relatedListHtml(links, heading) {
+	const inner = relatedListInnerHtml(links, heading);
+	return inner ? `<div class="${PREFIX}-related">${inner}</div>` : '';
+}
+
 /**
  * The closed bubble's glyph.
  *
@@ -3410,6 +3515,10 @@ function styleElement() {
 .${PREFIX}-search{padding:.5rem .9rem 0;border-top:1px solid rgba(0,0,0,.08)}
 .${PREFIX}-search[hidden]{display:none}
 .${PREFIX}-search-note{margin:0 0 .35rem;font-size:.72rem;opacity:.65;line-height:1.4}
+.${PREFIX}-related{margin:.4rem 0 .2rem}
+.${PREFIX}-related-heading{margin:0 0 .2rem;font-size:.75rem;opacity:.7}
+.${PREFIX}-related-list{list-style:none;margin:0;padding:0}
+.${PREFIX}-related-item a{display:block;padding:.15rem 0;font-size:.85rem;color:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .${PREFIX}-results{list-style:none;margin:0;padding:0;max-height:9.5rem;overflow-y:auto}
 .${PREFIX}-results[hidden]{display:none}
 .${PREFIX}-result a{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem;
@@ -3557,7 +3666,15 @@ async function askKaito(apiBase, kind, id, query, copy) {
 	// own page and is returned verbatim, in whatever language they wrote it. That
 	// is the cited-always guarantee, and it is not ours to translate.
 	if (body && typeof body.text === 'string' && body.text) {
-		return { kind: 'refused', text: copy.refused || body.text };
+		// The page URLs the server may attach to a refusal (strings only; `relatedLinks` decides
+		// which of them are shown).
+		// The server sends `{ url }` objects; a bare URL string is accepted as well (Tile #288 r1).
+		const related = body.kind === 'refused' && Array.isArray(body.related)
+			? body.related
+				.map((r) => (typeof r === 'string' ? r : r && typeof r.url === 'string' ? r.url : null))
+				.filter(Boolean)
+			: [];
+		return { kind: 'refused', text: copy.refused || body.text, related };
 	}
 	return null;
 }
@@ -4427,11 +4544,34 @@ export async function mount(el, handoff = null) {
 				const said = answer && answer.kind === 'unavailable'
 					? (askOnly ? copy.kaitoUnavailable : copy.kaitoUnavailableToHuman)
 					: answer ? answer.text : copy.error;
+				// Only a refusal that names pages gets the list, under the unchanged sentence. Titles come
+				// from the site's own search index when the host named one; otherwise the path is shown.
+				// 🔴 NEVER WAIT FOR THE INDEX (Tile #288 r1). The refusal, the person button and the list
+				// render now, with whatever titles the index already has (decoded paths otherwise). An
+				// index still loading swaps its titles into THIS list when it lands; one that fails or
+				// never settles leaves the paths.
+				let related = '';
+				const hasRelated = Boolean(answer && answer.kind === 'refused' && answer.related && answer.related.length);
+				const pageHref = location.href;
+				if (hasRelated) {
+					related = relatedListHtml(relatedLinks(answer.related, searchRows || [], pageHref), copy.relatedHeading);
+				}
 				log.insertAdjacentHTML(
 					'beforeend',
 					`<div class="${PREFIX}-msg ${PREFIX}-msg-owner">${escHtml(said)}</div>` +
+						related +
 						(askOnly ? '' : `<button type="button" class="${PREFIX}-tohuman">${escHtml(copy.toHumanAfterRefusal)}</button>`)
 				);
+				if (related && searchIndexUrl && !searchRows) {
+					// The element is taken now, so a later answer's list is never the one rewritten.
+					const box = log.querySelector(`.${PREFIX}-related`);
+					const pending = answer.related;
+					ensureSearchIndex().then((rows) => {
+						if (!box || !Array.isArray(rows) || !rows.length) return;
+						const inner = relatedListInnerHtml(relatedLinks(pending, rows, pageHref), copy.relatedHeading);
+						if (inner) box.innerHTML = inner;
+					}, () => {});
+				}
 			}
 			log.scrollTop = log.scrollHeight;
 			if (askOnly) return true;
