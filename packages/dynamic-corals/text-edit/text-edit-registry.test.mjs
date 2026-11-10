@@ -1,5 +1,5 @@
 // text-edit as a REGISTRY coral: a host that frames a preview loads it from the registry channel
-// (`/corals/text-edit/v1/text-edit.js`; `v0` stays on 0.1.0) like every other dynamic coral, instead of serving its own
+// (`/corals/text-edit/v1/text-edit.js`; never published on `v0`) like every other dynamic coral, instead of serving its own
 // copy. And it is NOT LISTED in the public coral catalog: it is an editing aid a host injects into
 // its own framed preview, not something a site owner installs on a page.
 //   run: node --test packages/dynamic-corals/text-edit/text-edit-registry.test.mjs
@@ -33,11 +33,11 @@ test('the embed loads the registry channel v1, not a host-served copy and never 
   const { embed } = metadataOf('text-edit');
   assert.match(embed, /<script src="https:\/\/feelreef\.com\/corals\/text-edit\/v1\/text-edit\.js"><\/script>/);
   assert.doesNotMatch(embed, /src="text-edit\.js"/);
-  assert.doesNotMatch(embed, /\/v0\//, 'v0 is the 0.1.0 host contract; 1.0.0 is breaking for hosts (tile#284)');
+  assert.doesNotMatch(embed, /\/v0\//, 'text-edit has never been published on v0: the registry 404s it (tile#284)');
 });
 
-// tile#284 — 1.0.0 is breaking for hosts (an answer must echo `doc`), so it is a new major on a new
-// channel. A channel is a major: `v<N>` serves N.x, and an embed names the channel of its own major.
+// tile#284 — 1.x is breaking for hosts (an answer must echo `doc`), so it is a new major on its own
+// channel, `v1` (text-edit was never published on `v0`). A channel is a major: `v<N>` serves N.x, and an embed names the channel of its own major.
 test('tile#284: text-edit is 1.x (1.1.0 adds the probe, additive) on channel v1, and the README says what breaks for hosts', () => {
   assert.equal(VERSION, '1.1.0');
   const manifest = JSON.parse(readFileSync(join(HERE, 'manifest.json'), 'utf8'));
@@ -45,8 +45,14 @@ test('tile#284: text-edit is 1.x (1.1.0 adds the probe, additive) on channel v1,
   assert.equal(manifest.source, 'https://feelreef.com/corals/text-edit/1.1.0/text-edit.js');
   assert.match(metadataOf('text-edit').requirements, /channel `v1`/);
   const readme = readFileSync(join(HERE, 'README.md'), 'utf8');
-  assert.match(readme, /1\.0\.0 is breaking for hosts: echo `doc`/);
-  assert.match(readme, /`v0`\s+keeps 0\.1\.0 and is never repointed/);
+  assert.match(readme, /Published on `v1` only: hosts echo `doc`/);
+  // The registry serves text-edit on v1 and latest only; v0 was never published (tile-lab review).
+  assert.match(readme, /never been published on a `v0`\s+channel/);
+  assert.match(readme, /0\.1\.0 was never published at all/);
+  assert.match(readme, /must echo `doc`/);
+  assert.doesNotMatch(readme, /`v0`\s+(keeps|stays on)/, 'no sentence says v0 serves anything');
+  assert.doesNotMatch(metadataOf('text-edit').requirements, /`v0` (keeps|stays on)/);
+  assert.match(metadataOf('text-edit').requirements, /never been published on `v0`/);
   assert.doesNotMatch(readme, /corals\/text-edit\/v0\//);
 });
 
