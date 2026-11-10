@@ -3017,14 +3017,19 @@ function escHtml(s) {
 /** At most this many related-page links under a KAITO refusal (the server sends at most 3). */
 export const RELATED_MAX = 3;
 
-/** A path for matching and for the fallback label: decoded when it decodes, always ending in `/`. */
-function relatedPathKey(pathname) {
-	let p = String(pathname || '/');
+/** The fallback label: the URL's own path, decoded when it decodes, never re-shaped (/manual.pdf stays /manual.pdf). */
+function relatedPathLabel(pathname) {
+	const p = String(pathname || '/');
 	try {
-		p = decodeURIComponent(p);
+		return decodeURIComponent(p);
 	} catch {
-		/* keep it encoded */
+		return p; /* keep it encoded */
 	}
+}
+
+/** The index lookup key only: the decoded path, normalised to end in `/` so /faq and /faq/ find the same row. */
+function relatedPathKey(pathname) {
+	const p = relatedPathLabel(pathname);
 	return p.endsWith('/') ? p : `${p}/`;
 }
 
@@ -3072,7 +3077,7 @@ export function relatedLinks(related, rows, pageHref) {
 		const href = u.toString();
 		if (out.some((l) => l.href === href)) continue;
 		const key = relatedPathKey(u.pathname);
-		out.push({ href, label: titles.get(key) || key });
+		out.push({ href, label: titles.get(key) || relatedPathLabel(u.pathname) });
 		if (out.length === RELATED_MAX) break;
 	}
 	return out;

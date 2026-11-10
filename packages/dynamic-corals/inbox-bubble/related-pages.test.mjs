@@ -157,6 +157,20 @@ test('relatedLinks: index titles by path; the decoded path when the index does n
 	assert.deepEqual(relatedLinks(['https://example.test/faq/'], [], PAGE), [{ href: 'https://example.test/faq/', label: '/faq/' }]);
 });
 
+test('relatedLinks: the fallback label is the link\'s own path, never re-shaped with a trailing slash', () => {
+	// r2 review: /manual.pdf was labelled /manual.pdf/, naming a different path from its href.
+	assert.deepEqual(
+		relatedLinks(['https://example.test/manual.pdf', 'https://example.test/contact.html', 'https://example.test/faq/'], [], PAGE),
+		[
+			{ href: 'https://example.test/manual.pdf', label: '/manual.pdf' },
+			{ href: 'https://example.test/contact.html', label: '/contact.html' },
+			{ href: 'https://example.test/faq/', label: '/faq/' }
+		]
+	);
+	// The index lookup still treats /faq and /faq/ as one page.
+	assert.deepEqual(relatedLinks(['https://example.test/faq'], INDEX, PAGE), [{ href: 'https://example.test/faq', label: 'Shipping FAQ' }]);
+});
+
 test('relatedLinks: only same-origin http(s) URLs survive, without fragments, deduplicated, capped', () => {
 	const links = relatedLinks(
 		[
