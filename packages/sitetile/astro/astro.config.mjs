@@ -17,6 +17,11 @@ import { noindexPass } from './noindex-pass.mjs';
 // reef#2874: the markdown twins of generated list routes (blog index, archives, their pages, the
 // language chooser), written over the files the build wrote and added to the worker's route map.
 import { agentListTwins } from './agent-list-twins.mjs';
+// A circle stays a circle under `corner: squircle`. The squircle rule in site.css names classes, so
+// a class that is also a full radius somewhere (the round hero image: `.st-hero .st-figure .st-img`
+// at 50%) was drawn as a rounded square in Chromium. signet's plugin reads the stylesheet at build
+// time and adds `corner-shape: round` beside every full `border-radius`, so there is no list to keep.
+import roundCorners from '@cvernet/signet/postcss-round-corners';
 
 export default defineConfig({
   integrations: [svgAttachmentHeaders(), locale404Pages(), noindexPass(), agentListTwins()],
@@ -29,6 +34,7 @@ export default defineConfig({
   compressHTML: true,
   vite: {
     plugins: [reefComponentsLayer()],
+    css: { postcss: { plugins: [roundCorners()] } },
     resolve: {
       alias: {
         '@sitetile': fileURLToPath(new URL('../site-core.js', import.meta.url)),
