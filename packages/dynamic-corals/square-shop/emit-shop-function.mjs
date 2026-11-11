@@ -16,6 +16,7 @@
 //     [--platform-origin <origin>] \
 //     [--inbox-preview-claim]  ← WfP preview builds only: the inbox forward also signs a `preview` claim (needs INBOX_FORWARD_SITE_KEY) \
 //     [--canonical-host <host>] \
+//     [--never-redirect-host-suffixes '["-live.platform.example"]']  ← extra never-redirected host suffixes; read only with --canonical-host \
 //     [--dynamic-coral-css layered] \
 //     [--emitter-commit <sha>] \
 //     [--split-out <dir outside dist>] \
@@ -501,6 +502,25 @@ if (canonicalHostArg) {
 	}
 }
 
+// Host suffixes the canonical-host 301 must never fire on, on top of the generic preview and service
+// hosts the worker already exempts. The calling platform owns them (its own preview and live names)
+// and passes them in; this emitter bakes whatever list it is given and names none itself. Each entry
+// is a lowercase hostname tail that starts with `.` or `-`, so it can only match the end of a label
+// boundary the caller chose. Read only together with --canonical-host: without a canonical host
+// there is no redirect to exempt from. Absent flag or empty list ⇒ absent key ⇒ the same bytes as
+// before the flag existed.
+const neverRedirectHostSuffixesArg = arg('never-redirect-host-suffixes');
+let neverRedirectHostSuffixes = [];
+if (neverRedirectHostSuffixesArg) {
+	try { neverRedirectHostSuffixes = JSON.parse(neverRedirectHostSuffixesArg); } catch { die('--never-redirect-host-suffixes must be a JSON array of host suffixes'); }
+	if (!Array.isArray(neverRedirectHostSuffixes)) die('--never-redirect-host-suffixes must be a JSON array of host suffixes');
+	for (const suffix of neverRedirectHostSuffixes) {
+		if (typeof suffix !== 'string' || !/^[.-][a-z0-9.-]*[a-z0-9]$/.test(suffix) || suffix.includes('..')) {
+			die('--never-redirect-host-suffixes: ' + JSON.stringify(suffix) + ' is not a lowercase host suffix starting with "." or "-"');
+		}
+	}
+}
+
 // 🔴 Where this site's dynamic-coral package CSS sits in the cascade, baked so the Worker's own
 // emitted <style> blocks land in the same layer the statically-built pages declared. The caller
 // derives it from the site's BASE `_site.md` — the same read the renderer's document-root stamp
@@ -561,6 +581,7 @@ const config = {
 	apiTransport: loaded ? loaded.transport : null,
 	platformOrigin,
 	...(canonicalHost ? { canonicalHost } : {}),
+	...(canonicalHost && neverRedirectHostSuffixes.length > 0 ? { neverRedirectHostSuffixes } : {}),
 	// Absent flag ⇒ absent key, so an undeclared site's baked config is the same bytes it was
 	// before this flag existed. Only the coral-CSS emission sites read it.
 	...(dynamicCoralCss ? { dynamicCoralCss } : {}),

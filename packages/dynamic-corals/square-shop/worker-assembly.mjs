@@ -24,20 +24,23 @@ export const SITE_CONFIG_KIND = 'tile.square-shop.site-config';
 // A Site has one canonical host; every other customer host (www/subdomain aliases and earlier
 // customer domains alike) answers GET/HEAD with a 301 to it. Preview and platform service hosts
 // (Pages, Workers, `*-preview`, the dispatch-served `<name>.feelreef.net` address) are never redirected.
-const CANONICAL_HELPERS = `function canonicalRedirect(request, canonicalHost) {
+// A caller whose platform serves preview or live names elsewhere passes those suffixes in
+// (`neverRedirectHostSuffixes`, from --never-redirect-host-suffixes); this file adds none of its own.
+// With no suffixes baked the text is exactly the earlier fragment.
+const canonicalHelpers = (withSuffixes) => `function canonicalRedirect(request, canonicalHost${withSuffixes ? ', neverRedirectHostSuffixes' : ''}) {
 \tif (request.method !== 'GET' && request.method !== 'HEAD') return null;
 \tconst url = new URL(request.url);
 \tconst normalize = (value) => String(value || '').trim().toLowerCase().split(':')[0];
 \tconst host = normalize(request.headers.get('host') || url.hostname);
 \tconst canonical = normalize(canonicalHost);
-\tconst preview = (value) => value.endsWith('.pages.dev') || value.endsWith('.workers.dev') || value.includes('-preview.') || value.endsWith('-preview') || value.endsWith('.feelreef.net');
+\tconst preview = (value) => value.endsWith('.pages.dev') || value.endsWith('.workers.dev') || value.includes('-preview.') || value.endsWith('-preview') || value.endsWith('.feelreef.net')${withSuffixes ? ' || neverRedirectHostSuffixes.some((suffix) => value.endsWith(suffix))' : ''};
 \tif (!host || !canonical || preview(host) || preview(canonical) || host === 'localhost' || host === '127.0.0.1') return null;
 \tif (host === canonical) return null;
 \treturn new Response(null, { status: 301, headers: { location: 'https://' + canonical + url.pathname + url.search } });
 }
 
 `;
-const CANONICAL_FETCH = `\t\tconst canonicalResponse = canonicalRedirect(request, CFG.canonicalHost);
+const canonicalFetch = (withSuffixes) => `\t\tconst canonicalResponse = canonicalRedirect(request, CFG.canonicalHost${withSuffixes ? ', CFG.neverRedirectHostSuffixes' : ''});
 \t\tif (canonicalResponse) return canonicalResponse;
 `;
 
@@ -94,6 +97,7 @@ export function assembleWorker({ core, template, queryRedirectsRuntime, provenan
 	if (!provenance || typeof provenance.emitterCommit !== 'string') throw new TypeError('assembleWorker: provenance.emitterCommit is required');
 	if (!config || typeof config !== 'object') throw new TypeError('assembleWorker: config is required');
 	const canonical = Boolean(config.canonicalHost);
+	const suffixes = canonical && Array.isArray(config.neverRedirectHostSuffixes) && config.neverRedirectHostSuffixes.length > 0;
 	const queryRedirects = Boolean(config.queryRedirects);
 	if (queryRedirects && typeof queryRedirectsRuntime !== 'string') {
 		throw new TypeError('assembleWorker: the config bakes queryRedirects but no query-redirects runtime source was given');
@@ -102,9 +106,9 @@ export function assembleWorker({ core, template, queryRedirectsRuntime, provenan
 	// name, a label, a contract path) is inserted literally instead of being read as
 	// a replacement pattern.
 	const body = template
-		.replace('/*__CANONICAL_HELPERS__*/', () => canonical ? CANONICAL_HELPERS : '')
+		.replace('/*__CANONICAL_HELPERS__*/', () => canonical ? canonicalHelpers(suffixes) : '')
 		.replace('/*__QUERY_REDIRECT_HELPERS__*/', () => queryRedirects ? QUERY_REDIRECT_HELPERS : '')
-		.replace('/*__CANONICAL_FETCH__*/', () => canonical ? CANONICAL_FETCH : '')
+		.replace('/*__CANONICAL_FETCH__*/', () => canonical ? canonicalFetch(suffixes) : '')
 		.replace('/*__QUERY_REDIRECT_FETCH__*/', () => queryRedirects ? QUERY_REDIRECT_FETCH : '')
 		.replaceAll('__SHOP_CONFIG__', () => JSON.stringify(config));
 	const runtime = queryRedirects ? workerEntrypointsOnly(queryRedirectsRuntime) + '\n' : '';

@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(tmpdir(), 'emitted-shop-worker-' + process.pid + '.mjs');
@@ -102,6 +103,53 @@ ok('www POST is not redirected', (await canonicalMod.default.fetch(new Request('
 			ok(`${host} ${method} passes through without a canonical redirect`,
 				response.status === 200 && response.headers.get('location') === null);
 		}
+	}
+}
+
+// Extra never-redirect host suffixes are the caller's: the platform passes its own preview and live
+// names, the worker bakes exactly that list and nothing else. Without the flag such a host is an
+// ordinary other host and keeps its 301.
+{
+	const suffixes = ['-live.platform.example', '-draft.platform.example'];
+	const outSuffixes = join(tmpdir(), 'emitted-shop-worker-suffixes-' + process.pid + '.mjs');
+	execFileSync('node', [join(here, 'emit-shop-function.mjs'), '--canonical-host', 'northwind.example',
+		'--never-redirect-host-suffixes', JSON.stringify(suffixes), '--out', outSuffixes], { stdio: 'inherit' });
+	const suffixMod = await import(pathToFileURL(outSuffixes).href);
+	const path = '/faq/?x=1';
+	for (const method of ['GET', 'HEAD']) {
+		for (const host of ['acme-live.platform.example', 'ACME-DRAFT.PLATFORM.EXAMPLE:443']) {
+			const passed = await suffixMod.default.fetch(new Request('https://' + host + path, { method }), canonicalEnv);
+			ok(`with suffixes: ${host} ${method} passes through`, passed.status === 200 && passed.headers.get('location') === null);
+			const before = await canonicalMod.default.fetch(new Request('https://' + host + path, { method }), canonicalEnv);
+			ok(`without suffixes: ${host} ${method} still 301s`, before.status === 301);
+		}
+		for (const host of ['www.northwind.example', 'example.net', 'live.platform.example', 'acme-live.platform.example.net']) {
+			const moved = await suffixMod.default.fetch(new Request('https://' + host + path, { method }), canonicalEnv);
+			ok(`with suffixes: ${host} ${method} keeps its canonical 301`,
+				moved.status === 301 && moved.headers.get('location') === 'https://northwind.example' + path);
+		}
+	}
+	ok('with suffixes: the baked list is exactly the given one',
+		readFileSync(outSuffixes, 'utf8').includes('"neverRedirectHostSuffixes":' + JSON.stringify(suffixes)));
+
+	// Absent flag, empty list, or no canonical host ⇒ the worker is the same bytes as before the flag.
+	const same = (extra, label, base = ['--canonical-host', 'northwind.example']) => {
+		const o = join(tmpdir(), 'emitted-shop-worker-suffix-same-' + label + '-' + process.pid + '.mjs');
+		execFileSync('node', [join(here, 'emit-shop-function.mjs'), ...base, ...extra, '--out', o], { stdio: 'inherit' });
+		return readFileSync(o, 'utf8');
+	};
+	ok('empty suffix list ⇒ same bytes as no flag', same(['--never-redirect-host-suffixes', '[]'], 'empty') === readFileSync(outCanonical, 'utf8'));
+	ok('suffixes without --canonical-host ⇒ same bytes as the default worker',
+		same(['--never-redirect-host-suffixes', JSON.stringify(suffixes)], 'nocanon', []) === same([], 'nocanon-base', []));
+
+	for (const bad of ['"-live.platform.example"', '{}', '["live.platform.example"]', '["-LIVE.platform.example"]',
+		'["-live.platform.example/"]', '["-live.platform.example:443"]', '[".platform..example"]', '[""]', '[1]', 'not json']) {
+		let refused = false;
+		try {
+			execFileSync('node', [join(here, 'emit-shop-function.mjs'), '--canonical-host', 'northwind.example',
+				'--never-redirect-host-suffixes', bad, '--out', join(tmpdir(), 'emitted-shop-worker-suffix-bad-' + process.pid + '.mjs')], { stdio: 'pipe' });
+		} catch (e) { refused = e.status !== 0 && String(e.stderr).includes('--never-redirect-host-suffixes'); }
+		ok(`--never-redirect-host-suffixes ${bad} is refused`, refused);
 	}
 }
 

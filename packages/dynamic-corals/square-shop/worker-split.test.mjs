@@ -130,6 +130,21 @@ test('golden holds with --split-out too, and the default call writes nothing but
 	assert.deepEqual(readdirSync(flagless.dist), ['_worker.js'], 'a default call must not write _routes.json or anything else');
 });
 
+test('split output carries the never-redirect host suffixes, and the config module reassembles them', () => {
+	const split = join(workDir, 'split-suffixes');
+	const suffixes = ['-live.platform.example'];
+	const r = ok(CURRENT, [...FULL, '--never-redirect-host-suffixes', JSON.stringify(suffixes), '--split-out', split]);
+	const mod = JSON.parse(readFileSync(join(split, 'site-config.json'), 'utf8'));
+	assert.deepEqual(mod.config.neverRedirectHostSuffixes, suffixes);
+	const shared = {
+		core: readFileSync(join(split, 'shared', 'product-page-core.js'), 'utf8'),
+		template: readFileSync(join(split, 'shared', 'shop-function-template.js'), 'utf8'),
+		queryRedirectsRuntime: readFileSync(join(split, 'shared', 'query-redirects.mjs'), 'utf8')
+	};
+	assert.equal(assembleWorkerFromSiteConfig(mod, shared), r.worker);
+	assert.ok(r.worker.includes('canonicalRedirect(request, CFG.canonicalHost, CFG.neverRedirectHostSuffixes)'));
+});
+
 test('split output: shared sources unchanged, config module reassembles the exact _worker.js', () => {
 	const split = join(workDir, 'split-a');
 	const r = ok(CURRENT, [...FULL, '--split-out', split], { INBOX_FORWARD_SITE_KEY: 'test-only-not-a-secret' });
