@@ -219,7 +219,7 @@ const twinMark = recordListTwin({
       (`body[data-page="home"] .st-prose`, `.st-sidebar-main > .st-tagcloud`, `.st-carousel`).
       index starts at 1 so none is promoted to <h1> (the post grid is the home's primary content,
       not a widget). Empty on every non-root-mount site → nothing emitted. */}
-  {isHome && homeCards.map((s, i) => <Section section={s} index={i + 1} lang={meta.lang} />)}
+  {isHome && homeCards.map((s, i) => <Section section={s} index={i + 1} lang={meta.lang || blogViewLang(meta, viewFiles)} />)}
 
   {/* tag-pill wiring + ?tag=/?ym= deep-link filtering are handled by the shared blog-archive
       island (src/packages/blog-archive/blog-archive.js), bundled once by SiteLayout. It rebuilds

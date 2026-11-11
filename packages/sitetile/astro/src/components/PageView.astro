@@ -21,6 +21,8 @@ const { site, stamp = null } = Astro.props;
 // One <html lang> per Site: a page with no lang from page + site config answers like the 404 / blog /
 // system pages (systemPageLang), not a separate literal.
 const viewFiles = import.meta.glob('../../content/*.md', { query: '?raw', import: 'default', eager: true });
+// Sections get this same language for their built-in copy (they had the bare `site.meta.lang`,
+// so a Site with `locales:` and no `lang:` printed zh/English chrome under another <html lang>).
 const pageLang = site.meta.lang || systemPageLang(site.meta, viewFiles);
 // The site-default is the site's TITLE NAME (site-core titleSiteName): a seeded placeholder title is
 // never printed as a page's <title> (reef#3040).
@@ -43,5 +45,5 @@ const headMeta = site.meta.description
 const h1At = pageH1Index(site.sections);
 ---
 <SiteLayout title={pageTitle} lang={pageLang} meta={headMeta} blogPosts={blogPosts} stamp={stamp}>
-  {site.sections.map((s, i) => <Section section={s} index={i} h1At={h1At} lang={site.meta.lang} blogPosts={blogPosts} meta={site.meta} />)}
+  {site.sections.map((s, i) => <Section section={s} index={i} h1At={h1At} lang={pageLang} blogPosts={blogPosts} meta={site.meta} />)}
 </SiteLayout>

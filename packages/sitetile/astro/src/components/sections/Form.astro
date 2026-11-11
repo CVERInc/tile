@@ -18,6 +18,7 @@ import { parseParams, inlineHtml, bodyHtml, safeHref, safeInternalPath } from '@
 import { emitForm } from '@emit/form.mjs';
 import { inboxFormCopy, DEFAULT_LANG, localeHomePath, contentRelsOf } from '../../packages/lingo/locale.mjs';
 import { recordThanks } from '../../../noindex-pass.mjs';
+import { systemPageLang } from '../../lib/blog.mjs';
 const { section, index = 0, hero, lang, meta } = Astro.props;
 const pm = parseParams(section.params);
 // `eyebrow="…"` — the small label above the heading, the same seam every other
@@ -129,7 +130,11 @@ const homeHref = isInbox ? localeHomePath({
 // Required fields, the success sentence and the `data-inbox-copy` payload the script reads are
 // worked out in emitForm from the fields and this locale's copy below (2026-09-03 cold-read
 // findings #9/#10; owner ruling on the success card).
-const fieldCopy = inboxFormCopy(lang || DEFAULT_LANG);
+// The copy's language is the page's <html lang>: its own `lang`, else the SITE's default (meta.lang,
+// else locales[0], else DEFAULT_LANG) — the same call PageView makes for the document language, over
+// the same root-content glob. 🩸 It was `lang || DEFAULT_LANG`: a Site with `locales: en, zh-TW` and
+// no `lang:` rendered <html lang="en"> around a form saying 「這是必填欄位。」/「送出中…」.
+const fieldCopy = inboxFormCopy(lang || systemPageLang(meta, import.meta.glob('../../../content/*.md', { query: '?raw', import: 'default', eager: true })) || DEFAULT_LANG);
 
 ---
 <Fragment set:html={emitForm(section, { eyebrow, submit, isInbox, formAction, method, thanksPath, thanksMark, returnTo, homeHref, copy: fieldCopy }, { hero, index, inline: inlineHtml, block: bodyHtml })} />

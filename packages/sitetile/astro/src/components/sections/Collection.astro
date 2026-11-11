@@ -1,5 +1,5 @@
 ---
-import { DEFAULT_LANG } from '../../packages/lingo/locale.mjs';
+import { DEFAULT_LANG, LINGO_LOCALES, sameLocale } from '../../packages/lingo/locale.mjs';
 // `collection` — a list of items, optionally grouped by category, with category jump-pills.
 // General: catalogs, portfolios, team pages, tag lists.
 // IR: `## title` + `%% sitetile: collection eyebrow="..." link="label"→href %%` + intro body,
@@ -15,7 +15,10 @@ const { section, hero, lang } = Astro.props;
 // per-locale UI chrome strings (mirrors a real card meta row in each language —
 // word order differs, not just a label swap: en "Updated {x}" vs zh/ja "{x} 更新/更新" suffix vs
 // ko "업데이트 날짜: {x}" prefix+colon).
-const L = String(lang || DEFAULT_LANG).toLowerCase();
+// The row is found by locale identity: the page language is written `zh-Hant` / `ja` / `ko` as often
+// as `zh-TW` / `ja-JP` / `ko-KR`, and an exact-tag lookup sent those to the English row.
+const want = lang || DEFAULT_LANG;
+const L = String(LINGO_LOCALES.find((l) => sameLocale(l, want)) || want).toLowerCase();
 const UI = {
   'zh-tw': { updated: (x) => `${x} 更新`, gh: '在 GitHub 看', learn: '了解更多' },
   'ja-jp': { updated: (x) => `${x} 更新`, gh: 'GitHub で見る', learn: '詳しく見る' },
