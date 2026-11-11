@@ -2354,8 +2354,12 @@ async function handleInboxForward(request, CFG) {
 			// The hexadecimal per-site key is UTF-8 text, not decoded key bytes.
 			const key = await crypto.subtle.importKey('raw', encoder.encode(CFG.inboxForwardKey),
 				{ name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+			// A preview claim exists only inside a signed forward: the five-line message binds it.
+			const previewBuild = CFG.inboxPreviewBuild;
 			const signature = await crypto.subtle.sign('HMAC', key,
-				encoder.encode('site:' + payload.id + '\n' + ip + '\n' + ts));
+				encoder.encode('site:' + payload.id + '\n' + ip + '\n' + ts
+					+ (previewBuild ? '\npreview\n' + previewBuild : '')));
+			if (previewBuild) headers['x-reef-forward-preview'] = previewBuild;
 			headers['x-reef-forward-ts'] = ts;
 			headers['x-reef-forward-sig'] = Array.from(new Uint8Array(signature),
 				(byte) => byte.toString(16).padStart(2, '0')).join('');

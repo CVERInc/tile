@@ -14,6 +14,7 @@
 //     [--content-signal <the site's ai-usage Content-Signal, e.g. search=yes,ai-input=yes,ai-train=no>] \
 //     [--query-redirects <path to the site's IR _query-redirects.md>] \
 //     [--platform-origin <origin>] \
+//     [--inbox-preview-claim]  ← WfP preview builds only: the inbox forward also signs a `preview` claim (needs INBOX_FORWARD_SITE_KEY) \
 //     [--canonical-host <host>] \
 //     [--dynamic-coral-css layered] \
 //     [--emitter-commit <sha>] \
@@ -427,6 +428,8 @@ if (siteKeyArg && !siteKey) {
 // Build-only input: never put signing keys in argv, logs, or provenance.
 const inboxForwardKey = (process.env.INBOX_FORWARD_SITE_KEY || '').trim();
 if (inboxForwardKey && !arg('out')) die('INBOX_FORWARD_SITE_KEY requires --out to keep the key out of stdout');
+// Opt-in and boolean: absent ⇒ no key in the baked config ⇒ the emitted bytes are unchanged.
+const inboxPreviewClaim = process.argv.includes('--inbox-preview-claim');
 let legacyShops = [];
 try { legacyShops = JSON.parse(arg('shops', '[]')); } catch { legacyShops = []; }
 if (!Array.isArray(legacyShops)) legacyShops = [];
@@ -542,6 +545,7 @@ const config = {
 	// Same discipline: absent flag ⇒ absent key ⇒ the config bytes are unchanged.
 	...(siteKey ? { siteKey } : {}),
 	...(inboxForwardKey ? { inboxForwardKey } : {}),
+	...(inboxPreviewClaim ? { inboxPreviewBuild: 'latest' } : {}),
 	// 🔴 A **SITE** coral — no Card can embed it. See ./README.md before concluding otherwise.
 	// 🔴 Belongs to the SHOP branch only. The forward/verdict branches never read
 	// it: they go over the service binding, whose target is the contract's
