@@ -65,7 +65,7 @@ function ecpayScript(html) {
 }
 
 // The same just-enough browser as native-ecpay-checkout.test.mjs, plus the coupon field's events.
-function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {} } = {}) {
+function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', session = {}, pageCoupon = null } = {}) {
   const calls = [];
   const forms = [];
   const store = { ...session };
@@ -84,7 +84,7 @@ function browser(html, respond, { href = 'https://site.example/shop/tea-bowl', s
   const location = { origin: url.origin, pathname: url.pathname, href: url.href, assigned: null, assign(u) { this.assigned = u; } };
   const history = { state: null, replaced: null, replaceState(_s, _t, u) { this.replaced = u; } };
   const document = {
-    querySelector: (sel) => (sel === '[data-native-ecpay-sku]' ? button : sel === '[data-native-ecpay-checkout]' ? panel : null),
+    querySelector: (sel) => (sel === '[data-native-ecpay-sku]' ? button : sel === '[data-native-ecpay-checkout]' ? panel : sel === '[data-native-coupon-field]' && pageCoupon !== null ? { value: pageCoupon } : null),
     querySelectorAll: () => [],
     body: { appendChild() {}, removeChild() {} },
     createElement: (tag) => {
@@ -168,6 +168,21 @@ test('with coupon_entry the field sits above the summary, for card and cash on d
   await b.choose('pay', 'cod');
   assert.ok(b.panel.innerHTML.includes(FIELD), 'still there with cash on delivery');
   assert.equal(quotes(b).length, 0, 'opening the sheet asks for no quote');
+});
+
+test('a code typed in the page field before Buy carries into the sheet, is quoted once and is sent', async () => {
+  const html = await productHtml({ coupon_entry: true });
+  const b = browser(html, rsp(), { pageCoupon: ' SAVE10 ' });
+  await b.press();
+  await b.settle();
+  assert.deepEqual(quotes(b).map((c) => c.body.coupon_code), ['SAVE10']);
+  assert.match(b.panel.innerHTML, /data-ecpay-field="coupon" value="SAVE10" autocomplete="off">/);
+  assert.match(b.panel.innerHTML, /<span>折扣<\/span>/);
+  // An empty page field carries nothing and asks for no quote.
+  const e = browser(html, rsp(), { pageCoupon: '   ' });
+  await e.press();
+  assert.equal(quotes(e).length, 0);
+  assert.ok(e.panel.innerHTML.includes(FIELD));
 });
 
 test('typing does not quote; one change sends one quote with the trimmed code', async () => {

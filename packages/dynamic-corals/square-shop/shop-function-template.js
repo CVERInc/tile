@@ -1315,9 +1315,10 @@ function nativeRailChoice(item, copy, refused) {
 }
 
 // The optional coupon input, above Buy, only where the projection offers it and Buy can be pressed.
-function nativeCouponField(item, copy, refused, entry) {
+// On a shipping product's page (`collapse`) it folds away with the rest when the ECPay sheet opens.
+function nativeCouponField(item, copy, refused, entry, collapse) {
 	if (!entry || !item.available || !item.sku || refused) return '';
-	return `<div data-native-coupon><label><span>${escHtml(copy.couponLabel)}</span><input type="text" autocomplete="off" aria-label="${escHtml(copy.couponLabel)}" data-native-coupon-field></label></div>`;
+	return `<div data-native-coupon${collapse ? ' data-native-ecpay-collapse' : ''}><label><span>${escHtml(copy.couponLabel)}</span><input type="text" autocomplete="off" aria-label="${escHtml(copy.couponLabel)}" data-native-coupon-field></label></div>`;
 }
 
 // RSP adds a top-level `preview_checkout` to the native projection only when the request is for the
@@ -1851,8 +1852,11 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney, couponMessa
 		// (an older RSP) keeps it, and a checkout refusal still drops it.
 		if (d.invoice_offered === false) S.invOff = true;
 		if (!current()) { S.ship = options[0].sub_type; S.storeRef = ''; }
-		// With a restored code the quote decides cash on delivery (requote applies the same reset).
-		const quoteNext = fromStoreMap && cm && val('coupon');
+		// A code typed in the page's coupon field before Buy carries into the sheet's field.
+		const typed = !fromStoreMap && cm && !val('coupon') ? document.querySelector('[data-native-coupon-field]') : null;
+		if (typed && typeof typed.value === 'string' && typed.value.trim()) S.v.coupon = typed.value.trim();
+		// With a restored or carried code the quote decides cash on delivery (requote applies the same reset).
+		const quoteNext = cm && val('coupon') && (fromStoreMap || !!typed);
 		if (!codAllowed() && !quoteNext) S.pay = 'card';
 		button.hidden = true;
 		button.removeAttribute('aria-busy');
@@ -1981,7 +1985,7 @@ function nativeProductBody(item, shop, copy, locale, preview, cfg, couponEntry) 
 	// (`checkout_rail`) keeps the rail-aware flow; one offering a rail choice takes this branch only when
 	// ECPay is among the rails, and then the radios sit beside the control and only the ECPay choice opens it.
 	if (cfg && cfg.siteId && !mapped.checkoutRail && (!mapped.checkoutRails.length || mapped.checkoutRails.includes('ecpay')) && nativeEcpayEligible(item, mapped, refused)) {
-		return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p data-native-ecpay-collapse><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}" data-native-ecpay-collapse>` : ''}<p class="st-native-price">${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p data-native-ecpay-collapse>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, false)}${nativeEcpayBuyControl(mapped, copy)}${nativeStatusNode(copy, false)}</div><section class="st-native-checkout" data-native-ecpay-checkout aria-label="${escHtml(copy.buy)}" hidden></section></article>${nativeCheckoutScript(copy, preview, mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0)}${nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview, couponEntry === true)}`;
+		return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p data-native-ecpay-collapse><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}" data-native-ecpay-collapse>` : ''}<p class="st-native-price">${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p data-native-ecpay-collapse>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, false)}${nativeCouponField(mapped, copy, false, couponEntry === true, true)}${nativeEcpayBuyControl(mapped, copy)}${nativeStatusNode(copy, false)}</div><section class="st-native-checkout" data-native-ecpay-checkout aria-label="${escHtml(copy.buy)}" hidden></section></article>${nativeCheckoutScript(copy, preview, mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0, couponEntry === true, locale, mapped.currency)}${nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview, couponEntry === true)}`;
 	}
 	return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, refused)}${nativeCouponField(mapped, copy, refused, couponEntry)}${nativeBuyControl(mapped, copy, refused)}${nativeStatusNode(copy, refused)}</div></article>${nativeCheckoutScript(copy, preview, !!mapped.checkoutRail || mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0, couponEntry && mapped.available && !!mapped.sku && !refused, locale, mapped.currency)}`;
 }

@@ -7,7 +7,8 @@ import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // The optional coupon field: shown only when the native projection says `coupon_entry === true`
-// and Buy goes through the cart door (never on the in-page ECPay sheet). At Buy a non-empty code is
+// and Buy can go through the cart door (on a shipping product's page it folds away when the in-page
+// ECPay sheet opens, which has its own field). At Buy a non-empty code is
 // applied (POST /api/cart/coupon), an empty field clears (DELETE); a 422 is named by its `code`,
 // stops before checkout and leaves Buy enabled. Without the flag the page is today's.
 
@@ -67,17 +68,32 @@ test('without coupon_entry the page carries no coupon code at all', async () => 
   assert.doesNotMatch(html, /cart\/coupon|couponMsg|cNotFound|data-native-coupon/);
 });
 
-test('the field is absent on the ECPay sheet branch, sold-out items and the grid', async () => {
-  const bowl = item({ currency: 'TWD', unit_price: 120000, tracked: true, available: 3, reserved: 0 }, true);
-  const sheetHtml = await page({ coupon_entry: true }, bowl);
-  assert.match(sheetHtml, /data-native-ecpay-sku/);
-  assert.equal(hasField(sheetHtml), false);
+test('the field is absent on sold-out items and the grid', async () => {
   assert.equal(hasField(await page({ coupon_entry: true }, item({ status: 'OUT_OF_STOCK' }))), false);
   assert.equal(hasField(await emit('/shop', { items: [item()], coupon_entry: true })), false);
 });
 
+// A product that ships (the in-page ECPay branch) also has the cart door: a non-ECPay payment
+// method and a Site whose ECPay answers no delivery method both press it. commerce.model offers the
+// coupon on every native checkout door, so the field sits above Buy there too, folded away with
+// the rest when the ECPay sheet opens (the sheet then has its own field).
+const bowl = item({ currency: 'TWD', unit_price: 120000, tracked: true, available: 3, reserved: 0 }, true);
+test('a shipping product offers the field above Buy, folded with the sheet, only with coupon_entry', async () => {
+  for (const extra of [{}, { checkout_rails: ['stripe', 'ecpay'] }]) {
+    const html = await page({ coupon_entry: true, ...extra }, bowl);
+    assert.match(html, /data-native-ecpay-sku/);
+    assert.match(html, /<div data-native-coupon data-native-ecpay-collapse><label><span>Discount code \(optional\)<\/span><input type="text" autocomplete="off" aria-label="Discount code \(optional\)" data-native-coupon-field><\/label><\/div><button type="button" class="dc-native-buy" data-native-ecpay-sku="tee-sku">/);
+    assert.match(html, /cart\/coupon/);
+    const without = await page(extra, bowl);
+    assert.match(without, /data-native-ecpay-sku/);
+    assert.doesNotMatch(without, /<div data-native-coupon|cart\/coupon|couponMsg/);
+  }
+});
+
 function drive(html, couponAnswer, { value = '', lang = '' } = {}) {
-  const script = html.match(/<script>([\s\S]*data-native-sku[\s\S]*?)<\/script>/);
+  // The cart door's script: the first one that presses `data-native-sku` (a shipping product's page
+  // also carries the ECPay sheet's script after it).
+  const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].find((m) => m[1].includes('data-native-sku'));
   assert.ok(script);
   let click;
   const document = { documentElement: { lang }, addEventListener(t, h) { if (t === 'click') click = h; } };
@@ -106,6 +122,14 @@ const order = (ui) => ui.calls.map((c) => `${c.method} ${c.url}`);
 
 test('a non-empty code is applied before checkout', async () => {
   const ui = drive(await page({ coupon_entry: true }), () => Response.json({ ok: true }), { value: '  SAVE10 ' });
+  await ui.click();
+  assert.deepEqual(order(ui), ['GET /api/cart', 'POST /api/cart/coupon', 'POST /api/checkout']);
+  assert.equal(ui.calls[1].body, JSON.stringify({ code: 'SAVE10' }));
+  assert.deepEqual(ui.redirects, ['https://pay.example/s']);
+});
+
+test('on a shipping product the cart door applies the code before checkout', async () => {
+  const ui = drive(await page({ coupon_entry: true, checkout_rails: ['stripe', 'ecpay'] }, bowl), () => Response.json({ ok: true }), { value: 'SAVE10' });
   await ui.click();
   assert.deepEqual(order(ui), ['GET /api/cart', 'POST /api/cart/coupon', 'POST /api/checkout']);
   assert.equal(ui.calls[1].body, JSON.stringify({ code: 'SAVE10' }));
