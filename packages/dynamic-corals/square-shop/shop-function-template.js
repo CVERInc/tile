@@ -1254,10 +1254,10 @@ async function fetchNativeProjection(request, env, cfg, slug, ctx) {
 // no pending-checkout locator in that body), so the honest sentence is that one is already
 // running — and nativeCheckoutScript leaves the control disabled to match it.
 const NATIVE_COPY = {
-	'en-US': { shop: 'Shop', buy: 'Buy now', soldOut: 'Unavailable', outOfStock: 'Sold out', checkoutBusy: 'Processing…', unavailable: 'Storefront unavailable', unavailableBody: 'Please try again later.', notFound: 'Product not found', empty: 'No products are available.', checkoutError: 'Unable to start checkout. Please try again.', checkoutConflict: 'A checkout is already in progress. Another one cannot be started right now.', currencyRefused: 'This item can\'t be paid for with this site\'s payment method.', previewLiveRefused: 'This is a preview. It can\'t take real payments, so purchases open when the site goes live.', emailLabel: 'Email for your order confirmation', emailRequired: 'Enter your email address to continue to payment.', emailInvalid: 'Please enter a valid email address.', emailConflict: 'This order is already linked to a different email address. Please enter the same address as before.', paymentMethod: 'Payment method', railEcpay: 'ECPay', previewTest: 'Preview — checkout runs in test mode; no real money moves.' },
-	'ja-JP': { shop: 'ショップ', buy: '今すぐ購入', soldOut: 'ご購入いただけません', outOfStock: '売り切れ', checkoutBusy: '処理中…', unavailable: 'ショップを表示できません', unavailableBody: 'しばらくしてから再度お試しください。', notFound: '商品が見つかりません', empty: '現在ご購入いただける商品はありません。', checkoutError: 'お支払い手続きを開始できませんでした。もう一度お試しください。', checkoutConflict: 'すでにお支払い手続きが進行中のため、新しい手続きは開始できません。', currencyRefused: 'この商品は、このサイトの支払い方法では購入できません。', previewLiveRefused: 'これはプレビューです。実際のお支払いは受け付けられないため、サイトの公開後にご購入いただけます。', emailLabel: 'メールアドレス（注文確認の送付先）', emailRequired: 'お支払いに進むには、メールアドレスを入力してください。', emailInvalid: '有効なメールアドレスを入力してください。', emailConflict: 'この注文には別のメールアドレスが登録されています。前回と同じアドレスを入力してください。', paymentMethod: '支払い方法', railEcpay: 'ECPay', previewTest: 'プレビュー：決済はテストモードで動作し、実際に請求されることはありません。' },
-	'zh-TW': { shop: '商店', buy: '立即購買', soldOut: '無法購買', outOfStock: '已售完', checkoutBusy: '處理中…', unavailable: '無法顯示商店', unavailableBody: '請稍後再試。', notFound: '找不到這個商品', empty: '目前沒有可購買的商品。', checkoutError: '無法開始結帳，請再試一次。', checkoutConflict: '已經有一筆結帳正在進行中，現在無法再開始新的結帳。', currencyRefused: '這個商品目前無法用本站的付款方式結帳。', previewLiveRefused: '這是預覽，無法收取真實款項；網站上線後才能購買。', emailLabel: '電子郵件（寄送訂單確認）', emailRequired: '請輸入電子郵件地址以繼續付款。', emailInvalid: '請輸入有效的電子郵件地址。', emailConflict: '此訂單已綁定其他電子郵件地址，請輸入先前填寫的地址。', paymentMethod: '付款方式', railEcpay: '綠界', previewTest: '預覽：結帳為測試模式，不會實際扣款。' },
-	'zh-CN': { shop: '商店', buy: '立即购买', soldOut: '无法购买', outOfStock: '已售罄', checkoutBusy: '处理中…', unavailable: '无法显示商店', unavailableBody: '请稍后再试。', notFound: '找不到这个商品', empty: '目前没有可购买的商品。', checkoutError: '无法开始结账，请再试一次。', checkoutConflict: '已经有一笔结账正在进行中，现在无法再开始新的结账。', currencyRefused: '这个商品目前无法使用本站的付款方式结账。', previewLiveRefused: '这是预览，无法收取真实款项；网站上线后才能购买。', emailLabel: '电子邮箱（接收订单确认）', emailRequired: '请输入电子邮箱地址以继续付款。', emailInvalid: '请输入有效的电子邮箱地址。', emailConflict: '此订单已绑定其他电子邮箱地址，请输入之前填写的地址。', paymentMethod: '付款方式', railEcpay: '绿界', previewTest: '预览：结账为测试模式，不会实际扣款。' }
+	'en-US': { couponLabel: 'Discount code (optional)', couponNotFound: 'We couldn\'t find that discount code.', couponUnavailable: 'This discount code can\'t be used right now.', couponExpired: 'This discount code has expired.', couponMinSpend: 'This discount code needs a minimum spend of {amount}.', couponGeneric: 'This discount code can\'t be used.', checkoutNotOpen: 'This shop is not taking payments yet.', shop: 'Shop', buy: 'Buy now', soldOut: 'Unavailable', outOfStock: 'Sold out', checkoutBusy: 'Processing…', unavailable: 'Storefront unavailable', unavailableBody: 'Please try again later.', notFound: 'Product not found', empty: 'No products are available.', checkoutError: 'Unable to start checkout. Please try again.', checkoutConflict: 'A checkout is already in progress. Another one cannot be started right now.', currencyRefused: 'This item can\'t be paid for with this site\'s payment method.', previewLiveRefused: 'This is a preview. It can\'t take real payments, so purchases open when the site goes live.', emailLabel: 'Email for your order confirmation', emailRequired: 'Enter your email address to continue to payment.', emailInvalid: 'Please enter a valid email address.', emailConflict: 'This order is already linked to a different email address. Please enter the same address as before.', paymentMethod: 'Payment method', railEcpay: 'ECPay', previewTest: 'Preview — checkout runs in test mode; no real money moves.' },
+	'ja-JP': { couponLabel: '割引コード（任意）', couponNotFound: 'その割引コードは見つかりません。', couponUnavailable: 'この割引コードは現在ご利用いただけません。', couponExpired: 'この割引コードは有効期限が切れています。', couponMinSpend: 'この割引コードは {amount} 以上のご購入でご利用いただけます。', couponGeneric: 'この割引コードはご利用いただけません。', checkoutNotOpen: 'このショップはまだ支払いを受け付けていないため、現在ご購入いただけません。', shop: 'ショップ', buy: '今すぐ購入', soldOut: 'ご購入いただけません', outOfStock: '売り切れ', checkoutBusy: '処理中…', unavailable: 'ショップを表示できません', unavailableBody: 'しばらくしてから再度お試しください。', notFound: '商品が見つかりません', empty: '現在ご購入いただける商品はありません。', checkoutError: 'お支払い手続きを開始できませんでした。もう一度お試しください。', checkoutConflict: 'すでにお支払い手続きが進行中のため、新しい手続きは開始できません。', currencyRefused: 'この商品は、このサイトの支払い方法では購入できません。', previewLiveRefused: 'これはプレビューです。実際のお支払いは受け付けられないため、サイトの公開後にご購入いただけます。', emailLabel: 'メールアドレス（注文確認の送付先）', emailRequired: 'お支払いに進むには、メールアドレスを入力してください。', emailInvalid: '有効なメールアドレスを入力してください。', emailConflict: 'この注文には別のメールアドレスが登録されています。前回と同じアドレスを入力してください。', paymentMethod: '支払い方法', railEcpay: 'ECPay', previewTest: 'プレビュー：決済はテストモードで動作し、実際に請求されることはありません。' },
+	'zh-TW': { couponLabel: '優惠碼（選填）', couponNotFound: '找不到這個優惠碼。', couponUnavailable: '這個優惠碼目前不能使用。', couponExpired: '這個優惠碼已過期。', couponMinSpend: '這個優惠碼需要消費滿 {amount} 才能使用。', couponGeneric: '這個優惠碼無法使用。', checkoutNotOpen: '這家店還在準備收款，目前無法購買。', shop: '商店', buy: '立即購買', soldOut: '無法購買', outOfStock: '已售完', checkoutBusy: '處理中…', unavailable: '無法顯示商店', unavailableBody: '請稍後再試。', notFound: '找不到這個商品', empty: '目前沒有可購買的商品。', checkoutError: '無法開始結帳，請再試一次。', checkoutConflict: '已經有一筆結帳正在進行中，現在無法再開始新的結帳。', currencyRefused: '這個商品目前無法用本站的付款方式結帳。', previewLiveRefused: '這是預覽，無法收取真實款項；網站上線後才能購買。', emailLabel: '電子郵件（寄送訂單確認）', emailRequired: '請輸入電子郵件地址以繼續付款。', emailInvalid: '請輸入有效的電子郵件地址。', emailConflict: '此訂單已綁定其他電子郵件地址，請輸入先前填寫的地址。', paymentMethod: '付款方式', railEcpay: '綠界', previewTest: '預覽：結帳為測試模式，不會實際扣款。' },
+	'zh-CN': { couponLabel: '优惠码（选填）', couponNotFound: '找不到这个优惠码。', couponUnavailable: '这个优惠码目前不能使用。', couponExpired: '这个优惠码已过期。', couponMinSpend: '这个优惠码需要消费满 {amount} 才能使用。', couponGeneric: '这个优惠码无法使用。', checkoutNotOpen: '这家店还在准备收款，目前无法购买。', shop: '商店', buy: '立即购买', soldOut: '无法购买', outOfStock: '已售罄', checkoutBusy: '处理中…', unavailable: '无法显示商店', unavailableBody: '请稍后再试。', notFound: '找不到这个商品', empty: '目前没有可购买的商品。', checkoutError: '无法开始结账，请再试一次。', checkoutConflict: '已经有一笔结账正在进行中，现在无法再开始新的结账。', currencyRefused: '这个商品目前无法使用本站的付款方式结账。', previewLiveRefused: '这是预览，无法收取真实款项；网站上线后才能购买。', emailLabel: '电子邮箱（接收订单确认）', emailRequired: '请输入电子邮箱地址以继续付款。', emailInvalid: '请输入有效的电子邮箱地址。', emailConflict: '此订单已绑定其他电子邮箱地址，请输入之前填写的地址。', paymentMethod: '付款方式', railEcpay: '绿界', previewTest: '预览：结账为测试模式，不会实际扣款。' }
 };
 
 // ONE resolver, the same one the site-owned buyer pages use: the donor shell the site itself
@@ -1311,6 +1311,12 @@ function nativeRailChoice(item, copy, refused) {
 	const names = { stripe: 'Stripe', square: 'Square', ecpay: copy.railEcpay };
 	const radios = item.checkoutRails.map((id, i) => `<label><input type="radio" name="${escHtml('native-rail-' + item.sku)}" value="${escHtml(id)}" data-native-rail-choice${i === 0 ? ' checked' : ''}> ${escHtml(Object.prototype.hasOwnProperty.call(names, id) ? names[id] : id)}</label>`).join('');
 	return `<fieldset data-native-rails><legend>${escHtml(copy.paymentMethod)}</legend>${radios}</fieldset>`;
+}
+
+// The optional coupon input, above Buy, only where the projection offers it and Buy can be pressed.
+function nativeCouponField(item, copy, refused, entry) {
+	if (!entry || !item.available || !item.sku || refused) return '';
+	return `<div data-native-coupon><label><span>${escHtml(copy.couponLabel)}</span><input type="text" autocomplete="off" aria-label="${escHtml(copy.couponLabel)}" data-native-coupon-field></label></div>`;
 }
 
 // RSP adds a top-level `preview_checkout` to the native projection only when the request is for the
@@ -1367,8 +1373,28 @@ const NATIVE_FORM_POST_SOURCE = `function post(fp){const a=fp.action,f=fp.fields
 // base layer's .st-runtime-status rule matches, so a failure reads as a failure and not as neutral muted text.
 // A new attempt clears the previous line and its tone before the control goes busy; success
 // navigates away and sets no tone.
-function nativeCheckoutScript(copy, preview, rail, choice) {
-	const strings = JSON.stringify(Object.assign({ error: copy.checkoutError, conflict: copy.checkoutConflict, currencyRefused: copy.currencyRefused, busy: copy.checkoutBusy, emailLabel: copy.emailLabel, emailRequired: copy.emailRequired, emailInvalid: copy.emailInvalid, emailConflict: copy.emailConflict }, preview ? { refused: copy.previewLiveRefused } : {})).replace(/</g, '\\u003c');
+// The coupon refusal sentences and the one mapping from a ruling-5 refusal `code` to them, shared by
+// the cart-door Buy script and the in-page ECPay sheet. The mapping reads C's c* strings, C.currency,
+// C.locale and a formatMoney named FM; an unknown code reads as the generic coupon sentence.
+function nativeCouponStrings(copy) {
+	return { cLabel: copy.couponLabel, cNotFound: copy.couponNotFound, cUnavailable: copy.couponUnavailable, cExpired: copy.couponExpired, cMinSpend: copy.couponMinSpend, cGeneric: copy.couponGeneric };
+}
+const NATIVE_COUPON_MESSAGE_SOURCE = "function cm(b){const k=b&&typeof b.code==='string'?b.code:'';if(k==='coupon_not_found')return C.cNotFound;if(k==='coupon_unavailable')return C.cUnavailable;if(k==='coupon_expired')return C.cExpired;if(k==='coupon_min_spend'&&b&&Number.isFinite(Number(b.min_spend_minor)))return C.cMinSpend.split('{amount}').join(FM({minor:Number(b.min_spend_minor),currency:typeof b.currency==='string'&&b.currency?b.currency:C.currency,locale:C.locale}));return C.cGeneric}";
+
+function nativeCheckoutScript(copy, preview, rail, choice, coupon, locale, currency) {
+	// The optional coupon field (only where the projection says `coupon_entry`, on the cart door): at Buy a
+	// non-empty code is applied (POST /api/cart/coupon), an empty field clears any earlier one (DELETE), then
+	// checkout starts as before. A 422 stops before checkout, names the refusal by its `code` and leaves Buy enabled.
+	const cp = coupon
+		? {
+			strings: Object.assign(nativeCouponStrings(copy), { locale, currency }),
+			fn: `const FM=(${completionFormatMoneySource()});${NATIVE_COUPON_MESSAGE_SOURCE}`,
+			decl: "let couponMsg='';",
+			apply: "const cf=parent&&parent.querySelector?parent.querySelector('[data-native-coupon-field]'):null;if(cf){const cc=typeof cf.value==='string'?cf.value.trim():'';const cr=await fetch('/api/cart/coupon',cc?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({code:cc})}:{method:'DELETE',credentials:'same-origin'});if(!cr.ok){if(cr.status===422){couponMsg=cm(await cr.json().catch(function(){return null}))}throw new Error('coupon failed')}}",
+			text: 'couponMsg?couponMsg:'
+		}
+		: { strings: {}, fn: '', decl: '', apply: '', text: '' };
+	const strings = JSON.stringify(Object.assign({ error: copy.checkoutError, conflict: copy.checkoutConflict, currencyRefused: copy.currencyRefused, notOpen: copy.checkoutNotOpen, busy: copy.checkoutBusy, emailLabel: copy.emailLabel, emailRequired: copy.emailRequired, emailInvalid: copy.emailInvalid, emailConflict: copy.emailConflict }, preview ? { refused: copy.previewLiveRefused } : {}, cp.strings)).replace(/</g, '\\u003c');
 	const pv = preview
 		? { decl: 'let refused=false;', detect: "refused=checkout.status===409&&!!result&&result.error==='preview_checkout_live_mode';", keep: '&&!refused', text: 'refused?C.refused:' }
 		: { decl: '', detect: '', keep: '', text: '' };
@@ -1384,7 +1410,7 @@ function nativeCheckoutScript(copy, preview, rail, choice) {
 	const lock = choice ? "const radios=parent&&parent.querySelectorAll?parent.querySelectorAll('[data-native-rail-choice]'):[];for(let i=0;i<radios.length;i++)radios[i].disabled=true;" : '';
 	const unlockOpen = choice ? '{' : '';
 	const unlockClose = choice ? 'for(let i=0;i<radios.length;i++)radios[i].disabled=false;}' : '';
-	return `<script>(function(){const C=${strings};const E=['customer_email_required','customer_email_invalid','customer_email_conflict'];const W=new WeakSet();const T=['https://payment-stage.ecpay.com.tw','https://payment.ecpay.com.tw'];function ask(button,code){const parent=button.parentElement;let field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const doc=button.ownerDocument;if(!field&&parent&&doc&&doc.createElement&&parent.insertBefore){const wrap=doc.createElement('div');wrap.setAttribute('data-native-email','');const label=doc.createElement('label');const caption=doc.createElement('span');caption.textContent=C.emailLabel;field=doc.createElement('input');field.setAttribute('type','email');field.setAttribute('autocomplete','email');field.setAttribute('required','');field.setAttribute('aria-label',C.emailLabel);field.setAttribute('data-native-email-field','');if(field.addEventListener)field.addEventListener('keydown',function(e){if(e&&e.key==='Enter'){if(e.preventDefault)e.preventDefault();if(button.click)button.click()}});label.appendChild(caption);label.appendChild(field);wrap.appendChild(label);parent.insertBefore(wrap,button)}if(field){field.disabled=false;field.setAttribute('aria-invalid','true');if(field.focus)field.focus()}return code==='customer_email_invalid'?C.emailInvalid:code==='customer_email_conflict'?C.emailConflict:C.emailRequired}${NATIVE_FORM_POST_SOURCE}function launch(r){if(!r||typeof r!=='object')return false;if(r.form_post&&typeof r.form_post==='object')return post(r.form_post);if(typeof r.redirect_url!=='string')return false;window.location.assign(r.redirect_url);return true}document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status){status.textContent='';status.removeAttribute('data-ejecta-status-tone')}button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;const parent=button.parentElement;const field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const email=field&&typeof field.value==='string'?field.value.trim():'';if(field)field.disabled=true;${lock}let conflict=false;let currencyRefused=false;let emailCode='';${pv.decl}try{if(!W.has(button)){const cart=await fetch('/api/cart',{method:'GET',credentials:'same-origin'});if(!cart.ok)throw new Error('cart failed');const held=await cart.json().catch(function(){return null});if(!held||!Array.isArray(held.lines))throw new Error('cart failed');let has=false;for(let i=0;i<held.lines.length;i++){const l=held.lines[i];if(l&&l.sku===sku&&Number(l.qty)>=1)has=true}if(!has){const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed')}}const lang=(document.documentElement&&document.documentElement.lang||'').trim();${bodyBuilder}const checkout=await fetch('/api/checkout',body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:body}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){if(result&&typeof result.error==='string'&&E.indexOf(result.error)>=0)emailCode=result.error;conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';currencyRefused=checkout.status===409&&!!result&&result.code==='rail_currency_unsupported';${pv.detect}throw new Error('checkout failed')}if(!launch(result))throw new Error('checkout failed')}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;let emailMsg='';if(emailCode){W.add(button);emailMsg=ask(button,emailCode)}else if(field)field.disabled=false;if(!conflict&&!currencyRefused${pv.keep})${unlockOpen}button.disabled=false;${unlockClose}if(status){status.textContent=emailMsg?emailMsg:${pv.text}currencyRefused?C.currencyRefused:conflict?C.conflict:C.error;status.setAttribute('data-ejecta-status-tone','error')}}})})()</script>`;
+	return `<script>(function(){const C=${strings};${cp.fn}const E=['customer_email_required','customer_email_invalid','customer_email_conflict'];const W=new WeakSet();const T=['https://payment-stage.ecpay.com.tw','https://payment.ecpay.com.tw'];function ask(button,code){const parent=button.parentElement;let field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const doc=button.ownerDocument;if(!field&&parent&&doc&&doc.createElement&&parent.insertBefore){const wrap=doc.createElement('div');wrap.setAttribute('data-native-email','');const label=doc.createElement('label');const caption=doc.createElement('span');caption.textContent=C.emailLabel;field=doc.createElement('input');field.setAttribute('type','email');field.setAttribute('autocomplete','email');field.setAttribute('required','');field.setAttribute('aria-label',C.emailLabel);field.setAttribute('data-native-email-field','');if(field.addEventListener)field.addEventListener('keydown',function(e){if(e&&e.key==='Enter'){if(e.preventDefault)e.preventDefault();if(button.click)button.click()}});label.appendChild(caption);label.appendChild(field);wrap.appendChild(label);parent.insertBefore(wrap,button)}if(field){field.disabled=false;field.setAttribute('aria-invalid','true');if(field.focus)field.focus()}return code==='customer_email_invalid'?C.emailInvalid:code==='customer_email_conflict'?C.emailConflict:C.emailRequired}${NATIVE_FORM_POST_SOURCE}function launch(r){if(!r||typeof r!=='object')return false;if(r.form_post&&typeof r.form_post==='object')return post(r.form_post);if(typeof r.redirect_url!=='string')return false;window.location.assign(r.redirect_url);return true}document.addEventListener('click',async function(event){const button=event.target&&event.target.closest&&event.target.closest('[data-native-sku]');if(!button||button.disabled)return;const sku=button.getAttribute('data-native-sku');if(!sku)return;const idle=button.textContent;const status=button.parentElement&&button.parentElement.querySelector('[data-native-status]');if(status){status.textContent='';status.removeAttribute('data-ejecta-status-tone')}button.disabled=true;button.setAttribute('aria-busy','true');if(C.busy)button.textContent=C.busy;const parent=button.parentElement;const field=parent&&parent.querySelector?parent.querySelector('[data-native-email-field]'):null;const email=field&&typeof field.value==='string'?field.value.trim():'';if(field)field.disabled=true;${lock}let conflict=false;let currencyRefused=false;let notOpen=false;let emailCode='';${pv.decl}${cp.decl}try{if(!W.has(button)){const cart=await fetch('/api/cart',{method:'GET',credentials:'same-origin'});if(!cart.ok)throw new Error('cart failed');const held=await cart.json().catch(function(){return null});if(!held||!Array.isArray(held.lines))throw new Error('cart failed');let has=false;for(let i=0;i<held.lines.length;i++){const l=held.lines[i];if(l&&l.sku===sku&&Number(l.qty)>=1)has=true}if(!has){const added=await fetch('/api/cart/items',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({sku:sku,qty:1})});if(!added.ok)throw new Error('add failed')}}${cp.apply}const lang=(document.documentElement&&document.documentElement.lang||'').trim();${bodyBuilder}const checkout=await fetch('/api/checkout',body?{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:body}:{method:'POST',credentials:'same-origin'});const result=await checkout.json().catch(function(){return null});if(!checkout.ok){if(result&&typeof result.error==='string'&&E.indexOf(result.error)>=0)emailCode=result.error;conflict=checkout.status===409&&!!result&&result.error==='checkout_attempt_conflict';currencyRefused=checkout.status===409&&!!result&&result.code==='rail_currency_unsupported';notOpen=checkout.status===409&&!!result&&result.checkout_available===false&&result.error!=='preview_checkout_live_mode';${pv.detect}throw new Error('checkout failed')}if(!launch(result))throw new Error('checkout failed')}catch(error){button.removeAttribute('aria-busy');button.textContent=idle;let emailMsg='';if(emailCode){W.add(button);emailMsg=ask(button,emailCode)}else if(field)field.disabled=false;if(!conflict&&!currencyRefused${pv.keep}${choice ? '' : '&&!notOpen'})${unlockOpen}button.disabled=false;${unlockClose}if(status){status.textContent=emailMsg?emailMsg:${cp.text}${pv.text}notOpen?C.notOpen:currencyRefused?C.currencyRefused:conflict?C.conflict:C.error;status.setAttribute('data-ejecta-status-tone','error')}}})})()</script>`;
 }
 
 // ─── NATIVE ECPAY CHECKOUT (in-page) ──────────────────────────────────────────
@@ -1398,7 +1424,9 @@ function nativeCheckoutScript(copy, preview, rail, choice) {
 //   POST /api/v2/ecpay/logistics/store-map {site_id, sub_type, client_back_url, device, cash_on_delivery?}
 //        → {ok, form_post}; ECPay's answer returns to client_back_url with `?store_ref=`
 //   POST /api/v2/ecpay/checkout {site_id, items, client_request_ref, client_back_url, logistics,
-//        customer_email, invoice?, payment?, lang?} → {order_id, form_post} | {order_id, cash_on_delivery:true}
+//        customer_email, invoice?, payment?, lang?, coupon_code?} → {order_id, form_post} | {order_id, cash_on_delivery:true}
+//   POST /api/v2/ecpay/coupon-quote {site_id, items, coupon_code} (only with `coupon_entry`)
+//        → {ok:true, currency, subtotal_minor, discount_minor, items_minor} | 422 {error, code, min_spend_minor?, currency?}
 //
 // Everything else keeps today's flow byte for byte: any other product renders exactly as before,
 // and a Site whose delivery-options read answers no method hands the very same click to the
@@ -1419,10 +1447,10 @@ const NATIVE_ECPAY_SUBTYPES = {
 };
 
 const NATIVE_ECPAY_COPY = {
-	'en-US': { ship: 'Delivery', recipient: 'Recipient', name: 'Name', phone: 'Mobile phone', address: 'Address', postal: 'Postal code', pay: 'Payment', card: 'Credit card (ECPay)', cod: 'Pay on pickup', codCvs: 'Pay {total} when you collect it at the store.', codHome: 'Pay {total} on delivery.', invoice: 'E-invoice', invEcpay: 'Keep in my ECPay member carrier', invMobile: 'Mobile barcode', invDonate: 'Donate', invTaxId: 'Company tax ID', invCitizen: 'Citizen digital certificate', citizenCode: 'Certificate number', invPaper: 'Paper invoice', invPaperNote: 'Sent with the parcel.', mobileCode: 'Mobile barcode (starts with /, 8 characters)', loveCode: 'Donation code', taxId: 'Tax ID number', company: 'Company name', companyAddress: 'Company address', subtotal: 'Subtotal', fee: 'Shipping', total: 'Total', free: 'Free', threshold: 'Free over {amount}', storePick: 'Choose a store', storePickNote: 'On the ECPay store map', storeChosen: 'Store selected', storeChosenNote: 'Your confirmation email names the store.', storeChange: 'Change store', submitCard: 'Continue to payment', submitCod: 'Place order', noteCard: 'You will pay on the ECPay payment page.', noteCod: 'Nothing is charged now; you pay on pickup.', errName: 'Enter the recipient’s name.', errPhone: 'Enter the recipient’s mobile phone.', errPhoneBad: 'This phone number does not look right.', errStore: 'Choose a store first.', errStoreStale: 'That store selection has expired. Please choose the store again.', errAddress: 'Enter the delivery address.', errPostalMissing: 'Enter the postal code.', errPostal: 'This postal code does not look right.', errMobile: 'Enter the mobile barcode (/ followed by 7 characters).', errLove: 'Enter a donation code of 3 to 7 digits.', errLoveUnknown: 'This donation code was not found.', errLoveUnverifiable: 'The donation code cannot be checked right now. Please choose another option.', errTaxId: 'Enter the 8-digit tax ID number.', errCompany: 'Enter the company name.', errCompanyAddress: 'Enter the company address.', errCitizen: 'Enter the certificate number (2 letters followed by 14 digits).', errPaperName: 'Enter the name for the invoice.', errPaperAddress: 'Enter the address for the invoice.', errMethod: 'This delivery method is not available right now. Please choose another.', errCod: 'This order cannot be paid on pickup. Please pay by card.', invNotOffered: 'This shop does not issue e-invoices, so that choice was skipped.', storeMapError: 'The store map could not be opened. Please try again.' },
-	'ja-JP': { ship: '配送方法', recipient: '受取人', name: '氏名', phone: '携帯電話', address: '住所', postal: '郵便番号', pay: 'お支払い方法', card: 'クレジットカード（ECPay）', cod: '受け取り時払い', codCvs: '店舗での受け取り時に {total} をお支払いください。', codHome: '配達時に {total} をお支払いください。', invoice: '電子発票', invEcpay: 'ECPay 会員キャリアに保存', invMobile: 'モバイルバーコード', invDonate: '寄付', invTaxId: '統一編号（法人）', invCitizen: '自然人証明書', citizenCode: '証明書番号', invPaper: '紙の発票', invPaperNote: '商品に同梱します。', mobileCode: 'モバイルバーコード（/ から始まる 8 文字）', loveCode: '寄付コード', taxId: '統一編号', company: '会社名', companyAddress: '会社住所', subtotal: '小計', fee: '送料', total: '合計', free: '送料無料', threshold: '{amount} 以上で送料無料', storePick: '店舗を選ぶ', storePickNote: 'ECPay の店舗マップで選択', storeChosen: '店舗を選択済み', storeChosenNote: '確認メールに店舗が記載されます。', storeChange: '店舗を変更', submitCard: 'お支払いへ進む', submitCod: '注文を確定する', noteCard: 'ECPay のお支払いページに移動します。', noteCod: '今は請求されません。受け取り時にお支払いください。', errName: '受取人の氏名を入力してください。', errPhone: '受取人の携帯電話を入力してください。', errPhoneBad: '電話番号の形式が正しくありません。', errStore: '先に店舗を選んでください。', errStoreStale: '店舗の選択が無効になりました。もう一度選んでください。', errAddress: '住所を入力してください。', errPostalMissing: '郵便番号を入力してください。', errPostal: '郵便番号の形式が正しくありません。', errMobile: 'モバイルバーコード（/ に続く 7 文字）を入力してください。', errLove: '3〜7 桁の寄付コードを入力してください。', errLoveUnknown: 'この寄付コードは見つかりません。', errLoveUnverifiable: '寄付コードを確認できません。別の方法を選んでください。', errTaxId: '8 桁の統一編号を入力してください。', errCompany: '会社名を入力してください。', errCompanyAddress: '会社住所を入力してください。', errCitizen: '証明書番号（英字 2 文字と数字 14 桁）を入力してください。', errPaperName: '発票の宛名を入力してください。', errPaperAddress: '発票の住所を入力してください。', errMethod: 'この配送方法は現在ご利用いただけません。別の方法を選んでください。', errCod: 'このご注文は受け取り時払いにできません。カードでお支払いください。', invNotOffered: 'このショップは電子発票を発行しないため、この項目は省略しました。', storeMapError: '店舗マップを開けませんでした。もう一度お試しください。' },
-	'zh-TW': { ship: '配送方式', recipient: '收件人', name: '姓名', phone: '手機', address: '地址', postal: '郵遞區號', pay: '付款方式', card: '信用卡（綠界）', cod: '取貨付款', codCvs: '到店取貨時付 {total}。', codHome: '送達時付 {total}。', invoice: '電子發票', invEcpay: '存在綠界會員載具', invMobile: '手機條碼', invDonate: '捐贈', invTaxId: '公司統編', invCitizen: '自然人憑證', citizenCode: '憑證號碼', invPaper: '紙本發票', invPaperNote: '隨商品寄出。', mobileCode: '手機條碼（/ 開頭共 8 碼）', loveCode: '捐贈碼', taxId: '統一編號', company: '公司抬頭', companyAddress: '公司地址', subtotal: '小計', fee: '運費', total: '合計', free: '免運費', threshold: '滿 {amount} 免運', storePick: '選門市', storePickNote: '到綠界地圖選', storeChosen: '已選門市', storeChosenNote: '確認信會寫明取貨門市。', storeChange: '換門市', submitCard: '前往付款', submitCod: '送出訂單', noteCard: '會到綠界付款頁。', noteCod: '不會先扣款；取貨時付。', errName: '請輸入收件人姓名。', errPhone: '請輸入收件人手機。', errPhoneBad: '手機號碼格式不對。', errStore: '請先選門市。', errStoreStale: '門市選擇已失效，請重新選門市。', errAddress: '請輸入地址。', errPostalMissing: '請輸入郵遞區號。', errPostal: '郵遞區號格式不對。', errMobile: '請輸入手機條碼（/ 開頭共 8 碼）。', errLove: '請輸入 3 到 7 位數的捐贈碼。', errLoveUnknown: '查無這個捐贈碼。', errLoveUnverifiable: '現在無法確認捐贈碼，請改選其他方式。', errTaxId: '請輸入 8 位數的統一編號。', errCompany: '請輸入公司抬頭。', errCompanyAddress: '請輸入公司地址。', errCitizen: '請輸入憑證號碼（2 個英文字母加 14 位數字）。', errPaperName: '請輸入發票上的姓名。', errPaperAddress: '請輸入發票上的地址。', errMethod: '這個配送方式目前無法使用，請改選其他方式。', errCod: '這筆訂單無法取貨付款，請改用信用卡。', invNotOffered: '這家商店不開立電子發票，已略過這一欄。', storeMapError: '無法開啟門市地圖，請再試一次。' },
-	'zh-CN': { ship: '配送方式', recipient: '收件人', name: '姓名', phone: '手机', address: '地址', postal: '邮政编码', pay: '付款方式', card: '信用卡（绿界）', cod: '取货付款', codCvs: '到店取货时付 {total}。', codHome: '送达时付 {total}。', invoice: '电子发票', invEcpay: '存在绿界会员载具', invMobile: '手机条码', invDonate: '捐赠', invTaxId: '公司统编', invCitizen: '自然人凭证', citizenCode: '凭证号码', invPaper: '纸本发票', invPaperNote: '随商品寄出。', mobileCode: '手机条码（/ 开头共 8 码）', loveCode: '捐赠码', taxId: '统一编号', company: '公司抬头', companyAddress: '公司地址', subtotal: '小计', fee: '运费', total: '合计', free: '免运费', threshold: '满 {amount} 免运', storePick: '选门店', storePickNote: '到绿界地图选', storeChosen: '已选门店', storeChosenNote: '确认信会写明取货门店。', storeChange: '换门店', submitCard: '前往付款', submitCod: '提交订单', noteCard: '会跳转到绿界付款页。', noteCod: '不会先扣款；取货时付。', errName: '请输入收件人姓名。', errPhone: '请输入收件人手机。', errPhoneBad: '手机号码格式不对。', errStore: '请先选门店。', errStoreStale: '门店选择已失效，请重新选门店。', errAddress: '请输入地址。', errPostalMissing: '请输入邮政编码。', errPostal: '邮政编码格式不对。', errMobile: '请输入手机条码（/ 开头共 8 码）。', errLove: '请输入 3 到 7 位数的捐赠码。', errLoveUnknown: '查无这个捐赠码。', errLoveUnverifiable: '现在无法确认捐赠码，请改选其他方式。', errTaxId: '请输入 8 位数的统一编号。', errCompany: '请输入公司抬头。', errCompanyAddress: '请输入公司地址。', errCitizen: '请输入凭证号码（2 个英文字母加 14 位数字）。', errPaperName: '请输入发票上的姓名。', errPaperAddress: '请输入发票上的地址。', errMethod: '这个配送方式目前无法使用，请改选其他方式。', errCod: '这笔订单无法取货付款，请改用信用卡。', invNotOffered: '这家商店不开具电子发票，已略过这一栏。', storeMapError: '无法打开门店地图，请再试一次。' }
+	'en-US': { ship: 'Delivery', recipient: 'Recipient', name: 'Name', phone: 'Mobile phone', address: 'Address', postal: 'Postal code', pay: 'Payment', card: 'Credit card (ECPay)', cod: 'Pay on pickup', codCvs: 'Pay {total} when you collect it at the store.', codHome: 'Pay {total} on delivery.', invoice: 'E-invoice', invEcpay: 'Keep in my ECPay member carrier', invMobile: 'Mobile barcode', invDonate: 'Donate', invTaxId: 'Company tax ID', invCitizen: 'Citizen digital certificate', citizenCode: 'Certificate number', invPaper: 'Paper invoice', invPaperNote: 'Sent with the parcel.', mobileCode: 'Mobile barcode (starts with /, 8 characters)', loveCode: 'Donation code', taxId: 'Tax ID number', company: 'Company name', companyAddress: 'Company address', subtotal: 'Subtotal', discount: 'Discount', fee: 'Shipping', total: 'Total', free: 'Free', threshold: 'Free over {amount}', storePick: 'Choose a store', storePickNote: 'On the ECPay store map', storeChosen: 'Store selected', storeChosenNote: 'Your confirmation email names the store.', storeChange: 'Change store', submitCard: 'Continue to payment', submitCod: 'Place order', noteCard: 'You will pay on the ECPay payment page.', noteCod: 'Nothing is charged now; you pay on pickup.', errName: 'Enter the recipient’s name.', errPhone: 'Enter the recipient’s mobile phone.', errPhoneBad: 'This phone number does not look right.', errStore: 'Choose a store first.', errStoreStale: 'That store selection has expired. Please choose the store again.', errAddress: 'Enter the delivery address.', errPostalMissing: 'Enter the postal code.', errPostal: 'This postal code does not look right.', errMobile: 'Enter the mobile barcode (/ followed by 7 characters).', errLove: 'Enter a donation code of 3 to 7 digits.', errLoveUnknown: 'This donation code was not found.', errLoveUnverifiable: 'The donation code cannot be checked right now. Please choose another option.', errTaxId: 'Enter the 8-digit tax ID number.', errCompany: 'Enter the company name.', errCompanyAddress: 'Enter the company address.', errCitizen: 'Enter the certificate number (2 letters followed by 14 digits).', errPaperName: 'Enter the name for the invoice.', errPaperAddress: 'Enter the address for the invoice.', errMethod: 'This delivery method is not available right now. Please choose another.', errCod: 'This order cannot be paid on pickup. Please pay by card.', invNotOffered: 'This shop does not issue e-invoices, so that choice was skipped.', storeMapError: 'The store map could not be opened. Please try again.' },
+	'ja-JP': { ship: '配送方法', recipient: '受取人', name: '氏名', phone: '携帯電話', address: '住所', postal: '郵便番号', pay: 'お支払い方法', card: 'クレジットカード（ECPay）', cod: '受け取り時払い', codCvs: '店舗での受け取り時に {total} をお支払いください。', codHome: '配達時に {total} をお支払いください。', invoice: '電子発票', invEcpay: 'ECPay 会員キャリアに保存', invMobile: 'モバイルバーコード', invDonate: '寄付', invTaxId: '統一編号（法人）', invCitizen: '自然人証明書', citizenCode: '証明書番号', invPaper: '紙の発票', invPaperNote: '商品に同梱します。', mobileCode: 'モバイルバーコード（/ から始まる 8 文字）', loveCode: '寄付コード', taxId: '統一編号', company: '会社名', companyAddress: '会社住所', subtotal: '小計', discount: '割引', fee: '送料', total: '合計', free: '送料無料', threshold: '{amount} 以上で送料無料', storePick: '店舗を選ぶ', storePickNote: 'ECPay の店舗マップで選択', storeChosen: '店舗を選択済み', storeChosenNote: '確認メールに店舗が記載されます。', storeChange: '店舗を変更', submitCard: 'お支払いへ進む', submitCod: '注文を確定する', noteCard: 'ECPay のお支払いページに移動します。', noteCod: '今は請求されません。受け取り時にお支払いください。', errName: '受取人の氏名を入力してください。', errPhone: '受取人の携帯電話を入力してください。', errPhoneBad: '電話番号の形式が正しくありません。', errStore: '先に店舗を選んでください。', errStoreStale: '店舗の選択が無効になりました。もう一度選んでください。', errAddress: '住所を入力してください。', errPostalMissing: '郵便番号を入力してください。', errPostal: '郵便番号の形式が正しくありません。', errMobile: 'モバイルバーコード（/ に続く 7 文字）を入力してください。', errLove: '3〜7 桁の寄付コードを入力してください。', errLoveUnknown: 'この寄付コードは見つかりません。', errLoveUnverifiable: '寄付コードを確認できません。別の方法を選んでください。', errTaxId: '8 桁の統一編号を入力してください。', errCompany: '会社名を入力してください。', errCompanyAddress: '会社住所を入力してください。', errCitizen: '証明書番号（英字 2 文字と数字 14 桁）を入力してください。', errPaperName: '発票の宛名を入力してください。', errPaperAddress: '発票の住所を入力してください。', errMethod: 'この配送方法は現在ご利用いただけません。別の方法を選んでください。', errCod: 'このご注文は受け取り時払いにできません。カードでお支払いください。', invNotOffered: 'このショップは電子発票を発行しないため、この項目は省略しました。', storeMapError: '店舗マップを開けませんでした。もう一度お試しください。' },
+	'zh-TW': { ship: '配送方式', recipient: '收件人', name: '姓名', phone: '手機', address: '地址', postal: '郵遞區號', pay: '付款方式', card: '信用卡（綠界）', cod: '取貨付款', codCvs: '到店取貨時付 {total}。', codHome: '送達時付 {total}。', invoice: '電子發票', invEcpay: '存在綠界會員載具', invMobile: '手機條碼', invDonate: '捐贈', invTaxId: '公司統編', invCitizen: '自然人憑證', citizenCode: '憑證號碼', invPaper: '紙本發票', invPaperNote: '隨商品寄出。', mobileCode: '手機條碼（/ 開頭共 8 碼）', loveCode: '捐贈碼', taxId: '統一編號', company: '公司抬頭', companyAddress: '公司地址', subtotal: '小計', discount: '折扣', fee: '運費', total: '合計', free: '免運費', threshold: '滿 {amount} 免運', storePick: '選門市', storePickNote: '到綠界地圖選', storeChosen: '已選門市', storeChosenNote: '確認信會寫明取貨門市。', storeChange: '換門市', submitCard: '前往付款', submitCod: '送出訂單', noteCard: '會到綠界付款頁。', noteCod: '不會先扣款；取貨時付。', errName: '請輸入收件人姓名。', errPhone: '請輸入收件人手機。', errPhoneBad: '手機號碼格式不對。', errStore: '請先選門市。', errStoreStale: '門市選擇已失效，請重新選門市。', errAddress: '請輸入地址。', errPostalMissing: '請輸入郵遞區號。', errPostal: '郵遞區號格式不對。', errMobile: '請輸入手機條碼（/ 開頭共 8 碼）。', errLove: '請輸入 3 到 7 位數的捐贈碼。', errLoveUnknown: '查無這個捐贈碼。', errLoveUnverifiable: '現在無法確認捐贈碼，請改選其他方式。', errTaxId: '請輸入 8 位數的統一編號。', errCompany: '請輸入公司抬頭。', errCompanyAddress: '請輸入公司地址。', errCitizen: '請輸入憑證號碼（2 個英文字母加 14 位數字）。', errPaperName: '請輸入發票上的姓名。', errPaperAddress: '請輸入發票上的地址。', errMethod: '這個配送方式目前無法使用，請改選其他方式。', errCod: '這筆訂單無法取貨付款，請改用信用卡。', invNotOffered: '這家商店不開立電子發票，已略過這一欄。', storeMapError: '無法開啟門市地圖，請再試一次。' },
+	'zh-CN': { ship: '配送方式', recipient: '收件人', name: '姓名', phone: '手机', address: '地址', postal: '邮政编码', pay: '付款方式', card: '信用卡（绿界）', cod: '取货付款', codCvs: '到店取货时付 {total}。', codHome: '送达时付 {total}。', invoice: '电子发票', invEcpay: '存在绿界会员载具', invMobile: '手机条码', invDonate: '捐赠', invTaxId: '公司统编', invCitizen: '自然人凭证', citizenCode: '凭证号码', invPaper: '纸本发票', invPaperNote: '随商品寄出。', mobileCode: '手机条码（/ 开头共 8 码）', loveCode: '捐赠码', taxId: '统一编号', company: '公司抬头', companyAddress: '公司地址', subtotal: '小计', discount: '折扣', fee: '运费', total: '合计', free: '免运费', threshold: '满 {amount} 免运', storePick: '选门店', storePickNote: '到绿界地图选', storeChosen: '已选门店', storeChosenNote: '确认信会写明取货门店。', storeChange: '换门店', submitCard: '前往付款', submitCod: '提交订单', noteCard: '会跳转到绿界付款页。', noteCod: '不会先扣款；取货时付。', errName: '请输入收件人姓名。', errPhone: '请输入收件人手机。', errPhoneBad: '手机号码格式不对。', errStore: '请先选门店。', errStoreStale: '门店选择已失效，请重新选门店。', errAddress: '请输入地址。', errPostalMissing: '请输入邮政编码。', errPostal: '邮政编码格式不对。', errMobile: '请输入手机条码（/ 开头共 8 码）。', errLove: '请输入 3 到 7 位数的捐赠码。', errLoveUnknown: '查无这个捐赠码。', errLoveUnverifiable: '现在无法确认捐赠码，请改选其他方式。', errTaxId: '请输入 8 位数的统一编号。', errCompany: '请输入公司抬头。', errCompanyAddress: '请输入公司地址。', errCitizen: '请输入凭证号码（2 个英文字母加 14 位数字）。', errPaperName: '请输入发票上的姓名。', errPaperAddress: '请输入发票上的地址。', errMethod: '这个配送方式目前无法使用，请改选其他方式。', errCod: '这笔订单无法取货付款，请改用信用卡。', invNotOffered: '这家商店不开具电子发票，已略过这一栏。', storeMapError: '无法打开门店地图，请再试一次。' }
 };
 
 // Which ECPay pages a launched form may go to: the cashier for a payment, the store map for a
@@ -1444,7 +1472,7 @@ function nativeEcpayBuyControl(item, copy) {
 
 // The browser half, serialised with toString() into the page. It may use only its arguments and
 // browser globals: C (the page's data), the two launchers and formatMoney's own source.
-function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
+function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney, couponMessage) {
 	const button = document.querySelector('[data-native-ecpay-sku]');
 	const panel = document.querySelector('[data-native-ecpay-checkout]');
 	if (!button || !panel) return;
@@ -1456,14 +1484,19 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 	const PHONE = /^\+?[0-9][0-9 ()-]{5,19}$/;
 	const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 	const DRAFT = 'dc-native-ecpay-draft:' + C.sku;
-	const KEEP = ['name', 'phone', 'address', 'postal', 'email'];
+	const KEEP = ['name', 'phone', 'address', 'postal', 'email', 'coupon'];
 	let ss = null;
 	try { ss = window.sessionStorage || null; } catch (e) { ss = null; }
-	const S = { ship: '', storeRef: '', pay: 'card', inv: 'carrier_ecpay', invOff: false, v: {}, err: {}, form: '', notice: '' };
-	let options = null, busy = false, fallen = false, opening = false;
+	const S = { ship: '', storeRef: '', pay: 'card', inv: 'carrier_ecpay', invOff: false, v: {}, err: {}, form: '', notice: '', closed: false, quote: null, cErr: '' };
+	let options = null, busy = false, fallen = false, opening = false, qseq = 0, quoting = null;
+	// The coupon field exists only where the page was emitted with `coupon_entry` (C.coupon and the
+	// shared refusal mapping); without it nothing below sends a quote or a code.
+	const cm = C.coupon && couponMessage ? couponMessage(C, formatMoney) : null;
 	const current = () => (options || []).find((o) => o.sub_type === S.ship) || null;
 	const fee = () => { const o = current(); return o ? Number(o.fee_minor) || 0 : 0; };
-	const total = () => C.price + fee();
+	// The item amount the fee and the free-shipping threshold compare: the quoted one after a coupon.
+	const items = () => (S.quote ? S.quote.items : C.price);
+	const total = () => items() + fee();
 	const codAllowed = () => { const o = current(); return !!(o && o.cod_available === true); };
 	const val = (k) => String(S.v[k] == null ? '' : S.v[k]).trim();
 	const uuid = () => (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(16).slice(2));
@@ -1507,6 +1540,10 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		}
 		return radio('ship', o.sub_type, on, inner);
 	}
+	function couponField() {
+		const id = 'dc-ecpay-coupon';
+		return '<div class="st-field"><label class="st-field-label" for="' + id + '">' + esc(C.cLabel) + '</label><input id="' + id + '" type="text" data-ecpay-field="coupon" value="' + esc(S.v.coupon || '') + '" autocomplete="off"' + (S.cErr ? ' aria-invalid="true" aria-describedby="' + id + '-err"' : '') + '>' + (S.cErr ? '<p class="st-err" id="' + id + '-err">' + esc(S.cErr) + '</p>' : '') + '</div>';
+	}
 	function render() {
 		const cod = S.pay === 'cod' && codAllowed();
 		const o = current();
@@ -1532,8 +1569,10 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		}
 		h += field('email', C.emailLabel, 'email', ' autocomplete="email"');
 		if (S.notice) h += '<p class="st-note">' + esc(S.notice) + '</p>';
-		h += '<div class="st-sum">' + (cod ? '' : '<div><span>' + esc(L.subtotal) + '</span><span>' + esc(money(C.price)) + '</span></div><div><span>' + esc(L.fee) + '</span><span>' + esc(money(fee())) + '</span></div>') + '<div class="st-sum-tot"><span>' + esc(L.total) + '</span><span>' + esc(money(total())) + '</span></div></div>';
-		h += '<button class="st-runtime-action st-wide" type="button" data-ecpay-submit' + (busy ? ' disabled aria-busy="true"' : '') + '>' + esc(busy ? C.busy : (cod ? L.submitCod : L.submitCard)) + '</button>';
+		if (cm) h += couponField();
+		const off = S.quote ? '<div><span>' + esc(L.discount) + '</span><span>−' + esc(money(S.quote.discount)) + '</span></div>' : '';
+		h += '<div class="st-sum">' + (cod ? '' : '<div><span>' + esc(L.subtotal) + '</span><span>' + esc(money(C.price)) + '</span></div>' + off + '<div><span>' + esc(L.fee) + '</span><span>' + esc(money(fee())) + '</span></div>') + '<div class="st-sum-tot"><span>' + esc(L.total) + '</span><span>' + esc(money(total())) + '</span></div></div>';
+		h += '<button class="st-runtime-action st-wide" type="button" data-ecpay-submit' + (busy ? ' disabled aria-busy="true"' : S.closed ? ' disabled' : '') + '>' + esc(busy ? C.busy : (cod ? L.submitCod : L.submitCard)) + '</button>';
 		h += '<p class="st-note">' + esc(cod ? L.noteCod : L.noteCard) + '</p>';
 		h += '<p data-ecpay-status role="status" class="st-runtime-status"' + (S.form ? ' data-ejecta-status-tone="error"' : '') + '>' + esc(S.form) + '</p>';
 		panel.innerHTML = h;
@@ -1589,11 +1628,25 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		return { carrier_type: '1', email };
 	}
 	// One refusal → where it shows. Returns true when the same order should be sent again as is.
+	// The shop is not taking payments: the sheet's submit stays off unless a payment-method choice
+	// beside the Buy control gives the buyer another rail to pick.
+	function notOpenLine() {
+		const holder = button.parentElement;
+		S.closed = !(holder && holder.querySelector && holder.querySelector('[data-native-rail-choice]'));
+		return C.notOpen;
+	}
 	function refusal(code, r) {
 		const e = r && typeof r.error === 'string' ? r.error : '';
 		const f = r && typeof r.field === 'string' ? r.field : '';
 		const reason = r && typeof r.reason === 'string' ? r.reason : '';
 		const err = {};
+		// A refused coupon: its sentence under the field, figures back to undiscounted, submit open again.
+		if (cm && code === 422 && r && typeof r.code === 'string' && /^coupon_|^code_required$/.test(r.code)) {
+			S.err = {};
+			S.cErr = cm(r);
+			if (S.quote) { S.quote = null; requote(++qseq); }
+			return false;
+		}
 		if ((e === 'invoice_not_offered' || e === 'ecpay invoice not available') && !S.invOff) {
 			S.invOff = true;
 			S.notice = L.invNotOffered;
@@ -1623,6 +1676,7 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		if (!Object.keys(err).length) {
 			S.form = code === 409 && r && r.code === 'rail_currency_unsupported' ? C.currencyRefused
 				: code === 409 && e === 'preview_checkout_live_mode' && C.refused ? C.refused
+				: code === 409 && r && r.checkout_available === false && e !== 'preview_checkout_live_mode' && C.notOpen ? notOpenLine()
 				: code === 409 && e === 'unavailable' ? C.outOfStock
 				: C.error;
 		}
@@ -1630,6 +1684,12 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 	}
 	async function submit(again) {
 		if (busy) return;
+		// A quote still in flight (the field's change fires as it loses focus to this press) settles
+		// first, so the kept figures are the quoted ones; the server decides the amount either way.
+		if (quoting) {
+			busy = true;
+			try { render(); await quoting; } catch (e) { /* a failed quote never blocks the order */ } finally { busy = false; }
+		}
 		S.err = validate();
 		S.form = '';
 		if (Object.keys(S.err).length) { render(); focusFirstError(); return; }
@@ -1646,6 +1706,7 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		const invoice = invoiceBody();
 		if (invoice) body.invoice = invoice;
 		if (cod) body.payment = { method: 'cod' };
+		if (cm && val('coupon')) body.coupon_code = val('coupon');
 		// The page's declared language, as the cart checkout sends it, so the order (and the mail RSP
 		// writes later) carries the language the buyer bought in. Absent when the page declares none.
 		const lang = (document.documentElement && document.documentElement.lang || '').trim();
@@ -1658,8 +1719,18 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		busy = false;
 		if (res && res.ok && r && typeof r.order_id === 'string' && r.order_id) {
 			const kept = { order_id: r.order_id, sub_type: o.sub_type, logistics_type: o.logistics_type, fee_minor: fee(), currency: C.currency, invoice: !S.invOff };
+			// A code was sent but no quote is for it (failed or stale): the figures here may not be the
+			// server's, so the note keeps none and the result page reads the server's answer.
+			const sentCode = cm ? val('coupon') : '';
+			const matched = !!(sentCode && S.quote && S.quote.code === sentCode);
+			const unsure = !!sentCode && !matched;
+			if (unsure) delete kept.fee_minor;
 			if (cod && r.cash_on_delivery === true) {
-				Object.assign(kept, { cod: true, total_minor: total(), lines: [{ name: C.name, qty: 1, amount_minor: C.price }] });
+				const lines = [{ name: C.name, qty: 1, amount_minor: C.price }];
+				if (matched) lines.push({ kind: 'discount', qty: 1, amount_minor: -S.quote.discount });
+				// Unsure: no `cod` mark either, so a `pending` answer waits for RSP's own `awaiting_collection`
+				// figures instead of showing an amount due this tab cannot vouch for.
+				if (!unsure) Object.assign(kept, { cod: true, total_minor: total(), lines });
 				if (ss) try { ss.setItem('dc-native-ecpay:' + ref, JSON.stringify(kept)); } catch (e) { /* the result page falls back to the server's answer */ }
 				dropDraft();
 				location.assign(back);
@@ -1707,6 +1778,60 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		button.textContent = C.buy;
 		button.click();
 	}
+	async function readMethods(itemsMinor) {
+		let d = null;
+		try {
+			const res = await fetch('/api/v2/ecpay/logistics/delivery-options?site_id=' + encodeURIComponent(C.site) + '&items_minor=' + encodeURIComponent(String(itemsMinor)), { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } });
+			d = res.ok ? await res.json().catch(() => null) : null;
+		} catch (e) { d = null; }
+		return d;
+	}
+	function methods(d) {
+		const list = d && d.ok === true && Array.isArray(d.options) ? d.options.filter((x) => x && typeof x.sub_type === 'string' && (x.logistics_type === 'CVS' || x.logistics_type === 'HOME')) : [];
+		// B2C and C2C sub-types of one carrier share a buyer-visible name; rows that read the same and cost the same are one choice.
+		const seen = {};
+		return list.filter((x) => {
+			const k = [(C.subtypes && C.subtypes[x.sub_type]) || x.sub_type, x.logistics_type, Number(x.fee_minor) || 0, x.free_threshold_minor == null ? '' : x.free_threshold_minor, x.cod_available === true].join('|');
+			return seen[k] ? false : (seen[k] = true);
+		});
+	}
+	// The delivery methods again at the current item amount (quoted or full): the chosen method and
+	// store stay when still listed, and cash on delivery follows the method as open() sets it.
+	async function requote(seq) {
+		const list = methods(await readMethods(items()));
+		if (seq !== qseq) return;
+		if (list.length) {
+			options = list;
+			if (!current()) { S.ship = options[0].sub_type; S.storeRef = ''; }
+			if (!codAllowed()) S.pay = 'card';
+		}
+		render();
+	}
+	// One quote per change of the coupon field (blur or Enter), never per keystroke. 200 → the
+	// discounted figures; 422 → the refusal sentence and the full price; anything else → the full
+	// price and no sentence (submit is not blocked; the server decides).
+	async function quote() {
+		const seq = ++qseq;
+		const code = val('coupon');
+		let q = null, msg = '';
+		if (code) {
+			try {
+				const res = await fetch('/api/v2/ecpay/coupon-quote', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ site_id: C.site, items: [{ sku: C.sku, qty: 1 }], coupon_code: code }) });
+				const r = await res.json().catch(() => null);
+				if (res.ok && r && r.ok === true && Number.isSafeInteger(Number(r.items_minor)) && Number.isSafeInteger(Number(r.discount_minor))) q = { code, discount: Number(r.discount_minor), items: Number(r.items_minor) };
+				else if (res.status === 422) msg = cm(r);
+			} catch (e) { q = null; }
+		}
+		if (seq !== qseq) return;
+		S.quote = q;
+		S.cErr = msg;
+		await requote(seq);
+	}
+	function startQuote() {
+		const p = quote();
+		quoting = p;
+		p.finally(() => { if (quoting === p) quoting = null; }).catch(() => { /* submit still goes; the server decides */ });
+	}
 	async function open(fromStoreMap) {
 		if (opening) return;
 		opening = true;
@@ -1716,25 +1841,18 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 			button.textContent = C.busy;
 		}
 		if (status) { status.textContent = ''; status.removeAttribute('data-ejecta-status-tone'); }
-		let d = null;
-		try {
-			const res = await fetch('/api/v2/ecpay/logistics/delivery-options?site_id=' + encodeURIComponent(C.site) + '&items_minor=' + encodeURIComponent(String(C.price)), { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } });
-			d = res.ok ? await res.json().catch(() => null) : null;
-		} catch (e) { d = null; }
+		const d = await readMethods(C.price);
 		opening = false;
-		const list = d && d.ok === true && Array.isArray(d.options) ? d.options.filter((x) => x && typeof x.sub_type === 'string' && (x.logistics_type === 'CVS' || x.logistics_type === 'HOME')) : [];
+		const list = methods(d);
 		if (!list.length) { if (!fromStoreMap) fallBack(); return; }
-		// B2C and C2C sub-types of one carrier share a buyer-visible name; rows that read the same and cost the same are one choice.
-		const seen = {};
-		options = list.filter((x) => {
-			const k = [(C.subtypes && C.subtypes[x.sub_type]) || x.sub_type, x.logistics_type, Number(x.fee_minor) || 0, x.free_threshold_minor == null ? '' : x.free_threshold_minor, x.cod_available === true].join('|');
-			return seen[k] ? false : (seen[k] = true);
-		});
+		options = list;
 		// A Site that says it issues no e-invoice never shows the choice; an answer without the field
 		// (an older RSP) keeps it, and a checkout refusal still drops it.
 		if (d.invoice_offered === false) S.invOff = true;
 		if (!current()) { S.ship = options[0].sub_type; S.storeRef = ''; }
-		if (!codAllowed()) S.pay = 'card';
+		// With a restored code the quote decides cash on delivery (requote applies the same reset).
+		const quoteNext = fromStoreMap && cm && val('coupon');
+		if (!codAllowed() && !quoteNext) S.pay = 'card';
 		button.hidden = true;
 		button.removeAttribute('aria-busy');
 		button.disabled = false;
@@ -1743,6 +1861,8 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 		for (let i = 0; i < collapse.length; i++) collapse[i].hidden = true;
 		panel.hidden = false;
 		render();
+		// Back from the store map with a code the buyer had typed: quote it once.
+		if (quoteNext) startQuote();
 	}
 	// Where the Site offers a payment-method choice, only the ECPay choice opens this checkout; any
 	// other rail goes through the existing native checkout for one press and the control stays ours.
@@ -1771,6 +1891,7 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 	});
 	panel.addEventListener('change', function (event) {
 		const t = event.target;
+		if (cm && t && t.getAttribute && t.getAttribute('data-ecpay-field') === 'coupon') { S.v.coupon = t.value; startQuote(); return; }
 		if (!t || t.type !== 'radio') return;
 		if (t.name === 'dc-ecpay-ship' && t.value !== S.ship) { S.ship = t.value; S.storeRef = ''; if (!codAllowed()) S.pay = 'card'; }
 		else if (t.name === 'dc-ecpay-pay') S.pay = t.value === 'cod' ? 'cod' : 'card';
@@ -1805,7 +1926,7 @@ function nativeEcpayCheckoutClient(C, postPay, postMap, formatMoney) {
 	}
 }
 
-function nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview) {
+function nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview, coupon) {
 	const data = {
 		site: cfg.siteId || '',
 		sku: mapped.sku,
@@ -1821,22 +1942,25 @@ function nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, previe
 		error: copy.checkoutError,
 		outOfStock: copy.outOfStock,
 		currencyRefused: copy.currencyRefused,
+		notOpen: copy.checkoutNotOpen,
 		emailLabel: copy.emailLabel,
 		emailRequired: copy.emailRequired,
 		emailInvalid: copy.emailInvalid,
 		emailConflict: copy.emailConflict,
 		refused: preview ? copy.previewLiveRefused : ''
 	};
+	// `coupon_entry`: the sheet's coupon field, its strings and the shared refusal mapping (ruling 13).
+	if (coupon) Object.assign(data, { coupon: true }, nativeCouponStrings(copy));
 	const json = JSON.stringify(data).replace(/</g, '\\u003c');
 	const launcher = (origins) => `(function(){const T=${JSON.stringify(origins)};${NATIVE_FORM_POST_SOURCE}return post})()`;
-	return `<script>(${nativeEcpayCheckoutClient.toString()})(${json},${launcher(NATIVE_ECPAY_PAY_ORIGINS)},${launcher(NATIVE_ECPAY_MAP_ORIGINS)},${completionFormatMoneySource()});</script>`;
+	return `<script>(${nativeEcpayCheckoutClient.toString()})(${json},${launcher(NATIVE_ECPAY_PAY_ORIGINS)},${launcher(NATIVE_ECPAY_MAP_ORIGINS)},${completionFormatMoneySource()}${coupon ? `,function(C,FM){${NATIVE_COUPON_MESSAGE_SOURCE}return cm}` : ''});</script>`;
 }
 
 function nativeProductDescription(item) {
 	return String((item.copy || {}).description_html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function nativeProductBody(item, shop, copy, locale, preview, cfg) {
+function nativeProductBody(item, shop, copy, locale, preview, cfg, couponEntry) {
 	const mapped = nativeCatalogItem(item);
 	// Same wrap as nativeUnavailable() above — nativeUnavailableBody() itself is untouched.
 	if (!mapped) return `<div class="st-runtime">${nativeUnavailableBody(copy)}</div>`;
@@ -1856,9 +1980,9 @@ function nativeProductBody(item, shop, copy, locale, preview, cfg) {
 	// (`checkout_rail`) keeps the rail-aware flow; one offering a rail choice takes this branch only when
 	// ECPay is among the rails, and then the radios sit beside the control and only the ECPay choice opens it.
 	if (cfg && cfg.siteId && !mapped.checkoutRail && (!mapped.checkoutRails.length || mapped.checkoutRails.includes('ecpay')) && nativeEcpayEligible(item, mapped, refused)) {
-		return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p data-native-ecpay-collapse><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}" data-native-ecpay-collapse>` : ''}<p class="st-native-price">${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p data-native-ecpay-collapse>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, false)}${nativeEcpayBuyControl(mapped, copy)}${nativeStatusNode(copy, false)}</div><section class="st-native-checkout" data-native-ecpay-checkout aria-label="${escHtml(copy.buy)}" hidden></section></article>${nativeCheckoutScript(copy, preview, mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0)}${nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview)}`;
+		return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p data-native-ecpay-collapse><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}" data-native-ecpay-collapse>` : ''}<p class="st-native-price">${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p data-native-ecpay-collapse>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, false)}${nativeEcpayBuyControl(mapped, copy)}${nativeStatusNode(copy, false)}</div><section class="st-native-checkout" data-native-ecpay-checkout aria-label="${escHtml(copy.buy)}" hidden></section></article>${nativeCheckoutScript(copy, preview, mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0)}${nativeEcpayCheckoutScript(cfg, shop, item, mapped, copy, locale, preview, couponEntry === true)}`;
 	}
-	return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, refused)}${nativeBuyControl(mapped, copy, refused)}${nativeStatusNode(copy, refused)}</div></article>${nativeCheckoutScript(copy, preview, !!mapped.checkoutRail || mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0)}`;
+	return `<article data-storefront-source="native" class="dc-native-product st-runtime st-native-detail"><p><a href="${escHtml(shop.shopPath)}">${escHtml(copy.shop)}</a></p>${nativePreviewNotice(copy, preview)}<h1>${escHtml(mapped.name)}</h1>${mapped.image_url ? `<img class="st-img" src="${escHtml(mapped.image_url)}" alt="${escHtml(mapped.name)}">` : ''}<p>${escHtml(formatMoney({ minor: mapped.price_minor, currency: mapped.currency, locale }))}</p>${description ? `<p>${escHtml(description)}</p>` : ''}<div class="st-native-actions">${nativeRailChoice(mapped, copy, refused)}${nativeCouponField(mapped, copy, refused, couponEntry)}${nativeBuyControl(mapped, copy, refused)}${nativeStatusNode(copy, refused)}</div></article>${nativeCheckoutScript(copy, preview, !!mapped.checkoutRail || mapped.checkoutRails.length > 0, mapped.checkoutRails.length > 0, couponEntry && mapped.available && !!mapped.sku && !refused, locale, mapped.currency)}`;
 }
 
 // 🔴 whole-<main> replacement — see nativeUnavailable()'s note just above: native has no author
@@ -1913,7 +2037,7 @@ async function renderNativeProduct(request, env, cfg, match, ctx) {
 		}), { siteName: cfg.siteName, canonical: `${shopUrl}/${match.slug}` }, { omitProductJsonLd: true });
 		head = injectHead(stripDonorHead(shell), rendered.headMeta);
 	}
-	return htmlResponse(replaceMain(head, nativeProductBody(item, match.shop, copy, locale, nativePreviewCheckout(projection.body), cfg)));
+	return htmlResponse(replaceMain(head, nativeProductBody(item, match.shop, copy, locale, nativePreviewCheckout(projection.body), cfg, projection.body.coupon_entry === true)));
 }
 
 // Resolve the selected provider's catalog list — same same-origin-first,

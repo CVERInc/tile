@@ -17,6 +17,11 @@
 // status and the body must still be identical. (No Content-Signal here: the fixture is emitted
 // without --content-signal, so that header must be absent, which the comparison proves.)
 //
+// A THIRD intentional difference: the native checkout script gained the not-connected sentence
+// (the `notOpen` string and its 409 `checkout_available:false` branch). Exactly those five
+// fragments are removed from the NEW body before comparing; every other byte stays compared, and a
+// fragment that is not found is simply not removed (pages without the script carry none).
+//
 // A missing fixture file is a FAILURE, never a skip: this proof must run wherever the suite runs.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -144,6 +149,19 @@ const OWN_HEAD = new Set(['native product page']);
 // The cases whose response gains a header on purpose, with the value it must have (see the header).
 const ADDED_HEADERS = { 'markdown route': { 'x-markdown-tokens': String(Math.ceil('# About\n'.length / 4)) } };
 
+const NOT_OPEN_FRAGMENTS = [
+	'"notOpen":"This shop is not taking payments yet.",',
+	'let notOpen=false;',
+	"notOpen=checkout.status===409&&!!result&&result.checkout_available===false&&result.error!=='preview_checkout_live_mode';",
+	'&&!notOpen)button.disabled',
+	'notOpen?C.notOpen:',
+];
+const withoutNotOpen = (b64) => {
+	let html = Buffer.from(b64, 'base64').toString('utf8');
+	for (const f of NOT_OPEN_FRAGMENTS) html = html.split(f).join(f === '&&!notOpen)button.disabled' ? ')button.disabled' : '');
+	return Buffer.from(html, 'utf8').toString('base64');
+};
+
 const baseFile = emit(baseRoot, 'base');
 const newFile = emit(path.resolve(here, '../../..'), 'new');
 
@@ -160,10 +178,10 @@ for (const [name, url, init, opts] of [...CASES.map(([n, u, i]) => [n, u, i, {}]
 		assert.deepEqual(after.headers.filter(([k]) => !(k in added)), before.headers, 'headers');
 		if (OWN_HEAD.has(name)) {
 			const html = (b64) => Buffer.from(b64, 'base64').toString('utf8');
-			const headless = (b64) => html(b64).replace(/<head>[\s\S]*?<\/head>/, '<head></head>');
+			const headless = (b64) => html(withoutNotOpen(b64)).replace(/<head>[\s\S]*?<\/head>/, '<head></head>');
 			assert.equal(headless(after.body), headless(before.body), 'body outside <head>');
 			assert.ok(html(after.body).includes(`<link rel="canonical" href="${SITE}/shop/tee">`), 'the product names its own canonical');
-		} else assert.equal(after.body, before.body, 'body');
+		} else assert.equal(withoutNotOpen(after.body), before.body, 'body');
 		assert.deepEqual(after.globalCalls, before.globalCalls, 'the same global fetches, catalog reads included');
 		assert.deepEqual(after.bindingCalls, before.bindingCalls, 'the same binding calls');
 	});
