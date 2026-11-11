@@ -179,14 +179,6 @@ test('RSP\'s own fee line names the method when the parcel says it; its discount
 	assert.ok(noParcel.body.includes(`<div><span>運費</span><span>${money(6000)}</span></div>`), noParcel.body);
 });
 
-test('the summary view for an order without ECPay facts leaves fee lines out, as before', async () => {
-	const plain = { state: 'paid', order_ref: 'ord-9', currency: 'TWD', total_minor: 36000, lines: [{ name: 'Tee', qty: 1, amount_minor: 30000 }, { kind: 'fee', name: '運費', qty: 1, amount_minor: 6000 }] };
-	const withKinds = await resultPage('https://site.example/shop/complete?ref=ref-9&merchant_trade_no=T1', plain);
-	const without = await resultPage('https://site.example/shop/complete?ref=ref-9&merchant_trade_no=T1', { ...plain, lines: plain.lines.slice(0, 1) });
-	assert.equal(withKinds.body, without.body);
-	assert.doesNotMatch(withKinds.body, /運費/);
-});
-
 test('the summary view (the paid result an order without ECPay facts, e.g. Stripe, gets) lists the discount under the goods, so the lines read as the total', async () => {
 	const stripe = { state: 'paid', order_ref: 'ord-9', currency: 'TWD', total_minor: 13500, lines: [{ name: 'Tee', qty: 1, amount_minor: 15000 }, { kind: 'discount', name: '折扣', qty: 1, amount_minor: -1500 }] };
 	const r = await resultPage('https://site.example/shop/complete?ref=ref-9', stripe);
@@ -197,6 +189,17 @@ test('the summary view (the paid result an order without ECPay facts, e.g. Strip
 	const none = await resultPage('https://site.example/shop/complete?ref=ref-9', { ...stripe, total_minor: 15000, lines: stripe.lines.slice(0, 1) });
 	assert.doesNotMatch(none.body, /dc-shop-discount|折扣/);
 	assert.ok(none.body.includes(`<ul class="st-list"><li>Tee × 1 — ${money(15000)}</li></ul>`), none.body);
+});
+
+test('the summary view lists a delivery fee after the discount, so goods − discount + fee read as the total', async () => {
+	const withFee = { state: 'paid', order_ref: 'ord-9', currency: 'TWD', total_minor: 23500, lines: [{ name: 'Tee', qty: 1, amount_minor: 15000 }, { kind: 'discount', name: '折扣', qty: 1, amount_minor: -1500 }, { kind: 'fee', name: '運費', qty: 1, amount_minor: 10000 }] };
+	const r = await resultPage('https://site.example/shop/complete?ref=ref-9', withFee);
+	assert.ok(r.body.includes(`<ul class="st-list"><li>Tee × 1 — ${money(15000)}</li><li class="dc-shop-discount">折扣 — −${money(1500)}</li><li class="dc-shop-fee">運費 — ${money(10000)}</li></ul><p class="dc-shop-total">合計: ${money(23500)}</p>`), r.body);
+	// A fee line without its own name takes the page's own 運費 word; no fee line, no fee row.
+	const unnamed = await resultPage('https://site.example/shop/complete?ref=ref-9', { ...withFee, lines: [withFee.lines[0], { kind: 'fee', qty: 1, amount_minor: 10000 }] });
+	assert.ok(unnamed.body.includes(`<li class="dc-shop-fee">運費 — ${money(10000)}</li>`), unnamed.body);
+	const none = await resultPage('https://site.example/shop/complete?ref=ref-9', { ...withFee, total_minor: 13500, lines: withFee.lines.slice(0, 2) });
+	assert.doesNotMatch(none.body, /dc-shop-fee|運費/);
 });
 
 test('no ECPay result view speaks as 「我們」 or "we"', async () => {
