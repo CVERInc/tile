@@ -315,12 +315,20 @@ function serializeCard(model) {
 // no marker, so serializeCard writes it in the current spelling. Every writer that puts pictures
 // into a model goes through here: a plain spread of `{ mime, b64 }` over an entry is how a
 // re-chosen picture respelled a line nobody had edited.
+//
+// An id is whatever name the API takes, `__proto__` and `constructor` among them. Each is DEFINED
+// on the result as its own entry: assigning `out['__proto__'] = …` would set the map's prototype
+// and list nothing. And "already holds" is asked of the map's own entries, so a name every object
+// inherits is not read as an asset.
 function mergeAssets(existing, staged) {
-  const out = { ...(existing || {}) };
+  const out = {};
+  const own = (o, id) => Object.prototype.hasOwnProperty.call(o, id);
+  const put = (id, value) => Object.defineProperty(out, id, { value, enumerable: true, writable: true, configurable: true });
+  for (const id of Object.keys(existing || {})) put(id, existing[id]);
   for (const id of Object.keys(staged || {})) {
     const { marker: _unused, ...bytes } = staged[id];
-    const marker = out[id] && out[id].marker;
-    out[id] = { ...bytes, ...(marker ? { marker } : {}) };
+    const marker = own(out, id) && out[id] && out[id].marker;
+    put(id, { ...bytes, ...(marker ? { marker } : {}) });
   }
   return out;
 }

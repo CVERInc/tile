@@ -569,6 +569,34 @@ test('put_asset adds bytes and bumps the version', async () => {
   assert.equal(Object.keys(parseCard(await bodyOf(env)).assets).length, 3);
 });
 
+test('🔴 put_asset stores an id that is also an Object.prototype name', async () => {
+  // The API takes these ids, so a 200 means the bytes are in the file.
+  const BARE = '---\ncard-page: test\n---\n\n## front\n\n- [ ] %% card: text %% Hello\n';
+  for (const id of ['__proto__', 'constructor']) {
+    const env = envWith({ t: BARE });
+    assert.deepEqual(Object.keys(parseCard(BARE).assets), [], 'setup: no assets');
+    const res = await call(env, 'PUT', `/_api/card/t/asset/${id}`, { base64: 'QUJD', mime: 'image/png' });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).id, id);
+    assert.ok((await bodyOf(env)).includes(`- [ ] %% card: asset id=${id} mime=image/png %% QUJD\n`), `${id}: 200, and no asset line`);
+    // putting it again replaces the bytes on the one line and keeps its spelling
+    assert.equal((await call(env, 'PUT', `/_api/card/t/asset/${id}`, { base64: GIF, mime: 'image/gif' })).status, 200);
+    const again = await bodyOf(env);
+    assert.ok(again.includes(`- [ ] %% card: asset id=${id} mime=image/gif %% ${GIF}\n`), `${id}: re-put wrote no line`);
+    assert.equal(again.split(`asset id=${id} `).length, 2, `${id}: written twice`);
+  }
+  // `constructor` on a lane that does not hold it is a new line, in the current spelling
+  const NEWLY = CARD.replace(/%% card:/g, '%% cardtile:');
+  const env = envWith({ t: NEWLY });
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/constructor', { base64: GIF, mime: 'image/gif' })).status, 200);
+  const after = await bodyOf(env);
+  assert.ok(after.includes(`- [ ] %% card: asset id=constructor mime=image/gif %% ${GIF}\n`), 'an id the lane does not hold got a marker');
+  // … and once the lane holds it as `cardtile:`, a re-put keeps that
+  const held = envWith({ t: after.replace('%% card: asset id=constructor', '%% cardtile: asset id=constructor') });
+  assert.equal((await call(held, 'PUT', '/_api/card/t/asset/constructor', { base64: 'QUJD', mime: 'image/png' })).status, 200);
+  assert.ok((await bodyOf(held)).includes('- [ ] %% cardtile: asset id=constructor mime=image/png %% QUJD\n'), 're-putting `constructor` respelled its line');
+});
+
 test('🔴 a stored card written `%% cardtile:` keeps that spelling through save_cards and put_asset', async () => {
   // The marker has two spellings for a while (docs/VOCABULARY.md); a write must not turn one into
   // the other. Every line of the stored card, the assets lane included, says `cardtile:`.

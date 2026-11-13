@@ -236,6 +236,38 @@ test('🔴 mergeAssets: staged bytes replace an entry, the line keeps its marker
   assert.deepEqual(mergeAssets(had, undefined), had);
 });
 
+// An asset id is any name the API takes, and some of those are names every object already answers
+// to. Each one is still a line in the assets lane: its own entry in the map, never a write to the
+// map's prototype, and never mistaken for an entry the lane holds.
+test('🔴 mergeAssets: an id that is also an Object.prototype name is an asset like any other', () => {
+  for (const id of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+    const staged = Object.fromEntries([[id, { mime: 'image/png', b64: 'QUJD' }]]);
+    const x = parseCard(OLD);
+    const had = Object.keys(x.assets);
+    x.assets = mergeAssets(x.assets, staged);
+    assert.ok(Object.prototype.hasOwnProperty.call(x.assets, id), `${id} is not an own entry`);
+    assert.deepEqual(Object.keys(x.assets), [...had, id], `${id} is not listed`);
+    assert.deepEqual(x.assets[id], { mime: 'image/png', b64: 'QUJD' }, `${id} holds something else`);
+    assert.equal(Object.getPrototypeOf(x.assets), Object.prototype, `${id} replaced the map's prototype`);
+    const out = serializeCard(x);
+    assert.ok(out.includes(`- [ ] %% card: asset id=${id} mime=image/png %% QUJD\n`), `${id} wrote no asset line`);
+    // staged again over the map that now holds it: one line, same spelling, new bytes
+    x.assets = mergeAssets(x.assets, Object.fromEntries([[id, { mime: 'image/gif', b64: 'REVG' }]]));
+    const again = serializeCard(x);
+    assert.ok(again.includes(`- [ ] %% card: asset id=${id} mime=image/gif %% REVG\n`), `${id} re-staged wrote no line`);
+    assert.equal(again.split(`asset id=${id} `).length, 2, `${id} is written twice`);
+  }
+  // an inherited name is not a held asset: `constructor` on a lane without one gets no marker …
+  const fresh = mergeAssets(parseCard(NEW).assets, { constructor: { mime: 'image/png', b64: 'QUJD' } });
+  assert.deepEqual(fresh.constructor, { mime: 'image/png', b64: 'QUJD' });
+  // … and one the lane does hold, written `cardtile:`, keeps that spelling
+  const y = parseCard(NEW.replace(/\n*$/, '\n') + '- [ ] %% cardtile: asset id=constructor mime=image/png %% QUJD\n');
+  const HELD = serializeCard(y);   // the lane is written sorted by id
+  assert.ok(HELD.includes('- [ ] %% cardtile: asset id=constructor mime=image/png %% QUJD\n') && !HELD.includes('%% card:'), 'setup');
+  y.assets = mergeAssets(y.assets, { constructor: { mime: 'image/gif', b64: 'REVG' } });
+  assert.equal(serializeCard(y), HELD.replace('id=constructor mime=image/png %% QUJD', 'id=constructor mime=image/gif %% REVG'));
+});
+
 // The editors are browser modules. Each function that folds staged pictures into the file is one
 // top-level block; it is run here, as written, over stand-ins for the page around it.
 function editorFn(file, name, env) {
