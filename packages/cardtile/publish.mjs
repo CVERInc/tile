@@ -1,6 +1,6 @@
 // Publish a WHOLE card — pictures and all — through the write API.
 //
-// 🩸 WHY THIS EXISTS. `save_card` takes a THIN card and re-attaches the assets **from the store**.
+// 🩸 WHY THIS EXISTS. `save_cards` takes a THIN card and re-attaches the assets **from the store**.
 // That is deliberate and it is the right default (an agent doing the obvious thing must not blank a
 // live page's images), but it has a corollary that is easy to miss: **the save door cannot create a
 // card that has pictures**. Send a fat card to a handle the store has never seen and the assets lane

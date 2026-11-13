@@ -627,7 +627,7 @@ export class HostBindings {
  *     `card:<gen>` record — that put IS the write — then deletes the old serial's chunks;
  *   · every write reads, checks and writes THAT, one at a time per handle and lifetime (`writes`, one
  *     queue per generation, apart from the lifetime's — inWriteTurn), then writes KV through from it
- *     (rule B: a failed KV put leaves `cache: 'pending'`, retried by the alarm). Pages and get_card read
+ *     (rule B: a failed KV put leaves `cache: 'pending'`, retried by the alarm). Pages and get_cards read
  *     KV, which converges; the version the fence and base_version compare against is never a KV read;
  *   · 🔴 first contact (migration): a generation this object holds no card for takes it from KV ONCE,
  *     and keeps it ADOPTED — unconfirmed — until its alarm settles it (heldCard, settleCard). While
@@ -1055,7 +1055,7 @@ export class CardLifetime {
     return { version, bytes: md.length, commit: { gen, lifetime: life.lifetime, serial: meta.serial }, ...(cache === 'pending' ? { cache: 'pending' } : {}) };
   }
   /**
-   * save_card's write. base_version is checked against the card held here (the Worker's check at
+   * save_cards's write. base_version is checked against the card held here (the Worker's check at
    * admission ran on a KV read, before Web Risk's wait). The save is assembled HERE, on the stored
    * assets lane — that is what a save means (assembleSave), and the Worker's assembly was on KV's.
    * If the card held here is not the one the Worker assembled (`from`), the result's destinations must
@@ -1141,7 +1141,9 @@ export class CardLifetime {
       // the caller's input, checked after the card as it always was (a missing card is a 404 first)
       if (!b64) return { status: 400, body: { error: 'put_asset needs `base64`.' } };
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { status: 400, body: { error: '`base64` is not base64.' } };
-      model.assets = { ...model.assets, [id]: { mime, b64 } };
+      // putting an id the lane already holds rewrites that line's bytes, not its marker spelling
+      const marker = model.assets[id] && model.assets[id].marker;
+      model.assets = { ...model.assets, [id]: { mime, b64, ...(marker ? { marker } : {}) } };
       const md = serializeCard(model);
       const bytes = utf8Bytes(md);
       if (bytes > KV_MAX_BYTES) {
@@ -1505,10 +1507,10 @@ async function deleteCard(env, handle, meant = null) {
  *
  * Routes:
  *   POST   /_api/cards                       list_cards    { handles: [...] } → summaries
- *   GET    /_api/card/<handle>               get_card      thin markdown + manifest + version
+ *   GET    /_api/card/<handle>               get_cards      thin markdown + manifest + version
  *   GET    /_api/card/<handle>/full          —             full markdown for the owner
  *   GET    /_api/card/<handle>/lifetime      —             → { handle, gen }: the current generation (reef#2618 r4)
- *   PUT    /_api/card/<handle>               save_card     { markdown, base_version, dry_run, create }
+ *   PUT    /_api/card/<handle>               save_cards     { markdown, base_version, dry_run, create }
  *          answers { handle, version, commit: { gen, lifetime, serial }, bytes, … } — `commit` orders
  *                  saves by (lifetime, serial); `version` is a content hash and repeats on a revert
  *          create: true (tile#209 r5) — the registry's word that the handle has never had a card; the
@@ -1522,7 +1524,7 @@ async function deleteCard(env, handle, meant = null) {
  *   DELETE /_api/card/<handle>/asset/<id>/fenced
  *          If-Version: <version> (required) delete_asset with expected_version (tile#209): 409 unless the
  *                                           card is still at <version>; every answer carries `fence`
- *   POST   /_api/preview                     preview_card  { handle, markdown } → a URL
+ *   POST   /_api/preview                     preview_cards  { handle, markdown } → a URL
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
  *   GET    /_api/vanity/<handle>             —             the card's own domain: { host|null, redirect, … }
  *   PUT    /_api/vanity/<handle>             —             { host, redirect?, expect? } → bind it (card-vanity.mjs)
@@ -1568,7 +1570,7 @@ export async function handleApi(request, env, url) {
     return json({ cards: out });
   }
 
-  // ── preview_card ───────────────────────────────────────────────────────────────────────────────
+  // ── preview_cards ───────────────────────────────────────────────────────────────────────────────
   //
   // A draft parked under a random key with a TTL, rendered at /_preview/<id>. It is assembled the
   // same way a save is — stored assets re-attached — because a preview that showed the card WITHOUT
@@ -1685,7 +1687,7 @@ export async function handleApi(request, env, url) {
 
   // ── the fenced delete_asset (tile#209, reef#2600 door 3) ───────────────────────────────────────
   //
-  // DELETE with `If-Version: <the version get_card gave>`: removed only if the card is still at that
+  // DELETE with `If-Version: <the version get_cards gave>`: removed only if the card is still at that
   // version, checked against the card the handle's object holds and removed in one step of its write
   // queue (CardLifetime.assetWrite) — never against a KV read (r2). Every answer
   // carries `fence: "if-version"`, so the caller can tell this route's 404 from "no such route".
@@ -1698,7 +1700,7 @@ export async function handleApi(request, env, url) {
     if (method !== 'DELETE') return json({ error: `${method} not allowed here; the fenced route only deletes.`, ...fence }, 405);
     const ifVersion = request.headers.get('if-version');
     if (ifVersion == null || !ifVersion.trim()) {
-      return json({ error: 'The fenced delete needs an If-Version header: the version get_card returned. Nothing was deleted.', ...fence }, 400);
+      return json({ error: 'The fenced delete needs an If-Version header: the version get_cards returned. Nothing was deleted.', ...fence }, 400);
     }
     return cardWrite(env, handle, 'asset', { kind: 'fenced', id, ifVersion }, fence);
   }
@@ -1732,7 +1734,7 @@ export async function handleApi(request, env, url) {
     const handle = (decodeSegment(card[1]) ?? '').toLowerCase();
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(card[1])}.` }, 400);
 
-    // ── get_card ─────────────────────────────────────────────────────────────────────────────────
+    // ── get_cards ─────────────────────────────────────────────────────────────────────────────────
     //
     // Thin by construction. `assets: "inline"` is NOT a parameter here: the fat bytes have explicit
     // exits (`/<handle>.md` publicly while serving, `/_api/card/<handle>/full` for the owner even while
@@ -1749,11 +1751,11 @@ export async function handleApi(request, env, url) {
       });
     }
 
-    // ── save_card ────────────────────────────────────────────────────────────────────────────────
+    // ── save_cards ────────────────────────────────────────────────────────────────────────────────
     if (method === 'PUT') {
       const body = (await readJson(request)) || {};
       if (typeof body.markdown !== 'string' || !body.markdown.length) {
-        return json({ error: 'save_card needs `markdown` — refusing to write an empty card.' }, 400);
+        return json({ error: 'save_cards needs `markdown` — refusing to write an empty card.' }, 400);
       }
       // the generation is captured HERE, at admission, before Web Risk's network wait (see commitCard)
       const live = await liveCard(store, handle);

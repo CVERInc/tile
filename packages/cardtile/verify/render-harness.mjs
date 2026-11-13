@@ -16,7 +16,7 @@ import { renderPage } from '../card-render.mjs';
 // the failure this replaces was a 30-second timeout with nothing to read.
 const SPECIMEN = 'specimen-rich';
 const md = readCard(SPECIMEN);
-if (!/%% card: profile[^%]*\bavatar=/.test(md)) {
+if (!/%% card(?:tile)?: profile[^%]*\bavatar=/.test(md)) {
   throw new Error(`${SPECIMEN} states no avatar, so the page this writes has no .cp-icon for the QR coral to mount on — verify-qr.mjs would time out with nothing to read`);
 }
 const css = CSS();

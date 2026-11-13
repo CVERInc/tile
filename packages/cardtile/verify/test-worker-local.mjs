@@ -11,7 +11,7 @@ import worker, { resolveHandle } from '../serve/card-worker.mjs';
 // said nothing about why.
 const HANDLE = 'specimen-rich';
 const cardMd = readCard(HANDLE);
-if (!/%% card: profile[^%]*\bavatar=/.test(cardMd)) {
+if (!/%% card(?:tile)?: profile[^%]*\bavatar=/.test(cardMd)) {
   throw new Error(`${HANDLE} states no avatar, and every gesture below starts from one`);
 }
 const pw = (await import(PLAYWRIGHT)).default;

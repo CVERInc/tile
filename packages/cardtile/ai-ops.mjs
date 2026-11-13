@@ -327,7 +327,7 @@ export const SEAT = { READ: 'CO|CA|CM', WRITE: 'CO|CA' };
 
 export const OPS = {
   list_cards: { seat: SEAT.READ, params: [], returns: 'handle, title, live_url, bytes, assets, version' },
-  get_card: {
+  get_cards: {
     seat: SEAT.READ,
     params: ['handle', 'assets: "summary" | "inline"'],
     // 🔴 summary is the DEFAULT and inline must be asked for by name. One real card is 1,159,422
@@ -336,7 +336,7 @@ export const OPS = {
     // a BACKUP taken over the summary exit is 99.7% missing, and what is missing is the pictures.
     returns: 'the card WITHOUT the assets lane, plus an asset manifest',
   },
-  save_card: {
+  save_cards: {
     // 🔴 WRITE, not READ, and specifically not `save_page`'s grade — which is ungated in reef-MCP
     // today. A Site edit does not go live until someone publishes; a Card has no publish step, so
     // the save IS the deploy. Copying save_page's gate would let a CM — someone explicitly not
@@ -348,8 +348,23 @@ export const OPS = {
   },
   put_asset: { seat: SEAT.WRITE, params: ['handle', 'id', 'base64', 'mime'], returns: 'id, bytes' },
   delete_asset: { seat: SEAT.WRITE, params: ['handle', 'id', 'expected_version'], returns: 'refuses while still referenced; with expected_version (tile#209), also if the card moved since that read' },
-  preview_card: { seat: SEAT.READ, params: ['handle', 'markdown'], returns: 'a URL. An agent that cannot look at what it did is guessing.' },
+  preview_cards: { seat: SEAT.READ, params: ['handle', 'markdown'], returns: 'a URL. An agent that cannot look at what it did is guessing.' },
 };
+
+/**
+ * The names three ops had before they took the product's noun (docs/VOCABULARY.md): former → current.
+ *
+ * OPS holds only the current names. A consumer that exposes these ops as tools keeps each former
+ * name callable, as an alias of the op it maps to, for a short window, so a caller that still says
+ * the old name is not broken by the rename itself. This map is the one list of what that window
+ * covers, and it is deleted when the window closes: once it is gone, the former names are gone.
+ * Nothing here is a second definition; an alias has no seat, params or returns of its own.
+ */
+export const OPS_FORMER_NAMES = Object.freeze({
+  get_card: 'get_cards',
+  save_card: 'save_cards',
+  preview_card: 'preview_cards',
+});
 
 /**
  * 🔴 THE DEBT, written down rather than discovered.
@@ -570,5 +585,5 @@ export const EDITOR_PROTOCOL = {
     'card:get-draft': { fields: [], when: 'Asks for the current draft; answered with card:draft.' },
     'card:propose': { fields: ['md'], when: 'Puts `md` in the editor as an unsaved draft. It is never saved by itself: the person presses Save. Announced as card:change.' },
   },
-  md: 'Every `md` is the whole card file, `## assets` lane included. A parent that saves through save_card (which keeps only the stored assets lane) uploads new assets with put_asset first; host-bridge.mjs exports splitCard() for that split.',
+  md: 'Every `md` is the whole card file, `## assets` lane included. A parent that saves through save_cards (which keeps only the stored assets lane) uploads new assets with put_asset first; host-bridge.mjs exports splitCard() for that split.',
 };

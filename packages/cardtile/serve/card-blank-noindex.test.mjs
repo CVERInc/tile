@@ -205,7 +205,7 @@ test('whitespace the author typed inside a template body makes the card authored
 
 // Decisions, each with its proof: the renderer cannot see these, so the card is still blank.
 //  · trailing whitespace only — extractCell strips it (`.replace(/\s+$/, '')`) before rendering.
-//  · CRLF vs LF — the store keeps whatever bytes save_card was given (card-api.mjs does not rewrite
+//  · CRLF vs LF — the store keeps whatever bytes save_cards was given (card-api.mjs does not rewrite
 //    line ends), so a CRLF card is a real possibility; parseCard reads both to the same model.
 test('trailing whitespace only, and CRLF line ends, render byte-identical HTML — so the card stays blank', async () => {
   const cases = {

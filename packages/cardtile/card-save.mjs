@@ -1,6 +1,6 @@
 // Saving a Card — the assembly, the version, and the orphan report. Pure, node-testable, no KV.
 //
-// This is the half of `save_card` that is not HTTP. It lives HERE, in cardtile, because assembling a
+// This is the half of `save_cards` that is not HTTP. It lives HERE, in cardtile, because assembling a
 // save needs the PARSER: the caller sends a thin card (no `## assets` lane — one real card is 1,159,422
 // bytes of which 3,277 is the card) and the stored bytes have to be put back around it. Only
 // card-core knows where that lane begins and ends, so this is where the join belongs. See
@@ -151,15 +151,15 @@ export function assembleSave(incomingMd, storedMd) {
 }
 
 /**
- * The bytes a save would write, WITHOUT the assets lane — i.e. what `get_card` hands back and what
- * `save_card` expects to receive. One function so the two exits cannot drift apart; the Worker's
+ * The bytes a save would write, WITHOUT the assets lane — i.e. what `get_cards` hands back and what
+ * `save_cards` expects to receive. One function so the two exits cannot drift apart; the Worker's
  * `Accept: text/markdown` path is the same operation over the wire.
  */
 export function thinCard(md) {
   return serializeCard({ ...parseCard(String(md ?? '')), assets: {} });
 }
 
-/** The asset manifest `get_card` returns instead of the bytes: id → mime + size. */
+/** The asset manifest `get_cards` returns instead of the bytes: id → mime + size. */
 export function assetManifest(md) {
   const { assets } = parseCard(String(md ?? ''));
   const referenced = referencedAssets(thinCard(md));

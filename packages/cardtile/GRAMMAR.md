@@ -5,6 +5,11 @@ A Card is one Markdown file: a frontmatter fence, then lanes (`## grid`, `## bac
 their parameters live in [ai-ops.mjs](ai-ops.mjs) (`CELL_TYPES`, `UNIVERSAL`); editor labels and
 hints live in [w/cell-i18n.mjs](w/cell-i18n.mjs).
 
+A line's marker has a second spelling, `%% cardtile: <type>`. It is read exactly like
+`%% card: <type>`, and a line keeps the spelling it has when the file is saved. New lines are still
+written `%% card:`; [docs/VOCABULARY.md](../../docs/VOCABULARY.md) says when that changes. The first
+lane may likewise be headed `## front` instead of `## grid` and keeps the heading it has.
+
 This note covers what belongs to the whole card: its settings, views, backs, geometry, the editor's
 embedding protocol and the custom-domain API, followed by the link and social icon rules. The same
 rules are exported as data from [ai-ops.mjs](ai-ops.mjs) (`FRONTMATTER`, `CARD_SETTINGS`, `BACKS`,
@@ -163,7 +168,7 @@ Every message is an object with `v: 1` and a `type`; anything else is ignored.
 `dirty` is true when the draft differs from what the host last loaded or confirmed saved.
 `card:saved` and `card:save-failed` are ignored unless a save is out. A proposal is announced
 like any edit, with `card:change`. Every `md` is the whole file, `## assets` lane included; a host
-that saves through `save_card` uploads new assets with `put_asset` first
+that saves through `save_cards` uploads new assets with `put_asset` first
 (`splitCard()` in [w3/host-bridge.mjs](w3/host-bridge.mjs) does that split).
 
 ## Custom-domain API (server to server)

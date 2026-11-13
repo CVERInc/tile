@@ -55,8 +55,17 @@ const SPAN_MAX = 6;
 const DEFAULT_LANE = 'grid';
 
 // marker + body, body either INLINE after the closing %% (button/link) or on the following lines
-// (prose / fenced JSON). [1]=inner(type+params), [2]=same-line trailing, [3]=following lines.
-const RE_CARD_MARKER = /^%%\s*card:\s*(.*?)\s*%%[ \t]*([^\n]*)\n?([\s\S]*)$/;
+// (prose / fenced JSON). [1]='tile' when the marker is spelled `cardtile:`, [2]=inner(type+params),
+// [3]=same-line trailing, [4]=following lines.
+//
+// 🔴 TWO SPELLINGS OF ONE MARKER, for a short while (docs/VOCABULARY.md, "Lines and lanes on disk").
+// `%% cardtile: <type>` names the family namespace the way `%% sitetile:` does and is where the
+// marker is going; `%% card: <type>` is what every stored file says today and what cellToRaw still
+// writes for a new line. Both read as the same cell. A cell read from a `cardtile:` line carries
+// `marker: 'cardtile'` so that writing it back does not change its line; a cell read from a
+// `card:` line carries nothing, so its shape is what it always was. Exactly these two words: the
+// colon follows the word directly, so `cardtiles:`, `card-page:` and `sitetile:` are not this.
+const RE_CARD_MARKER = /^%%\s*card(tile)?:\s*(.*?)\s*%%[ \t]*([^\n]*)\n?([\s\S]*)$/;
 
 const clampSpan = (v, max) => {
   const n = Number(v);
@@ -108,12 +117,13 @@ const legacySlides = (word, rawParams) => word === 'embed' && kindAssigned(rawPa
 function extractCell(text) {
   const m = RE_CARD_MARKER.exec(text || '');
   if (!m) return { type: 'text', params: {}, rawParams: '', body: (text || '').trim() };
-  const sp = /^(\S+)\s*([\s\S]*)$/.exec(m[1].trim());
+  const sp = /^(\S+)\s*([\s\S]*)$/.exec(m[2].trim());
   const word = sp ? sp[1] : 'text';
   const rawParams = sp ? sp[2].trim() : '';
   const params = parseParams(rawParams);
-  const body = (m[2] + (m[3] ? '\n' + m[3] : '')).replace(/\s+$/, '');
-  const cell = { type: word, params, rawParams, body: body.replace(/^\n+/, '') };
+  const body = (m[3] + (m[4] ? '\n' + m[4] : '')).replace(/\s+$/, '');
+  // `marker` remembers a line written `%% cardtile:`, the same way `spelled` below remembers a word
+  const cell = { type: word, params, rawParams, body: body.replace(/^\n+/, ''), ...(m[1] ? { marker: 'cardtile' } : {}) };
   // `spelled` remembers the word on disk, so writing the cell back does not rewrite the file
   if (legacySlides(word, rawParams)) return { ...cell, type: 'slides', spelled: word };
   return cell;
@@ -128,6 +138,8 @@ function extractCell(text) {
 // still carries a `kind=` token, by EXACTLY the test extractCell uses — `kindAssigned`, copied in
 // verbatim because this function may not call out. Without one the old word would come back as
 // HTML, so the cell is written by its real name instead.
+// The marker is written as the line had it: `%% cardtile:` for a cell read from such a line
+// (`marker: 'cardtile'`, see RE_CARD_MARKER), `%% card:` for every other cell, new ones included.
 function cellToRaw(cell) {
   function kindAssigned(raw) {
     const s = String(raw || '');
@@ -137,7 +149,7 @@ function cellToRaw(cell) {
     return false;
   }
   const word = cell.type === 'slides' && cell.spelled === 'embed' && kindAssigned(cell.rawParams) ? 'embed' : cell.type;
-  const marker = '%% card: ' + word + (cell.rawParams ? ' ' + cell.rawParams : '') + ' %%';
+  const marker = '%% ' + (cell.marker === 'cardtile' ? 'cardtile' : 'card') + ': ' + word + (cell.rawParams ? ' ' + cell.rawParams : '') + ' %%';
   const body = cell.body || '';
   if (!body) return '- [ ] ' + marker;
   if (!body.includes('\n')) return '- [ ] ' + marker + ' ' + body;
@@ -236,7 +248,8 @@ function parseCard(md) {
       for (const t of col.tiles) {
         const c = extractCell(t.text);
         const id = (c.params.id || '').trim();
-        if (c.type === 'asset' && id) assets[id] = { mime: c.params.mime || 'image/webp', b64: (c.body || '').trim() };
+        // an asset is hoisted out of its line, so the line's marker spelling rides on the entry
+        if (c.type === 'asset' && id) assets[id] = { mime: c.params.mime || 'image/webp', b64: (c.body || '').trim(), ...(c.marker ? { marker: c.marker } : {}) };
       }
       continue;                                    // never a cell, never a block
     }
@@ -290,6 +303,7 @@ function serializeCard(model) {
       rawParams: `id=${id} mime=${model.assets[id].mime}`,
       params: { id, mime: model.assets[id].mime },
       body: model.assets[id].b64,
+      ...(model.assets[id].marker === 'cardtile' ? { marker: 'cardtile' } : {}),
     }))));
   }
   return serializeFile({ pre: model.pre || '', columns, archive: '', post: model.post || '', eol: '\n' });

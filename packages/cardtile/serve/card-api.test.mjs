@@ -219,9 +219,9 @@ test('timingSafeEqualHex: equal, unequal, and different lengths', () => {
   assert.equal(_internal.timingSafeEqualHex('abcd', null), false);
 });
 
-// ── get_card ─────────────────────────────────────────────────────────────────────────────────────
+// ── get_cards ─────────────────────────────────────────────────────────────────────────────────────
 
-test('🔴 get_card is THIN — no base64 crosses the wire, and the manifest says what was left behind', async () => {
+test('🔴 get_cards is THIN — no base64 crosses the wire, and the manifest says what was left behind', async () => {
   const res = await call(envWith({ t: CARD }), 'GET', '/_api/card/t');
   const body = await res.json();
   assert.ok(!body.markdown.includes(GIF), 'the assets lane came through anyway');
@@ -234,7 +234,7 @@ test('🔴 get_card is THIN — no base64 crosses the wire, and the manifest say
   assert.equal(body.version, await cardVersion(CARD));
 });
 
-test('get_card on a handle with no card → 404, and a bad handle → 400', async () => {
+test('get_cards on a handle with no card → 404, and a bad handle → 400', async () => {
   const env = envWith({ t: CARD });
   assert.equal((await call(env, 'GET', '/_api/card/nobody')).status, 404);
   assert.equal((await call(env, 'GET', '/_api/card/' + encodeURIComponent('bad handle!'))).status, 400);
@@ -407,10 +407,10 @@ test('stop and resume refuse bad handles before touching the store', async () =>
   assert.equal((await call(env, 'PUT', '/_api/card/t/stop')).status, 200);
 });
 
-// ── save_card ────────────────────────────────────────────────────────────────────────────────────
+// ── save_cards ────────────────────────────────────────────────────────────────────────────────────
 
 test('🔴 a save sent WITHOUT assets keeps the pictures — this is the whole thin-card bargain', async () => {
-  // The failure this prevents: an agent does the obvious thing (get_card → edit → save_card) and
+  // The failure this prevents: an agent does the obvious thing (get_cards → edit → save_cards) and
   // blanks every image on someone's live page, because the card it sent honestly had no assets lane.
   const env = envWith({ t: CARD });
   const thin = thinCard(CARD).replace('hello', 'hello there');
@@ -569,6 +569,32 @@ test('put_asset adds bytes and bumps the version', async () => {
   assert.equal(Object.keys(parseCard(await bodyOf(env)).assets).length, 3);
 });
 
+test('🔴 a stored card written `%% cardtile:` keeps that spelling through save_cards and put_asset', async () => {
+  // The marker has two spellings for a while (docs/VOCABULARY.md); a write must not turn one into
+  // the other. Every line of the stored card, the assets lane included, says `cardtile:`.
+  const NEWLY = CARD.replace(/%% card:/g, '%% cardtile:');
+  assert.ok(NEWLY.includes('%% cardtile: asset') && !NEWLY.includes('%% card:'), 'setup');
+  const env = envWith({ t: NEWLY });
+  const got = await (await call(env, 'GET', '/_api/card/t')).json();
+  assert.ok(got.markdown.includes('%% cardtile:') && !got.markdown.includes('%% card:'), 'the thin exit respelled a line');
+  const saved = await call(env, 'PUT', '/_api/card/t', { markdown: got.markdown, base_version: got.version });
+  assert.equal(saved.status, 200);
+  assert.equal(await bodyOf(env), NEWLY, 'a save of what was read changed the stored file');
+  // a NEW asset is a new line and is written in the current spelling; the lines already there stay
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/two', { base64: GIF, mime: 'image/gif' })).status, 200);
+  const after = await bodyOf(env);
+  assert.ok(after.includes('- [ ] %% card: asset id=two mime=image/gif'), 'a new asset line is written `%% card:`');
+  assert.equal(after.replace(/^- \[ \] %% card: asset id=two [^\n]*\n/m, ''), NEWLY, 'adding an asset respelled the others');
+  // putting an id the lane already holds keeps that line's spelling
+  const id = Object.keys(parseCard(NEWLY).assets)[0];
+  assert.equal((await call(env, 'PUT', `/_api/card/t/asset/${id}`, { base64: GIF, mime: 'image/gif' })).status, 200);
+  assert.ok((await bodyOf(env)).includes(`- [ ] %% cardtile: asset id=${id} mime=image/gif %% ${GIF}`), 're-putting an asset respelled its line');
+  // …and the control: the same writes on the old spelling leave no `cardtile:` behind
+  const old = envWith({ t: CARD });
+  await call(old, 'PUT', '/_api/card/t/asset/two', { base64: GIF, mime: 'image/gif' });
+  assert.ok(!(await bodyOf(old)).includes('cardtile:'), 'a write respelled a line forward');
+});
+
 test('put_asset refuses input that is not base64, and a bad id', async () => {
   const env = envWith({ t: CARD });
   assert.equal((await call(env, 'PUT', '/_api/card/t/asset/two', { base64: 'not base64!!' })).status, 400);
@@ -609,7 +635,7 @@ test('🔴 list_cards answers about the handles it is GIVEN — it never decides
   assert.deepEqual(both.cards.map((c) => c.handle), ['t', 'other']);
 });
 
-test('preview_card parks a draft with a TTL and hands back a URL', async () => {
+test('preview_cards parks a draft with a TTL and hands back a URL', async () => {
   const env = envWith({ t: CARD });
   const body = await (await call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) })).json();
   const id = /\/_preview\/([0-9a-f]{32})$/.exec(body.url)[1];
@@ -2566,7 +2592,7 @@ test('🔴 r13 a lifetime stored before highWater existed takes its inverse\'s t
 // caller-chosen ids and replaces one — leaving it still unreferenced. An unfenced delete then removes
 // the NEW bytes and nothing says so. The fenced route refuses when the card moved; and because KV has
 // no compare-and-set, its check and its removal run in the handle's CardLifetime object, in one
-// queue shared by every card write (put_asset, save_card's base_version, both deletes), so no other
+// queue shared by every card write (put_asset, save_cards's base_version, both deletes), so no other
 // write can land between the check and the removal.
 //
 // 🔴 Exact answers: reef's hosted delete_asset (reef PR #2683) reads `fence`, `conflict`,
@@ -2740,7 +2766,7 @@ test('🔴 CONTROL — the old route is unchanged: no If-Version needed, no fenc
   assert.deepEqual(Object.keys(ref).sort(), ['error', 'referenced']);
 });
 
-test('🔴 save_card\'s base_version is checked in the same queue: a save read before an in-flight put_asset is refused, and the picture survives', async () => {
+test('🔴 save_cards\'s base_version is checked in the same queue: a save read before an in-flight put_asset is refused, and the picture survives', async () => {
   const env = envWith({ t: CARD });
   const read = await versionOf(env);
   const held = holdPut(env, (k) => k === cardKey('t', '0'));
@@ -3138,7 +3164,7 @@ test('🔴 r4 P1 inside the first-contact window EVERY write that could overwrit
     const put = await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: 'QUJD', mime: 'image/png' });
     const del = await call(env, 'DELETE', '/_api/card/t/asset/unused');
     const save = await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'edited') });
-    for (const [name, res] of [['put_asset', put], ['delete_asset', del], ['save_card', save]]) {
+    for (const [name, res] of [['put_asset', put], ['delete_asset', del], ['save_cards', save]]) {
       const body = await res.json();
       assert.equal(res.status, 409, `${name} was acknowledged inside the window: ${JSON.stringify(body)}`);
       assert.equal(body.retry, true, name);

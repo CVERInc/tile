@@ -416,7 +416,7 @@ step('🔴 「往上移」／「往下移」 reorder the card, and the buttons n
   } else ok(`${tag}: last tile walked to the top — ${after[0]}`);
   // …and it reached the FILE, not just the screen
   const text = await md(page);
-  const firstCellLine = text.split('\n').find((l) => l.includes('%% card:'));
+  const firstCellLine = text.split('\n').find((l) => /%% card(?:tile)?:/.test(l));
   if (!firstCellLine.includes(after[0].split(':')[0])) fail(`${tag}: the order changed on screen but not in the card`);
   await shot(page, `${tag}-17-reordered`);
   await ctx.close();

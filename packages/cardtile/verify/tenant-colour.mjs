@@ -38,7 +38,7 @@ import { CSS, QR_JS } from '../serve/card-assets.mjs';
 // n-equals-one-multi-tenant-is-unverified) and two specimens still carry avatars. The assertion
 // below keeps it honest if that ever stops being true.
 const ALL_SPECIMENS = ['specimen-plain', 'specimen-assets', 'specimen-rich'];
-const CARDS = ALL_SPECIMENS.filter((h) => /%% card: profile[^%]*\bavatar=/.test(readCard(h)));
+const CARDS = ALL_SPECIMENS.filter((h) => /%% card(?:tile)?: profile[^%]*\bavatar=/.test(readCard(h)));
 if (CARDS.length < 2) {
   throw new Error(`cross-tenant colour needs at least TWO cards with avatars to compare; ${CARDS.length} available`);
 }

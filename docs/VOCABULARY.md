@@ -30,14 +30,33 @@ Retired inside Cards (being phased out of code, docs and copy): the singular nou
 
 ## Lines and lanes on disk
 
-- A line names the family namespace it belongs to: `%% <kind>tile: …`. Site lines already read `%% sitetile:`; a board's settings read `%% tugtile:settings`. Cards lines will read `%% cardtile: <type>` (planned).
-- **Today, Cards lines are still written `%% card: <type>`.** The new marker is planned and is not to be written yet: every reader has to accept it first. Until this file says the switch has happened, keep writing `%% card:`.
-- The front lane will be headed `## front` (planned; today `## grid`). The back lane is `## back: <id>` (`## drawer: <id>` is the older spelling).
-- **Spellings are kept per token.** Each lane heading and each line marker keeps the spelling it was written with; a save never rewrites spelling behind its author's back. An old word leaves a file only through one deliberate migration. Old spellings stay readable forever.
+- A line names the family namespace it belongs to: `%% <kind>tile: …`. Site lines already read `%% sitetile:`; a board's settings read `%% tugtile:settings`. Cards lines are moving to `%% cardtile: <type>`.
+- **Readers in this repository accept `%% cardtile: <type>`**, exactly as they accept `%% card: <type>`: the parser, the renderer, both editors, the deck and the save path read the same tile from either spelling.
+- **Today, Cards lines are still written `%% card: <type>`.** Accepting the new marker is the first step and the only one taken. Until this file says the writers have switched, keep writing `%% card:`: a reader outside this repository may not accept the new marker yet.
+- The front lane will be headed `## front` (planned; today writers head it `## grid`). Readers already accept either, because the first lane is the front lane whatever its heading says. The back lane is `## back: <id>` (`## drawer: <id>` is the older spelling).
+- **Spellings are kept per token.** Each lane heading and each line marker keeps the spelling it was written with; a save never rewrites spelling behind its author's back, in either direction. An old word leaves a file only through one deliberate migration.
+- **The two spellings are meant to coexist for a short time, not forever.** The switch goes in this order, one step at a time, and this file says when each step has happened:
+  1. Readers accept the new spelling. *Done in this repository for `%% cardtile:` and `## front`.*
+  2. Writers switch to the new spelling. *Not yet.*
+  3. One deliberate migration rewrites every stored file. *Not yet.*
+  4. Readers drop the old spelling. *Not yet.*
+
+  The Cards line marker and the front lane heading follow this path. So does `## drawer:`: its writers already write `## back:`, and it leaves with the same migration.
 
 ## Historic names that stay
 
 Names that are stored, or that cross a deploy boundary, keep their old spelling unless a migration is planned for them: stored keys, routes such as `/_api/card…`, the frontmatter claim `card-page:`, refusal codes, message keys and rule ids. They are historic names, not current vocabulary; read `card` in them as "Cards".
+
+One group of names has moved:
+
+- **The agent operations are named verb_noun with the product noun**: `get_cards`, `save_cards`, `preview_cards`, beside `list_cards`, which already was. `put_asset` and `delete_asset` are unchanged. The former names (`get_card`, `save_card`, `preview_card`) are no longer operations in this repository. A consumer that exposes the operations as tools keeps each former name callable as a temporary alias on its own side, from the map `OPS_FORMER_NAMES` in `packages/cardtile/ai-ops.mjs`. The alias window is short, and the map is deleted when it closes.
+
+Two more are planned to follow and have not moved:
+
+- **Routes.** `/_api/card/<handle>` is still the route. `/_api/cards/<handle>` is the proposal: proposed, not decided, and nothing serves it.
+- **Refusal codes.** They keep their current spelling until this file names their new one.
+
+The rest of the list above stays as it is, with no migration planned.
 
 ## Site (sitetile)
 

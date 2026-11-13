@@ -2,7 +2,7 @@
   "name": "@tile/cardtile",
   "private": true,
   "type": "module",
-  "description": "REEF with Card — the Card content model (markdown in, a rendered page out) and its edge worker. Not published to npm; this manifest exists so serve/gen-assets.mjs can RESOLVE @cvernet/signet instead of reaching into a sibling package's node_modules.",
+  "description": "REEF with Cards — the Card content model (markdown in, a rendered page out) and its edge worker. Not published to npm; this manifest exists so serve/gen-assets.mjs can RESOLVE @cvernet/signet instead of reaching into a sibling package's node_modules.",
   "//": [
     "🩸 WHY THIS FILE EXISTS (2026-08-12). gen-assets.mjs read signet from",
     "packages/sitetile/astro/node_modules/@cvernet/signet. sitetile graduated to the public",

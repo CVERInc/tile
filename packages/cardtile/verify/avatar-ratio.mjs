@@ -17,7 +17,7 @@ import worker from '../serve/card-worker.mjs';
 // none is not noise here: it is the only place the OTHER claim can be checked, namely that a
 // profile with no avatar emits no avatar element rather than an <img src="">.
 const CARDS = ['specimen-plain', 'specimen-assets', 'specimen-rich'];
-const HAS_AVATAR = (h) => /%% card: profile[^%]*\bavatar=/.test(readCard(h));
+const HAS_AVATAR = (h) => /%% card(?:tile)?: profile[^%]*\bavatar=/.test(readCard(h));
 const WIDTHS = [320, 390, 430, 768, 1200];
 // What it used to be. 🔴 !important, because addStyleTag appends to <head> and NATIVE_CSS is printed
 // in the <body> — without it the "before" column silently measures the AFTER behaviour, and the two

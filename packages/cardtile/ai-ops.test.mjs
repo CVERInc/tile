@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CELL_TYPES, UNIVERSAL, PALETTE, BLANKS, DISPOSITION, OPS } from './ai-ops.mjs';
+import { CELL_TYPES, UNIVERSAL, PALETTE, BLANKS, DISPOSITION, OPS, OPS_FORMER_NAMES, SEAT } from './ai-ops.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RENDER = readFileSync(join(HERE, 'card-render.mjs'), 'utf8');
@@ -160,8 +160,42 @@ test('every op names a seat, and no op is graded as feelreef-side', () => {
     // given itself a master key on customer content, which is the空缺 feelreef is positioned against.
     assert.ok(!/\bfO\b|\bfA\b|\bfM\b/.test(op.seat), `${name} grants a feelreef-side seat on customer content`);
   }
-  assert.equal(OPS.save_card.seat, OPS.put_asset.seat, 'writing a card and writing its assets must need the same seat');
-  assert.notEqual(OPS.save_card.seat, OPS.get_card.seat, 'saving must not be as cheap as reading');
+  assert.equal(OPS.save_cards.seat, OPS.put_asset.seat, 'writing a card and writing its assets must need the same seat');
+  assert.notEqual(OPS.save_cards.seat, OPS.get_cards.seat, 'saving must not be as cheap as reading');
+});
+
+test('the ops are named verb_noun with the product noun, in the order and shape they had', () => {
+  assert.deepEqual(Object.keys(OPS), ['list_cards', 'get_cards', 'save_cards', 'put_asset', 'delete_asset', 'preview_cards']);
+  assert.deepEqual(OPS.get_cards, {
+    seat: SEAT.READ,
+    params: ['handle', 'assets: "summary" | "inline"'],
+    returns: 'the card WITHOUT the assets lane, plus an asset manifest',
+  });
+  assert.deepEqual(OPS.save_cards, {
+    seat: SEAT.WRITE,
+    params: ['handle', 'markdown (thin)', 'base_version', 'prompt', 'dry_run', 'message'],
+    returns: 'structural diff, new version, and ORPHANED assets — reported, never collected',
+  });
+  assert.deepEqual(OPS.preview_cards, { seat: SEAT.READ, params: ['handle', 'markdown'], returns: 'a URL. An agent that cannot look at what it did is guessing.' });
+  for (const former of ['get_card', 'save_card', 'preview_card']) {
+    assert.equal(former in OPS, false, `${former} is still an op: a former name is an alias a consumer keeps, never a second entry here`);
+  }
+});
+
+test('OPS_FORMER_NAMES: the three former names, each pointing at an op that exists, and nothing else', () => {
+  assert.deepEqual({ ...OPS_FORMER_NAMES }, { get_card: 'get_cards', save_card: 'save_cards', preview_card: 'preview_cards' });
+  assert.ok(Object.isFrozen(OPS_FORMER_NAMES), 'the alias map can be edited at runtime');
+  assert.throws(() => { 'use strict'; OPS_FORMER_NAMES.list_card = 'list_cards'; }, TypeError);
+  for (const [former, current] of Object.entries(OPS_FORMER_NAMES)) {
+    assert.ok(Object.hasOwn(OPS, current), `${former} points at ${current}, which is not an op`);
+    assert.equal(Object.hasOwn(OPS, former), false, `${former} is both a former name and a current one`);
+    assert.equal(current, former + 's', 'the rename is the product noun and nothing else');
+  }
+  // the ops that were not renamed have no former name
+  for (const name of ['list_cards', 'put_asset', 'delete_asset']) {
+    assert.ok(Object.hasOwn(OPS, name));
+    assert.equal(Object.values(OPS_FORMER_NAMES).includes(name), false);
+  }
 });
 
 // 🔴 THE CONTROL. Every assertion above is a set comparison, and a set comparison against a scan

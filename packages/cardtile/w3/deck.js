@@ -28,14 +28,15 @@
   const REFQ=window.__deckRef?'?ref='+encodeURIComponent(String(window.__deckRef)):'';
   const mk=(tag,cls,html)=>{const e=document.createElement(tag);e.className=cls;if(html!=null)e.innerHTML=html;return e;};
   // ---- items from a card file: one per `- [ ] %% card: … %% text` line. Kept as text; a card is built only when it is near view ----
+  // The marker has two spellings, `%% card:` and `%% cardtile:` (card-core.js RE_CARD_MARKER); k is the length of the one this line uses.
   // `## back: id` lanes are the backs: an item names one with `back=#id`. Items are only read from the first lane.
   const mdTexts=[], backAt=new Map(), backs=new Map(); { const MD=window.__cardMd; if(MD){ let a=0; const L=MD.length; if(MD.startsWith('---\n')){ const e=MD.indexOf('\n---\n',4); a=e<0?0:e+5; }
       // one id rule for both ends (`back=#x%y` and `## back: a|b` used to be cut differently and never matched)
-      let cur=null; const ID=/^[^\s%|]+/, BK=/(?:^|\s)back=#([^\s%|]+)/;
+      let cur=null, k=0; const ID=/^[^\s%|]+/, BK=/(?:^|\s)back=#([^\s%|]+)/;
       while(a<L){ let b=MD.indexOf('\n',a); if(b<0)b=L; const e=MD.charCodeAt(b-1)===13?b-1:b;   // CRLF: drop the \r
         if(MD.startsWith('## ',a)){ const m=/^back:\s*(.*)$/.exec(MD.slice(a+3,e)); const id=m&&ID.exec(m[1]); cur=id?[]:null; if(id)backs.set(id[0],cur); }
-        else if(MD.startsWith('- [ ] %% card:',a)){ const t=MD.indexOf('%% ',a+14); const txt=t>=0&&t<e?MD.slice(t+3,e):'';
-          if(cur){ if(txt)cur.push(txt); } else { const m=BK.exec(MD.slice(a+14,t>=0&&t<e?t:e)); if(m)backAt.set(mdTexts.length,m[1]); mdTexts.push(txt); } }   // items from every lane that is not a back
+        else if(MD.startsWith('- [ ] %% card',a)&&(k=MD.charCodeAt(a+13)===58?14:MD.startsWith('tile:',a+13)?18:0)){ const t=MD.indexOf('%% ',a+k); const txt=t>=0&&t<e?MD.slice(t+3,e):'';
+          if(cur){ if(txt)cur.push(txt); } else { const m=BK.exec(MD.slice(a+k,t>=0&&t<e?t:e)); if(m)backAt.set(mdTexts.length,m[1]); mdTexts.push(txt); } }   // items from every lane that is not a back
         else if(cur&&MD.charCodeAt(a)===9){ cur.push(MD.slice(a+1,e)); }
         a=b+1; } } }
   const esc=t=>String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;');
