@@ -16,7 +16,7 @@
 # topology, and the scars that explain why each line is the way it is.
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-# REEF with Card — the multi-tenant edge renderer. Deploy:
+# REEF with Cards — the multi-tenant edge renderer. Deploy:
 #   CLOUDFLARE_API_TOKEN=<your token> npx wrangler deploy
 # The CARDS KV holds card:<handle>:<gen> → card.md (gen = the value of gen:<handle>, absent ⇒ 0;
 # see genKey in card-api.mjs). Create once, then paste the id below:

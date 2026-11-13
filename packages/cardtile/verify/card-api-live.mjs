@@ -183,7 +183,7 @@ console.log(`\n4. LIFECYCLE  (scratch handle "${SCRATCH}" — created, exercised
   const SHAPE = LIVE_CARD || SCRATCH;
   if (LIVE_CARD) console.log(`\n   ⚠️  --card ${LIVE_CARD}: the checks below READ and send two DRY-RUN PUTs to a REAL card.\n`);
 
-  // ── 2. get_card, on a row that carries an asset ───────────────────────────────────────────────
+  // ── 2. get_cards, on a row that carries an asset ───────────────────────────────────────────────
   console.log(`\n   2. GET_CARD  (${SCRATCH})\n`);
   const live = (await api('GET', `/_api/card/${SHAPE}`)).json;
   {
@@ -256,7 +256,7 @@ console.log(`\n4. LIFECYCLE  (scratch handle "${SCRATCH}" — created, exercised
   const deleted = await api('DELETE', `/_api/card/${SCRATCH}/asset/pic`);
   check(deleted.status === 200, `the same delete succeeds once unreferenced (${deleted.status})`);
 
-  // preview_card: a URL that renders, is not indexed, and is not the card
+  // preview_cards: a URL that renders, is not indexed, and is not the card
   const pv = await api('POST', '/_api/preview', { handle: SCRATCH, markdown: thin.json.markdown });
   check(pv.status === 200 && /\/_preview\/[0-9a-f]{32}$/.test(pv.json.url || ''), `preview URL (${pv.status})`);
   const pvRes = await fetch(pv.json.url, { headers: { 'cache-control': 'no-cache' } });

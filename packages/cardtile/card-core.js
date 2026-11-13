@@ -55,8 +55,17 @@ const SPAN_MAX = 6;
 const DEFAULT_LANE = 'grid';
 
 // marker + body, body either INLINE after the closing %% (button/link) or on the following lines
-// (prose / fenced JSON). [1]=inner(type+params), [2]=same-line trailing, [3]=following lines.
-const RE_CARD_MARKER = /^%%\s*card:\s*(.*?)\s*%%[ \t]*([^\n]*)\n?([\s\S]*)$/;
+// (prose / fenced JSON). [1]='tile' when the marker is spelled `cardtile:`, [2]=inner(type+params),
+// [3]=same-line trailing, [4]=following lines.
+//
+// 🔴 TWO SPELLINGS OF ONE MARKER, for a short while (docs/VOCABULARY.md, "Lines and lanes on disk").
+// `%% cardtile: <type>` names the family namespace the way `%% sitetile:` does and is where the
+// marker is going; `%% card: <type>` is what every stored file says today and what cellToRaw still
+// writes for a new line. Both read as the same cell. A cell read from a `cardtile:` line carries
+// `marker: 'cardtile'` so that writing it back does not change its line; a cell read from a
+// `card:` line carries nothing, so its shape is what it always was. Exactly these two words: the
+// colon follows the word directly, so `cardtiles:`, `card-page:` and `sitetile:` are not this.
+const RE_CARD_MARKER = /^%%\s*card(tile)?:\s*(.*?)\s*%%[ \t]*([^\n]*)\n?([\s\S]*)$/;
 
 const clampSpan = (v, max) => {
   const n = Number(v);
@@ -108,12 +117,13 @@ const legacySlides = (word, rawParams) => word === 'embed' && kindAssigned(rawPa
 function extractCell(text) {
   const m = RE_CARD_MARKER.exec(text || '');
   if (!m) return { type: 'text', params: {}, rawParams: '', body: (text || '').trim() };
-  const sp = /^(\S+)\s*([\s\S]*)$/.exec(m[1].trim());
+  const sp = /^(\S+)\s*([\s\S]*)$/.exec(m[2].trim());
   const word = sp ? sp[1] : 'text';
   const rawParams = sp ? sp[2].trim() : '';
   const params = parseParams(rawParams);
-  const body = (m[2] + (m[3] ? '\n' + m[3] : '')).replace(/\s+$/, '');
-  const cell = { type: word, params, rawParams, body: body.replace(/^\n+/, '') };
+  const body = (m[3] + (m[4] ? '\n' + m[4] : '')).replace(/\s+$/, '');
+  // `marker` remembers a line written `%% cardtile:`, the same way `spelled` below remembers a word
+  const cell = { type: word, params, rawParams, body: body.replace(/^\n+/, ''), ...(m[1] ? { marker: 'cardtile' } : {}) };
   // `spelled` remembers the word on disk, so writing the cell back does not rewrite the file
   if (legacySlides(word, rawParams)) return { ...cell, type: 'slides', spelled: word };
   return cell;
@@ -128,6 +138,8 @@ function extractCell(text) {
 // still carries a `kind=` token, by EXACTLY the test extractCell uses — `kindAssigned`, copied in
 // verbatim because this function may not call out. Without one the old word would come back as
 // HTML, so the cell is written by its real name instead.
+// The marker is written as the line had it: `%% cardtile:` for a cell read from such a line
+// (`marker: 'cardtile'`, see RE_CARD_MARKER), `%% card:` for every other cell, new ones included.
 function cellToRaw(cell) {
   function kindAssigned(raw) {
     const s = String(raw || '');
@@ -137,7 +149,7 @@ function cellToRaw(cell) {
     return false;
   }
   const word = cell.type === 'slides' && cell.spelled === 'embed' && kindAssigned(cell.rawParams) ? 'embed' : cell.type;
-  const marker = '%% card: ' + word + (cell.rawParams ? ' ' + cell.rawParams : '') + ' %%';
+  const marker = '%% ' + (cell.marker === 'cardtile' ? 'cardtile' : 'card') + ': ' + word + (cell.rawParams ? ' ' + cell.rawParams : '') + ' %%';
   const body = cell.body || '';
   if (!body) return '- [ ] ' + marker;
   if (!body.includes('\n')) return '- [ ] ' + marker + ' ' + body;
@@ -236,7 +248,8 @@ function parseCard(md) {
       for (const t of col.tiles) {
         const c = extractCell(t.text);
         const id = (c.params.id || '').trim();
-        if (c.type === 'asset' && id) assets[id] = { mime: c.params.mime || 'image/webp', b64: (c.body || '').trim() };
+        // an asset is hoisted out of its line, so the line's marker spelling rides on the entry
+        if (c.type === 'asset' && id) assets[id] = { mime: c.params.mime || 'image/webp', b64: (c.body || '').trim(), ...(c.marker ? { marker: c.marker } : {}) };
       }
       continue;                                    // never a cell, never a block
     }
@@ -290,9 +303,34 @@ function serializeCard(model) {
       rawParams: `id=${id} mime=${model.assets[id].mime}`,
       params: { id, mime: model.assets[id].mime },
       body: model.assets[id].b64,
+      ...(model.assets[id].marker === 'cardtile' ? { marker: 'cardtile' } : {}),
     }))));
   }
   return serializeFile({ pre: model.pre || '', columns, archive: '', post: model.post || '', eol: '\n' });
+}
+
+// mergeAssets(existing, staged) → a new assets map: `staged` ({ id: { mime, b64 } }) laid over
+// `existing`. An id the lane already holds takes the staged bytes and KEEPS the marker its line was
+// written with (see parseCard: the spelling rides on the entry); a new id is a new line and gets
+// no marker, so serializeCard writes it in the current spelling. Every writer that puts pictures
+// into a model goes through here: a plain spread of `{ mime, b64 }` over an entry is how a
+// re-chosen picture respelled a line nobody had edited.
+//
+// An id is whatever name the API takes, `__proto__` and `constructor` among them. Each is DEFINED
+// on the result as its own entry: assigning `out['__proto__'] = …` would set the map's prototype
+// and list nothing. And "already holds" is asked of the map's own entries, so a name every object
+// inherits is not read as an asset.
+function mergeAssets(existing, staged) {
+  const out = {};
+  const own = (o, id) => Object.prototype.hasOwnProperty.call(o, id);
+  const put = (id, value) => Object.defineProperty(out, id, { value, enumerable: true, writable: true, configurable: true });
+  for (const id of Object.keys(existing || {})) put(id, existing[id]);
+  for (const id of Object.keys(staged || {})) {
+    const { marker: _unused, ...bytes } = staged[id];
+    const marker = own(out, id) && out[id] && out[id].marker;
+    put(id, { ...bytes, ...(marker ? { marker } : {}) });
+  }
+  return out;
 }
 
 // packGrid: the 2D PROJECTION. First-fit pack of the flat cell list into a `cols`-wide grid honouring
@@ -474,4 +512,4 @@ export { CARD_MAX_BYTES, utf8Length, embedsOverCeiling, kindAssigned };
 // grammar — two implementations of "what a param looks like" is how a form starts writing tokens the
 // parser reads differently, on somebody's only copy of their file.
 export { setToken, removeToken, quoteParam, normalizeCell, setTitle };
-export { rasterCopyId, rasterCopyOwner };
+export { rasterCopyId, rasterCopyOwner, mergeAssets };

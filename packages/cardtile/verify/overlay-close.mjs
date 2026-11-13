@@ -28,7 +28,7 @@ const CARDS = ['specimen-plain', 'specimen-assets', 'specimen-rich'];
 const HANDLE = 'specimen-rich';
 {
   const md = readCard(HANDLE);
-  if (!/%% card: profile[^%]*\bavatar=/.test(md)) throw new Error(`${HANDLE} states no avatar — the QR overlay opens from it`);
+  if (!/%% card(?:tile)?: profile[^%]*\bavatar=/.test(md)) throw new Error(`${HANDLE} states no avatar — the QR overlay opens from it`);
   if (!/^## (back|drawer):/m.test(md)) throw new Error(`${HANDLE} has no drawer lane — there is no drawer overlay to close`);
 }
 const VIEW = { width: 390, height: 844 };

@@ -660,7 +660,7 @@ function editorAsset(hash, name) {
 // decides WHO may edit (seats in its registry); this Worker owns storage and assembly; the browser
 // never holds a bearer. So this route serves a page with NO card in it and NO credential — the card
 // arrives from the parent over postMessage and goes back the same way (w3/host-bridge.mjs), and the
-// parent does the save through `save_card`. Like /try/edit it never touches the CARDS store.
+// parent does the save through `save_cards`. Like /try/edit it never touches the CARDS store.
 //
 // `?host=` must be one of the allowed parent origins (validHostOrigin); it is written into the
 // page's opts, used as the ONLY postMessage target and origin the editor accepts, and as the one
@@ -917,7 +917,7 @@ const router = {
       return parkJson({ id, expires_in_seconds: TRY_TTL });
     }
 
-    // A parked draft (preview_card). Unlisted, un-guessable, gone within the hour — and NEVER
+    // A parked draft (preview_cards). Unlisted, un-guessable, gone within the hour — and NEVER
     // indexed: a preview is a byte-for-byte near-duplicate of a live card, so an indexed one would
     // compete with the creator's own page in exactly the way the PREVIEW deployment rule exists to
     // prevent. `noindex` is set unconditionally here rather than via isPreview(), because this route

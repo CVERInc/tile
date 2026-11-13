@@ -89,7 +89,7 @@ export function realCardHref({ name, tagline, draft }) {
  */
 export function sandboxDoorFields(md) {
   const name = /^title:\s*(.+)$/m.exec(String(md ?? ''))?.[1]?.trim() || '';
-  const cellBody = /^-\s*\[ ?\]\s*%%\s*card:\s*profile\b[^%]*%%[ \t]*([^\n]*)/m.exec(String(md ?? ''))?.[1];
+  const cellBody = /^-\s*\[ ?\]\s*%%\s*card(?:tile)?:\s*profile\b[^%]*%%[ \t]*([^\n]*)/m.exec(String(md ?? ''))?.[1];
   const tagline = (cellBody || '').trim();
   return { name, tagline };
 }

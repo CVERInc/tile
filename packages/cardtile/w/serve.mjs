@@ -115,7 +115,7 @@ async function api(method, path, body) {
  *
  *   1. read the stored card, for its version and its asset manifest;
  *   2. upload any image the editor has that the store does not (put_asset), so an image dragged in
- *      locally survives — without this the save silently drops it, since save_card takes its assets
+ *      locally survives — without this the save silently drops it, since save_cards takes its assets
  *      from the STORE by design;
  *   3. save the THIN card, guarded by the version read in step 1.
  *
@@ -145,7 +145,7 @@ async function saveCard(handle, fatMd, baseVersion) {
   }
 
   const thin = serializeCard({ ...model, assets: {} });
-  // 🔴 The version passed to save_card is the one read AFTER the uploads, not the page's. An upload
+  // 🔴 The version passed to save_cards is the one read AFTER the uploads, not the page's. An upload
   // changes the card, so the page's version is stale by construction the moment step 2 does
   // anything — passing it would make every save-with-a-new-image a conflict with ourselves. The
   // page's version was already honoured, above, before a single byte was written.

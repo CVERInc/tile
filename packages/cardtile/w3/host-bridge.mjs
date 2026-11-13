@@ -28,8 +28,8 @@
 // 🔴 `md` IS THE FAT CARD — exactly the editor's draft, `## assets` lane included, byte-for-byte what
 // the sandbox parks. A picture chosen in a sheet is staged by cell-form-dom's picker and written into
 // that lane when the sheet is done (edit3.mjs: `x.assets = { ...x.assets, ...pending }` → serializeCard). NOTE for the
-// parent: save_card's assembleSave() (card-save.mjs) DISCARDS an incoming lane and re-attaches only
-// the stored one, so the parent splits: put_asset for new ids, then save_card the thin card.
+// parent: save_cards's assembleSave() (card-save.mjs) DISCARDS an incoming lane and re-attaches only
+// the stored one, so the parent splits: put_asset for new ids, then save_cards the thin card.
 // `splitCard()` below is that split, exported for whoever wants it; the bridge does not apply it.
 import { parseCard, serializeCard } from '../card-core.js';
 import { referencedAssets } from '../card-save.mjs';

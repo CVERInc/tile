@@ -10,7 +10,7 @@ const { chromium } = pw;
 // it says so rather than dying on `samples[0].s[0]` being undefined.
 const SPECIMEN = 'specimen-rich';
 const cardMd = readCard(SPECIMEN);
-if (!/%% card: embed[^%]*kind=bubbles/.test(cardMd)) {
+if (!/%% card(?:tile)?: embed[^%]*kind=bubbles/.test(cardMd)) {
   throw new Error(`${SPECIMEN} carries no \`kind=bubbles\` embed, so there is no pop to measure — add one to cards/gen-specimens.mjs`);
 }
 const env = { CARDS: { get: async () => cardMd } };

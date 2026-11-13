@@ -143,11 +143,11 @@ test('card:change is debounced 150ms and carries the FAT md, assets lane intact'
   assert.equal('assets' in msg, false);
 });
 
-test('🔴 the parent\'s split: save_card drops a fat lane, splitCard + put_asset keeps the picture', () => {
-  // control first: a NEW picture posted inside a FAT md is silently dropped by save_card — that is
+test('🔴 the parent\'s split: save_cards drops a fat lane, splitCard + put_asset keeps the picture', () => {
+  // control first: a NEW picture posted inside a FAT md is silently dropped by save_cards — that is
   // why assets travel beside md and the parent put_asset()s them
   const stored = THIN;                                   // the store has no bytes for `pic` yet
-  assert.equal(parseCard(assembleSave(FAT, stored).md).assets.pic, undefined, 'save_card drops an incoming lane');
+  assert.equal(parseCard(assembleSave(FAT, stored).md).assets.pic, undefined, 'save_cards drops an incoming lane');
   const { md, assets } = splitCard(FAT);
   const storedWithPic = serializeCard({ ...parseCard(stored), assets }); // after put_asset(pic)
   const saved = assembleSave(md, storedWithPic);

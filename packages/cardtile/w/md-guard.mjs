@@ -15,12 +15,13 @@ import { parseCard } from '../card-core.js';
  *
  * So the gate is what actually goes wrong, and each arm is something a person really types:
  *   · no `## <lane>` heading at all — the file has stopped being a card
- *   · a `- [ ]` line with no `%% card: … %%` marker — THAT TILE would be silently dropped
+ *   · a `- [ ]` line with no `%% card: … %%` marker (or `%% cardtile: … %%`, the same marker's
+ *     other spelling: card-core.js RE_CARD_MARKER) — THAT TILE would be silently dropped
  * Anything else parses, and leaving is allowed. `null` means "fine".
  */
 export function whatIsWrong(md) {
   const lines = String(md).split('\n');
-  const orphan = lines.findIndex((l) => /^\s*-\s*\[/.test(l) && !/%%\s*card\s*:/.test(l));
+  const orphan = lines.findIndex((l) => /^\s*-\s*\[/.test(l) && !/%%\s*card(?:tile)?\s*:/.test(l));
   if (orphan >= 0) return { line: orphan + 1 };
   if (!lines.some((l) => /^##\s+\S/.test(l))) return { line: 1 };
   try {

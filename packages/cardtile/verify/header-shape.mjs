@@ -32,7 +32,7 @@ import worker from '../serve/card-worker.mjs';
 // the page as an image). Everything this harness measures hangs off the avatar, so a card without
 // one is not a failing case here — it is not a case at all. Read from the cards, not assumed.
 const ALL_SPECIMENS = ['specimen-plain', 'specimen-assets', 'specimen-rich'];
-const CARDS = ALL_SPECIMENS.filter((h) => /%% card: profile[^%]*\bavatar=/.test(readCard(h)));
+const CARDS = ALL_SPECIMENS.filter((h) => /%% card(?:tile)?: profile[^%]*\bavatar=/.test(readCard(h)));
 if (!CARDS.length) throw new Error('no specimen states an avatar — this harness has nothing to measure');
 const VIEWS = [{ width: 390, height: 844 }, { width: 1200, height: 900 }];
 const SURVEYED = 0.977;
