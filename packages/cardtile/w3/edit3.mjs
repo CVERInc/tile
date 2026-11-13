@@ -17,7 +17,7 @@
 //
 // The preview of a view is the PAGE: renderCardHTML(md, { deck }) — the same function, with the same
 // deck (w3/deck-page.mjs), that the Worker serves to visitors.
-import { parseCard, serializeCard, normalizeCell, setTitle, setToken, removeToken } from '../card-core.js';
+import { parseCard, serializeCard, normalizeCell, setTitle, setToken, removeToken, mergeAssets } from '../card-core.js';
 import { CELL_TYPES, blankCell, PALETTE, DISPOSITION, CONTROL } from '../ai-ops.mjs';
 import { formBodyHtml, composeCell } from '../w/cell-form-core.mjs';
 import { whatIsWrong } from '../w/md-guard.mjs';
@@ -488,7 +488,7 @@ function saveSheet() {
   }
   let x = clone();
   if (rename) x = setTitle(x, rename);
-  if (Object.keys(pending).length) x.assets = { ...(x.assets || {}), ...pending };
+  if (Object.keys(pending).length) x.assets = mergeAssets(x.assets, pending);
   if (which === 'default') x.drawers.find((d) => d.id === defId(x.pre)).cells = [withRaw(next, removeToken(next.rawParams || '', 'back'))];
   else if (which === 'back') x.drawers.find((d) => d.id === backId(x.cells[i])).cells = [withRaw(next, removeToken(next.rawParams || '', 'back'))];
   else { const id = backId(x.cells[i]); x.cells[i] = id ? withRaw(next, setToken(next.rawParams || '', 'back', '#' + id)) : next; }
@@ -969,7 +969,7 @@ el('opt-file').onchange = async () => {
 // one setting → the draft, at once
 function putSetting(name, value, { repaint = true } = {}) {
   const x = clone(); x.pre = applySetting(x.pre, name, value);
-  if (Object.keys(pending).length) { x.assets = { ...(x.assets || {}), ...pending }; pending = {}; }
+  if (Object.keys(pending).length) { x.assets = mergeAssets(x.assets, pending); pending = {}; }
   cache.clear(); commit(x, { settings: repaint });
 }
 let settingTimer = 0, settingNext = null;

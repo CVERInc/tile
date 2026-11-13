@@ -31,9 +31,9 @@ Retired inside Cards (being phased out of code, docs and copy): the singular nou
 ## Lines and lanes on disk
 
 - A line names the family namespace it belongs to: `%% <kind>tile: …`. Site lines already read `%% sitetile:`; a board's settings read `%% tugtile:settings`. Cards lines are moving to `%% cardtile: <type>`.
-- **Readers in this repository accept `%% cardtile: <type>`**, exactly as they accept `%% card: <type>`: the parser, the renderer, both editors, the deck and the save path read the same tile from either spelling.
+- **Readers in this repository accept `%% cardtile: <type>`**, exactly as they accept `%% card: <type>`: the parser, the renderer, both editors, the deck and the save path read the same tile from either spelling. So do the verification scripts under `packages/cardtile/verify/` that pick a line out by its marker.
 - **Today, Cards lines are still written `%% card: <type>`.** Accepting the new marker is the first step and the only one taken. Until this file says the writers have switched, keep writing `%% card:`: a reader outside this repository may not accept the new marker yet.
-- The front lane will be headed `## front` (planned; today writers head it `## grid`). Readers already accept either, because the first lane is the front lane whatever its heading says. The back lane is `## back: <id>` (`## drawer: <id>` is the older spelling).
+- The front lane will be headed `## front` (planned). Today no writer heads it that: the serializer heads a front lane that has no name of its own `## grid`, and the editor starts an empty file from the seed `## cards`. A lane that already has a heading keeps it. Readers already accept all of these, because the first lane is the front lane whatever its heading says. The back lane is `## back: <id>` (`## drawer: <id>` is the older spelling).
 - **Spellings are kept per token.** Each lane heading and each line marker keeps the spelling it was written with; a save never rewrites spelling behind its author's back, in either direction. An old word leaves a file only through one deliberate migration.
 - **The two spellings are meant to coexist for a short time, not forever.** The switch goes in this order, one step at a time, and this file says when each step has happened:
   1. Readers accept the new spelling. *Done in this repository for `%% cardtile:` and `## front`.*

@@ -309,6 +309,22 @@ function serializeCard(model) {
   return serializeFile({ pre: model.pre || '', columns, archive: '', post: model.post || '', eol: '\n' });
 }
 
+// mergeAssets(existing, staged) → a new assets map: `staged` ({ id: { mime, b64 } }) laid over
+// `existing`. An id the lane already holds takes the staged bytes and KEEPS the marker its line was
+// written with (see parseCard: the spelling rides on the entry); a new id is a new line and gets
+// no marker, so serializeCard writes it in the current spelling. Every writer that puts pictures
+// into a model goes through here: a plain spread of `{ mime, b64 }` over an entry is how a
+// re-chosen picture respelled a line nobody had edited.
+function mergeAssets(existing, staged) {
+  const out = { ...(existing || {}) };
+  for (const id of Object.keys(staged || {})) {
+    const { marker: _unused, ...bytes } = staged[id];
+    const marker = out[id] && out[id].marker;
+    out[id] = { ...bytes, ...(marker ? { marker } : {}) };
+  }
+  return out;
+}
+
 // packGrid: the 2D PROJECTION. First-fit pack of the flat cell list into a `cols`-wide grid honouring
 // w (col-span) and h (row-span). Returns { placements:[{cell,index,row,col,w,h,type}], rows, cols }.
 // A row-spanning (h>1) cell truly occupies cells in the next row(s); later cells flow around it. No
@@ -488,4 +504,4 @@ export { CARD_MAX_BYTES, utf8Length, embedsOverCeiling, kindAssigned };
 // grammar — two implementations of "what a param looks like" is how a form starts writing tokens the
 // parser reads differently, on somebody's only copy of their file.
 export { setToken, removeToken, quoteParam, normalizeCell, setTitle };
-export { rasterCopyId, rasterCopyOwner };
+export { rasterCopyId, rasterCopyOwner, mergeAssets };

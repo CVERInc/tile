@@ -68,7 +68,7 @@ for (const handle of CARDS) {
   const { ctx, page } = await open('specimen-rich');
   const changed = await page.evaluate(() => {
     const w = window.__cardtileW;
-    w.commit(w.md.replace('%% card: profile', '%% card: profile chips=CONTROL'));
+    w.commit(w.md.replace(/%% card(?:tile)?: profile/, '$& chips=CONTROL'));   // either marker spelling, kept as written
     return w.canvasHtml();
   });
   const served = renderCardHTML(readCard('specimen-rich'), { handle: 'x', cardUrl: await page.evaluate(() => window.__cardtileW.cardUrl) });

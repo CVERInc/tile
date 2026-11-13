@@ -21,7 +21,7 @@
 // The consequence is stated plainly rather than left implicit: ANYONE holding this token can write
 // ANY card. It is an infrastructure credential, not a user credential, and it is scoped by being
 // held only by the hosted Worker.
-import { parseCard, serializeCard, CARD_MAX_BYTES, embedsOverCeiling } from '../card-core.js';
+import { parseCard, serializeCard, mergeAssets, CARD_MAX_BYTES, embedsOverCeiling } from '../card-core.js';
 import { cardDestinations, cardLinkReport } from './card-destinations.mjs';
 import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
@@ -1142,8 +1142,7 @@ export class CardLifetime {
       if (!b64) return { status: 400, body: { error: 'put_asset needs `base64`.' } };
       if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { status: 400, body: { error: '`base64` is not base64.' } };
       // putting an id the lane already holds rewrites that line's bytes, not its marker spelling
-      const marker = model.assets[id] && model.assets[id].marker;
-      model.assets = { ...model.assets, [id]: { mime, b64, ...(marker ? { marker } : {}) } };
+      model.assets = mergeAssets(model.assets, { [id]: { mime, b64 } });
       const md = serializeCard(model);
       const bytes = utf8Bytes(md);
       if (bytes > KV_MAX_BYTES) {

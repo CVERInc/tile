@@ -55,7 +55,7 @@ for (const handle of CARDS) {
   if (!htmlRow.body.startsWith('<!doctype html')) fail(`${handle}: the default exit is not HTML`);
   if (thinRow.body !== thinExpected) fail(`${handle}: the thin body is not card-core's assetless serialization`);
   if (fatRow.body !== file) fail(`${handle}: the fat exit is not the stored file, byte for byte`);
-  if (/^- \[ \] %% card: asset/m.test(thinRow.body)) fail(`${handle}: an asset line survived into the thin card`);
+  if (/^- \[ \] %% card(?:tile)?: asset/m.test(thinRow.body)) fail(`${handle}: an asset line survived into the thin card`);
   // the download link must be reachable FROM the thin card, or the complete file is only findable
   // by someone who already knows the convention
   if (!/rel="alternate"/.test(rows[1][1].r.headers.get('link') || '')) fail(`${handle}: thin carries no Link to the full file`);

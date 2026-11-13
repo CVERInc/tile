@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   parseCard, serializeCard, extractCell, cellToRaw, normalizeCell, setSpan, setToken, reorder,
+  mergeAssets, setTitle,
 } from './card-core.js';
 import { renderPage } from './card-render.mjs';
 import { assembleSave, thinCard } from './card-save.mjs';
@@ -196,6 +197,136 @@ test('readers that count cells or read one take the new spelling', () => {
   for (const md of [OLD, NEW, MIXED]) assert.equal(isTemplateOnly(md), isTemplateOnly(OLD));
 });
 
+test('a blank template is recognised as blank in either spelling, and a look-alike line is not a template tile', () => {
+  const blank = FM + '## grid\n\n- [ ] %% card: profile w=6 %% blank.profile\n- [ ] %% card: text %% blank.text\n';
+  assert.equal(isTemplateOnly(blank), true, 'setup: the old-spelling template is blank');
+  assert.equal(isTemplateOnly(newOf(blank)), true, 'a template written `%% cardtile:` was not recognised as blank');
+  assert.equal(isTemplateOnly(blank.replace('%% card: text', '%% cardtile: text')), true, 'mixed');
+  // the marker has to be READ for the answer to be "blank": a line the parser does not take as a
+  // tile is authored text, and so is a filled tile in the new spelling
+  assert.equal(isTemplateOnly(blank.replace('%% card: text', '%% cardtiles: text')), false, 'look-alike');
+  assert.equal(isTemplateOnly(newOf(blank).replace('blank.text', 'I draw things.')), false, 'a filled new-spelling tile');
+});
+
+// ── a picture staged over an id the file already holds ───────────────────────────────────────
+// Asset ids are content addresses, so choosing the same picture again — or choosing an embedded
+// picture as the backdrop — stages an id the assets lane already has. The staged entry is the
+// picker's `{ mime, b64 }`; the line it lands on keeps the marker it was written with.
+const A = 'sha256-aaaaaaaaaaaaaaaa', B = 'sha256-bbbbbbbbbbbbbbbb';   // in MIXED: A is `card:`, B is `cardtile:`
+const STAGED = { [A]: { mime: 'image/png', b64: 'AAAA' }, [B]: { mime: 'image/webp', b64: 'BBBB' } };
+
+test('🔴 mergeAssets: staged bytes replace an entry, the line keeps its marker, a new id is written `card:`', () => {
+  assert.ok(MIXED.includes(`%% card: asset id=${A}`) && MIXED.includes(`%% cardtile: asset id=${B}`), 'setup');
+  for (const id of [A, B]) {
+    const x = parseCard(MIXED);
+    x.assets = mergeAssets(x.assets, { [id]: STAGED[id] });
+    assert.equal(serializeCard(x), MIXED, `re-staging ${id} changed the file`);
+  }
+  const x = parseCard(NEW);
+  x.assets = mergeAssets(x.assets, { [B]: { mime: 'image/gif', b64: 'CCCC' }, 'sha256-cccccccccccccccc': { mime: 'image/png', b64: 'DDDD', marker: 'cardtile' } });
+  const out = serializeCard(x);
+  assert.ok(out.includes(`- [ ] %% cardtile: asset id=${B} mime=image/gif %% CCCC\n`), 'new bytes on an existing line respelled it');
+  assert.ok(out.includes('- [ ] %% card: asset id=sha256-cccccccccccccccc mime=image/png %% DDDD\n'), 'a new asset line is written `%% card:`');
+  assert.equal(out.replace(/^.*id=sha256-(b|c){16} .*\n/gm, ''), NEW.replace(/^.*id=sha256-b{16} .*\n/m, ''), 'another line moved');
+  // pure: neither argument is written to, and an absent side is an empty one
+  const had = parseCard(NEW).assets, before = JSON.stringify(had);
+  mergeAssets(had, STAGED);
+  assert.equal(JSON.stringify(had), before);
+  assert.deepEqual(mergeAssets(undefined, STAGED), STAGED);
+  assert.deepEqual(mergeAssets(had, undefined), had);
+});
+
+// The editors are browser modules. Each function that folds staged pictures into the file is one
+// top-level block; it is run here, as written, over stand-ins for the page around it.
+function editorFn(file, name, env) {
+  const src = readFileSync(join(HERE, file), 'utf8').split('\n');
+  const from = src.findIndex((l) => l.startsWith(`function ${name}(`));
+  const to = src.findIndex((l, i) => i > from && l === '}');
+  assert.ok(from >= 0 && to > from, `${file}: ${name} moved; this test no longer finds it`);
+  return new Function('env', `with (env) { return (${src.slice(from, to + 1).join('\n')}); }`)(env);
+}
+const noDom = { querySelectorAll: () => [], querySelector: () => null };
+
+test('🔴 the editor: finishing a sheet with a re-chosen picture leaves the file byte for byte as it was', () => {
+  for (const id of [B, A]) {
+    const m = parseCard(MIXED);
+    let out = null;
+    const env = {
+      open: { i: 1, which: 'front', asMd: true }, pending: { [id]: STAGED[id] }, undoTo: null, TYPES: {},
+      cellAt: (i) => m.cells[i], syncProse() {}, closeSheet() {}, clone: () => structuredClone(m),
+      el: (n) => (n === 'f-__raw' ? { value: m.cells[1].body } : noDom),
+      backId: () => '', defId: () => '', withRaw: (c) => c,
+      commit: (x) => { out = serializeCard(x); },
+      normalizeCell, setTitle, setToken, mergeAssets,
+    };
+    editorFn('w3/edit3.mjs', 'saveSheet', env)();
+    assert.equal(out, MIXED, `saveSheet respelled a line (staged ${id})`);
+  }
+});
+
+test('🔴 the editor: an embedded picture chosen as the backdrop keeps its asset line', () => {
+  for (const id of [B, A]) {
+    const m = parseCard(MIXED);
+    let out = null;
+    const env = {
+      pending: { [id]: STAGED[id] }, clone: () => structuredClone(m), cache: { clear() {} },
+      applySetting: (pre, name, value) => pre.replace('title: Aster\n', `title: Aster\n${name}: ${value}\n`),
+      commit: (x) => { out = serializeCard(x); },
+      mergeAssets,
+    };
+    editorFn('w3/edit3.mjs', 'putSetting', env)('backdrop', `asset:${id}`);
+    assert.equal(out, MIXED.replace('title: Aster\n', `title: Aster\nbackdrop: asset:${id}\n`), `putSetting respelled a line (staged ${id})`);
+    assert.deepEqual(env.pending, {}, 'the staged picture was not taken');
+  }
+});
+
+test('🔴 the older editor: saving a tile with a re-chosen picture leaves the file byte for byte as it was', () => {
+  for (const id of [B, A]) {
+    const S = { model: parseCard(MIXED), lane: { kind: 'face' } };
+    let out = null;
+    const env = {
+      S, openIndex: 1, pendingAssets: { [id]: STAGED[id] }, TYPES: { link: {} },
+      laneCells: () => S.model.cells, el: () => noDom, document: { getElementById: () => null },
+      composeCell: (cell) => ({ rawParams: cell.rawParams, body: cell.body, rename: null }),
+      formCtx() {}, fieldError() {}, closeModal() {},
+      edit: (fn) => { out = serializeCard(fn(structuredClone({ ...S.model }))); },
+      normalizeCell, setTitle, mergeAssets,
+    };
+    editorFn('w/editor.mjs', 'saveCell', env)();
+    assert.equal(out, MIXED, `saveCell respelled a line (staged ${id})`);
+  }
+});
+
+test('no writer folds staged pictures into the assets lane by hand', () => {
+  // one merge, in card-core: a spread of `{ mime, b64 }` over an entry drops the line's marker
+  for (const f of ['w3/edit3.mjs', 'w/editor.mjs', 'serve/card-api.mjs']) {
+    const src = readFileSync(join(HERE, f), 'utf8');
+    assert.doesNotMatch(src, /assets = \{ *\.\.\./, `${f} spreads over the assets map`);
+    assert.match(src, /assets = mergeAssets\(/, `${f} does not merge through card-core`);
+  }
+});
+
+test('the verification scripts that pick a line by its marker take either spelling, and keep it', () => {
+  // these run in a browser against a served card; the selector itself is one expression, run here
+  const line = (file, has) => {
+    const l = readFileSync(join(HERE, file), 'utf8').split('\n').find((x) => x.includes(has));
+    assert.ok(l, `${file}: the selector moved; this test no longer finds it`);
+    return l;
+  };
+  const control = /w\.md(\.replace\(.*\))\);/.exec(line('verify/editor.mjs', 'chips=CONTROL'));
+  assert.ok(control, 'verify/editor.mjs: the control edit changed shape');
+  const edit = new Function('md', `return md${control[1]};`);
+  assert.ok(edit(OLD).includes('- [ ] %% card: profile chips=CONTROL w=6'), 'old spelling');
+  assert.ok(edit(NEW).includes('- [ ] %% cardtile: profile chips=CONTROL w=6'), 'the control edit did nothing to a `%% cardtile:` file');
+  assert.equal(oldOf(edit(NEW)), edit(OLD), 'the control edit respelled a line');
+  const leak = /if \((\/.*\/m)\.test\(thinRow\.body\)\)/.exec(line('verify/negotiation.mjs', 'an asset line survived'));
+  assert.ok(leak, 'verify/negotiation.mjs: the leak check changed shape');
+  const leaked = new Function(`return ${leak[1]};`)();
+  for (const md of [OLD, NEW, MIXED]) assert.equal(leaked.test(md), true, 'an asset line in a thin card went unseen');
+  for (const md of [OLD, NEW, MIXED]) assert.equal(leaked.test(thinCard(md)), false);
+  assert.equal(leaked.test(FM + '## assets\n\n- [ ] %% cardtiles: asset id=x mime=image/png %% AAAA\n'), false, 'look-alike');
+});
+
 // deck.js is a browser script; its item reader is one block, run here against a stand-in `window`.
 function deckItems(md) {
   const src = readFileSync(join(HERE, 'w3/deck.js'), 'utf8').split('\n');
@@ -287,4 +418,17 @@ test('writers still head a new front lane `## grid`', () => {
   assert.equal(parseCard('').lane, 'grid');
   assert.match(serializeCard({ pre: '', post: '', cells: [{ type: 'text', rawParams: '', body: 'hi' }], drawers: [], assets: {} }), /^## grid\n/);
   assert.match(cellToRaw(normalizeCell({ type: 'text', rawParams: '', body: 'hi' })), /^- \[ \] %% card: text %% hi$/);
+});
+
+test('the editor starts an empty file from `## cards`, and that heading is kept like any other', () => {
+  // docs/VOCABULARY.md says what each writer heads the front lane; this is the editor's seed
+  const seed = /^const EMPTY = '(.*)';$/m.exec(readFileSync(join(HERE, 'w3/edit3.mjs'), 'utf8'));
+  assert.ok(seed, 'w3/edit3.mjs: the empty-file seed moved; this test no longer finds it');
+  const EMPTY = seed[1].replace(/\\n/g, '\n');
+  assert.equal(EMPTY, '## cards\n\n');
+  const x = parseCard(EMPTY);
+  assert.equal(x.lane, 'cards');
+  x.cells.push(normalizeCell({ type: 'text', rawParams: '', body: 'hi' }));
+  if (x.blocks[0]) x.blocks[0].count = 1; else x.blocks = [{ label: '', start: 0, count: 1 }];
+  assert.equal(serializeCard(x), '## cards\n\n- [ ] %% card: text %% hi\n');
 });

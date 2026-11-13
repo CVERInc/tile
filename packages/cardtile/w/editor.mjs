@@ -10,7 +10,7 @@
 //      model loses is the params it has no UI for, which is exactly the long tail a creator wrote by
 //      hand — and their card is their only copy.
 import {
-  parseCard, serializeCard, reorder, normalizeCell, setTitle,
+  parseCard, serializeCard, reorder, normalizeCell, setTitle, mergeAssets,
 } from '../card-core.js';
 import { cardOrigin, cardUrlFor, renderCardHTML } from '../serve/card-worker.mjs';
 // 🔴 The forms are BUILT from the shared ai_ops definition, not from a copy of it. fields.mjs was
@@ -645,7 +645,7 @@ function saveCell() {
   edit((m0) => {
     // pictures chosen in this sheet join the card's own `## assets` lane — one file, pictures included
     const m = rename ? setTitle(m0, rename) : m0;
-    if (Object.keys(staged).length) m.assets = { ...(m.assets || {}), ...staged };
+    if (Object.keys(staged).length) m.assets = mergeAssets(m.assets, staged);
     if (S.lane.kind === 'face') { m.cells = m.cells.map((c, i) => (i === idx ? next : c)); return m; }
     const d = m.drawers.find((x) => x.id === S.lane.id);
     d.cells = d.cells.map((c, i) => (i === idx ? next : c));
