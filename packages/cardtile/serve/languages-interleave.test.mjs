@@ -290,6 +290,31 @@ test('🔴 row 5 — a reused handle: no key of the previous lifetime, and no ke
   assert.match((await visit(env, '/t?lang=ja-JP')).body, /新しい日本語/);
 });
 
+// ── row 6: a record that lost its language fields (a write by an older Worker, a rollback) ───────
+
+test('🔴 row 6 — after a write that dropped the language fields, a new file never lands under a rev key still in KV', async () => {
+  const env = await withJapanese();
+  const { gen } = await liveCard(env.CARDS, 't');
+  const oldKey = langKeys(env)[0];
+  // what an older Worker's main save leaves: the object's record without its language fields, and the
+  // main key put without metadata. The old Japanese body stays in KV, under the key that named it.
+  const storage = env.CARD_LIFETIMES.storageOf('t');
+  const { languages: _l, langSeq: _s, owed: _o, ...bare } = storage._m.get(`card:${gen}`);
+  storage._m.set(`card:${gen}`, bare);
+  env.CARDS._meta.delete(`card:t:${gen}`);
+  assert.ok(env.CARDS._m.has(oldKey));
+  // the new Japanese file's body put fails; the record that names it lands
+  const failBody = kvFails(env, 'put', /^card:t:[^:]+:ja-JP:/);
+  const r = await saveLang(env, 'ja-JP', JA2);
+  assert.equal(r.status, 200);
+  assert.ok(failBody.hits.length >= 1);
+  assert.ok(!failBody.hits.includes(oldKey), `the new rev is not the old one (${oldKey})`);
+  for (const v of await servedFor(env, 'ja-JP')) assert.doesNotMatch(v.body, /イラストレーター/, 'never the file from before the rollback');
+  failBody.heal();
+  await env.CARD_LIFETIMES.alarm('t');
+  assert.match((await visit(env, '/t?lang=ja-JP')).body, /新しい日本語/);
+});
+
 // ── the Card's DELETE takes every language key, live and owed ────────────────────────────────────
 
 test('DELETE of the Card removes live and owed language keys, even when its listing misses them', async () => {
