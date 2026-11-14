@@ -54,9 +54,10 @@ const wallMarkup = (doc) => doc.querySelectorAll('main .st-grid, main .st-bleed'
  * then the deck. `layout` gives the stand-in the two measurements the deck asks a browser for: how
  * tall the document is, and where the wall's tiles are.
  */
-function open(md, { storage, moveBefore, ctx = {}, bare = false, deckJs = DECK_JS, quiet = false } = {}) {
+function open(md, { storage, moveBefore, ctx = {}, bare = false, deckJs = DECK_JS, quiet = false, page = null, before: setUp = null, layout = null } = {}) {
   let html = renderCardHTML(md, { handle: 'specimen', ...ctx });
   if (bare) html = html.replace(/<html[^>]*>/, '<html lang="en">').replace(/<script>\(function\(d\)[\s\S]*?<\/script>/, '');
+  if (page) html = page(html);   // what another page of ours adds to the markup (the draw page's attribute)
   const win = makeWindow(html, { scripts: true, storage, moveBefore });
   const doc = win.document, root = doc.documentElement;
   const cells = engineCells(doc);
@@ -66,8 +67,10 @@ function open(md, { storage, moveBefore, ctx = {}, bare = false, deckJs = DECK_J
   const inDeck = () => root.classList.contains('deck');
   doc.scrollHeightOf = (el) => (el !== root ? 0 : inDeck() ? win.innerHeight * Math.max(1, doc.querySelectorAll('.deck-snap').length) : 400 + cells.length * 300);
   doc.rectOf = (el) => (inDeck() || !cells.includes(el) ? { width: 342, height: 480 } : { top: 200 + cells.indexOf(el) * 300 - win.scrollY, left: 24, width: 342, height: 280 });
+  if (layout) layout(win, doc);     // a page with measurements of its own (the file wall)
+  if (setUp) setUp(win, doc);       // what the page has on window before the deck runs (a card file, a fixed shuffle)
   win.run(deckJs, 'deck.js'); win.tick(3000);
-  const button = (v) => doc.querySelector(`.deck-seg button[data-m="${INNER[v]}"]`);
+  const button =(v) => doc.querySelector(`.deck-seg button[data-m="${INNER[v]}"]`);
   const press = (v) => { const b = button(v); assert.ok(b, `the switcher has no ${v} button`); b.focus(); b.click(); win.tick(3000); return b; };
   return { win, doc, root, cells, before, button, press };
 }
@@ -420,4 +423,63 @@ test('the deck\'s script is slow: after a short wait the wall is shown, and the 
   win.run(DECK_JS, 'deck.js'); win.tick(3000);
   assert.equal(root.className.split(' ').includes('deck'), true, 'the script arrived and the pile did not open');
   assert.equal(root.dataset.view, 'stack');
+});
+
+// ── round 3: the review's findings ───────────────────────────────────────────────────────────────
+/** every id that is in the document more than once (`about×2`) — in the page, on the cards, on the bench, in the drawers */
+const dupIds = (doc) => { const n = new Map(); for (const e of doc.querySelectorAll('[id]')) n.set(e.id, (n.get(e.id) || 0) + 1); return [...n].filter(([, k]) => k > 1).map(([id, k]) => `${id}×${k}`); };
+const turnOver = (p, cell) => { cell.parentNode.dispatchEvent(new p.win.Event('click', { bubbles: true, isTrusted: true })); p.win.tick(1000); };
+const putBack = (p) => { p.win.dispatchEvent(new p.win.Event('keydown', { key: 'Escape' })); p.win.tick(1000); };
+
+// 2 — a back that two tiles name is ONE node: it is on the card that is turned over, never copied
+const sharedBack = (view) => ['---', 'card-page: specimen', 'title: Specimen', `view: ${view}`, '---', '', '## cards', '',
+  '- [ ] %% card: text back=#about %% One.', '- [ ] %% card: text back=#about %% Two.', '- [ ] %% card: text noback %% Three.',
+  '', '## back: about | About', '', '- [ ] %% card: text %% The back.', ''].join('\n');
+for (const view of VIEWS) test(`two tiles that name one back, opened on ${view}: no id is in the document twice, in any view`, () => {
+  const p = open(sharedBack(view));
+  assert.equal(p.doc.querySelectorAll('#drawer-about-title').length >= 1, true, 'CONTROL: the back has a title with an id');
+  assert.ok(p.doc.querySelectorAll('[id]').length >= 2, 'CONTROL: the stand-in answers [id]');
+  assert.deepEqual(dupIds(p.doc), [], `opened on ${view}`);
+  let at = view;
+  for (const to of [...VIEWS.filter((v) => v !== view), view, ...VIEWS.filter((v) => v !== view).reverse(), view]) {
+    p.press(to); holds(p, to, `${at} → ${to}`);
+    assert.deepEqual(dupIds(p.doc), [], `${at} → ${to}: an id is in the document more than once`);
+    at = to;
+  }
+});
+test('the back two tiles name is on whichever of their cards is turned over — the same node — and in its drawer on the wall', () => {
+  const p = open(sharedBack('stack'));
+  const body = p.doc.querySelector('.dc-drawer-body'), title = p.doc.getElementById('drawer-about-title');
+  const drawer = p.doc.getElementById('about');
+  const [one, two] = p.cells.map((c) => c.closest('.deck-card'));
+  assert.ok(one.classList.contains('can-flip') && two.classList.contains('can-flip'), 'both cards can be turned over');
+  for (const [mode, n, k] of [['stack', 1, two], ['stack', 0, one], ['list', 1, two], ['list', 0, one], ['list', 1, two]]) {
+    if (p.root.dataset.view !== mode) p.press(mode);
+    p.win.__deckJump(n); p.win.tick(1000);
+    turnOver(p, p.cells[n]);
+    assert.ok(k.classList.contains('flipped') && p.root.classList.contains('open'), `${mode}: card ${n} did not turn over`);
+    same(body.closest('.deck-card'), k, `${mode}: card ${n} is turned over and the back it names is not on it`);
+    same(p.doc.getElementById('drawer-about-title'), title, `${mode}: the title's id answers with another node`);
+    assert.deepEqual(dupIds(p.doc), [], `${mode}, card ${n} turned over`);
+    putBack(p);
+  }
+  p.press('wall'); holds(p, 'wall', 'list → wall');
+  same(body.parentNode, drawer, 'on the wall the back is in its drawer');
+  p.press('stack'); holds(p, 'stack', 'wall → stack');
+  p.win.__deckJump(0); p.win.tick(1000); turnOver(p, p.cells[0]);
+  same(body.closest('.deck-card'), one, 'after the wall the back is on the card that is turned over');
+});
+test('the file\'s default back (`back: "#id"`) is one node too, however many tiles take it', () => {
+  const md = ['---', 'card-page: specimen', 'title: Specimen', 'view: stack', 'back: "#about"', '---', '', '## cards', '',
+    '- [ ] %% card: text %% One.', '- [ ] %% card: text %% Two.', '- [ ] %% card: text back=#about %% Three.', '', '## back: about | About', '', '- [ ] %% card: text %% The back.', ''].join('\n');
+  const p = open(md);
+  const body = p.doc.querySelector('.dc-drawer-body');
+  assert.deepEqual(dupIds(p.doc), [], 'opened on stack');
+  for (const n of [1, 2, 0]) {
+    p.win.__deckJump(n); p.win.tick(1000); turnOver(p, p.cells[n]);
+    assert.ok(p.root.classList.contains('open'), `card ${n} did not turn over`);
+    same(body.closest('.deck-card'), p.cells[n].closest('.deck-card'), `card ${n} is turned over without the default back on it`);
+    putBack(p);
+  }
+  for (const to of ['wall', 'list', 'stack']) { p.press(to); holds(p, to, `→ ${to}`); assert.deepEqual(dupIds(p.doc), [], `→ ${to}`); }
 });

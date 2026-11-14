@@ -237,7 +237,7 @@
   const away=c=>{ const i=idx(c); if(i>=P&&i<P+M){ c.remove(); lazy.delete(i); } else mv(bench,c,null); };
   let pushed=false; addEventListener('popstate',()=>{ if(openCard){pushed=false; close();} });
   const docksInert=on=>document.querySelectorAll('dc-dock').forEach(d=>{ d.inert=on; });   /* the dice was tappable through the frosted glass */
-  const open=card=>{docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
+  const open=card=>{if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
   let lastFocus=null;
   const close=()=>{if(!openCard)return;const c=openCard;if(pushed){pushed=false;try{history.back();}catch(_){}}c.classList.remove('is-open');c.classList.remove('flipping-open');void c.offsetWidth;c.classList.add('flipping-close');c.addEventListener('animationend',function h(e){if(e.animationName!=='deck-put')return;c.removeEventListener('animationend',h);c.classList.remove('flipped');});/* flipping-close stays: its fill IS the rest pose, so nothing re-animates after the end; the next open() removes it */openCard=null;document.documentElement.classList.remove('open');docksInert(false);if(lastFocus&&lastFocus.focus){lastFocus.focus();lastFocus=null;}};
   const addCard=(frontNode,backNode,opts={})=>register(buildCard(frontNode,backNode,{...opts,seated:true}));
@@ -245,7 +245,8 @@
   // in the page — it is never outside the document, not even while its card is being put together
   function buildCard(frontNode,backNode,opts={}){
     const card=mk('div','deck-card'); if(opts.seated) bench.appendChild(card); if(frontNode&&frontNode.dataset&&frontNode.dataset.theme) card.style.cssText=frontNode.dataset.theme; const front=mk('div','deck-face deck-front'); card.appendChild(front); if(opts.seated) mv(front,frontNode,null); else front.appendChild(frontNode);
-    if(backNode){card.classList.add('can-flip'); const back=mk('div','deck-face deck-back'); back.tabIndex=-1; const sc=mk('div','deck-back-scroll'); back.appendChild(sc); card.appendChild(back); if(opts.seated) mv(sc,backNode,null); else sc.appendChild(backNode);
+    if(opts.back) card.dataset.back=opts.back;   // the back is one a tile names (shared: see lend); its face is made even while another card has the node
+    if(backNode||opts.back){card.classList.add('can-flip'); const back=mk('div','deck-face deck-back'); back.tabIndex=-1; const sc=mk('div','deck-back-scroll'); back.appendChild(sc); card.appendChild(back); if(backNode){ if(opts.seated) mv(sc,backNode,null); else sc.appendChild(backNode); }
       front.addEventListener('click',e=>{ if(e.target.closest('a,button,input,.cp-icon,#qr-holder'))return; if(String(getSelection()).length)return; if((LIST||card.classList.contains('is-top'))&&!openCard) open(card); });
       let hadSel=false; back.addEventListener('pointerdown',()=>{ hadSel=String(getSelection()).length>0; });   /* a drag that selects text, or the tap that clears a selection, is not a close */
       back.addEventListener('click',e=>{ if(e.target.closest('a,button,input,select,textarea,label'))return; if(hadSel||String(getSelection()).length){hadSel=false;return;} if(openCard===card) close(); });}
@@ -270,13 +271,20 @@
   const goBack=(href,label,sameTab,note)=>{let dom=href; try{const u=new URL(href,location.href); dom=u.hostname.replace(/^www\./,''); if(/(^|\.)(feelreef\.com|reef\.cards)$/.test(u.hostname)&&u.pathname!=='/') dom+=u.pathname.replace(/\/$/,''); }catch(_){}   // our own domains: the path is the identity (card.feelreef.com/wtg); elsewhere the host is enough
     return mk('div','deck-go',(note?'<p class="note">'+note+'</p>':'')+'<a class="btn" '+(sameTab?'':'target="_blank" rel="noopener noreferrer" ')+'href="'+href+'">'+(label||dom)+' <span class="arr">↗</span></a>');};
   /* the default back — frontmatter `back: "#id"` names one back lane, the same pointer a tile's back=#id is, for the whole Cards. Every tile without a back of its own (and not a link or a video) gets a copy */
-  const DEFB=String(FM.back||'').replace(/^["']|["']$/g,'').replace(/^#/,''); const defBack=()=>DEFB&&drawers[DEFB]?drawers[DEFB].cloneNode(true):bcard();
+  const DEFB=String(FM.back||'').replace(/^["']|["']$/g,'').replace(/^#/,'');
   // A tile's card is made when the window around the top card first reaches it (card(i) → dealt(i)), not all at once: a long
   // Card opens in the time its first cards take, and a tile nobody has reached yet is still where the engine put it — in the
   // page, not drawn (the stylesheet does not draw the grid in a pile). Once made, a card is kept.
   // A tile takes its seat: its place on the wall is marked first, and where it sits in its card is noted after.
+  // 🔴 A back that a tile names (back=#id, or the file's default `back: "#id"`) is ONE node, however many tiles name it: the
+  // drawer's own body. It is never copied — a copy carried the back's ids a second time (its title's, and any the author wrote
+  // in it), and getElementById, a #fragment and aria-labelledby then answered with whichever came first. Only one card is
+  // turned over at a time (openCard), so one node is enough: the first card to name it holds it, and lend() moves it to the
+  // card that is being turned over. Its two homes are the drawer (wall) and the card that held it last (pile).
   const usedBack=new Set();
   const seat=(c,b,named)=>{ lodge(c); if(named)lodge(b); const k=buildCard(c,b,{seated:true}); settled(c); if(named)settled(b); return k; };
+  const seatNamed=(c,id)=>{ const b=drawers[id], first=!usedBack.has(id); usedBack.add(id); lodge(c); if(first)lodge(b); const k=buildCard(c,first?b:null,{seated:true,back:id}); settled(c); if(first)settled(b); return k; };
+  const lend=k=>{ const b=drawers[k.dataset.back], sc=k.querySelector('.deck-back-scroll'); if(!b||!sc||b.parentNode===sc)return; mv(sc,b,null); settled(b); };
   const dealt=i=>{ const k=tileCard(cells[i]); k.dataset.i=String(i); pre[i]=k; mat(k); return k; };
   for(let i=0;i<cells.length;i++) pre.push(null);
   function tileCard(c){
@@ -286,9 +294,10 @@
       return seat(c,yt?goBack('https://www.youtube.com/watch?v='+yt):null);
     }
     const link=c.querySelector('a.st-gal-link, a.st-cell-link'); /* a picture's link or a link tile: both turn over to the address */ const trig=c.querySelector('[data-drawer]');
-    if(trig&&drawers[trig.dataset.drawer]){ const id=trig.dataset.drawer, first=!usedBack.has(id); usedBack.add(id); return seat(c,first?drawers[id]:drawers[id].cloneNode(true),first); }   /* the back a tile names is the drawer's own body: on its card in a pile, in its drawer on the wall — one node, two homes. A second tile naming the same back gets a copy (it used to take the node away from the first, whose back was then empty). The engine's door (a whole-tile <a href="#id">) stays in the tile, for the wall; in a pile the card itself turns over and the stylesheet takes the door out (html.deck .st-back-door) — left tappable, the tap followed it (in the editor's preview frame #id resolves to the editor's own address and the frame loaded the editor inside itself) and the card never turned */
+    if(trig&&drawers[trig.dataset.drawer]) return seatNamed(c,trig.dataset.drawer);   /* the back a tile names is the drawer's own body: on its card in a pile, in its drawer on the wall — one node, two homes. A second tile naming the same back shares that node (seatNamed, lend): it is on whichever of their cards is turned over. The engine's door (a whole-tile <a href="#id">) stays in the tile, for the wall; in a pile the card itself turns over and the stylesheet takes the door out (html.deck .st-back-door) — left tappable, the tap followed it (in the editor's preview frame #id resolves to the editor's own address and the frame loaded the editor inside itself) and the card never turned */
     if(link&&(/^https?:/.test(link.getAttribute('href')||'')||'same' in link.dataset||'blank' in link.dataset)){ return seat(c,goBack(link.href,link.dataset.pill,'same' in link.dataset,link.dataset.note)); }
-    return seat(c,'noback' in c.dataset?null:defBack()); // hero, social, anything else: the default back — the owner's business card unless the file names one
+    if('noback' in c.dataset) return seat(c,null);
+    return DEFB&&drawers[DEFB]?seatNamed(c,DEFB):seat(c,bcard()); // hero, social, anything else: the default back — the owner's business card unless the file names one
   }
   if(mdTexts.length){ const tpl=document.getElementById('md-cover'); if(tpl){ const c=tpl.content.firstElementChild.cloneNode(true); const r=c.querySelector('[data-range]'); if(r) r.textContent=numFmt(mdTexts[0])+' – '+numFmt(mdTexts[mdTexts.length-1]); addCard(c,null); } }
   P=pre.length; M=mdTexts.length; addingPost=true; window.__mdFirst=P; window.__mdCount=M;
