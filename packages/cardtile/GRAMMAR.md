@@ -176,7 +176,9 @@ a Card always has.
 Which language files exist is the main file's own fact: the main file's record names each one, and
 the Worker reads only the file it names, in the same read as the main file. A removed file is never
 served again, even while its removal is still settling in the store, and a tag listed again has no
-file until a new one is saved.
+file until a new one is saved. Through the API, a language file and the main GET of a Card with
+`locales:` are read from the Card's current state, the main file and its language files together,
+even while what visitors are served is still catching up with a save.
 
 ### Language files through the API
 

@@ -70,14 +70,33 @@ same generation and a rev: `card:<handle>:<gen>:<tag>:<rev>`. Which ones exist i
 main file's own key: its KV metadata `{"languages": {"<tag>": "<rev>"}}`, written in the same put as
 the main body. The Worker reads a language file only when that metadata names it, and only the key
 it names. Write them only through the API (`PUT /_api/cards/<handle>/lang/<tag>`). The handle's
-`CardLifetime` holds each one (storage slot `card:<gen>@<tag>@<rev>`, named by its main record
-`card:<gen>`) and is the only writer of these keys and of that metadata.
+`CardLifetime` holds each one (storage slot `card:<gen>@<tag>@<rev>`) and the language map that names
+them, object storage `languages:<gen>` (`{ languages, owed, langSeq, published }`). It is the only
+writer of these keys and of that metadata. The map is a key of its own, not a field of the main
+record `card:<gen>`: the cardtile worker before tile#304 rewrites that record whole on every save, and never
+reads, lists or deletes an object key outside `card:`.
 
 🔴 So a main body written by hand with `wrangler kv key put` carries no metadata, and from then on
-its Card is served in its main language only, until the next save through the API writes the record
-again. A hand-written language key is never served or read back: nothing names it. Only the Card's
-DELETE sweeps it, through its listing of `card:<handle>:`. A key of the form
+its Card is served in its main language only, until the next save through the API, or the republish
+below, puts the main key again. A hand-written language key is never served or read back: nothing
+names it. Only the Card's DELETE sweeps it, through its listing of `card:<handle>:`. A key of the form
 `card:<handle>:<gen>:<tag>` (no rev) is not read by anything.
+
+🔴 Rolling back to a cardtile worker without language files (before tile#304), then forward again. While it
+is deployed, that cardtile worker serves every Card in its main language and ignores the language keys and the
+map. Every main save it makes puts the main key without metadata. After the forward deploy, such a
+Card's files are served again once its object is next activated: any API call for the handle, or its
+alarm, sees that KV may lack the map it last published and republishes the main key with it. A
+visitor's request never reaches the object, so until then visitors get the main file. To force it for
+one handle: `POST /_api/cards/<handle>/lang` with the bearer, no body. It is idempotent and changes
+nothing the object holds, and answers `{handle, republished: true, languages: [<tag>…]}` (`cache:
+"pending"` when KV refused and the alarm will retry). A Card that the older cardtile worker deleted is gone
+with its files. Its map key is removed by the next DELETE of that handle.
+
+A change that leaves KV behind the object (`cache: 'pending'`, a changed map, an owed deletion) arms
+the object's alarm in the same storage write. An object that starts and finds such a state without an
+alarm arms one before it answers. So a crash between the change and its KV writes is finished by the
+alarm, with no further write needed.
 
 A domain binding lives under the same generation's keys (reef#2618 r5 — see `vanityKey`). Two
 Durable Objects hold the facts KV cannot be trusted with (r8):

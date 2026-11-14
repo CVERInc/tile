@@ -90,7 +90,8 @@ export const cardKey = (handle, gen) => `card:${handle}:${gen}`;
  * It is the main file's own KV record: its metadata `{ languages: { <tag>: <rev> } }` (languageRevsOf),
  * written by CardLifetime in the same put as the main body. A rev is 48 random bits (newRev), never one
  * the record names or owes, so a rev key is written once — even after a write by an older Worker that
- * dropped the record's language fields, when a counter would start again over keys still in KV. Every
+ * dropped the language map (r3: it is its own object key now, which that Worker does not touch; a
+ * map lost any other way is the same case), when a counter would start again over keys still in KV. Every
  * reader reads exactly the key the record it read names, and a key
  * the record does not name (a removed file whose KV deletion has not settled, a superseded rev, a
  * round-1 key without a rev) is unreachable by construction. Its deletion can settle whenever.
@@ -683,10 +684,11 @@ export class HostBindings {
  *                                        the If-Version check (fenced), the reference check and the
  *                                        removal or replacement, against the card held here; `gen` absent
  *                                        → the current generation (this object is its authority)
- *   POST /language { handle, gen?, tag, kind: put | delete | get, … }
+ *   POST /language { handle, gen?, tag?, kind: put | delete | get | republish, … }
  *                                        tile#304: a language file's write, removal or read, in the same
- *                                        queue; the record `card:<gen>` then also carries `languages`,
- *                                        `langSeq` and `owed` (see the language section below)
+ *                                        queue (r3: `get` without a tag is the main GET's snapshot, and
+ *                                        `republish` puts the main key again with the language map); the
+ *                                        map is its own key `languages:<gen>` (see the language section)
  * An empty object is generation 0: `gen:` keys exist only since this PR, which ships this class, so no
  * handle was ever rotated anywhere else. Its lifetime state never comes from KV.
  */
