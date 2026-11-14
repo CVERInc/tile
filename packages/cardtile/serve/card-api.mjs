@@ -435,7 +435,10 @@ function enqueueWrite(object, gen, step) {
   return turn;
 }
 function inWriteTurn(object, gen, step) {
-  return enqueueWrite(object, gen, step).then(({ status, body }) => Response.json(body, { status }),
+  // a step answers `body` (JSON), or `raw` markdown (tile#304 r3: a language file's /full, assembled here)
+  return enqueueWrite(object, gen, step).then(({ status, body, raw }) => (raw != null
+    ? new Response(raw, { status, headers: { 'Content-Type': 'text/markdown; charset=utf-8' } })
+    : Response.json(body, { status })),
     () => Response.json({ error: 'store_failed', why: 'The card store failed during this write. Read the card again before retrying.' }, { status: 500 }));
 }
 /** a failed write-through is retried by the object's alarm (the runtime calls `alarm()`), and sooner by
@@ -1500,20 +1503,45 @@ export class CardLifetime {
     return { status: 200, body: { handle, republished: true, languages: Object.keys((await this.langMap(gen)).languages), ...(cache === 'pending' ? { cache } : {}) } };
   }
   /**
-   * GET of a language file (r2: the API reads the object, the authority, never KV — KV may still hold
-   * a body no map names). Reads only: no adoption, no flush, no write. A generation whose main file
-   * this object does not hold has no language file.
+   * 🔴 tile#304 r3 (review r2 #3): every API read that combines the main file and a language file —
+   * GET …/lang/<tag> and its manifest, …/lang/<tag>/full, and the main GET of a Card with `locales:`
+   * (its `languages` and its manifest's `referenced`) — is answered HERE, from ONE snapshot of what
+   * the object holds, in its write queue: never the main file from KV with a language file from here.
+   * (r2 read the main file from KV, which a pending write-through can leave behind the object.) The
+   * save's orphans are counted in saveCard, on the same held state. Reads only: no adoption, no flush,
+   * no write. A generation whose main file this object does not hold (never written through it) has
+   * no language file: `{ held: false }`, and the Worker answers from KV (readLanguage, the main GET).
+   *   tag absent  the main GET's answer (mainAnswer)
+   *   tag         that file: the refusals (languageRefusal), cards_language_missing, the file with the
+   *               main file's manifest, or with `full` the complete file (`raw`)
    */
-  async languageRead({ handle, gen, tag }) {
+  async languageRead({ handle, gen, tag, full }) {
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
     const record = await this.storage.get(cardMetaKey(gen));
-    const map = record && record.from !== 'unknown' ? await this.storage.get(langRecordKey(gen)) : null;
-    const file = map ? await this.langOf(gen, tag, map) : null;
-    if (!file) return { status: 404, body: { error: 'cards_language_missing', lang: tag, why: `"${handle}" lists ${tag} but has no ${tag} file; visitors asking for it get the main file.` } };
-    // the asset ids any current file of the Card uses (the manifest's `referenced`, review r1 #1)
+    if (!record || record.from === 'unknown') return { status: 200, body: { held: false } };
     const main = await this.cardOf(handle, gen);
-    const used = await this.assetUse(gen, main && main.md != null ? main.md : null, map);
-    return { status: 200, body: { md: file.md, version: file.version, used: [...used.keys()] } };
+    const map = await this.langMap(gen);
+    if (tag == null) {
+      const { listed, files } = languagesOf(main.md);
+      const languages = {}, alsoUsed = new Set();
+      for (const t of files) {
+        const file = await this.langOf(gen, t, map);
+        languages[t] = file ? file.version : null;
+        // r2 (review r1 #1): an asset only a language file uses is `referenced` too
+        if (file) for (const id of referencedAssets(thinCard(file.md))) alsoUsed.add(id);
+      }
+      return { status: 200, body: mainAnswer(handle, main.md, main.version, listed, languages, alsoUsed) };
+    }
+    const refused = languageRefusal(tag, main.md);
+    if (refused) return { status: 404, body: refused };
+    const file = await this.langOf(gen, tag, map);
+    if (!file) return { status: 404, body: languageMissing(handle, tag) };
+    // the file with the main file's assets lane: what `/full` hands over, and what the manifest is read
+    // against. r2: an asset is `referenced` when ANY current file of the Card refers to it
+    const withAssets = serializeCard({ ...parseCard(file.md), assets: parseCard(main.md).assets });
+    if (full) return { status: 200, raw: withAssets };
+    const used = await this.assetUse(gen, main.md, map);
+    return { status: 200, body: { handle, lang: tag, version: file.version, markdown: thinCard(file.md), assets: assetManifest(withAssets, new Set(used.keys())), total_bytes: file.md.length } };
   }
   /**
    * which current files of the Card refer to each asset id: id → ['main', <tag>…] (main first, then
@@ -1667,9 +1695,10 @@ function cardWriteOk(op, b) {
   if (!VALID_HANDLE.test(String(b.handle)) || !(b.gen == null || str(b.gen))) return false;
   if (op === '/language') {
     if (b.kind === 'republish') return b.tag == null; // the whole map, never one tag (tile#304 r3)
+    if (b.kind === 'get' && b.tag == null) return b.full == null; // the main GET's snapshot (r3)
     // the tag as the Worker normalised it, and nothing else: it becomes a storage slot and a KV key
     if (!(str(b.tag) && normaliseTag(b.tag) === b.tag)) return false;
-    if (b.kind === 'get') return true;
+    if (b.kind === 'get') return b.full == null || typeof b.full === 'boolean';
     if (b.kind === 'delete') return b.ifVersion == null || (str(b.ifVersion) && b.ifVersion.trim().length > 0);
     return b.kind === 'put' && str(b.gen) && str(b.markdown) && (b.base == null || typeof b.base === 'string') && (b.check == null || typeof b.check === 'boolean');
   }
@@ -1695,6 +1724,10 @@ async function cardWrite(env, handle, op, body, extra = {}) {
   } catch (e) {
     if (e && /is not bound/.test(e.message)) throw e;
     return json({ error: 'write_failed', why: `"${handle}" was not written: its write queue did not answer. Read the card again before retrying.`, ...extra }, 503);
+  }
+  // tile#304 r3: a language file's /full, assembled in the object, is handed over as it is
+  if (res.ok && /^text\/markdown/.test(res.headers.get('content-type') || '')) {
+    return new Response(res.body, { headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' } });
   }
   const answer = await res.json().catch(() => ({ error: 'write_failed', why: 'The write queue answered without a body. Read the card again before retrying.' }));
   // `extra` (the fenced route's `fence`) marks every refusal, the queue's own included; a success
@@ -1861,6 +1894,29 @@ const readJson = async (request) => {
 };
 
 /**
+ * get_cards' answer for a main file. tile#304: a main file that lists languages says which exist —
+ * `locales` as listed, and `languages`: each tag that may have a file → that file's version, or null
+ * when it has none; an asset only a language file uses is `referenced` (`alsoUsed`). A main file that
+ * lists none answers exactly as before, with no new field.
+ */
+const mainAnswer = (handle, md, version, listed, languages, alsoUsed) => ({
+  handle,
+  version,
+  markdown: thinCard(md),
+  assets: assetManifest(md, alsoUsed.size ? alsoUsed : null),
+  total_bytes: md.length,
+  ...(listed.length ? { locales: listed, languages } : {}),
+});
+/** tile#304: why `tag` of the Card whose main file is `mainMd` is not a language file to read (404), or null */
+function languageRefusal(tag, mainMd) {
+  const { listed, main, files } = languagesOf(mainMd);
+  if (tag === main) return { error: 'cards_language_is_main', lang: tag, why: `${tag} is the main file's own language: read the main file.` };
+  if (!files.includes(tag)) return { error: 'cards_language_not_listed', lang: tag, locales: listed, why: `The main file does not list ${tag} in \`locales:\`.` };
+  return null;
+}
+const languageMissing = (handle, tag) => ({ error: 'cards_language_missing', lang: tag, why: `"${handle}" lists ${tag} but has no ${tag} file; visitors asking for it get the main file.` });
+
+/**
  * get: handle → { md, version, gen } | null. Null is "no such card", never an error — and a body from
  * a deleted lifetime is no such card (see genKey).
  */
@@ -1871,30 +1927,26 @@ async function readCard(store, handle) {
 }
 
 /**
- * tile#304: GET …/<handle>/lang/<tag>[/full]. The main file is read from KV like get_cards (the pages'
- * store); the language file itself (r2) from the handle's object, the authority — KV may still hold a
- * body that no record names (a removal whose deletion has not settled), and the API must never hand
- * that back. Four answers that are not the file, each its own code:
+ * tile#304: GET …/<handle>/lang/<tag>[/full]. r3 (review r2 #3): the whole answer is the handle's
+ * object's, from one snapshot of the main file and the language file it holds (CardLifetime
+ * languageRead) — KV may hold a main file behind the object's (a pending write-through) or a language
+ * body no map names (a removal whose deletion has not settled), and the API must never combine either
+ * with what the object holds. Four answers that are not the file, each its own code:
  *   cards_language_no_card    no main file (404)
  *   cards_language_is_main    the tag is the main file's own `lang:`: read the main file (404)
  *   cards_language_not_listed the main file does not list it (404)
  *   cards_language_missing    listed, and the object holds no file (404): visitors asking for it get the main file
+ * Only when the object holds no main file for the generation (a Card never written through it) is the
+ * main file read from KV, for the first three; such a Card has no language file.
  */
 async function readLanguage(env, store, handle, tag, full) {
+  const held = await cardWrite(env, handle, 'language', { kind: 'get', tag, ...(full ? { full: true } : {}) });
+  if (held.status !== 200 || !/^application\/json/.test(held.headers.get('content-type') || '')) return held;
+  const answer = await held.json();
+  if (answer.held !== false) return json(answer);
   const { md: main } = await liveCard(store, handle);
   if (main == null) return json({ error: 'cards_language_no_card', why: `No card at "${handle}".` }, 404);
-  const { listed, main: mainLang, files } = languagesOf(main);
-  if (tag === mainLang) return json({ error: 'cards_language_is_main', lang: tag, why: `${tag} is the main file's own language: read the main file.` }, 404);
-  if (!files.includes(tag)) return json({ error: 'cards_language_not_listed', lang: tag, locales: listed, why: `The main file does not list ${tag} in \`locales:\`.` }, 404);
-  const held = await cardWrite(env, handle, 'language', { kind: 'get', tag });
-  if (held.status !== 200) return held;
-  const { md, used } = await held.json();
-  // the file with the main file's assets lane: what `/full` hands over, and what the manifest is read
-  // against. r2: an asset is `referenced` when ANY current file of the Card refers to it (the object's
-  // `used`), as on the main GET: that is what decides whether it may be deleted
-  const withAssets = serializeCard({ ...parseCard(md), assets: parseCard(main).assets });
-  if (full) return new Response(withAssets, { headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' } });
-  return json({ handle, lang: tag, version: await cardVersion(md), markdown: thinCard(md), assets: assetManifest(withAssets, new Set(Array.isArray(used) ? used : [])), total_bytes: md.length });
+  return json(languageRefusal(tag, main) || languageMissing(handle, tag), 404);
 }
 
 // 🩸 `writeCard` (write + read back + assert, carried over from reef's card-store.js) is gone since
@@ -2386,26 +2438,18 @@ export async function handleApi(request, env, url) {
     if (method === 'GET') {
       const row = await readCard(store, handle);
       if (!row) return json({ error: `No card at "${handle}".` }, 404);
-      // tile#304: a main file that lists languages says which exist — `locales` as listed, and
-      // `languages`: each tag that may have a file → that file's version, or null when it has none.
-      // r2: "has one" is what the main file's own record names (the same read), never a bare key.
-      // A main file that lists none answers exactly as before, with no new field.
+      // A main file that lists no languages answers exactly as before, from this read alone.
       const { listed, files } = languagesOf(row.md);
-      const languages = {}, alsoUsed = new Set();
-      for (const t of files) {
-        const md = row.languages[t] ? await store.get(languageKey(handle, row.gen, t, row.languages[t])) : null;
-        languages[t] = md == null ? null : await cardVersion(md);
-        // r2 (review r1 #1): an asset only a language file uses is `referenced` too
-        if (md != null) for (const id of referencedAssets(thinCard(md))) alsoUsed.add(id);
-      }
-      return json({
-        handle,
-        version: row.version,
-        markdown: thinCard(row.md),
-        assets: assetManifest(row.md, alsoUsed.size ? alsoUsed : null),
-        total_bytes: row.md.length,
-        ...(listed.length ? { locales: listed, languages } : {}),
-      });
+      if (!listed.length) return json(mainAnswer(handle, row.md, row.version, listed, {}, new Set()));
+      // 🔴 tile#304 r3 (review r2 #3): one that lists some combines the main file with its language
+      // files (`languages`, and the manifest's `referenced`), so the whole answer is the object's, from
+      // one snapshot (CardLifetime languageRead) — never this KV read beside the object's files
+      const held = await cardWrite(env, handle, 'language', { kind: 'get' });
+      if (held.status !== 200) return held;
+      const answer = await held.json();
+      if (answer.held !== false) return json(answer);
+      // the object holds no main file for this generation (never written through it): no language file
+      return json(mainAnswer(handle, row.md, row.version, listed, Object.fromEntries(files.map((t) => [t, null])), new Set()));
     }
 
     // ── save_cards ────────────────────────────────────────────────────────────────────────────────
