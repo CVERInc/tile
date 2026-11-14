@@ -747,6 +747,28 @@ test('sandbox: locale comes from Accept-Language, one of the nine console locale
   }
 });
 
+// tile#298 r2 — the editor routes share the matcher, so they honour quality weights too.
+const Q_EDITOR_CASES = [
+  // [Accept-Language, sandbox <html lang>, host-mode locale]
+  ['ja;q=0,en;q=1', 'lang="en-US"', 'en'],
+  ['en;q=0.1,ja;q=1', 'lang="ja-JP"', 'ja'],
+  ['ja;q=0.2,zh-TW;q=0.9', 'lang="zh-TW"', 'zh'],
+];
+for (const [al, wantLang, wantLocale] of Q_EDITOR_CASES) {
+  test(`sandbox + host mode: Accept-Language ${JSON.stringify(al)} is read by quality → ${wantLocale}`, async () => {
+    const sandbox = await (await worker.fetch(
+      new Request('https://card.feelreef.com/try/edit', { headers: { 'accept-language': al } }), NEVER_TOUCHED,
+    )).text();
+    assert.ok(sandbox.includes(wantLang), `/try/edit ${al}: expected ${wantLang}`);
+    const { env } = untouchableEnv();
+    const host = await (await worker.fetch(new Request(
+      `https://card.feelreef.com/edit?host=${encodeURIComponent('https://feelreef.com')}`, { headers: { 'accept-language': al } },
+    ), env)).text();
+    const opts = JSON.parse(/window\.__CARDTILE_W3_OPTS__ = (\{.*?\});/.exec(host)[1]);
+    assert.equal(opts.locale, wantLocale, `/edit ${al}`);
+  });
+}
+
 test('sandbox: `?locale=` overrides Accept-Language, for manual testing/linking', async () => {
   const res = await worker.fetch(
     new Request('https://card.feelreef.com/try/edit?locale=ko', { headers: { 'accept-language': 'en-US' } }),

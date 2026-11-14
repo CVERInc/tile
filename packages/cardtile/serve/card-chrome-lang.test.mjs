@@ -61,6 +61,11 @@ const CASES = [
   ['Accept-Language: first one we speak wins', '', 'xx-YY,zh-TW;q=0.9,ja;q=0.8', '疊'],
   ['Accept-Language zh-CN → Simplified', '', 'zh-CN', '叠'],
   ['Accept-Language nothing we speak → English', '', 'xx-YY', 'Stack'],
+  // tile#298 r2 — the reviewer's three requests: quality weights, not written order
+  ['Accept-Language: q=0 excludes a language', '', 'ja;q=0,en;q=1', 'Stack'],
+  ['Accept-Language: a later, higher q wins', '', 'en;q=0.1,ja;q=1', '重ね'],
+  ['Accept-Language: a later, higher q wins (zh-TW)', '', 'ja;q=0.2,zh-TW;q=0.9', '疊'],
+  ['Accept-Language: the only language excluded → English', '', 'ja;q=0', 'Stack'],
   ['?lang= beats Accept-Language', '?lang=ja', 'zh-TW', '重ね'],
   ['?lang= takes a full tag', '?lang=zh-TW', 'ja', '疊'],
   ['?locale= still works', '?locale=ja', undefined, '重ね'],
