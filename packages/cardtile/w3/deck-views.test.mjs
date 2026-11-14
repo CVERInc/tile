@@ -876,6 +876,7 @@ const WAYS_OFF = [
   { name: 'a jump (__deckJump) to C', views: ['list', 'stack'], go: ({ p }) => p.win.__deckJump(2) },
   { name: 'the dice\'s riffle (__deckRiffle) to C', views: ['list', 'stack'], go: ({ p }) => { p.win.__deckRiffle(2); p.win.tick(300); }   /* the riffle starts two cards back and walks: by now it has landed */ },
   { name: 'the arrow key (a walk)', views: ['list', 'stack'], go: ({ p }) => { p.win.dispatchEvent(ev(p, 'keydown', { key: 'ArrowRight' })); p.win.tick(40); } },
+  { name: 'the arrow key the other way (a walk back, onto A)', views: ['list', 'stack'], go: ({ p }) => { p.win.dispatchEvent(ev(p, 'keydown', { key: 'ArrowLeft' })); p.win.tick(40); } },
   { name: 'a tap on the next card (a walk)', views: ['stack'], go: ({ p }) => { p.cells[2].parentNode.dispatchEvent(ev(p, 'click')); p.win.tick(40); } },
   { name: 'a sideways wheel swipe', views: ['list', 'stack'], go: ({ p, ph }) => { p.root.dispatchEvent(ev(p, 'wheel', { deltaX: ph, deltaY: 0, deltaMode: 0, timeStamp: 5000 })); p.win.tick(40); } },
   { name: 'a drag of the top card', views: ['stack'], go: ({ p }) => { const t = p.cells[1].parentNode;
@@ -915,6 +916,17 @@ for (const way of WAYS_OFF) for (const view of way.views) for (const ending of O
     tap(p, p.cells[1]); p.win.tick(1000);
     assert.ok(b.classList.contains('is-open') && flagged(p).length === 1, 'CONTROL: asked for again, B turns over');
     same(s.body.closest('.deck-card'), b, 'CONTROL: asked for again, B holds the back');
+  });
+}
+// the riffle starts some cards BEFORE its target and walks up to it: one that lands on B has left B on the way, so B does not turn over
+for (const view of ['list', 'stack']) for (const ending of Object.keys(ENDINGS)) {
+  test(`${view}: B waits for A's turn and the dice's riffle lands on B itself (${ending}) — it left B to get there, nothing turns over`, () => {
+    const s = waitingOnB(view), { p, b } = s;
+    p.win.__deckRiffle(1); p.win.tick(300);
+    assert.ok(p.win.__deckCur() === 1 && b.classList.contains('is-top'), 'CONTROL: the riffle landed on B');
+    same(s.body.closest('.deck-card'), s.a, 'CONTROL: A\'s turn is not over yet');
+    ENDINGS[ending](s);
+    noneOpen(s, 'A\'s turn ended'); p.win.tick(3000); noneOpen(s, 'three seconds later');
   });
 }
 // the ways that are not a change of card: they put the waiting card back (close), which takes the request with it
