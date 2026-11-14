@@ -3,10 +3,11 @@
 // the shared chrome (Done, Undo, the picture picker…) is sandbox-i18n.mjs's CHROME_STRINGS — this
 // table only holds what those two did not already say.
 //
-// Keyed by the sandbox's nine locale keys. `en` and `zh` (Traditional) are complete. For the other
-// seven, a string is given only where a sibling table already says the same thing in that language
+// Keyed by the sandbox's nine locale keys. `en`, `zh` (Traditional) and `ja` are complete. For the other
+// six, a string is given only where a sibling table already says the same thing in that language
 // (SAME_AS_CHROME below, and the host status words, which w2's board table carried in all nine);
-// everything else falls back to English key by key, and EDIT3_MISSING lists exactly which.
+// everything else falls back to English key by key, and EDIT3_MISSING lists exactly which
+// (w3/locale-coverage.test.mjs fails on any such cell its AWAITING_TRANSLATION list does not name).
 //
 // Placeholders are `{name}`, filled by fmt(). Every value is a plain string, so the banned-word scan
 // (w3/words.test.mjs) sees all of it.
@@ -128,6 +129,64 @@ const ZH = {
   more: '更多', help: '這是什麼？',
 };
 
+// Japanese, written out like ZH. Ten keys are not here because the shared chrome (SAME_AS_CHROME) and
+// w2's host words (HOST) already say them in ja — the same button, the same word. Terms follow the
+// sandbox's ja tables: タイル for a tile, 表面 / 裏面 for its two faces, Cards as the product's name.
+// View names: 重ね / 縦並び / 一覧 (see w3/deck-i18n.mjs for why); the editor and the deck say the same.
+const JA = {
+  untitled: '無題', options: 'Cards の設定', settingsBack: '設定', viewsAria: '表示', wallFrame: '一覧', editBtn: '編集', raw: 'ファイルの中身',
+  docTitle: '{t} · Cards を編集', pageTitle: 'Cards を編集',
+  bcValue: '名前＋QR コード',
+  dfSays: '自分の裏面がないタイルは、裏返すとすべてこれになります。', replaceBack: '差し替える…', toBc: 'デフォルトに戻す', toBcDone: 'デフォルトの裏面に戻しました。',
+  titleL: 'タイトル', titleFromProfile: 'プロフィールにもこの名前が表示されます。', rawSays: '保存されているファイルそのままの全体です。', openRaw: 'ファイルの中身を編集', bcL: 'デフォルトの裏面',
+  previewFrame: '訪問者に見える姿',
+  pickHint: 'ひとつ選んで始めましょう。あとから変えられます。',
+  backInRaw: 'この裏面はファイルの中身で編集', editTile: 'このタイルを編集', addBetween: '{a} 枚目と {b} 枚目の間にタイルを追加',
+  front: '表面', back: '裏面', pairOn: '表と裏としてつなぐ', pairOff: 'つなぎを外す',
+  text: 'テキスト', deleted: 'タイルを削除しました',
+  backdrop: '背景', backdropHint: 'Cards の後ろに置く画像です。', bdNone: 'なし', bdSet: '画像',
+  bdPick: '画像を選ぶ…', bdUrl: '画像の URL', bdRemove: '背景を外す',
+  dim: '背景の暗さ', dim0: 'なし', dim25: '弱', dim45: '中', dim65: '強', dimHint: '画像の上でも文字が読みやすくなります。', auto: '自動',
+  viewStack: '重ね', viewList: '縦並び', viewWall: '一覧',
+  viewSaysStack: '1 枚ずつめくる', viewSaysList: '全部をスクロール', viewSaysWall: 'ページ全体を見る',
+  viewsLabel: '訪問者が選べる表示', opensAs: '最初の表示', full: '全幅', width: '幅',
+  savedLive: '保存しました。公開中です。',
+  seek: 'アシスタントに頼む', palPh: 'アシスタントにしてほしいことを書く…',
+  palSays: 'まだつながっていません。つながると、変更は下書きに入り、「保存」を押すまで公開されません。',
+  palEcho: '「{q}」と頼まれました。何も変更していません。',
+  accentL: 'メインの色', accentSays: '色をひとつ選ぶと、ほかの配色はそこから決まります。', accentReset: 'リセット', accentCustom: 'カスタムの色',
+  themeL: 'ライトかダーク', themeAutoSays: '「自動」は訪問者の端末の設定に合わせます。', themeAuto: '自動', themeLight: 'ライト', themeDark: 'ダーク',
+  backupL: 'バックアップ', backupSays: 'Cards を 1 つのファイルとしてダウンロードします。', download: 'ファイルとしてダウンロード', replaceFile: 'ファイルですべて置き換える…',
+  replaceSays: '置き換わるのは未保存の下書きです。「保存」を押すまでは確定しません。', replaceAsk: 'ここにある内容は、すべてファイルの内容に置き換わります。', replaceGo: 'ファイルを選んで置き換える',
+  resetAsk: 'このブラウザの Cards を消去しますか？', resetSays: 'このブラウザの Cards を消去して、白紙からやり直します。',
+  dangerSays: '置き換えで変わるのは未保存の下書きだけです。やり直すと、このブラウザの Cards が消去されます。',
+  replaced: 'ファイルの内容に置き換えました：{a} → {b}。', badFile: '{n} 行目に直すべき誤りがあります。何も変更していません。',
+  secName: '名前と URL', secLook: '見た目', secViewsBack: '表示と裏面', secFound: '見つけてもらう', secMore: 'その他',
+  viewsL: '表示', viewsKeepOne: '少なくとも 1 つは残してください。', listSep: '、',
+  handleL: 'URL', handleSays: 'デフォルトの裏面の QR コードは、この URL を開きます。', change: '変更',
+  newHandle: '新しい URL', handleWarn: '変更した瞬間に reef.cards/{o} は使えなくなり、誰でも取得できるようになります。この URL を使ったリンク、QR コード、印刷物は別の場所につながります。',
+  typeOld: '手放すには {o} と入力', doChange: 'URL を変更', handleDone: 'Cards は reef.cards/{h} に移りました。',
+  hShape: '英小文字・数字・ハイフンで 1〜39 文字。先頭は英字か数字です。', hReserved: 'その URL は予約されています。',
+  handleHere: 'URL はここではなく、Cards の一覧で変更します。',
+  domainL: '独自ドメイン', domainSays: '訪問者はあなたのドメインで Cards を開けるようになります。', connect: 'ドメインをつなぐ', domainNone: '未接続',
+  headerL: 'ヘッダー', headerCentre: '中央', headerLeft: 'アイコンを左に',
+  iconsL: 'アイコン', iconsColour: 'カラー', iconsMono: 'グレー',
+  poolL: 'カードプールに入れる',
+  poolOn: 'reef.cards で引いた人にあなたの Cards が出ることがあり、feelreef のトップページにも表示されます。その代わり、最後のタイルとフッターに reef.cards へのリンクが入ります。',
+  poolOff: 'URL を知っている人だけが Cards を見られます。reef.cards へのリンクは入りません。',
+  transferL: '譲渡',
+  notYet: 'まだ使えません',
+  colon: '：',
+  hostLoadFailed: 'このページで Cards を開けませんでした。再読み込みしてもう一度お試しください。', reload: '再読み込み',
+  proposed: '提案された変更が下書きに入っています。「保存」を押すまで公開されません。',
+  leaveTitle: '保存していない変更があります', leaveKeep: '編集を続ける', leaveDiscard: '破棄する',
+  signIn: 'ログイン', signInSays: 'ログインすると「保存」で公開され、どの端末からでも開けます。ここにある内容もそのまま引き継がれます。',
+  sbxStatus: 'まだログインしていないので、今はこのブラウザにだけ保存されています。',
+  required: '必須', needs: '「{f}」を入力すると完了できます',
+  socialNet: 'サービス', socialLink: 'リンクまたは @ユーザー名', socialAdd: 'もうひとつ追加', socialRemove: '削除', socialWeb: 'ウェブサイト', socialEmail: 'メール',
+  more: 'その他', help: 'これは何？',
+};
+
 // Keys whose words the shared chrome table already has in every locale — the same button, the same
 // meaning. Used for the seven locales this table does not write out (en and zh keep their own).
 const SAME_AS_CHROME = { undo: 'undo', close: 'modalCloseAria', done: 'modalSave', deleteTile: 'modalDelete', addTile: 'addCellHeader', cancel: 'pubCancel', save: 'pubSave' };
@@ -143,13 +202,20 @@ const HOST = {
   pt: { hostWaiting: 'Aguardando a página…', hostSaving: 'Salvando…', hostFailed: 'Falha ao salvar' },
 };
 
+// The words a translator supplied for the six locales not written out above, one object per locale,
+// keys in EN's order. Strict JSON between the two marker lines, so the translation step can read the
+// block and rewrite it whole. The derived words (SAME_AS_CHROME, HOST) win over it: same button, same word.
+// <translated>
+const TRANSLATED = {};
+// </translated>
+
 /** each locale's OWN strings (no fallback applied) — what the tests and the missing-key list read */
 export const EDIT3_STRINGS = Object.fromEntries(LOCALE_KEYS.map((k) => {
   if (k === 'en') return [k, EN];
   if (k === 'zh') return [k, ZH];
   const chrome = CHROME_STRINGS[k] || {};
   const derived = Object.fromEntries(Object.entries(SAME_AS_CHROME).filter(([, c]) => chrome[c]).map(([key, c]) => [key, chrome[c]]));
-  return [k, { ...derived, ...(HOST[k] || {}) }];
+  return [k, { ...(TRANSLATED[k] || {}), ...derived, ...(HOST[k] || {}), ...(k === 'ja' ? JA : {}) }];
 }));
 
 export const EDIT3_KEYS = Object.keys(EN);
