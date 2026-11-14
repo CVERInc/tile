@@ -43,7 +43,7 @@ test('the main record names each live language file, in the same KV put as the m
   const meta = await mainMetadata(env);
   assert.deepEqual(Object.keys(meta.languages), ['ja-JP']);
   const rev = meta.languages['ja-JP'];
-  assert.match(rev, /^[1-9][0-9]*$/);
+  assert.match(rev, /^[0-9a-f]{12}$/);
   const { gen } = await liveCard(env.CARDS, 't');
   assert.deepEqual(langKeys(env), [`card:t:${gen}:ja-JP:${rev}`], 'one versioned key, the one the record names');
   assert.match(env.CARDS._m.get(`card:t:${gen}:ja-JP:${rev}`), /イラストレーター/);
@@ -71,9 +71,9 @@ test('🔴 KV metadata stays under its 1024-byte ceiling at the most a Card can 
   }
   const meta = await mainMetadata(env);
   assert.equal(Object.keys(meta.languages).length, 11);
+  // every rev is 12 hex digits, so this is the most the metadata can ever be
   const bytes = Buffer.byteLength(JSON.stringify(meta));
-  // the rev is a decimal counter: even at 16 digits each, 11 entries add (16 - 1) × 11 bytes to this
-  assert.ok(bytes + 15 * 11 <= 1024, `${bytes} bytes now`);
+  assert.ok(bytes <= 1024, `${bytes} bytes`);
 });
 
 // ── row 1: the reviewer's case ───────────────────────────────────────────────────────────────────

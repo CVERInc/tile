@@ -87,16 +87,19 @@ export const cardKey = (handle, gen) => `card:${handle}:${gen}`;
  * generation is `0` or 24 hex digits, so this key is never a main file's.
  *
  * 🔴 r2 (review r1 #2): WHICH language files a visitor may be served is not a KV fact about these keys.
- * It is the main file's own KV record: its metadata `{ languages: { <tag>: <rev> } }` (LANGUAGE_REVS),
- * written by CardLifetime in the same put as the main body. A rev is issued once per generation and a
- * rev key is written once, so every reader reads exactly the key the record it read names, and a key
+ * It is the main file's own KV record: its metadata `{ languages: { <tag>: <rev> } }` (languageRevsOf),
+ * written by CardLifetime in the same put as the main body. A rev is 48 random bits (newRev), never one
+ * the record names or owes, so a rev key is written once — even after a write by an older Worker that
+ * dropped the record's language fields, when a counter would start again over keys still in KV. Every
+ * reader reads exactly the key the record it read names, and a key
  * the record does not name (a removed file whose KV deletion has not settled, a superseded rev, a
  * round-1 key without a rev) is unreachable by construction. Its deletion can settle whenever.
  * Round-1 keys (`card:<handle>:<gen>:<tag>`) are not read: none was ever written outside a branch.
  */
 export const languageKey = (handle, gen, tag, rev) => `card:${handle}:${gen}:${tag}:${rev}`;
-/** a rev as the object issues it: a decimal counter, per generation, from 1 */
-const VALID_REV = /^[1-9][0-9]{0,15}$/;
+/** a rev as the object issues it (newRev): 12 hex digits */
+const VALID_REV = /^[0-9a-f]{12}$/;
+const newRev = () => [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, '0')).join('');
 /**
  * the live language files a main record's KV metadata names → { tag: rev }, every entry checked (a tag
  * in its normalised spelling, a rev the object could have issued); anything else names nothing.
@@ -1212,7 +1215,8 @@ export class CardLifetime {
   // r2 (review r1 #2): the main file's record `card:<gen>` is the ONE place that says which language
   // files exist. While there is something to say it carries (langState / withLangState):
   //   languages { <tag>: <rev> }   the live language files — the only truth there is about them
-  //   langSeq   <n>                the last rev issued in this generation (a rev is never issued twice)
+  //   langSeq   <n>                how many language writes this generation has had (the order a PUT's
+  //                                `commit.serial` answers; a rev itself is random, see languageKey)
   //   owed      [[<tag>, <rev>]…]  KV keys of files no longer live, whose deletion KV still owes
   // and its KV copy carries `languages` as the main key's metadata, in the same put as the main body
   // (writeThrough). Each live file is a record `card:<gen>@<tag>@<rev>` and its chunks (langSlot): a
@@ -1369,9 +1373,13 @@ export class CardLifetime {
     if (bytes > KV_MAX_BYTES) return { status: 413, body: { error: `That would make the ${tag} file ${bytes} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
     const wouldChange = !cur || md !== cur.md;
     if (check) return { status: 200, body: { checked: true, version: cur ? cur.version : null, wouldChange } };
-    // the next rev of this generation, in a fresh slot; the record names it only once it is whole here
+    // a new rev, in a fresh slot; the record names it only once it is whole here. Never one the record
+    // names or owes (48 random bits make that a formality; the check makes it a rule)
     const version = await cardVersion(md);
-    const seq = (main.meta.langSeq || 0) + 1, rev = String(seq);
+    const seq = (main.meta.langSeq || 0) + 1;
+    const taken = new Set([...Object.values(main.meta.languages || {}), ...(main.meta.owed || []).map(([, r]) => r)]);
+    let rev = newRev();
+    while (taken.has(rev)) rev = newRev();
     await this.keepCard(handle, gen, md, version, 'pending', null, { from: 'object', tag, rev }, langSlot(gen, tag, rev));
     await this.nameLanguages(handle, gen, { [tag]: rev }, seq);
     await this.tidyLanguages(gen);
