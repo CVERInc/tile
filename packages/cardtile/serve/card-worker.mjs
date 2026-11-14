@@ -5,7 +5,8 @@
 // card_render.py that bakes one card's HTML per request on Heroku.
 //
 //   card.feelreef.com/<handle>   → handle = first path segment (canonical)
-//   reef.cards/<handle>          → the same; reef.cards/ is the root card (reef#2725, CARD_CANONICAL_HOST)
+//   reef.cards/<handle>          → the same; reef.cards/ is the root card (reef#2725, CARD_CANONICAL_HOST;
+//                                  before it, dark or a noindex mirror of the old host — cardsHostStage)
 //   <creator's own domain>/      → handle via the store's vanity: binding (one domain = one card)
 //   reef.cards/report            → the report door, reef.cards only (reef#2758, card-report.mjs)
 //   /_coral/<coral>-<ver>.js     → a coral client (served here so the page can <script src> it)
@@ -180,13 +181,37 @@ export const ROOT_HANDLE = 'feelreef';
 const APEX_HOST = 'feelreef.com';
 
 /**
- * The switch: `CARD_CANONICAL_HOST`. Exactly `reef.cards` moves the Cards there — the old addresses
- * 301 to it and the root card becomes indexable. Unset, or ANY other value, is today's host and
- * today's behaviour: a typo must never redirect every Card to a host we do not serve.
+ * cardsHostStage: env → 'dark' | 'open' | 'canonical'. Pure, and the ONLY reader of the two settings:
+ * everything else that depends on them (canonicalHost, movedTo, the robots rule, the open stage's
+ * mirror) asks this function.
+ *
+ *   'dark'       today's default. reef.cards answers nothing; card.feelreef.com is the Cards' address.
+ *   'open'       tile#299. `CARDS_HOST_OPEN = "reef.cards"` and the cutover switch off: reef.cards
+ *                answers a visitor's reads exactly as card.feelreef.com does (openStageMirrors), with
+ *                `X-Robots-Tag: noindex, nofollow`, so the two hosts can be compared handle by handle.
+ *                Nothing else changes: no 301, every address the Worker emits is still the old one,
+ *                and the old host answers byte for byte as in 'dark'.
+ *   'canonical'  reef#2725, the cutover. `CARD_CANONICAL_HOST = "reef.cards"`: the old addresses 301
+ *                to reef.cards. The cutover switch alone means this, whatever CARDS_HOST_OPEN says.
+ *
+ * Each setting is read by one rule: exactly `reef.cards` (case and surrounding space aside) is on;
+ * unset or ANY other value is off. A typo must never redirect every Card to a host we do not serve,
+ * nor open a host nobody asked to open — so a typo in either setting falls back toward 'dark'.
  */
-export const canonicalHost = (env) =>
-  String(env?.CARD_CANONICAL_HOST ?? '').trim().toLowerCase() === CARDS_HOST ? CARDS_HOST : CANON_HOST;
-const movedToCardsHost = (env) => canonicalHost(env) === CARDS_HOST;
+export const CARDS_HOST_STAGES = Object.freeze(['dark', 'open', 'canonical']);
+const namesCardsHost = (v) => String(v ?? '').trim().toLowerCase() === CARDS_HOST;
+export function cardsHostStage(env) {
+  if (namesCardsHost(env?.CARD_CANONICAL_HOST)) return 'canonical';
+  if (namesCardsHost(env?.CARDS_HOST_OPEN)) return 'open';
+  return 'dark';
+}
+
+/**
+ * The cutover switch's host: reef.cards in the 'canonical' stage only, card.feelreef.com otherwise —
+ * including 'open', where the new host serves but is not yet anyone's address.
+ */
+export const canonicalHost = (env) => (cardsHostStage(env) === 'canonical' ? CARDS_HOST : CANON_HOST);
+const movedToCardsHost = (env) => cardsHostStage(env) === 'canonical';
 
 // `feelreef.com/<handle>`: one segment in the handle grammar (card-api VALID_HANDLE, any case —
 // the path is preserved as written). Anything else on the apex is the marketing site's, never a Card.
@@ -514,7 +539,9 @@ const isDemo = (handle) => /^demo-/.test(String(handle || ''));
 // user-content domain with its own reputation, and there the project's ruling on Cards applies as
 // written: a Card is searchable (2026-10-13 「Card 維持可以被搜尋到」); the ONLY content-based
 // exception is the blank template (2026-10-14 gatekeeper list: 「空白樣板卡 noindex」). Before the
-// move reef.cards keeps the old rule.
+// move reef.cards keeps the old rule — and is never asked about here: dark, it answers nothing, and
+// in the open stage (tile#299) its answer is the old host's, asked as the old host, with
+// `noindex, nofollow` set over whatever this returned (openStageAnswer).
 //
 // tile-lab#51 (product owner 2026-10-30): 「根頁那張 feelreef 自己的卡開索引；客戶的卡維持整主機
 // noindex」— the host-wide noindex was explicitly 「直到…搬去獨立 usercontent 網域那天」, and
@@ -742,6 +769,65 @@ async function reportedHandle(u, env) {
   return (await isBound(store, pointer, gen, host)) ? pointer : null;
 }
 
+// ── tile#299: the open stage on reef.cards ──────────────────────────────────────────────────────
+//
+// What reef.cards answers when CARDS_HOST_OPEN is on and the cutover is not (cardsHostStage 'open'):
+// a visitor's read of a Card, and the files that Card's page loads, answered BY THE OLD HOST — the
+// request is re-addressed to card.feelreef.com and run through this same router, so it is the same
+// store read and the same render by construction, not by a second code path kept in step with the
+// first. Every address that answer carries (canonical, og:url, the QR's data-url, the icon links, the
+// download link, a redirect's Location) is therefore the old one: a QR printed from a page seen on
+// reef.cards in this stage carries card.feelreef.com. The one thing added is the robots header.
+//
+// 🔴 An ALLOWLIST, so a route added to this router later is dark here until somebody decides
+// otherwise: a page that fails to load during the comparison is visible, a write door that quietly
+// opened on a host nobody was watching is not.
+//
+//   GET/HEAD only                      the stage is read-only for visitors
+//   /_deck/…, /_coral/… (versioned)    the deck and corals every Card page loads by a relative path
+//   /_icon/<domain>.ico, /_yt/<id>.jpg the relays a Card page loads by a relative path
+//   / and /<handle-shaped>[…]          the Card exits: page, thin and fat markdown, avatar, icons, the
+//                                      root card and its icon files — whatever card.feelreef.com
+//                                      answers for that path, its 404 included
+//
+// Dark here, each for a reason (the full table is card-open-stage.test.mjs):
+//   /_api…           the write API stays where it is; its answers echo the host they were asked on
+//   /report          a write door, and it is reef.cards' own page (it names reef.cards as home)
+//   security.txt     on reef.cards it would claim reef.cards as its Canonical (RFC 9116)
+//   /edit, /try/…    the editor, its files, the retired path and the park: not a Card, and the
+//                    cutover reaches /try/edit on reef.cards only through the old host's 301
+//   /_preview/…      handed out by the write API on the host it was asked on, which is the old one
+//   anything else    /robots.txt, /.well-known/…, any path whose first segment is not handle-shaped
+const OPEN_STAGE_ROBOTS = 'noindex, nofollow';
+const ICON_RELAY_RE = /^\/_icon\/([^/]+)\.ico$/;
+const YT_RELAY_RE = /^\/_yt\/([A-Za-z0-9_-]+)\.jpg$/;
+const CARD_SEGMENT_RE = /^[a-z0-9][a-z0-9-]{0,62}(\.md)?$/i;
+/** the first path segments that are this Worker's own routes on the old host, never a Card */
+const notCardSegment = (seg) => [HOST_EDIT_PATH, SANDBOX_PATH, REPORT_PATH].some((p) => p.split('/')[1] === seg.toLowerCase());
+
+/** openStageMirrors: (pathname, method) → does reef.cards answer this in the 'open' stage? Pure. */
+export function openStageMirrors(pathname, method) {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  const p = String(pathname || '/');
+  if (p === QR_PATH || p === DRAWER_PATH || p === DECK_JS_PATH || p === DECK_CSS_PATH) return true;
+  if (ICON_RELAY_RE.test(p) || YT_RELAY_RE.test(p)) return true;
+  if (p === '/') return true;
+  const seg = p.split('/')[1] || '';
+  if (iconKind('/' + seg) && p === '/' + seg) return true;          // the root card's icon files
+  return CARD_SEGMENT_RE.test(seg) && !notCardSegment(seg.replace(/\.md$/i, ''));
+}
+
+/** the old host's answer to the same request, plus the open stage's robots header */
+async function openStageAnswer(request, url, env, ctx) {
+  const at = new URL(url.href);
+  at.hostname = CANON_HOST;
+  // GET/HEAD only (openStageMirrors), so there is no body to carry
+  const res = await router.fetch(new Request(at.href, { method: request.method, headers: request.headers }), env, ctx);
+  const headers = new Headers(res.headers);
+  headers.set('X-Robots-Tag', OPEN_STAGE_ROBOTS);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 const router = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -749,8 +835,14 @@ const router = {
     // Cloudflare the two are the same; but X-Card-Handle is a promise about WHICH domain serves which
     // card, so its identity comes from one authority. (`hostname` is lowercase and port-free.)
     const reqHost = url.hostname;
-    // A route can be installed before cutover. Until the switch is on, this entire host is dark.
-    if (reqHost === CARDS_HOST && !movedToCardsHost(env)) return NOT_RELAYED();
+    // A route can be installed before cutover. Before it, reef.cards is dark (cardsHostStage 'dark'),
+    // or (tile#299, 'open') a read-only mirror of the old host for the routes a Card page needs, and
+    // dark for every other route. Nothing below this line ever sees reef.cards outside the cutover.
+    if (reqHost === CARDS_HOST) {
+      const stage = cardsHostStage(env);
+      if (stage === 'dark') return NOT_RELAYED();
+      if (stage === 'open') return openStageMirrors(url.pathname, request.method) ? openStageAnswer(request, url, env, ctx) : NOT_RELAYED();
+    }
 
     // 🔴 FIRST, and before any host resolution. The write API is host-agnostic — reef-MCP calls the
     // canonical host, and a vanity domain must never expose it under a creator's own name. Putting
@@ -808,7 +900,7 @@ const router = {
     if (moved) return new Response(null, { status: 301, headers: { Location: moved, 'Cache-Control': MOVED_CACHE } });
 
     // reef#2758 — the report door, on reef.cards only (and only with the switch on: the host is dark
-    // otherwise, above). On the old card host `/report` 301s here like every other path (GET), and a
+    // otherwise, above, and so is this route in the open stage). On the old card host `/report` 301s here like every other path (GET), and a
     // POST there falls through to handle routing — `report` is a reserved handle, so it is no card.
     if (reqHost === CARDS_HOST && (url.pathname === REPORT_PATH || url.pathname === `${REPORT_PATH}/`)) {
       return handleReport(request, env, { handleOf: (u) => reportedHandle(u, env) });
@@ -993,7 +1085,7 @@ const router = {
     // fetch — cost scales with distinct brands, not with cards. And the mark still comes from the
     // brand, so it still cannot go stale: that is the property a bundled icon set would have cost us.
     // (reef#2026: external marks are never stored on our side, and never swapped for a built-in one.)
-    const icm = /^\/_icon\/([^/]+)\.ico$/.exec(url.pathname);
+    const icm = ICON_RELAY_RE.exec(url.pathname);
     if (icm) {
       // a malformed escape (`%`, `%zz`, a cut UTF-8 sequence) throws URIError: the same 400 as a bad domain
       let domain;
@@ -1008,7 +1100,7 @@ const router = {
       return relayImage(request, ctx, iconUpstreams(domain), 604800);
     }
 
-    const ytm = /^\/_yt\/([A-Za-z0-9_-]+)\.jpg$/.exec(url.pathname);
+    const ytm = YT_RELAY_RE.exec(url.pathname);
     if (ytm) {
       if (!VIDEO_RE.test(ytm[1])) return new Response('bad id', { status: 400 });
       return relayImage(request, ctx, `https://i.ytimg.com/vi/${ytm[1]}/hqdefault.jpg`, 86400);
