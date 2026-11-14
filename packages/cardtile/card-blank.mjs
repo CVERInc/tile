@@ -90,3 +90,37 @@ function judge(m) {
   if ((m.blocks || []).some((b) => !blankish(b.label))) return false;
   return (m.cells || []).every(isTemplateCell);
 }
+
+/** isSandboxSample: card markdown → true only when it is the sandbox's own sample starter, untouched.
+ *
+ * tile#296. The sandbox once seeded a persona card (`w/sandbox-i18n.mjs` `buildSandboxCard`, in each
+ * of its locales) and two editors stored it unasked: w2 wrote it under its draft key on load, and the
+ * first-day w3 wrote it under its saved key on Save. A browser holding only that still opened on
+ * somebody else's sample after the sandbox started from an empty card.
+ *
+ * The cells are judged by isTemplateOnly, above — every body a blank-card writer seeds, in every
+ * locale, including the older starter's "tap to edit" text tile. What isTemplateOnly deliberately
+ * leaves out is the frontmatter, and in a browser's own copy that is where a visitor's work can be:
+ * the title they typed, a setting they chose. So here the frontmatter must be EXACTLY what the
+ * starter wrote — `card-page: try`, one persona's `title`, the SAME persona's `lang`, nothing else.
+ * One-sided like the rest of this file: anything not recognised is the visitor's, and is kept. */
+export function isSandboxSample(cardMd) {
+  if (!isTemplateOnly(cardMd)) return false;
+  const fm = frontmatterOf(cardMd);
+  if (!fm || fm.size !== 3 || fm.get('card-page') !== 'try') return false;
+  return personas.some((p) => fm.get('title') === p.name && fm.get('lang') === p.lang);
+}
+
+// `key: value` lines between the opening fences → Map, or null for anything else (no frontmatter, a
+// line that is not `key: value`, a key twice).
+function frontmatterOf(md) {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(md);
+  if (!fm) return null;
+  const out = new Map();
+  for (const line of fm[1].split(/\r?\n/)) {
+    const kv = /^([A-Za-z][\w-]*):[ \t]*(.*?)[ \t]*$/.exec(line);
+    if (!kv || out.has(kv[1])) return null;
+    out.set(kv[1], kv[2]);
+  }
+  return out;
+}
