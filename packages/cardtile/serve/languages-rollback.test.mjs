@@ -240,6 +240,31 @@ test('negative control — no rollback: a fresh activation reads the main key on
   assert.equal(storage._alarm, null, 'no alarm');
 });
 
+// r5 (closing check P2, port of closing-wake-short-circuit.mjs): the check runs on activation even
+// when the lifetime (`life`) or the main record (`card:0`) is pending, before the object answers.
+for (const pending of ['life', 'card:0']) {
+  test(`🔴 closing check P2 — KV lost the map and \`${pending}\` is pending: the first answered request has read the main key and cleared \`published\``, async () => {
+    const env = await withJapanese();
+    await quiet(env);
+    const storage = env.CARD_LIFETIMES.storageOf('t');
+    const rev = (await mainMetadata(env)).languages['ja-JP'];
+    await env.CARDS.put('card:t:0', env.CARDS._m.get('card:t:0')); // an older worker's put: no metadata
+    assert.equal(await mainMetadata(env), null);
+    assert.ok(storage._m.get('languages:0').published, 'the marker still says KV holds the map');
+    storage._m.set(pending, { ...storage._m.get(pending), cache: 'pending' });
+    env.CARD_LIFETIMES.restart('t');
+    const at = env.CARDS.reads.length;
+    assert.equal((await call(env, 'GET', '/_api/card/t/lifetime')).status, 200);
+    assert.ok(env.CARDS.reads.slice(at).includes('card:t:0'), 'the activation read the main key');
+    assert.equal(storage._m.get('languages:0').published, null, '`published` is cleared');
+    assert.notEqual(storage._alarm, null, 'an alarm is armed');
+    await quiet(env);
+    assert.deepEqual(await mainMetadata(env), { languages: { 'ja-JP': rev } }, 'KV names the file again');
+    assert.equal((await visit(env, '/t?lang=ja-JP')).headers.get('content-language'), 'ja-JP');
+    assert.deepEqual(await disagreements(env), []);
+  });
+}
+
 // the other transitions the previous Worker can make on a Card with a language file, each followed by
 // this Worker again (settle/adopt has no test: a record adopted or unknown never coexists with a map
 // that names a file, so the previous Worker's settleCard returns at its first line — see the r4 report)
