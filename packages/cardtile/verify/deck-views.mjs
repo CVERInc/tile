@@ -10,6 +10,11 @@
 //             DOMContentLoaded and at load; the browser's own layout-shift sum at load. With --base
 //             the same ruler is laid on that checkout, where it is EXPECTED to see the flash — a
 //             ruler that has never been seen to fire is not trusted here.
+//   lang      THE VISITOR'S WORDS AND THE OPENING VIEW, TOGETHER (tile#298 + tile#297). A card with no
+//             `lang:` that opens on list, asked for with `Accept-Language: ja`, deck.js held back: no
+//             wall tile in any frame, the root names list before the script arrives, and when it has,
+//             the switcher's three labels are the Japanese view names with list pressed. <html lang>
+//             stays the content's. The same page asked for in English is the control.
 //   walk      THE SIX SWITCHES, by keyboard (focus the button, Enter), until every ordered pair has
 //             been made. Counted across each switch alone: main-frame `framenavigated`, document
 //             requests, `beforeunload`, and a value on `window` set at load. The tiles are the SAME
@@ -51,7 +56,7 @@
 //   … --no-move-before           take Element.moveBefore away before the page runs: the path WebKit and
 //                                Firefox take today. 🔴 Still Chromium underneath — it shows what the
 //                                fallback does to a frame, not how another engine paints.
-//   … --only a,b                 just these steps (prepaint walk print boot long editor file draw before)
+//   … --only a,b                 just these steps (prepaint lang walk print boot long editor file draw before)
 //   … --dry                      no browser: serve the pages, read the markup back, exit
 //
 // Pictures: out/card-verify/deck-views/<engine>/ (walk/ holds one per switch), listed in
@@ -65,6 +70,7 @@ import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readCard, PLAYWRIGHT, OUT } from './paths.mjs';
 import worker from '../serve/card-worker.mjs';
+import { deckStrings } from '../w3/deck-i18n.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] || '' : '');
@@ -117,9 +123,12 @@ const store = {
 // link marks are answered with a fixed pixel: a layout ruler must not depend on a third party (see spread-layout.mjs)
 const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 async function serve(w) {
-  const ask = async (path) => w.fetch(new Request('http://x' + path), { CARDS: store, PREVIEW: 'true' });
+  // (the visitor's Accept-Language goes through: a card with no `lang:` answers in it — the `lang` step)
+  let al = '';
+  const ask = async (path) => w.fetch(new Request('http://x' + path, { headers: al ? { 'accept-language': al } : {} }), { CARDS: store, PREVIEW: 'true' });
   const server = http.createServer(async (req, res) => {
     try {
+      al = String(req.headers['accept-language'] || '');
       if (/^\/_icon\/[^/]+\.ico$/.test(req.url)) { res.writeHead(200, { 'Content-Type': 'image/png' }); res.end(PIXEL); return; }
       // the card-file specimen (see the header: synthetic)
       const f = /^\/file-(stack|list|wall)$/.exec(req.url), fm = /^\/_file\/(stack|list|wall)\.card\.md$/.exec(req.url);
@@ -258,8 +267,8 @@ function state() {
   };
 }
 
-async function newPage(size) {
-  const ctx = await browser.newContext({ viewport: size, deviceScaleFactor: 1 });
+async function newPage(size, more = {}) {
+  const ctx = await browser.newContext({ viewport: size, deviceScaleFactor: 1, ...more });
   const page = await ctx.newPage();
   const seen = { docs: 0, navs: 0, childNavs: 0, errs: [] };
   page.on('request', (r) => { if (r.isNavigationRequest() && r.frame() === page.mainFrame()) seen.docs++; });
@@ -309,6 +318,46 @@ async function prepaint(origin, tag, handle, view, size) {
     ok(s.maxWall > 0, `CONTROL (--base): the ruler sees the wall before the pile there (${s.maxWall} tiles) — it can fire`, 'prepaint:ruler-fires-on-base');
   }
   await ctx.close();
+}
+
+// ── lang: a card with no `lang:`, a visitor who reads Japanese — the words and the opening view at once ──
+async function langPage(accept, words, size) {
+  at('lang', accept, sz(size));
+  const { ctx, page, seen } = await newPage(size, { extraHTTPHeaders: { 'Accept-Language': accept } });
+  let held = 0;
+  await page.route(DECK_JS_URL, async (route) => { held++; await new Promise((r) => setTimeout(r, HOLD)); await route.continue(); });
+  const nav = page.goto(`${head.url}/bio-list`, { waitUntil: 'load' });
+  await page.waitForSelector('footer.st-footer', { state: 'attached' });
+  await page.waitForTimeout(600);
+  const w = await page.evaluate(() => ({ deckRan: !!document.querySelector('.deck-bar'), cls: document.documentElement.className, view: document.documentElement.dataset.view || '' }));
+  const res = await nav;
+  await page.waitForSelector('.deck-seg button', { state: 'attached', timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(1200);
+  const s = await page.evaluate(() => {
+    window.__vS.stop = true;
+    const b = [...document.querySelectorAll('.deck-seg button')];
+    return { frames: window.__vS.frames, maxWall: window.__vS.maxWall, cls: document.documentElement.className, view: document.documentElement.dataset.view || '', lang: document.documentElement.lang,
+      labels: b.map((e) => e.getAttribute('aria-label')), titles: b.map((e) => e.title), modes: b.map((e) => e.dataset.m), pressed: b.filter((e) => e.getAttribute('aria-pressed') === 'true').map((e) => e.dataset.m),
+      shown: b.filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; }).length };
+  });
+  const vary = res ? String(res.headers().vary || '') : '';
+  const want = [words.viewStack, words.viewList, words.viewWall];
+  console.log(`  Accept-Language ${accept} ${sz(size)}  waiting: view="${w.view}" class="${w.cls}" · over ${s.frames} frames the wall showed at most ${s.maxWall} tiles · labels ${JSON.stringify(s.labels)} · pressed ${JSON.stringify(s.pressed)} · <html lang="${s.lang}"> · Vary: ${vary}`);
+  const tag = accept.split(/[-,;]/)[0];
+  ok(held === 1 && !w.deckRan, `CONTROL (${tag}): deck.js was held back and had not run when the page was looked at`, `lang:${tag}:control`);
+  ok(w.view === 'list' && /\bdeck\b/.test(w.cls) && /\blist\b/.test(w.cls), `${tag}: the root names list, with the pile's classes, before the deck's script (view="${w.view}" class="${w.cls}")`, `lang:${tag}:markup`);
+  ok(s.maxWall === 0 && s.frames > 5, `${tag}: no wall tile in any of ${s.frames} frames from first frame to after load (at most ${s.maxWall})`, `lang:${tag}:no-flash`);
+  ok(s.view === 'list' && /\blist\b/.test(s.cls), `${tag}: the page is on list once the deck is up (view="${s.view}" class="${s.cls}")`, `lang:${tag}:opens-on-list`);
+  ok(JSON.stringify(s.modes) === JSON.stringify(['deck', 'list', 'spread']) && s.shown === 3, `CONTROL (${tag}): the switcher is on the page, three buttons with a box (${s.shown})`, `lang:${tag}:switcher`);
+  ok(JSON.stringify(s.labels) === JSON.stringify(want), `${tag}: the switcher's labels are ${JSON.stringify(want)} (got ${JSON.stringify(s.labels)})`, `lang:${tag}:labels`);
+  ok(JSON.stringify(s.titles) === JSON.stringify(want), `${tag}: so are its titles (got ${JSON.stringify(s.titles)})`, `lang:${tag}:titles`);
+  ok(JSON.stringify(s.pressed) === JSON.stringify(['list']), `${tag}: list is the one pressed (${JSON.stringify(s.pressed)})`, `lang:${tag}:pressed`);
+  ok(s.lang === 'en', `${tag}: <html lang> is the content's language, not the visitor's ("${s.lang}")`, `lang:${tag}:html-lang`);
+  ok(/accept-language/i.test(vary), `${tag}: the answer varies by Accept-Language (Vary: ${vary})`, `lang:${tag}:vary`);
+  ok(seen.errs.length === 0, `${tag}: no error on the console${seen.errs.length ? ' — ' + seen.errs.slice(0, 2).join(' | ') : ''}`, `lang:${tag}:console`);
+  if (tag === 'ja') await shot(page, `lang-ja-bio-list-${sz(size)}.png`, `a card with no lang:, opened on list, for a visitor whose Accept-Language is ja at ${sz(size)}`);
+  await ctx.close();
+  return s.labels;
 }
 
 // ── walk: load, the six switches, a card turned over, the drawer, the embed ──────────────────────
@@ -692,6 +741,13 @@ try {
       await prepaint(head.url, 'after', `${spec}-${v}`, v, s);
       if (base && (spec === 'bio' || s === PHONE)) await prepaint(base.url, 'before', `${spec}-${v}`, v, s);
     }
+  }
+  if (want('lang')) {
+    console.log('── lang: a card with no lang:, Accept-Language ja — the visitor\'s words and the opening view together');
+    const ja = await langPage('ja', deckStrings('ja'), PHONE);
+    const en = await langPage('en-US', deckStrings('en'), PHONE);
+    at('lang');
+    ok(ja.length === 3 && ja.every((l, i) => l && l !== en[i]), `CONTROL: the Japanese labels are not the English ones (${JSON.stringify(ja)} / ${JSON.stringify(en)})`, 'lang:differs');
   }
   if (want('walk')) {
     console.log('── walk: load, the six switches, a card turned over, the drawer, the embed');
