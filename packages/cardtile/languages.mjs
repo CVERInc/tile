@@ -233,6 +233,17 @@ export function languageFileRefusal(md, tag) {
     return { error: 'cards_language_key_refused', key: refused[0], keys: refused,
       why: `A language file may set only ${PER_LANGUAGE_KEYS.map((k) => `\`${k}\``).join(' and ')} in its frontmatter; \`${refused[0]}\` is decided for the whole Card by the main file. Remove ${refused.length === 1 ? 'that line' : 'those lines'} and save again. Nothing was saved.` };
   }
+  // 🔴 …and outside the fence. The Worker's frontmatter reader (card-worker `frontmatter`) matches a
+  // `key:` line ANYWHERE in the file, not only between the fences — so a line `accent: #f00` in the
+  // prose before the first lane would set a whole-Card key the main file leaves at its default. A save
+  // keeps that prose at column 0 (lines inside a lane are indented under their tile), so the stored
+  // form is scanned for such a line, and it is refused like a key in the fence.
+  const after = splitFence(storedLanguageFile(md)).rest;
+  const stray = after.split('\n').map((l) => LINE_KEY.exec(l)).find((m) => m && WHOLE_CARD_KEYS.includes(m[1]));
+  if (stray) {
+    return { error: 'cards_language_key_refused', key: stray[1], keys: [stray[1]], where: 'body',
+      why: `A line \`${stray[1]}: …\` outside the frontmatter is read as the Card's \`${stray[1]}\`, which the main file decides. Reword or indent that line and save again. Nothing was saved.` };
+  }
   const lang = fenceValue(lines, 'lang');
   if (lang && normaliseTag(lang) !== tag) {
     return { error: 'cards_language_lang_mismatch', lang, tag,

@@ -65,6 +65,15 @@ write `gen:<handle>` by hand either. It is a cache of the handle's `CardLifetime
 writes it at the end of each DELETE. A hand value there takes the card down and disagrees with
 the object, which then refuses every bind until the next DELETE rewrites it.
 
+A Card's language files (tile#304, GRAMMAR.md "Languages") live beside the main file, under the
+same generation: `card:<handle>:<gen>:<tag>`. Write them only through the API
+(`PUT /_api/cards/<handle>/lang/<tag>`). The handle's `CardLifetime` holds each one (storage slot
+`card:<gen>@<tag>`) and is the only writer of the KV key. A hand-written key is served and read
+back by the API's GET, but the object does not know about it: a save with its version is refused
+as a conflict, its DELETE answers `cards_language_missing`, and the object does not remove it when
+the language leaves `locales:`. Only the Card's DELETE sweeps it, through its listing of
+`card:<handle>:`.
+
 A domain binding lives under the same generation's keys (reef#2618 r5 — see `vanityKey`). Two
 Durable Objects hold the facts KV cannot be trusted with (r8):
 

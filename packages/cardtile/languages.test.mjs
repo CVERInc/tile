@@ -121,6 +121,13 @@ test('languageFileRefusal: only title and lang; lang must be the tag', () => {
   }
   const two = languageFileRefusal(JA.replace('lang: ja-JP', 'lang: ja-JP\naccent: #000\nviews: wall'), 'ja-JP');
   assert.deepEqual(two.keys, ['accent', 'views']);
+  // a key line OUTSIDE the fence is read by the Worker's frontmatter reader too: refused, named
+  const prose = languageFileRefusal(JA.replace('\n## grid', '\naccent: #ff0000\n\n## grid'), 'ja-JP');
+  assert.equal(prose && prose.error, 'cards_language_key_refused');
+  assert.equal(prose.key, 'accent');
+  assert.equal(prose.where, 'body');
+  assert.equal(languageFileRefusal(JA.replace('\n## grid', '\nThe accent: warm.\n\n## grid'), 'ja-JP'), null, 'CONTROL: prose that is not a key line');
+  assert.equal(languageFileRefusal(JA.replace('イラストレーター。', 'イラストレーター。\naccent: #ff0000'), 'ja-JP'), null, 'CONTROL: inside a lane the line is the tile’s (indented when stored)');
   assert.equal(languageFileRefusal(JA, 'zh-TW').error, 'cards_language_lang_mismatch');
   assert.equal(languageFileRefusal(JA.replace('lang: ja-JP', 'lang: JA_jp'), 'ja-JP'), null, 'the same tag in another spelling is the tag');
 });

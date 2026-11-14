@@ -118,7 +118,9 @@ decides for the whole Card is read from the main file, always:
 A language file may carry only `title` and `lang`. Any other frontmatter key is refused when the
 file is saved (`cards_language_key_refused`, naming the key) and ignored when it is read. That
 includes keys this repository does not read: a repository that embeds the engine may read them for
-the whole Card. A `lang:` that is not the file's tag is refused (`cards_language_lang_mismatch`).
+the whole Card. A line such as `accent: #f00` in the text between the frontmatter and the first lane
+is refused the same way, because the renderer reads a `key:` line wherever it starts a line. A `lang:`
+that is not the file's tag is refused (`cards_language_lang_mismatch`).
 
 There is one assets lane per Card, the main file's: `asset:<id>` means the same picture in every
 language, and an assets lane sent with a language file is dropped, as a save drops the caller's.

@@ -1744,6 +1744,10 @@ export function resourceOf(afterPrefix) {
  *   DELETE /_api/card/<handle>/asset/<id>/fenced
  *          If-Version: <version> (required) delete_asset with expected_version (tile#209): 409 unless the
  *                                           card is still at <version>; every answer carries `fence`
+ *   GET    /_api/card/<handle>/lang/<tag>    —             a language file (tile#304), thin + version
+ *   GET    /_api/card/<handle>/lang/<tag>/full —           …with the main file's assets lane
+ *   PUT    /_api/card/<handle>/lang/<tag>    —             { markdown, base_version, dry_run } → save it
+ *   DELETE /_api/card/<handle>/lang/<tag>    —             If-Version optional → remove it
  *   POST   /_api/preview                     preview_cards  { handle, markdown } → a URL
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
  *   GET    /_api/vanity/<handle>             —             the card's own domain: { host|null, redirect, … }
