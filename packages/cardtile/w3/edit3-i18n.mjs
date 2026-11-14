@@ -133,7 +133,8 @@ const ZH = {
 // Japanese, written out like ZH. Ten keys are not here because the shared chrome (SAME_AS_CHROME) and
 // w2's host words (HOST) already say them in ja — the same button, the same word. Terms follow the
 // sandbox's ja tables: タイル for a tile, 表面 / 裏面 for its two faces, Cards as the product's name.
-// View names: 重ね / 縦並び / 一覧 (see w3/deck-i18n.mjs for why); the editor and the deck say the same.
+// View names: 重ね / 並び / 一覧 — the list view sets the cards out side by side, so 並び, not 縦並び
+// (see w3/deck-i18n.mjs for why); the editor and the deck say the same.
 const JA = {
   untitled: '無題', options: 'Cards の設定', settingsBack: '設定', viewsAria: '表示', wallFrame: '一覧', editBtn: '編集', raw: 'ファイルの中身',
   docTitle: '{t} · Cards を編集', pageTitle: 'Cards を編集',
@@ -148,7 +149,7 @@ const JA = {
   backdrop: '背景', backdropHint: 'Cards の後ろに置く画像です。', bdNone: 'なし', bdSet: '画像',
   bdPick: '画像を選ぶ…', bdUrl: '画像の URL', bdRemove: '背景を外す',
   dim: '背景の暗さ', dim0: 'なし', dim25: '弱', dim45: '中', dim65: '強', dimHint: '画像の上でも文字が読みやすくなります。', auto: '自動',
-  viewStack: '重ね', viewList: '縦並び', viewWall: '一覧',
+  viewStack: '重ね', viewList: '並び', viewWall: '一覧',
   viewSaysStack: '1 枚ずつめくる', viewSaysList: '全部をスクロール', viewSaysWall: 'ページ全体を見る',
   viewsLabel: '訪問者が選べる表示', opensAs: '最初の表示', full: '全幅', width: '幅',
   savedLive: '保存しました。公開中です。',

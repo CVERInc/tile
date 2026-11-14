@@ -49,13 +49,14 @@ const WRITTEN = {
     makeYourOwn: '做一份自己的',
     fileNote: '一個檔案，不到 25 MB。',
   },
-  // 重ね / 縦並び / 一覧: native words, not katakana loans. 重ね (cards laid on one another) and 縦並び
-  // (lined up top to bottom, the list view's own movement) say what each view does; 一覧 is the word
-  // Japanese interfaces already use for "everything at once". ウォール does not read as a view in
-  // Japanese, and タイル is taken: it is the unit word in every Japanese table here.
+  // 重ね / 並び / 一覧: native words, not katakana loans. 重ね (cards laid on one another) and 並び
+  // (cards set out side by side, in a row) say what each view does — nothing about the list view is
+  // vertical, so not 縦並び; 一覧 is the word Japanese interfaces already use for "everything at once".
+  // ウォール does not read as a view in Japanese, and タイル is taken: it is the unit word in every
+  // Japanese table here.
   ja: {
     viewStack: '重ね',
-    viewList: '縦並び',
+    viewList: '並び',
     viewWall: '一覧',
     zoomQr: 'QR コードを拡大',
     putBack: 'カードを戻す',
