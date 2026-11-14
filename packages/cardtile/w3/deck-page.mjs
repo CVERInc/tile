@@ -85,9 +85,10 @@ export const DECK_HEAD_JS = "(function(d){var v=d.getAttribute('data-view');try{
   // …and the way back. Under html.deck the stylesheet does not draw the engine's grid, so a deck that never comes up
   // would leave an empty table. window.__deckBoot is deck.js's word ('ready', or 'pending' while it fetches a card
   // file): no word once the page is parsed (the script threw, or was never run) is a failure, and so is the script's
-  // own onerror. No word after DECK_WAIT_MS is only a slow script: the wall is shown meanwhile, the root keeps the
-  // view it opens on, and deck.js puts the pile's classes back when it arrives.
-  + "window.__deckFail=function(){d.classList.remove('deck','list');d.setAttribute('data-view','wall');d.setAttribute('data-deck-off','');};document.addEventListener('DOMContentLoaded',function(){if(!window.__deckBoot)window.__deckFail();});setTimeout(function(){if(!window.__deckBoot)d.classList.remove('deck','list');},3000);"
+  // own onerror. No 'ready' after DECK_WAIT_MS is only a slow script — or a card file deck.js is still waiting for
+  // ('pending': it used to count as a word, and a file that never answered left the table empty for good): the wall
+  // is shown meanwhile, the root keeps the view it opens on, and deck.js puts the pile's classes back when it comes up.
+  + "window.__deckFail=function(){d.classList.remove('deck','list');d.setAttribute('data-view','wall');d.setAttribute('data-deck-off','');};document.addEventListener('DOMContentLoaded',function(){if(!window.__deckBoot)window.__deckFail();});setTimeout(function(){if(window.__deckBoot!=='ready')d.classList.remove('deck','list');},3000);"
   + "})(document.documentElement);";
 /** how long a page that opens on a pile waits for deck.js before it shows the wall instead (the number in DECK_HEAD_JS) */
 export const DECK_WAIT_MS = 3000;

@@ -550,3 +550,50 @@ test('the draw page that opens on the wall: the engine\'s markup stays as it was
   p.press('stack'); p.press('wall');
   assert.equal(wallMarkup(p.doc), p.before.wall, 'wall → stack → wall');
 });
+
+// 1 — the cases the review named for a deck that does not come up
+const flush = () => new Promise((r) => setImmediate(r));
+const filePage = (view) => renderCardHTML(fileHost(view), { handle: 'specimen' }).replace('<html', '<html data-card-src="/items.card.md"');
+test('a card file that cannot be fetched (data-card-src): the page is the wall, and says the deck is off', async () => {
+  const win = makeWindow(filePage('stack'), { scripts: true }); const root = win.document.documentElement;
+  win.console = { ...console, error() {} };
+  assert.equal(root.className, 'deck', 'CONTROL: the head script set the pile\'s classes');
+  win.run(DECK_JS, 'deck.js');
+  assert.equal(win.__deckBoot, 'pending', 'CONTROL: the deck is waiting for its card file');
+  await flush(); await flush();
+  failedToWall({ doc: win.document }, 'the card file was refused');
+  assert.equal(win.__deckBoot, 'failed');
+});
+test('a card file that is slow or never answers: after the wait the wall is shown, not an empty table, and the pile opens if it arrives', async () => {
+  const win = makeWindow(filePage('stack'), { scripts: true }); const root = win.document.documentElement;
+  let arrive; win.fetch = () => new Promise((ok) => { arrive = ok; });
+  win.run(DECK_JS, 'deck.js'); await flush();
+  win.document.dispatchEvent(new win.Event('DOMContentLoaded'));
+  assert.ok(!root.hasAttribute('data-deck-off'), 'a deck waiting for its card file was taken for a failed one');
+  win.tick(2000); assert.equal(root.className, 'deck', 'the wait is shorter than two seconds');
+  win.tick(2000); assert.equal(root.className, '', 'four seconds on, the card file has not come and the page is still an empty table');
+  assert.equal(root.dataset.view, 'stack', 'the wait gave up the view the page opens on');
+  assert.ok(!root.hasAttribute('data-deck-off'), 'a slow card file was taken for a failed one');
+  win.document.scrollHeightOf = (el) => (el === root ? 844 * 12 : 0); win.document.rectOf = () => ({ width: 342, height: 480 });
+  arrive({ ok: true, text: () => Promise.resolve(fileOf('stack')) }); await flush(); await flush(); win.tick(3000);
+  assert.equal(win.__deckBoot, 'ready', 'the card file arrived and the deck did not come up');
+  assert.ok(root.classList.contains('deck'), 'the card file arrived and the pile did not open');
+});
+// A policy that refuses inline scripts refuses the head script, the hand-over script and the onerror handler alike. The
+// pile's classes are the head script's, so such a page starts as the wall and stays it unless deck.js itself comes up.
+test('inline scripts and inline handlers refused (a strict CSP): no deck → the wall; deck.js throws → the wall; deck.js runs → the pile', () => {
+  const html = renderCardHTML(card({ view: 'stack' }), { handle: 'specimen' });
+  const fresh = () => { const win = makeWindow(html); const doc = win.document; doc.scrollHeightOf = (el) => (el === doc.documentElement ? 844 * 8 : 0); doc.rectOf = () => ({ width: 342, height: 480 }); win.console = { ...console, error() {} }; return win; };
+  let win = fresh();   // deck.js refused as well, or failed to load: nothing ran at all
+  assert.equal(win.document.documentElement.className, '', 'no script ran and the root carries a pile\'s classes');
+  win = fresh();       // deck.js runs and throws half-way: nobody else is there to put the page back
+  const wall = wallMarkup(win.document), at = 'const API={};';
+  win.run(DECK_JS.replace(at, 'throw new Error("injected: half-way");' + at), 'deck.js'); win.tick(3000);
+  assert.ok(win.document.querySelector('.deck-card'), 'CONTROL: the throw came after cards were made');
+  failedToWall({ doc: win.document }, 'CSP, threw half-way');
+  assert.equal(wallMarkup(win.document), wall, 'CSP, threw half-way: the wall is not the engine\'s own markup');
+  win = fresh();       // deck.js alone: it reads the opening view from the markup and comes up
+  win.run(DECK_JS, 'deck.js'); win.tick(3000);
+  assert.equal(win.__deckBoot, 'ready');
+  assert.equal(win.document.documentElement.className.split(' ').includes('deck'), true, 'deck.js alone did not open the pile the markup names');
+});
