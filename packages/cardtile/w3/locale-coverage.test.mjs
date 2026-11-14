@@ -21,42 +21,13 @@ const TABLES = {
 };
 
 // The cells a translator still owes: in each entry, these keys in these locales. Nothing else.
-// (zh-Hans has the deck's first eleven words already; the five added for deck.js's English it has not.)
+// The translation pass filled every other cell. These 17 came back with a word the owner's banned
+// list (banned-words.mjs) forbids, so they were withheld unchanged and go back to the translator.
 const AWAITING_TRANSLATION = [
-  {
-    table: 'deck-i18n',
-    locales: ['ko', 'de', 'fr', 'es', 'pt'],
-    keys: ['viewStack', 'viewList', 'viewWall', 'zoomQr', 'putBack', 'homeCtaTitle', 'homeCtaText',
-      'drawCtaTitle', 'drawCtaText', 'drawWhere', 'tryNow'],
-  },
-  {
-    table: 'deck-i18n',
-    locales: ['ko', 'zh-Hans', 'de', 'fr', 'es', 'pt'],
-    keys: ['mdOf', 'fileEndTitle', 'fileEndText', 'makeYourOwn', 'fileNote'],
-  },
-  {
-    table: 'edit3-i18n',
-    locales: ['ko', 'zh-Hans', 'de', 'fr', 'es', 'pt'],
-    keys: [
-      'untitled', 'options', 'settingsBack', 'viewsAria', 'wallFrame', 'editBtn', 'raw', 'docTitle',
-      'pageTitle', 'bcValue', 'dfSays', 'replaceBack', 'toBc', 'toBcDone', 'titleL', 'titleFromProfile',
-      'rawSays', 'openRaw', 'bcL', 'previewFrame', 'pickHint', 'backInRaw', 'editTile', 'addBetween', 'front',
-      'back', 'pairOn', 'pairOff', 'text', 'deleted', 'backdrop', 'backdropHint', 'bdNone', 'bdSet', 'bdPick',
-      'bdUrl', 'bdRemove', 'dim', 'dim0', 'dim25', 'dim45', 'dim65', 'dimHint', 'auto', 'viewStack',
-      'viewList', 'viewWall', 'viewSaysStack', 'viewSaysList', 'viewSaysWall', 'viewsLabel', 'opensAs',
-      'full', 'width', 'savedLive', 'seek', 'palPh', 'palSays', 'palEcho', 'accentL', 'accentSays',
-      'accentReset', 'accentCustom', 'themeL', 'themeAutoSays', 'themeAuto', 'themeLight', 'themeDark',
-      'backupL', 'backupSays', 'download', 'replaceFile', 'replaceSays', 'replaceAsk', 'replaceGo',
-      'resetAsk', 'resetSays', 'dangerSays', 'replaced', 'badFile', 'secName', 'secLook', 'secViewsBack',
-      'secFound', 'secMore', 'viewsL', 'viewsKeepOne', 'listSep', 'handleL', 'handleSays', 'change',
-      'newHandle', 'handleWarn', 'typeOld', 'doChange', 'handleDone', 'hShape', 'hReserved', 'handleHere',
-      'domainL', 'domainSays', 'connect', 'domainNone', 'headerL', 'headerCentre', 'headerLeft', 'iconsL',
-      'iconsColour', 'iconsMono', 'poolL', 'poolOn', 'poolOff', 'transferL', 'notYet', 'colon',
-      'hostLoadFailed', 'reload', 'proposed', 'leaveTitle', 'leaveKeep', 'leaveDiscard', 'signIn',
-      'signInSays', 'sbxStatus', 'required', 'needs', 'socialNet', 'socialLink', 'socialAdd', 'socialRemove',
-      'socialWeb', 'socialEmail', 'more', 'help',
-    ],
-  },
+  { table: 'edit3-i18n', locales: ['fr'], keys: ['options', 'settingsBack', 'proposed'] },
+  { table: 'edit3-i18n', locales: ['ko', 'zh-Hans'], keys: ['raw', 'openRaw', 'signInSays'] },
+  { table: 'edit3-i18n', locales: ['zh-Hans', 'de', 'fr', 'es', 'pt'], keys: ['backInRaw'] },
+  { table: 'edit3-i18n', locales: ['es'], keys: ['palSays', 'proposed', 'signInSays'] },
 ];
 
 const awaiting = new Set();
@@ -119,4 +90,63 @@ test('control: a new key with fewer than nine locales fails, named', () => {
   const missing = LOCALE_KEYS.filter((l) => !present(own(l).plantedNewKey) && !awaiting.has(`deck-i18n|plantedNewKey|${l}`));
   assert.equal(keys.length, DECK_KEYS.length + 1);
   assert.deepEqual(missing.sort(), LOCALE_KEYS.filter((l) => l !== 'en').sort());
+});
+
+// Mechanical checks on every cell, in every locale (the translator's words are not judged here,
+// only their shape). Banned words are words.test.mjs's job; placeholders are checked above.
+const everyCell = function* () {
+  for (const [table, { keys, own }] of Object.entries(TABLES)) {
+    for (const l of LOCALE_KEYS) {
+      if (l === 'en') continue;
+      for (const key of keys) {
+        const v = own(l)[key];
+        if (present(v)) yield { table, key, l, v, en: own('en')[key] };
+      }
+    }
+  }
+};
+
+test('no translation holds a line break (\\n, \\r, U+2028, U+2029)', () => {
+  const breaks = String.fromCharCode(10, 13, 0x2028, 0x2029);
+  const bad = [...everyCell()].filter(({ v }) => [...v].some((c) => breaks.includes(c)));
+  assert.deepEqual(bad.map(({ table, key, l }) => `${table} · ${key} · ${l}`), []);
+});
+
+// The limits the translator was given, in characters (code points).
+const MAX_CHARS = {
+  'deck-i18n': { viewStack: 8, viewList: 8, viewWall: 8, homeCtaTitle: 20, drawCtaTitle: 15, tryNow: 15,
+    fileEndTitle: 20, makeYourOwn: 20 },
+  'edit3-i18n': { viewStack: 8, viewList: 8, viewWall: 8 },
+};
+
+test('view names and short labels stay within the length they were translated for', () => {
+  const over = [];
+  for (const { table, key, l, v } of everyCell()) {
+    const max = MAX_CHARS[table][key];
+    if (max && [...v].length > max) over.push(`${table} · ${key} · ${l}: “${v}” is ${[...v].length} > ${max}`);
+  }
+  assert.deepEqual(over, []);
+});
+
+// (zh and ja are written by hand here and may name the product their own way.)
+const TRANSLATED_LOCALES = ['ko', 'zh-Hans', 'de', 'fr', 'es', 'pt'];
+
+test('the product name “Cards” stays “Cards” wherever the English says it (translated locales)', () => {
+  const lost = [...everyCell()]
+    .filter(({ l, v, en }) => TRANSLATED_LOCALES.includes(l) && /\bCards\b/.test(en) && !/\bCards\b/.test(v));
+  assert.deepEqual(lost.map(({ table, key, l, v }) => `${table} · ${key} · ${l}: ${v}`), []);
+});
+
+// A cell equal to its English is usually an untranslated copy. Allowed: strings of 3 characters or
+// fewer (separators), and these words, which are the ordinary word in that language too.
+const SAME_AS_ENGLISH = new Set([
+  'edit3-i18n|text|de', 'edit3-i18n|backupL|de', 'edit3-i18n|backupL|pt', 'edit3-i18n|headerL|de',
+  'edit3-i18n|iconsL|de', 'edit3-i18n|socialWeb|de',
+]);
+
+test('no translation is a copy of the English, except short strings and the named loanwords', () => {
+  const same = [...everyCell()]
+    .filter(({ v, en }) => v === en && [...en].length > 3)
+    .map(({ table, key, l }) => `${table}|${key}|${l}`);
+  assert.deepEqual(same.sort(), [...SAME_AS_ENGLISH].sort());
 });

@@ -91,7 +91,105 @@ const WRITTEN = {
 // the two marker lines, so the translation step can read the block and rewrite it whole; a key here
 // never replaces one in WRITTEN (the merge below lets WRITTEN win), so hand-written words stay.
 // <translated>
-const TRANSLATED = {};
+const TRANSLATED = {
+  "ko": {
+    "viewStack": "스택",
+    "viewList": "목록",
+    "viewWall": "모아보기",
+    "zoomQr": "QR 코드 확대",
+    "putBack": "돌려놓기",
+    "homeCtaTitle": "이제 당신 차례예요.",
+    "homeCtaText": "회원가입 없이 지금 바로 수정해 보세요.",
+    "drawCtaTitle": "다음",
+    "drawCtaText": "탭하여 다른 사람 보기.",
+    "drawWhere": "무작위로 뽑은 다른 사람들의 Cards",
+    "tryNow": "지금 사용해 보기",
+    "mdOf": "{n}장 중 {i}번째",
+    "fileEndTitle": "여기까지입니다.",
+    "fileEndText": "파일 하나에 {n}장.",
+    "makeYourOwn": "직접 만들기",
+    "fileNote": "단일 파일. 25MB 미만."
+  },
+  "zh-Hans": {
+    "mdOf": "第 {i} 张，共 {n} 张",
+    "fileEndTitle": "就这些。",
+    "fileEndText": "一个文件，{n} 张。",
+    "makeYourOwn": "制作属于自己的",
+    "fileNote": "一个文件，不足 25 MB。"
+  },
+  "de": {
+    "viewStack": "Stapel",
+    "viewList": "Liste",
+    "viewWall": "Wand",
+    "zoomQr": "QR-Code vergrößern",
+    "putBack": "Zurücklegen",
+    "homeCtaTitle": "Sie sind dran.",
+    "homeCtaText": "Keine Registrierung. Jetzt anpassen.",
+    "drawCtaTitle": "Weiter",
+    "drawCtaText": "Antippen für jemand anderen.",
+    "drawWhere": "Cards anderer Personen, zufällig ausgewählt",
+    "tryNow": "Jetzt testen",
+    "mdOf": "{i} von {n}",
+    "fileEndTitle": "Das ist alles.",
+    "fileEndText": "{n} in einer Datei.",
+    "makeYourOwn": "Eigene erstellen",
+    "fileNote": "Eine Datei. Unter 25 MB."
+  },
+  "fr": {
+    "viewStack": "Pile",
+    "viewList": "Liste",
+    "viewWall": "Mur",
+    "zoomQr": "Agrandir le code QR",
+    "putBack": "Replacer",
+    "homeCtaTitle": "À vous de jouer.",
+    "homeCtaText": "Sans inscription. Commencez à modifier dès maintenant.",
+    "drawCtaTitle": "Suivant",
+    "drawCtaText": "Appuyez pour voir quelqu'un d'autre.",
+    "drawWhere": "Des Cards d'autres personnes, choisies au hasard",
+    "tryNow": "Essayer",
+    "mdOf": "{i} sur {n}",
+    "fileEndTitle": "C’est tout.",
+    "fileEndText": "{n} dans un seul fichier.",
+    "makeYourOwn": "Créer le vôtre",
+    "fileNote": "Un seul fichier. Moins de 25 Mo."
+  },
+  "es": {
+    "viewStack": "Pila",
+    "viewList": "Lista",
+    "viewWall": "Muro",
+    "zoomQr": "Ampliar el código QR",
+    "putBack": "Volver a colocar",
+    "homeCtaTitle": "Tu turno.",
+    "homeCtaText": "Sin registro. Comienza a editar ahora.",
+    "drawCtaTitle": "Siguiente",
+    "drawCtaText": "Toca para ver a otra persona.",
+    "drawWhere": "Cards de otras personas, elegidas al azar",
+    "tryNow": "Probar ahora",
+    "mdOf": "{i} de {n}",
+    "fileEndTitle": "Eso es todo.",
+    "fileEndText": "{n} en un solo archivo.",
+    "makeYourOwn": "Crear uno propio",
+    "fileNote": "Un solo archivo. Menos de 25 MB."
+  },
+  "pt": {
+    "viewStack": "Pilha",
+    "viewList": "Lista",
+    "viewWall": "Mural",
+    "zoomQr": "Ampliar código QR",
+    "putBack": "Colocar de volta",
+    "homeCtaTitle": "Sua vez.",
+    "homeCtaText": "Sem cadastro. Comece a editar agora.",
+    "drawCtaTitle": "Próximo",
+    "drawCtaText": "Toque para ver outra pessoa.",
+    "drawWhere": "Cards de outras pessoas, escolhidos aleatoriamente",
+    "tryNow": "Testar agora",
+    "mdOf": "{i} de {n}",
+    "fileEndTitle": "Isso é tudo.",
+    "fileEndText": "{n} em um único arquivo.",
+    "makeYourOwn": "Crie o seu",
+    "fileNote": "Um único arquivo. Menos de 25 MB."
+  }
+};
 // </translated>
 
 export const DECK_STRINGS = Object.fromEntries(LOCALE_KEYS
