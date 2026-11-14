@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CardLifetime, HostBindings, _internal } from './card-api.mjs';
-import { MAIN, JA, call, withJapanese, visit, mainMetadata, langKeys, disagreements } from './languages-harness.mjs';
+import { MAIN, call, withJapanese, visit, mainMetadata, langKeys, disagreements, quiet } from './languages-harness.mjs';
 import { thinCard } from '../card-save.mjs';
 
 const OLD = '5d974ca1ed';
@@ -68,6 +68,7 @@ async function rolledBackAndSaved() {
     page: await visit(env, '/t?lang=ja-JP'),
   };
   assert.match(before.page.body, /イラストレーター/);
+  await quiet(env); // the setup's own alarms fire now: what is armed later, the activation armed
   deployOld(env);
   const s = await oldCall(env, 'PUT', '/_api/card/t', { markdown: thinCard(SAVED_BY_OLD) });
   assert.equal(s.status, 200, s.text);
@@ -86,6 +87,7 @@ test('🔴 review r2 #2 — the previous Worker\'s ordinary main save, then this
   deployNew(env);
   // 🔴 documented: until the object is activated, visitors (KV only) still get the main file
   assert.doesNotMatch((await visit(env, '/t?lang=ja-JP')).body, /イラストレーター/);
+  assert.equal(storage._alarm, null, 'nothing is armed before the activation');
   // any API call activates it; it arms the alarm that republishes (and answers as before)
   assert.equal((await call(env, 'GET', '/_api/card/t/lifetime')).status, 200);
   assert.equal(await env.CARD_LIFETIMES.tick('t'), true);

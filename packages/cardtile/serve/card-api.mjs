@@ -892,13 +892,16 @@ export class CardLifetime {
     // names and every one it still owed a deletion (r2: `[tag, rev]` pairs) — read before the sweep
     // below takes the record, so DELETE removes them even when its listing of the store has not caught
     // up: the same reason it is handed the hosts rather than listing them
-    const endedRecord = await this.storage.get(cardMetaKey(ended));
-    const languages = [...Object.entries((endedRecord && endedRecord.languages) || {}), ...((endedRecord && endedRecord.owed) || [])];
+    const endedLang = langState(await this.storage.get(langRecordKey(ended)));
+    const languages = [...Object.entries(endedLang.languages), ...endedLang.owed];
     // tile#209 r2/r3: the ended lifetime's card is not kept here either — EVERY card key of every
     // generation but the new one, by prefix: chunks no record names (a write that failed or crashed
     // between its chunks and its record) are private bytes too. Language files are `card:<gen>@<tag>`
     // keys (langSlot), so this takes them with the main file.
     await this.sweepCards((g) => g === s.gen);
+    // tile#304 r3: and every language map but the new lifetime's — the ended one's, and any an older
+    // Worker's DELETE left (it sweeps `card:` keys only, and does not know these)
+    for (const k of (await this.storage.list({ prefix: 'languages:' })).keys()) if (k !== langRecordKey(s.gen)) await this.storage.delete(k);
     return { ended, gen: s.gen, pending: s.pending, languages };
   }
   /**
@@ -1052,14 +1055,15 @@ export class CardLifetime {
     const CARD_CHUNK = 256 * 1024;
     const serial = (prev ? prev.serial : 0) + 1;
     const n = Math.max(1, Math.ceil(md.length / CARD_CHUNK));
-    // tile#304 r2: the main record carries which language files are live (langState); a write of the
-    // main file keeps them as they were unless it says otherwise (`lang`, a save that drops a tag). A
-    // language file's own record has no `prev` here (each rev is a fresh slot), so it carries none.
+    // tile#304 r3: the record is exactly what it always was. A save that changes which language files
+    // are live (`lang`, one that drops a tag) changes the language map (`languages:<gen>`) in the SAME
+    // storage put as the record: one write of two keys, which a Durable Object commits atomically.
     const { lang, ...origin } = provenance;
-    const meta = withLangState({ handle, gen, serial, n, version, cache, ...origin }, lang !== undefined ? lang : langState(prev));
+    const meta = { handle, gen, serial, n, version, cache, ...origin };
+    const entries = { [cardMetaKey(slot)]: meta, ...(lang !== undefined ? { [langRecordKey(gen)]: lang } : {}) };
     try {
       for (let i = 0; i < n; i++) await this.storage.put(cardChunkKey(slot, serial, i), md.slice(i * CARD_CHUNK, (i + 1) * CARD_CHUNK));
-      await this.storage.put(cardMetaKey(slot), meta);
+      await this.putEntries(entries);
     } catch (e) {
       // its own generation's chunks only, but the record and the serial it names (r4)
       await this.sweepCards((g, sl) => g !== slot || sl === null || (prev != null && sl === prev.serial)).catch(() => {});
@@ -1075,6 +1079,12 @@ export class CardLifetime {
     await this.sweepCards((g, sl) => g !== slot || sl === null || sl === serial);
     return meta;
   }
+  /** put one or more keys in one storage write (a Durable Object commits a put of several keys atomically) */
+  async putEntries(entries) {
+    const keys = Object.keys(entries);
+    if (keys.length === 1) await this.storage.put(keys[0], entries[keys[0]]);
+    else await this.storage.put(entries);
+  }
   /** delete every `card:` key `keep(gen, serial | null for a record)` does not keep — by prefix, so it
    *  finds what no record names */
   async sweepCards(keep) {
@@ -1086,22 +1096,31 @@ export class CardLifetime {
   }
   /**
    * the KV copy of the held card, for the pages; a failure stays `pending` for the alarm. tile#304 r2:
-   * the record's live language files go in the SAME put, as the key's metadata (see languageKey) — and
-   * a Card with none is put exactly as before, with no options argument, so its key carries no metadata.
+   * the live language files (the language map, r3) go in the SAME put, as the key's metadata (see
+   * languageKey) — and a Card with none is put exactly as before, with no options argument, so its key
+   * carries no metadata. r3: once it has landed, the map records it as published with this record
+   * (`published`), which is how the object knows, without reading KV, whether KV carries its map.
    */
   async writeThrough(handle, gen, md, meta) {
-    const named = meta.languages && Object.keys(meta.languages).length ? { metadata: { languages: meta.languages } } : null;
+    const lang = await this.storage.get(langRecordKey(gen));
+    const live = lang && Object.keys(lang.languages || {}).length ? lang.languages : null;
     try {
-      if (named) await this.env.CARDS.put(cardKey(handle, gen), md, named);
+      if (live) await this.env.CARDS.put(cardKey(handle, gen), md, { metadata: { languages: live } });
       else await this.env.CARDS.put(cardKey(handle, gen), md);
     } catch { await retryLater(this.storage); return 'pending'; }
     const now = await this.storage.get(cardMetaKey(gen));
-    if (now && now.serial === meta.serial && sameRevs(now.languages, meta.languages) && now.cache !== 'written') { now.cache = 'written'; await this.storage.put(cardMetaKey(gen), now); }
+    if (now && now.serial === meta.serial && now.cache !== 'written') { now.cache = 'written'; await this.storage.put(cardMetaKey(gen), now); }
+    if (lang && now && now.serial === meta.serial && unpublished(lang, now)) {
+      await this.storage.put(langRecordKey(gen), { ...lang, published: { serial: meta.serial, languages: lang.languages } });
+    }
     return 'written';
   }
+  /** the main key's put, when KV may not hold the record — or (r3) the language map — the object holds */
   async flushCard(gen) {
     const meta = await this.storage.get(cardMetaKey(gen));
-    if (!meta || meta.cache !== 'pending' || (await this.read(meta.handle)).gen !== gen) return;
+    if (!meta || meta.from === 'unknown' || (await this.read(meta.handle)).gen !== gen) return;
+    // (an adopted card's body is KV's own, not yet confirmed: it is never put back to republish a map)
+    if (meta.cache !== 'pending' && (meta.from === 'kv' || !unpublished(await this.storage.get(langRecordKey(gen)), meta))) return;
     const held = await this.cardOf(meta.handle, gen);
     await this.writeThrough(meta.handle, gen, held.md, held.meta);
   }
@@ -1174,13 +1193,14 @@ export class CardLifetime {
     // longer lists (or that is now the main file's own language). Reported by a check and a dry run,
     // and (r2) unnamed by the very record put that commits the new main file below. Nothing is said
     // when nothing goes.
-    const held = Object.keys((cur && cur.meta && cur.meta.languages) || {});
+    const map = cur ? await this.storage.get(langRecordKey(gen)) : null;
+    const held = Object.keys((map && map.languages) || {});
     const allowed = languagesOf(md).files;
     const removed = held.filter((t) => !allowed.includes(t));
     const removal = removed.length ? { languages_removed: removed } : {};
     // r2 (review r1 #1): an asset a language file that STAYS refers to is in use, not an orphan
     if (orphans.length && held.length > removed.length) {
-      const used = await this.assetUse(gen, null, cur.meta, removed);
+      const used = await this.assetUse(gen, null, map, removed);
       for (let i = orphans.length - 1; i >= 0; i--) if (used.has(orphans[i])) orphans.splice(i, 1);
     }
     // r3 (codex r2 P2): the Worker's preliminary check — the lock, the size, the structural answer a
@@ -1194,11 +1214,11 @@ export class CardLifetime {
           why: 'The card changed while this save was being checked, and the change alters what it links to. Read the card again and save.' } };
       }
     }
-    // tile#304 r2: removing a language is part of THIS commit: the record that holds the new main file
-    // names the language files that stay, and owes KV the deletion of the ones that go. From the
-    // moment KV holds that record no visitor can be served a removed file, whether its deletion has
-    // settled or not (see languageKey).
-    const lang = removed.length ? changeLanguages(langState(cur.meta), Object.fromEntries(removed.map((t) => [t, null]))) : undefined;
+    // tile#304 r2: removing a language is part of THIS commit: the language map written with the record
+    // that holds the new main file (r3: in the same storage put) names the language files that stay, and
+    // owes KV the deletion of the ones that go. From the moment KV holds that record no visitor can be
+    // served a removed file, whether its deletion has settled or not (see languageKey).
+    const lang = removed.length ? changeLanguages(langState(map), Object.fromEntries(removed.map((t) => [t, null]))) : undefined;
     const res = await this.commitCard(handle, gen, md, cur, lang);
     if (res.conflict) return { status: 409, body: res };
     // the removed files' slots here, then their KV keys. A KV deletion that fails is not `cache:
@@ -1210,64 +1230,72 @@ export class CardLifetime {
     return { status: 200, body: { ...res, created: !cur, wouldChange, diff, orphans, carried, ...removal } };
   }
 
-  // ── tile#304: the Card's language files, held here, named by the main file's record ─────────────
+  // ── tile#304: the Card's language files, held here, named by the language map ──────────────────
   //
-  // r2 (review r1 #2): the main file's record `card:<gen>` is the ONE place that says which language
-  // files exist. While there is something to say it carries (langState / withLangState):
+  // r3 (review r2 #2): the language map `languages:<gen>` is the ONE place that says which language
+  // files exist. It is its own key, NOT a field of the main record `card:<gen>`: the Worker before this
+  // PR rewrites that record whole on every save (keepCard) and never reads, lists or deletes a key
+  // outside `card:`, so a rollback to it cannot lose the map. It exists once the generation has had a
+  // language file (a Card that never had one has no such key, and every other key exactly as before):
   //   languages { <tag>: <rev> }   the live language files — the only truth there is about them
+  //   owed      [[<tag>, <rev>]…]  KV keys of files no longer live, whose deletion KV still owes
   //   langSeq   <n>                how many language writes this generation has had (the order a PUT's
   //                                `commit.serial` answers; a rev itself is random, see languageKey)
-  //   owed      [[<tag>, <rev>]…]  KV keys of files no longer live, whose deletion KV still owes
-  // and its KV copy carries `languages` as the main key's metadata, in the same put as the main body
+  //   published { serial, languages } | null  the map KV's main key was last put with, and the record
+  //                                (its serial) that put was of. The map is UNPUBLISHED (unpublished())
+  //                                while either differs from now — a change of the map, a main write,
+  //                                or a save by an older Worker (it raises the serial and puts the
+  //                                main key without metadata) — and the object then republishes it.
+  // KV's copy is the main key's metadata `{ languages }`, in the same put as the main body
   // (writeThrough). Each live file is a record `card:<gen>@<tag>@<rev>` and its chunks (langSlot): a
-  // fresh slot per rev, written BEFORE the record names it — so the file a record names is always whole
-  // here, and a slot no record names (a write that died before its commit, a removed or superseded
+  // fresh slot per rev, written BEFORE the map names it — so the file the map names is always whole
+  // here, and a slot it does not name (a write that died before its commit, a removed or superseded
   // file, a round-1 slot without a rev) is debris, swept by tidyLanguages.
   //
-  // Every change is: the slot (a PUT), then THE commit — one put of the main record — then KV in
-  // three steps (publish): the bodies of live files, then the main record that names them, then — only
-  // once KV holds a record that no longer names them — the deletion of owed keys. Each step that fails
-  // is retried by the alarm in the same order. Whatever KV holds at any moment, a visitor is served a
-  // language body only through a main record that names its rev, and a rev key's bytes never change,
-  // so the language body and the main body served together are always a pair this object committed
-  // together; a named key that is missing (its put not landed yet) is the main file.
+  // Every change is: the slot (a PUT), then THE commit — one put of the map (a save that drops a tag:
+  // of the map and the main record together) — then KV in three steps (publish): the bodies of live
+  // files, then the main key with the map, then — only once KV holds that — the deletion of owed keys.
+  // Each step that fails is retried by the alarm in the same order. Whatever KV holds at any moment, a
+  // visitor is served a language body only through a main key whose metadata names its rev, and a rev
+  // key's bytes never change, so the language body and the main body served together are always a pair
+  // this object committed together; a named key that is missing (its put not landed yet) is the main file.
 
-  /** the live language file of `tag` in `gen` (the main record `main` when the caller holds it): { md, version, rev, meta } | null */
-  async langOf(gen, tag, main) {
-    const record = main !== undefined ? main : await this.storage.get(cardMetaKey(gen));
-    const rev = record && record.languages && record.languages[tag];
+  /** the language map of `gen`, as a fresh mutable value (empty when the generation never had one) */
+  async langMap(gen) { return langState(await this.storage.get(langRecordKey(gen))); }
+  /** the live language file of `tag` in `gen` (the language map `map` when the caller holds it): { md, version, rev, meta } | null */
+  async langOf(gen, tag, map) {
+    const held = map !== undefined ? map : await this.storage.get(langRecordKey(gen));
+    const rev = held && held.languages && held.languages[tag];
     if (!rev) return null;
     const slot = langSlot(gen, tag, rev);
     const meta = await this.storage.get(cardMetaKey(slot));
-    if (!meta) throw new Error(`card:${slot} is named by the main record and is not held`);
+    if (!meta) throw new Error(`card:${slot} is named by the language map and is not held`);
     const parts = [];
     for (let i = 0; i < meta.n; i++) parts.push(await this.storage.get(cardChunkKey(slot, meta.serial, i)));
     if (parts.some((p) => typeof p !== 'string')) throw new Error(`card:${slot} is missing a chunk`);
     return { md: parts.join(''), version: meta.version, rev, meta };
   }
   /**
-   * THE commit of a language change: one put of the main record, its live map changed by `changes`
-   * ({ tag: rev | null }; a replaced or removed rev joins `owed`), `langSeq` raised to `seq`, and
-   * `cache: 'pending'` (its KV copy must carry the new map). An ended lifetime gets EndedDuringWrite,
-   * and if it ended while the put was on its way, that generation's keys are swept again here.
+   * THE commit of a language change: one put of the language map, changed by `changes` ({ tag: rev |
+   * null }; a replaced or removed rev joins `owed`), `langSeq` raised to `seq`. It is unpublished from
+   * here until KV holds it (see above). An ended lifetime gets EndedDuringWrite, and if it ended while
+   * the put was on its way, that generation's keys are swept again here.
    */
   async nameLanguages(handle, gen, changes, seq) {
-    const before = await this.storage.get(cardMetaKey(gen));
-    if (!before || (await this.read(handle)).gen !== gen) throw new EndedDuringWrite();
-    const state = changeLanguages(langState(before), changes);
+    if (!(await this.storage.get(cardMetaKey(gen))) || (await this.read(handle)).gen !== gen) throw new EndedDuringWrite();
+    const state = changeLanguages(await this.langMap(gen), changes);
     if (seq != null) state.langSeq = Math.max(state.langSeq, seq);
-    const next = withLangState({ ...before, cache: 'pending' }, state);
-    await this.storage.put(cardMetaKey(gen), next);
+    await this.storage.put(langRecordKey(gen), state);
     if ((await this.read(handle)).gen !== gen) {
       await this.sweepCards((g) => g !== gen && !g.startsWith(`${gen}@`));
+      await this.storage.delete(langRecordKey(gen));
       throw new EndedDuringWrite();
     }
-    return next;
+    return state;
   }
-  /** delete every language slot of `gen` the main record does not name (debris: see above) */
+  /** delete every language slot of `gen` the language map does not name (debris: see above) */
   async tidyLanguages(gen) {
-    const record = await this.storage.get(cardMetaKey(gen));
-    const live = (record && record.languages) || {};
+    const live = (await this.langMap(gen)).languages;
     const listed = await this.storage.list({ prefix: `card:${gen}@` });
     for (const k of listed.keys()) {
       const [, tag, rev] = k.split(':')[1].split('@');
@@ -1284,45 +1312,56 @@ export class CardLifetime {
   /** step 1 (and the alarm's): the body of every live file KV does not hold yet */
   async flushLanguages(gen) {
     const record = await this.storage.get(cardMetaKey(gen));
-    if (!record || !record.languages || (await this.read(record.handle)).gen !== gen) return;
-    for (const [tag, rev] of Object.entries(record.languages)) {
+    const map = await this.storage.get(langRecordKey(gen));
+    if (!record || !map || (await this.read(record.handle)).gen !== gen) return;
+    for (const [tag, rev] of Object.entries(map.languages || {})) {
       const meta = await this.storage.get(cardMetaKey(langSlot(gen, tag, rev)));
       if (!meta || meta.cache === 'written') continue;
-      const file = await this.langOf(gen, tag, record);
+      const file = await this.langOf(gen, tag, map);
       await this.langWriteThrough(record.handle, gen, tag, rev, file.md);
     }
   }
   /**
-   * step 3 (and the alarm's): delete the owed keys — only once KV holds the current main record
-   * (`cache: 'written'`). Every owed rev was unnamed by a record at or before the current one, and a
-   * rev is never named again, so from then on nothing in KV names them. Until then the record KV
-   * holds may still name one, and its body is the half of a pair a visitor is being served.
+   * step 3 (and the alarm's): delete the owed keys — only once KV holds the current main record with
+   * the current map (`cache: 'written'`, and the map published with it). Every owed rev was unnamed by
+   * a map at or before the current one, and a rev is never named again, so from then on nothing in KV
+   * names them. Until then the main key KV holds may still name one, and its body is the half of a
+   * pair a visitor is being served.
    */
   async dropOwed(gen) {
+    const map = await this.storage.get(langRecordKey(gen));
+    if (!map || !map.owed || !map.owed.length) return 'written';
     const record = await this.storage.get(cardMetaKey(gen));
-    if (!record || !record.owed || !record.owed.length) return 'written';
-    if (record.cache !== 'written' || (await this.read(record.handle)).gen !== gen) return 'pending';
+    if (!record || record.cache !== 'written' || unpublished(map, record) || (await this.read(record.handle)).gen !== gen) return 'pending';
     const left = [];
-    for (const [tag, rev] of record.owed) {
+    for (const [tag, rev] of map.owed) {
       try { await this.env.CARDS.delete(languageKey(record.handle, gen, tag, rev)); } catch { left.push([tag, rev]); }
     }
-    await this.storage.put(cardMetaKey(gen), withLangState(record, { ...langState(record), owed: left }));
+    await this.storage.put(langRecordKey(gen), { ...map, owed: left });
     if (!left.length) return 'written';
     await retryLater(this.storage);
     return 'pending';
+  }
+  /** does KV still owe the object anything of `gen` — the main record, the language map, a live body, an owed deletion? */
+  async owesKv(gen) {
+    const record = await this.storage.get(cardMetaKey(gen));
+    if (!record) return false;
+    if (record.cache === 'pending') return true;
+    const map = await this.storage.get(langRecordKey(gen));
+    if (!map) return false;
+    if ((map.owed || []).length || (record.from !== 'kv' && unpublished(map, record))) return true;
+    for (const [tag, rev] of Object.entries(map.languages || {})) {
+      const meta = await this.storage.get(cardMetaKey(langSlot(gen, tag, rev)));
+      if (!meta || meta.cache !== 'written') return true;
+    }
+    return false;
   }
   /** steps 1–3 after a language change; 'pending' when any of them is still owed to KV */
   async publish(gen) {
     await this.flushLanguages(gen);
     await this.flushCard(gen);
     const dropped = await this.dropOwed(gen);
-    const record = await this.storage.get(cardMetaKey(gen));
-    if (!record || record.cache === 'pending' || dropped === 'pending') return 'pending';
-    for (const [tag, rev] of Object.entries(record.languages || {})) {
-      const meta = await this.storage.get(cardMetaKey(langSlot(gen, tag, rev)));
-      if (!meta || meta.cache !== 'written') return 'pending';
-    }
-    return 'written';
+    return dropped === 'pending' || (await this.owesKv(gen)) ? 'pending' : 'written';
   }
 
   /**
@@ -1343,7 +1382,8 @@ export class CardLifetime {
       return { status: 404, body: { error: 'cards_language_no_card', why: `There is no card at "${handle}", so it has no languages. Save the main file first.` } };
     }
     if (main.unsettled) return { status: 409, body: windowRefusal(main.unsettled, kind === 'put' ? 'Nothing was saved' : 'Nothing was deleted') };
-    const cur = await this.langOf(gen, tag, main.meta);
+    const map = await this.langMap(gen);
+    const cur = await this.langOf(gen, tag, map);
     if (kind === 'delete') {
       if (!cur) return { status: 404, body: { error: 'cards_language_missing', lang: tag, why: `"${handle}" has no ${tag} file.` } };
       if (ifVersion != null && ifVersion.trim() !== cur.version) {
@@ -1373,11 +1413,11 @@ export class CardLifetime {
     if (bytes > KV_MAX_BYTES) return { status: 413, body: { error: `That would make the ${tag} file ${bytes} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
     const wouldChange = !cur || md !== cur.md;
     if (check) return { status: 200, body: { checked: true, version: cur ? cur.version : null, wouldChange } };
-    // a new rev, in a fresh slot; the record names it only once it is whole here. Never one the record
+    // a new rev, in a fresh slot; the map names it only once it is whole here. Never one the map
     // names or owes (48 random bits make that a formality; the check makes it a rule)
     const version = await cardVersion(md);
-    const seq = (main.meta.langSeq || 0) + 1;
-    const taken = new Set([...Object.values(main.meta.languages || {}), ...(main.meta.owed || []).map(([, r]) => r)]);
+    const seq = map.langSeq + 1;
+    const taken = new Set([...Object.values(map.languages), ...map.owed.map(([, r]) => r)]);
     let rev = newRev();
     while (taken.has(rev)) rev = newRev();
     await this.keepCard(handle, gen, md, version, 'pending', null, { from: 'object', tag, rev }, langSlot(gen, tag, rev));
@@ -1393,33 +1433,34 @@ export class CardLifetime {
   }
   /**
    * GET of a language file (r2: the API reads the object, the authority, never KV — KV may still hold
-   * a body no record names). Reads only: no adoption, no flush, no write. A generation whose main file
+   * a body no map names). Reads only: no adoption, no flush, no write. A generation whose main file
    * this object does not hold has no language file.
    */
   async languageRead({ handle, gen, tag }) {
     if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
     const record = await this.storage.get(cardMetaKey(gen));
-    const file = record && record.from !== 'unknown' ? await this.langOf(gen, tag, record) : null;
+    const map = record && record.from !== 'unknown' ? await this.storage.get(langRecordKey(gen)) : null;
+    const file = map ? await this.langOf(gen, tag, map) : null;
     if (!file) return { status: 404, body: { error: 'cards_language_missing', lang: tag, why: `"${handle}" lists ${tag} but has no ${tag} file; visitors asking for it get the main file.` } };
     // the asset ids any current file of the Card uses (the manifest's `referenced`, review r1 #1)
     const main = await this.cardOf(handle, gen);
-    const used = await this.assetUse(gen, main && main.md != null ? main.md : null, record);
+    const used = await this.assetUse(gen, main && main.md != null ? main.md : null, map);
     return { status: 200, body: { md: file.md, version: file.version, used: [...used.keys()] } };
   }
   /**
    * which current files of the Card refer to each asset id: id → ['main', <tag>…] (main first, then
-   * the live language files in the record's order), by the same scan as the main file's
+   * the live language files in the map's order), by the same scan as the main file's
    * (referencedAssets). `mainMd` null leaves the main file out; `except` leaves out tags going away.
    */
-  async assetUse(gen, mainMd, record, except = []) {
+  async assetUse(gen, mainMd, map, except = []) {
     const used = new Map();
     const add = (file, md) => {
       for (const id of referencedAssets(thinCard(md))) { if (!used.has(id)) used.set(id, []); if (!used.get(id).includes(file)) used.get(id).push(file); }
     };
     if (mainMd != null) add('main', mainMd);
-    for (const tag of Object.keys((record && record.languages) || {})) {
+    for (const tag of Object.keys((map && map.languages) || {})) {
       if (except.includes(tag)) continue;
-      add(tag, (await this.langOf(gen, tag, record)).md);
+      add(tag, (await this.langOf(gen, tag, map)).md);
     }
     return used;
   }
@@ -1471,8 +1512,9 @@ export class CardLifetime {
     // tile#304 r2 (review r1 #1): referenced by ANY current file of the Card — the main file or a live
     // language file, which shares this one assets lane. A Card with language files is told which
     // (`used_by`: 'main' and tags); one without is answered exactly as before.
-    const live = Object.keys(cur.meta.languages || {});
-    const used = await this.assetUse(gen, cur.md, cur.meta);
+    const map = await this.storage.get(langRecordKey(gen));
+    const live = Object.keys((map && map.languages) || {});
+    const used = await this.assetUse(gen, cur.md, map);
     if (used.has(id)) {
       const by = used.get(id);
       return { status: 409, body: !live.length ? {
@@ -1505,26 +1547,21 @@ const cardMetaKey = (gen) => `card:${gen}`;
 const cardChunkKey = (gen, serial, i) => `card:${gen}:${serial}:${i}`;
 /** tile#304: a language file's storage slot in CardLifetime (r2: one per rev), used where the main file's slot is its gen */
 const langSlot = (gen, tag, rev) => `${gen}@${tag}@${rev}`;
+/** tile#304 r3: a generation's language map in CardLifetime — its own key, never a field of `card:<gen>` (see the language section) */
+const langRecordKey = (gen) => `languages:${gen}`;
 /**
- * tile#304 r2: the language state a main record carries (see CardLifetime's language section), as a
- * fresh, mutable value: `{ languages, owed, langSeq }`, empty for a record without one.
+ * the language map as a fresh, mutable value: `{ languages, owed, langSeq, published }`, empty for a
+ * generation that never had one
  */
-const langState = (record) => ({
-  languages: { ...((record && record.languages) || {}) },
-  owed: [...((record && record.owed) || [])],
-  langSeq: (record && record.langSeq) || 0,
+const langState = (map) => ({
+  languages: { ...((map && map.languages) || {}) },
+  owed: [...((map && map.owed) || [])],
+  langSeq: (map && map.langSeq) || 0,
+  published: (map && map.published) || null,
 });
-/** `record` with `state` in it — each field only while it says something, so a Card that never had a
- *  language file keeps a record exactly as before */
-function withLangState(record, state) {
-  const { languages: _l, owed: _o, langSeq: _s, ...rest } = record;
-  return {
-    ...rest,
-    ...(Object.keys(state.languages).length ? { languages: state.languages } : {}),
-    ...(state.owed.length ? { owed: state.owed } : {}),
-    ...(state.langSeq ? { langSeq: state.langSeq } : {}),
-  };
-}
+/** r3: is `map` not (yet) what KV's main key carries — changed since its last put, or that put was of an earlier record? */
+const unpublished = (map, record) => !!map && !!record
+  && !(map.published && map.published.serial === record.serial && sameRevs(map.published.languages, map.languages));
 /** apply `{ tag: rev | null }` to a language state: a rev that stops being live is owed to KV */
 function changeLanguages(state, changes) {
   for (const [tag, rev] of Object.entries(changes)) {

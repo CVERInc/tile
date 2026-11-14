@@ -245,17 +245,17 @@ test('row 4a — DELETE while the language body put is in flight: the write is s
 test('row 4b — DELETE between the file kept and the record naming it: the write is stale, nothing reaches KV', async () => {
   const env = await withJapanese();
   const before = new Set(langKeys(env));
-  // the main record's put in the object is the language write's commit; hold it
-  const held = storageHolds(env, /^card:0$/);
+  // the language map's put in the object is the language write's commit (r3: its own key); hold it
+  const held = storageHolds(env, /^languages:0$/);
   const put = saveLang(env, 'zh-TW', ZH);
-  await within(held.reached, 'the object putting the main record');
+  await within(held.reached, 'the object putting the language map');
   assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
   held.release();
   const r = await put;
   assert.equal(r.status, 409);
   assert.equal(r.json.stale_generation, true);
   assert.deepEqual(langKeys(env).filter((k) => !before.has(k)), [], 'no zh-TW body was written to KV');
-  assert.deepEqual(objectKeys(env).filter((k) => k.startsWith('card:')), [], 'the object holds nothing of the ended lifetime');
+  assert.deepEqual(objectKeys(env).filter((k) => k.startsWith('card:') || k.startsWith('languages:')), [], 'the object holds nothing of the ended lifetime');
 });
 
 // ── row 5: a reused handle ───────────────────────────────────────────────────────────────────────
@@ -296,11 +296,12 @@ test('🔴 row 6 — after a write that dropped the language fields, a new file 
   const env = await withJapanese();
   const { gen } = await liveCard(env.CARDS, 't');
   const oldKey = langKeys(env)[0];
-  // what an older Worker's main save leaves: the object's record without its language fields, and the
-  // main key put without metadata. The old Japanese body stays in KV, under the key that named it.
+  // what an older Worker's main save leaves in KV: the main key put without metadata. The old Japanese
+  // body stays in KV, under the key that named it. (r3: the map is its own object key, which that
+  // Worker never touches — its real save is in languages-rollback.test.mjs; here the map is dropped
+  // too, the harder case for this row.)
   const storage = env.CARD_LIFETIMES.storageOf('t');
-  const { languages: _l, langSeq: _s, owed: _o, ...bare } = storage._m.get(`card:${gen}`);
-  storage._m.set(`card:${gen}`, bare);
+  storage._m.delete(`languages:${gen}`);
   env.CARDS._meta.delete(`card:t:${gen}`);
   assert.ok(env.CARDS._m.has(oldKey));
   // the new Japanese file's body put fails; the record that names it lands
