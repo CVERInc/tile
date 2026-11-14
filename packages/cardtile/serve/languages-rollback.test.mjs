@@ -251,7 +251,10 @@ for (const pending of ['life', 'card:0']) {
     await env.CARDS.put('card:t:0', env.CARDS._m.get('card:t:0')); // an older worker's put: no metadata
     assert.equal(await mainMetadata(env), null);
     assert.ok(storage._m.get('languages:0').published, 'the marker still says KV holds the map');
-    storage._m.set(pending, { ...storage._m.get(pending), cache: 'pending' });
+    // (this Card has no `life` record yet; a pending one is a whole lifetime, as read() makes it, so
+    // the alarm's card-level flushes see the same generation — a bare `{ cache }` would stop them)
+    const was = storage._m.get(pending) || { gen: '0', hosts: [], pending: {}, handle: 't' };
+    storage._m.set(pending, { ...was, cache: 'pending' });
     env.CARD_LIFETIMES.restart('t');
     const at = env.CARDS.reads.length;
     assert.equal((await call(env, 'GET', '/_api/card/t/lifetime')).status, 200);

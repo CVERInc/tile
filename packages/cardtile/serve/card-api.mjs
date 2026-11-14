@@ -773,7 +773,9 @@ export class CardLifetime {
   async wake() {
     const life = await this.storage.get('life');
     const gen = (life && life.gen) || GEN0;
-    if ((life && life.cache === 'pending') || (await this.owesKv(gen, true))) await this.armAlarm(Date.now());
+    // r5 (closing check P2): owesKv, and with it the KV check, runs even when the lifetime is pending
+    const owes = await this.owesKv(gen, true);
+    if ((life && life.cache === 'pending') || owes) await this.armAlarm(Date.now());
   }
   /**
    * 🔴 tile#304 r4 (closing review P1): does KV's main key name the language files the map names? The
@@ -1444,10 +1446,11 @@ export class CardLifetime {
   async owesKv(gen, check = false) {
     const record = await this.storage.get(cardMetaKey(gen));
     if (!record) return false;
-    if (record.cache === 'pending') return true;
+    if (record.cache === 'pending' && !check) return true;
     let map = await this.storage.get(langRecordKey(gen));
+    if (check && map) map = await this.checkKvMap(gen, record, map, true); // r5: before the pending answer
+    if (record.cache === 'pending') return true;
     if (!map) return false;
-    if (check) map = await this.checkKvMap(gen, record, map, true);
     if ((map.owed || []).length || (record.from !== 'kv' && unpublished(map, record))) return true;
     for (const [tag, rev] of Object.entries(map.languages || {})) {
       const meta = await this.storage.get(cardMetaKey(langSlot(gen, tag, rev)));
