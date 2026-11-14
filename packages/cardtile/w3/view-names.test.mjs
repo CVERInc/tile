@@ -26,3 +26,15 @@ test('ja: the list view is 並び in both tables', () => {
   assert.equal(DECK_STRINGS.ja.viewList, '並び');
   assert.equal(EDIT3_STRINGS.ja.viewList, '並び');
 });
+
+// The second view is the cards SPREAD OUT side by side (the product owner's ruling, tile#306), not a
+// "list". Pinned in all nine locales so a later translation run cannot quietly turn it back.
+test('the second view is the spread, in all nine locales', () => {
+  const expected = {
+    en: 'List', zh: '攤', 'zh-Hans': '摊', ja: '並び',
+    ko: '펼침', de: 'Fächer', fr: 'Éventail', es: 'Abanico', pt: 'Leque',
+  };
+  assert.deepEqual([...LOCALE_KEYS].sort(), Object.keys(expected).sort());
+  const actual = Object.fromEntries(LOCALE_KEYS.map((l) => [l, DECK_STRINGS[l].viewList]));
+  assert.deepEqual(actual, expected);
+});
