@@ -11,7 +11,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CARD_SETTINGS, FRONTMATTER, BACKS, GEOMETRY, EDITOR_PROTOCOL, DISPOSITION } from './ai-ops.mjs';
+import { CARD_SETTINGS, FRONTMATTER, BACKS, GEOMETRY, EDITOR_PROTOCOL, DISPOSITION, SCOPE, LANGUAGE_FILES } from './ai-ops.mjs';
+import { LOCALES_KEY, PER_LANGUAGE_KEYS, WHOLE_CARD_KEYS, MAX_LOCALES } from './languages.mjs';
+import { CLAIM_KEYS } from './claim.mjs';
 import { applySetting, fmRead, VIEW_IDS } from './w3/card-settings.mjs';
 import { DECK_KEYS, DECK_VIEWS } from './w3/deck-page.mjs';
 import {
@@ -62,7 +64,7 @@ function settingNames() {
 test('CARD_SETTINGS lists exactly the frontmatter keys the renderer, the deck and the editor read', () => {
   const worker = workerKeys();
   assert.ok(worker.size >= 12, `found only ${worker.size} keys in card-worker — the scan is not reading it`);
-  const used = new Set([...worker, ...DECK_KEYS, ...settingNames()]);
+  const used = new Set([...worker, ...DECK_KEYS, ...settingNames(), LOCALES_KEY]);
   assert.deepEqual(KEYS.filter((k) => !used.has(k)).sort(), [], 'CARD_SETTINGS declares keys no code reads');
   assert.deepEqual([...used].filter((k) => !KEYS.includes(k)).sort(), [], 'code reads frontmatter keys CARD_SETTINGS does not declare');
 });
@@ -279,9 +281,34 @@ test('GRAMMAR.md: the settings table names every key in CARD_SETTINGS, and every
   }
 });
 
+// ── tile#304: which file decides each key ────────────────────────────────────────────────────────
+
+/** the refusal codes a source file can emit: string literals `cards_language_…` / `cards_locales_…` */
+const codesIn = (rel) => new Set([...code(read(rel)).matchAll(/'(cards_(?:language|locales)_[a-z_]+)'/g)].map((m) => m[1]));
+
+test('every key’s `scope` is the one languages.mjs enforces, and the two lists cover every key read', () => {
+  for (const [k, s] of Object.entries(CARD_SETTINGS)) {
+    assert.equal(s.scope, PER_LANGUAGE_KEYS.includes(k) ? SCOPE.LANGUAGE : SCOPE.CARD, `${k}: scope`);
+  }
+  // the code's classification is exactly CARD_SETTINGS plus the claim — nothing read is unclassified,
+  // and nothing classified is unread
+  assert.deepEqual([...PER_LANGUAGE_KEYS, ...WHOLE_CARD_KEYS].sort(), [...KEYS, ...CLAIM_KEYS].sort());
+  assert.match(CARD_SETTINGS.locales.values, new RegExp(`at most ${MAX_LOCALES}\\b`));
+  assert.match(LANGUAGE_FILES.limits, new RegExp(`At most ${MAX_LOCALES} tags`));
+});
+
+test('LANGUAGE_FILES names exactly the refusal codes the code emits', () => {
+  const emitted = new Set([...codesIn('languages.mjs'), ...codesIn('serve/card-api.mjs')]);
+  assert.ok(emitted.size >= 8, `found only ${emitted.size} codes: the scan is not reading the code`);
+  assert.deepEqual(Object.keys(LANGUAGE_FILES.refusals).sort(), [...emitted].sort());
+  for (const c of emitted) assert.ok(GRAMMAR.includes('`' + c + '`'), `GRAMMAR.md does not mention \`${c}\``);
+});
+
 // 🔴 THE CONTROL: set comparisons over a scan that found nothing pass beautifully.
 test('CONTROL: the comparisons above fire on a fabricated drift', () => {
-  const used = new Set([...workerKeys(), ...DECK_KEYS, ...settingNames()]);
+  // the code scan sees a code, and not the same code inside a comment
+  assert.deepEqual([...new Set([...code("x = 'cards_language_fake' // 'cards_language_hidden'").matchAll(/'(cards_(?:language|locales)_[a-z_]+)'/g)].map((m) => m[1]))], ['cards_language_fake']);
+  const used = new Set([...workerKeys(), ...DECK_KEYS, ...settingNames(), LOCALES_KEY]);
   const short = KEYS.filter((k) => k !== 'radius');
   assert.deepEqual([...used].filter((k) => !short.includes(k)), ['radius']);
   assert.ok(code("a // 'card:fake'\nb").indexOf('card:fake') < 0, 'the comment stripper keeps line comments');

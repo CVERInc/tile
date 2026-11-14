@@ -18,6 +18,7 @@
 // other key is refused when the file is written and ignored when it is read.
 
 import { parseCard, serializeCard } from './card-core.js';
+import { CLAIM_KEYS } from './claim.mjs';
 
 /** the frontmatter key, in the MAIN file, that lists the Card's languages */
 export const LOCALES_KEY = 'locales';
@@ -52,7 +53,7 @@ export const WHOLE_CARD_KEYS = Object.freeze([
   // the footer and the page's own metadata: the same Card, the same year, the same opt-ins
   'since', 'generator', 'powered-by',
   // identity: which handle this file is (claim.mjs reads either spelling), and which languages exist
-  'cardtile', 'card-page', LOCALES_KEY,
+  ...CLAIM_KEYS, LOCALES_KEY,
 ]);
 
 // ── language tags ────────────────────────────────────────────────────────────────────────────────

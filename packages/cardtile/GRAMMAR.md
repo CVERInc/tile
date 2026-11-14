@@ -62,9 +62,142 @@ Written by hand only:
 | `lang` | a BCP 47 tag such as `zh-TW`; anything else is `en` | `en` |
 | `generator` | `off` removes the generator meta tag; other text replaces it | `feelreef` |
 | `powered-by` | `on`: a credit link in the footer | none |
+| `locales` | the Card's languages, e.g. `[en-US, ja-JP]`, at most 12 (see Languages) | one language |
 
 A `backdrop-dim` that is not a number means the default, not 0. `powered-by` is ignored whenever
 the platform states whether the card is in the card pool.
+
+## Languages
+
+A Card can exist in several languages, the way a Site can: **one file per language**, never
+several languages inside one file, and never a language in the address. The main file is the Card.
+Its `locales:` lists the languages, its own `lang:` among them, and each other listed language may
+have a file of its own: a complete card file in the same grammar, holding the owner's words in that
+language.
+
+```markdown
+---
+title: Aster
+lang: en-US
+locales: [en-US, ja-JP]
+accent: #c0392b
+---
+
+## grid
+
+- [ ] %% card: profile w=6 %% Illustrator.
+```
+
+```markdown
+---
+title: アスター
+lang: ja-JP
+---
+
+## grid
+
+- [ ] %% card: profile w=6 %% イラストレーター。
+```
+
+A language file changes the words, never what the Card is. It is rendered as written when it is
+chosen; keeping its tiles in step with the main file's (which tiles, their order and sizes, the
+backs) is the writer's job, and the engine does not compare the two. Everything the frontmatter
+decides for the whole Card is read from the main file, always:
+
+| Key | Decided by | Why |
+|---|---|---|
+| `title` | each language file (absent: the main file's) | the Card's name, in the owner's words |
+| `lang` | each language file (must be its tag; absent: the tag) | the language of the words served |
+| `accent`, `theme`, `header`, `icons`, `radius`, `arrows` | the main file | one Card looks one way in every language |
+| `backdrop`, `backdrop-dim` | the main file | a picture is an asset, and assets are the Card's |
+| `views`, `view`, `back` | the main file | the structure a visitor navigates |
+| `since`, `generator`, `powered-by` | the main file | the same Card, the same footer and page metadata |
+| `card-page`, `cardtile` (the claim) | the main file | which handle the file is |
+| `locales` | the main file | which languages exist |
+
+A language file may carry only `title` and `lang`. Any other frontmatter key is refused when the
+file is saved (`cards_language_key_refused`, naming the key) and ignored when it is read. That
+includes keys this repository does not read: a repository that embeds the engine may read them for
+the whole Card. A `lang:` that is not the file's tag is refused (`cards_language_lang_mismatch`).
+
+There is one assets lane per Card, the main file's: `asset:<id>` means the same picture in every
+language, and an assets lane sent with a language file is dropped, as a save drops the caller's.
+The avatar and the icon files are always the main file's.
+
+### Language tags
+
+A tag in `locales:`, in a route or in `?lang=` is read the same way:
+
+| Written | Read as | Rule |
+|---|---|---|
+| `ja-JP`, `JA-jp`, `ja_JP` | `ja-JP` | case as RFC 5646 writes it (language lower, script Title, region upper); `_` is `-` |
+| `zh-hant-tw` | `zh-Hant-TW` | the same |
+| `zh-TW` and `zh-Hant-TW` | two tags | nothing is aliased; matching decides how near they are |
+| `es-419`, `sl-rozaj` | as written | numeric regions and variants are tags |
+| `*`, `en-x-private`, `de-u-co-phonebk`, `en-`, `e`, `<x>`, over 35 characters | not a tag | the renderer's `<html lang>` shape only: letters, then 2–8 letter or digit subtags |
+
+A request is matched against the listed tags (and the main file's own `lang`) in this order:
+
+| Step | Example | Served |
+|---|---|---|
+| exact | `ja-JP` | `ja-JP` |
+| lookup: drop the last subtag until one matches (RFC 4647) | `zh-Hant-TW` with `zh-Hant` listed | `zh-Hant` |
+| the same language, the first listed | `en-GB` with `en-US` listed | `en-US` |
+| …but never across Chinese scripts, named or implied by the region | `zh-CN` with only `zh-TW` listed | the main file |
+| nothing matches | `fr` | the main file |
+
+### Which file a visitor gets
+
+1. `?lang=<tag>`. A well-formed value decides: a match is served, anything else is the main file,
+   and the header is not asked. An empty or malformed value is ignored.
+2. `Accept-Language`, with its `q` weights: the highest weight that matches wins, ties keep the
+   header's order, `q=0` excludes, `*` matches nothing.
+3. Otherwise, the main file.
+
+A chosen language with a file is served as that file's `title` and lanes over the main file's other
+keys and assets. A listed language with no file, an unlisted one and an unknown one are the main
+file. A language is never a reason for a 404. The page (`<html lang>`), the markdown exits
+(`Accept: text/markdown`, `/<handle>.md`) and their `Content-Language` all name the file actually
+served. Every answer of a Card that lists `locales:` says `Vary: Accept, Accept-Language`, and its
+page carries one `rel="alternate" hreflang` link per listed language (its `?lang=` address) plus
+`x-default` (the bare address). A language chosen by `?lang=` is its own canonical address. A Card
+without `locales:` answers exactly as a Card always has.
+
+### Language files through the API
+
+On both prefixes, beside the main file's routes:
+
+| Method | Path | Body or header | Answer |
+|---|---|---|---|
+| `GET` | `/_api/cards/<handle>/lang/<tag>` | | `{handle, lang, version, markdown, assets, total_bytes}`: the file without an assets lane, the main file's asset manifest |
+| `GET` | `/_api/cards/<handle>/lang/<tag>/full` | | the file with the main file's assets lane |
+| `PUT` | `/_api/cards/<handle>/lang/<tag>` | `{markdown, base_version?, dry_run?}` | `{handle, lang, version, commit, bytes, created, wouldChange}` |
+| `DELETE` | `/_api/cards/<handle>/lang/<tag>` | `If-Version`, optional | `{handle, lang, deleted: true}` |
+
+A language file has its own version, and `base_version` / `If-Version` are that version. Its links
+pass the same scheme, count and safety checks as the main file's, and it obeys the same byte ceiling,
+per file. The main file's routes take no `?lang=` (`cards_language_use_path`): there, a lost query
+would turn a translation's save into an overwrite of the main file, or a removal into the deletion of
+the whole Card. The main file's `GET` adds `locales` and `languages` (each tag that may have a file →
+its version, or `null`) when it lists any. A main save that drops a tag from `locales:` removes that
+tag's file in the same write and says so (`languages_removed`); deleting the Card removes every
+language file.
+
+| Code | Status | When |
+|---|---|---|
+| `cards_language_tag_invalid` | 400 | the tag is not a language tag |
+| `cards_language_not_listed` | 409 (a `GET`: 404) | the main file does not list the tag |
+| `cards_language_is_main` | 409 (a `GET`: 404) | the tag is the main file's own `lang` |
+| `cards_language_key_refused` | 422 | the file carries a key the main file decides (`key`) |
+| `cards_language_lang_mismatch` | 422 | the file's `lang` is not the tag |
+| `cards_language_no_card` | 404 | there is no main file |
+| `cards_language_missing` | 404 | the tag is listed and has no file |
+| `cards_language_use_path` | 400 | `?lang=` on a main-file route |
+| `cards_locales_invalid` | 422 | a main save lists something that is not a tag |
+| `cards_locales_too_many` | 422 | a main save lists more than 12 tags |
+
+The visitor-facing language switch and banner, any product limit on the number of languages, and
+automatic translation are not part of this.
 
 ## Views
 
