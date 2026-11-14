@@ -10,12 +10,18 @@
 // back to English key by key, and EDIT3_MISSING lists exactly which; w3/locale-coverage.test.mjs fails
 // on any missing cell in any locale.
 //
+// 🔴 The three view names (viewStack / viewList / viewWall) and the wall's frame label (wallFrame) are
+// NOT written in this file, in any locale: they are the deck's words (w3/deck-i18n.mjs), taken at load
+// time below, so the editor and the deck name the views alike everywhere (tile#306). Change a view
+// name in deck-i18n.mjs; w3/view-names.test.mjs holds the two tables equal.
+//
 // Placeholders are `{name}`, filled by fmt(). Every value is a plain string, so the banned-word scan
 // (w3/words.test.mjs) sees all of it.
 import { LOCALE_KEYS, CHROME_STRINGS, primaryLocale } from '../w/sandbox-i18n.mjs';
+import { DECK_STRINGS } from './deck-i18n.mjs';
 
 const EN = {
-  untitled: 'Untitled', options: 'Cards settings', settingsBack: 'Settings', viewsAria: 'Views', wallFrame: 'Wall', editBtn: 'Edit', raw: 'Raw content',
+  untitled: 'Untitled', options: 'Cards settings', settingsBack: 'Settings', viewsAria: 'Views', editBtn: 'Edit', raw: 'Raw content',
   docTitle: '{t} · Editing Cards', pageTitle: 'Edit Cards',
   bcValue: 'Name + QR code',
   dfSays: 'The back of every tile that has none of its own.', replaceBack: 'Replace…', toBc: 'Back to the default', toBcDone: 'The default back is back.',
@@ -29,7 +35,6 @@ const EN = {
   backdrop: 'Backdrop', backdropHint: 'A picture behind your Cards.', bdNone: 'None', bdSet: 'A picture',
   bdPick: 'Choose a picture…', bdUrl: 'Picture address', bdRemove: 'Remove backdrop',
   dim: 'Dim backdrop', dim0: 'None', dim25: 'Light', dim45: 'Medium', dim65: 'Dark', dimHint: 'Keeps text readable over the picture.', auto: 'Auto',
-  viewStack: 'Stack', viewList: 'List', viewWall: 'Wall',
   viewSaysStack: 'Flip through', viewSaysList: 'Scroll through all', viewSaysWall: 'See the whole page',
   viewsLabel: 'How visitors can view', opensAs: 'Opens as', full: 'Full', width: 'Width',
   save: 'Save', savedLive: 'Saved. It is live now.',
@@ -76,7 +81,7 @@ const EN = {
 };
 
 const ZH = {
-  untitled: '未命名', options: 'Cards 設定', settingsBack: '設定', viewsAria: '看法', wallFrame: '牆', editBtn: '編輯', raw: '原始內容',
+  untitled: '未命名', options: 'Cards 設定', settingsBack: '設定', viewsAria: '看法', editBtn: '編輯', raw: '原始內容',
   docTitle: '{t} · 編輯 Cards', pageTitle: '編輯 Cards',
   bcValue: '名字＋QR code',
   dfSays: '沒有自己背面的卡牌，翻過來都是它。', replaceBack: '換掉…', toBc: '換回預設', toBcDone: '換回預設背面了。',
@@ -90,7 +95,6 @@ const ZH = {
   backdrop: '整面背景', backdropHint: '放在你的 Cards 後面的圖。', bdNone: '沒有', bdSet: '一張圖',
   bdPick: '選擇圖片…', bdUrl: '圖片網址', bdRemove: '移除背景',
   dim: '背景暗度', dim0: '不調暗', dim25: '淡', dim45: '中', dim65: '深', dimHint: '讓字在圖上讀得清楚。', auto: '自動',
-  viewStack: '疊', viewList: '攤', viewWall: '牆',
   viewSaysStack: '翻著看', viewSaysList: '一次攤開', viewSaysWall: '整頁排好',
   viewsLabel: '訪客可以怎麼看', opensAs: '一打開看到', full: '全寬', width: '寬度',
   save: '儲存', savedLive: '存好了，已經上線。',
@@ -133,10 +137,9 @@ const ZH = {
 // Japanese, written out like ZH. Ten keys are not here because the shared chrome (SAME_AS_CHROME) and
 // w2's host words (HOST) already say them in ja — the same button, the same word. Terms follow the
 // sandbox's ja tables: タイル for a tile, 表面 / 裏面 for its two faces, Cards as the product's name.
-// View names: 重ね / 並び / 一覧 — the list view sets the cards out side by side, so 並び, not 縦並び
-// (see w3/deck-i18n.mjs for why); the editor and the deck say the same.
+// The view names (重ね / 並び / 一覧, and why) are the deck's: see w3/deck-i18n.mjs.
 const JA = {
-  untitled: '無題', options: 'Cards の設定', settingsBack: '設定', viewsAria: '表示', wallFrame: '一覧', editBtn: '編集', raw: 'ファイルの中身',
+  untitled: '無題', options: 'Cards の設定', settingsBack: '設定', viewsAria: '表示', editBtn: '編集', raw: 'ファイルの中身',
   docTitle: '{t} · Cards を編集', pageTitle: 'Cards を編集',
   bcValue: '名前＋QR コード',
   dfSays: '自分の裏面がないタイルは、裏返すとすべてこれになります。', replaceBack: '差し替える…', toBc: 'デフォルトに戻す', toBcDone: 'デフォルトの裏面に戻しました。',
@@ -149,7 +152,6 @@ const JA = {
   backdrop: '背景', backdropHint: 'Cards の後ろに置く画像です。', bdNone: 'なし', bdSet: '画像',
   bdPick: '画像を選ぶ…', bdUrl: '画像の URL', bdRemove: '背景を外す',
   dim: '背景の暗さ', dim0: 'なし', dim25: '弱', dim45: '中', dim65: '強', dimHint: '画像の上でも文字が読みやすくなります。', auto: '自動',
-  viewStack: '重ね', viewList: '並び', viewWall: '一覧',
   viewSaysStack: '1 枚ずつめくる', viewSaysList: '全部をスクロール', viewSaysWall: 'ページ全体を見る',
   viewsLabel: '訪問者が選べる表示', opensAs: '最初の表示', full: '全幅', width: '幅',
   savedLive: '保存しました。公開中です。',
@@ -214,7 +216,6 @@ const TRANSLATED = {
     "options": "Cards 설정",
     "settingsBack": "설정",
     "viewsAria": "보기",
-    "wallFrame": "월",
     "editBtn": "편집",
     "raw": "파일 내용",
     "docTitle": "{t} · Cards 편집",
@@ -254,9 +255,6 @@ const TRANSLATED = {
     "dim65": "강함",
     "dimHint": "이미지 위에서도 텍스트를 읽기 쉽게 해줍니다.",
     "auto": "자동",
-    "viewStack": "스택",
-    "viewList": "목록",
-    "viewWall": "모아보기",
     "viewSaysStack": "한 장씩 넘겨보기",
     "viewSaysList": "스크롤하여 모두 보기",
     "viewSaysWall": "페이지 전체 보기",
@@ -350,7 +348,6 @@ const TRANSLATED = {
     "options": "Cards 设置",
     "settingsBack": "设置",
     "viewsAria": "视图",
-    "wallFrame": "墙",
     "editBtn": "编辑",
     "raw": "文件内容",
     "docTitle": "{t} · 编辑 Cards",
@@ -390,9 +387,6 @@ const TRANSLATED = {
     "dim65": "深",
     "dimHint": "让图片上的文字更清晰易读。",
     "auto": "自动",
-    "viewStack": "堆叠",
-    "viewList": "列表",
-    "viewWall": "墙",
     "viewSaysStack": "翻着看",
     "viewSaysList": "滚动查看全部",
     "viewSaysWall": "查看整个页面",
@@ -486,7 +480,6 @@ const TRANSLATED = {
     "options": "Cards-Einstellungen",
     "settingsBack": "Einstellungen",
     "viewsAria": "Ansichten",
-    "wallFrame": "Wand",
     "editBtn": "Bearbeiten",
     "raw": "Originalinhalt",
     "docTitle": "{t} · Cards bearbeiten",
@@ -526,9 +519,6 @@ const TRANSLATED = {
     "dim65": "Stark",
     "dimHint": "Sorgt dafür, dass Text über dem Bild lesbar bleibt.",
     "auto": "Automatisch",
-    "viewStack": "Stapel",
-    "viewList": "Liste",
-    "viewWall": "Wand",
     "viewSaysStack": "Durchblättern",
     "viewSaysList": "Alles durchscrollen",
     "viewSaysWall": "Die ganze Seite sehen",
@@ -622,7 +612,6 @@ const TRANSLATED = {
     "options": "Réglages de Cards",
     "settingsBack": "Réglages",
     "viewsAria": "Affichages",
-    "wallFrame": "Mur",
     "editBtn": "Modifier",
     "raw": "Contenu d’origine",
     "docTitle": "{t} · Modifier Cards",
@@ -662,9 +651,6 @@ const TRANSLATED = {
     "dim65": "Sombre",
     "dimHint": "Permet de garder le texte lisible sur l'image.",
     "auto": "Automatique",
-    "viewStack": "Pile",
-    "viewList": "Liste",
-    "viewWall": "Mur",
     "viewSaysStack": "Feuilleter une à une",
     "viewSaysList": "Tout faire défiler",
     "viewSaysWall": "Voir toute la page",
@@ -758,7 +744,6 @@ const TRANSLATED = {
     "options": "Configuración de Cards",
     "settingsBack": "Configuración",
     "viewsAria": "Vistas",
-    "wallFrame": "Mural",
     "editBtn": "Editar",
     "raw": "Contenido original",
     "docTitle": "{t} · Editar Cards",
@@ -798,9 +783,6 @@ const TRANSLATED = {
     "dim65": "Oscuro",
     "dimHint": "Mantiene el texto legible sobre la imagen.",
     "auto": "Automático",
-    "viewStack": "Pila",
-    "viewList": "Lista",
-    "viewWall": "Mural",
     "viewSaysStack": "Pasar una a una",
     "viewSaysList": "Desplazarse por todo",
     "viewSaysWall": "Ver toda la página",
@@ -894,7 +876,6 @@ const TRANSLATED = {
     "options": "Configurações do Cards",
     "settingsBack": "Configurações",
     "viewsAria": "Visualizações",
-    "wallFrame": "Mural",
     "editBtn": "Editar",
     "raw": "Conteúdo original",
     "docTitle": "{t} · Editar Cards",
@@ -934,9 +915,6 @@ const TRANSLATED = {
     "dim65": "Escuro",
     "dimHint": "Mantém o texto legível sobre a imagem.",
     "auto": "Automático",
-    "viewStack": "Pilha",
-    "viewList": "Lista",
-    "viewWall": "Mural",
     "viewSaysStack": "Passar uma a uma",
     "viewSaysList": "Rolar por tudo",
     "viewSaysWall": "Ver a página inteira",
@@ -1028,16 +1006,26 @@ const TRANSLATED = {
 };
 // </translated>
 
-/** each locale's OWN strings (no fallback applied) — what the tests and the missing-key list read */
-export const EDIT3_STRINGS = Object.fromEntries(LOCALE_KEYS.map((k) => {
-  if (k === 'en') return [k, EN];
-  if (k === 'zh') return [k, ZH];
+// The deck's three view names for a locale, under the editor's four keys (the wall's frame is labelled
+// with the wall's own name). Applied last, so nothing in this file can say them differently.
+const viewNames = (k) => {
+  const d = DECK_STRINGS[k] || {};
+  return Object.fromEntries([['viewStack', d.viewStack], ['viewList', d.viewList], ['viewWall', d.viewWall], ['wallFrame', d.viewWall]]
+    .filter(([, v]) => v != null));
+};
+
+const ownStrings = (k) => {
+  if (k === 'en') return EN;
+  if (k === 'zh') return ZH;
   const chrome = CHROME_STRINGS[k] || {};
   const derived = Object.fromEntries(Object.entries(SAME_AS_CHROME).filter(([, c]) => chrome[c]).map(([key, c]) => [key, chrome[c]]));
-  return [k, { ...(TRANSLATED[k] || {}), ...derived, ...(HOST[k] || {}), ...(k === 'ja' ? JA : {}) }];
-}));
+  return { ...(TRANSLATED[k] || {}), ...derived, ...(HOST[k] || {}), ...(k === 'ja' ? JA : {}) };
+};
 
-export const EDIT3_KEYS = Object.keys(EN);
+/** each locale's OWN strings (no fallback applied) — what the tests and the missing-key list read */
+export const EDIT3_STRINGS = Object.fromEntries(LOCALE_KEYS.map((k) => [k, { ...ownStrings(k), ...viewNames(k) }]));
+
+export const EDIT3_KEYS = Object.keys(EDIT3_STRINGS.en);
 
 /** every (locale → keys) that falls back to English */
 export const EDIT3_MISSING = Object.fromEntries(LOCALE_KEYS.filter((k) => k !== 'en')
@@ -1047,7 +1035,7 @@ export const EDIT3_MISSING = Object.fromEntries(LOCALE_KEYS.filter((k) => k !== 
 /** the editor's words for a locale key or tag, English for anything that locale does not have */
 export function editStrings(tagOrKey) {
   const k = primaryLocale(tagOrKey || 'en');
-  return { ...EN, ...(EDIT3_STRINGS[k] || {}) };
+  return { ...EDIT3_STRINGS.en, ...(EDIT3_STRINGS[k] || {}) };
 }
 
 /** '{a} of {b}' + {a: 1, b: 2} → '1 of 2'. A placeholder with no value is left as written. */

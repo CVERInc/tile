@@ -6,6 +6,9 @@
 // entry for a key falls back to English, key by key; DECK_MISSING lists exactly which ones do.
 // en, zh (Traditional) and ja are written here in full; w3/locale-coverage.test.mjs fails on any
 // missing cell in any locale.
+//
+// 🔴 viewStack / viewList / viewWall are also the EDITOR's view names, in every locale: edit3-i18n.mjs
+// takes them from here and writes none of its own (tile#306; w3/view-names.test.mjs).
 import { LOCALE_KEYS, primaryLocale } from '../w/sandbox-i18n.mjs';
 
 // the words written here by hand: en, zh, ja, and zh-Hans's first eleven
