@@ -8,6 +8,10 @@ import { sandboxStart, SAVED_KEY, DRAFT_KEY, W2_DRAFT_KEY } from './sandbox-star
 import { isSandboxSample } from '../card-blank.mjs';
 import { readsAsCard } from './host-bridge.mjs';
 import { buildSandboxCard, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
+import * as blank from '../card-blank.mjs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 
 const LOCALES = Object.keys(SANDBOX_LOCALES);
 
@@ -213,4 +217,113 @@ test('unchanged: nothing stored, an empty saved card, and a previous draft that 
   assert.deepEqual(sandboxStart(store({})), { saved: null, draft: null, clear: [] });
   assert.deepEqual(sandboxStart(store({ [SAVED_KEY]: '## cards\n\n' })), { saved: '## cards\n\n', draft: null, clear: [] });
   assert.deepEqual(sandboxStart(store({ [W2_DRAFT_KEY]: 'not a card' })), { saved: null, draft: null, clear: [] });
+});
+
+// ── tile#296 round 3: the one older generation, recognised by digest ─────────────────────────────
+// The previous editor also stored the 9 starters `buildSandboxCard` wrote at 89a5b04 (replaced at
+// 22f9636). Their text is deliberately NOT in this repo any more; card-blank.mjs carries only three
+// numbers per text (length, FNV-1a, Murmur3). Nothing below needs that text except the last test,
+// which renders it from git history in memory and is skipped when the history is not in the checkout.
+const norm = (md) => md.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
+const triple = (s) => [s.length, blank.fnv1a32(s), blank.murmur3_32(s, blank.STARTER_DIGEST_SEED)];
+const ALL_STARTERS = LOCALES.flatMap((k) => STARTERS(k).map(([shape, md]) => [`${k} ${shape}`, md]));
+
+test('digests: FNV-1a and Murmur3 (32-bit, over UTF-8) match their published vectors', () => {
+  assert.equal(typeof blank.fnv1a32, 'function');
+  assert.equal(typeof blank.murmur3_32, 'function');
+  for (const [s, h] of [['', 0x811c9dc5], ['a', 0xe40c292c], ['foobar', 0xbf9cf968]]) assert.equal(blank.fnv1a32(s), h, `fnv ${JSON.stringify(s)}`);
+  for (const [s, seed, h] of [['', 0, 0], ['', 1, 0x514e28b7], ['', 0xffffffff, 0x81f16f39], ['\0\0\0\0', 0, 0x2362f9de],
+    ['aaaa', 0x9747b28c, 0x5a97808a], ['Hello, world!', 0x9747b28c, 0x24884cba],
+    ['The quick brown fox jumps over the lazy dog', 0x9747b28c, 0x2fa826cd]]) {
+    assert.equal(blank.murmur3_32(s, seed), h, `murmur ${JSON.stringify(s)} seed ${seed}`);
+  }
+  // non-ASCII is hashed as its UTF-8 bytes, and both stay unsigned 32-bit
+  for (const s of ['é', '日本語', '😀', 'Ünïcödé — ✓']) for (const h of [blank.fnv1a32(s), blank.murmur3_32(s, 7)]) {
+    assert.ok(Number.isInteger(h) && h >= 0 && h < 2 ** 32, s);
+  }
+  assert.notEqual(blank.fnv1a32('é'), blank.fnv1a32('e'));
+});
+
+test('digest table: 9 rows of three unsigned 32-bit numbers, all distinct', () => {
+  const rows = blank.OLDER_STARTER_DIGESTS;
+  assert.equal(rows?.length, 9);
+  for (const r of rows) {
+    assert.equal(r.length, 3);
+    for (const n of r) assert.ok(Number.isInteger(n) && n >= 0 && n < 2 ** 32, String(r));
+  }
+  assert.equal(new Set(rows.map((r) => r[1])).size, 9);
+  assert.equal(new Set(rows.map((r) => r[2])).size, 9);
+});
+
+test('the 18 current starters are recognised by string equality, not by the digest table', () => {
+  const rows = blank.OLDER_STARTER_DIGESTS;
+  assert.equal(rows?.length, 9);
+  for (const [at, md] of ALL_STARTERS) {
+    assert.equal(isSandboxSample(md), true, at);
+    const [, a, b] = triple(norm(md));
+    assert.ok(!rows.some((r) => r[1] === a || r[2] === b), `${at} must not share a digest with a row`);
+  }
+});
+
+// a deterministic stream of single-character edits: delete, replace or insert one UTF-16 unit
+const POOL = [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,:;!?-—_%=[]()/\'"#\n\téüßñçøåœ日本語한국어中文'];
+function* oneCharEdits(s, count, seed) {
+  let x = seed >>> 0;
+  const rnd = (n) => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x % n; };
+  for (let i = 0; i < count; i++) {
+    const kind = i % 3; const p = rnd(s.length + (kind === 2 ? 1 : 0)); const c = POOL[rnd(POOL.length)];
+    if (kind === 0) yield s.slice(0, p) + s.slice(p + 1);
+    else if (kind === 1) yield s.slice(0, p) + (c === s[p] ? (c === 'a' ? 'b' : 'a') : c) + s.slice(p + 1);
+    else yield s.slice(0, p) + c + s.slice(p);
+  }
+}
+const EDITS_PER_STARTER = 400;
+
+test(`near misses: ${EDITS_PER_STARTER} single-character edits of each of the 18 starters share no digest with any row`, (t) => {
+  const rows = blank.OLDER_STARTER_DIGESTS;
+  assert.equal(rows?.length, 9);
+  let tried = 0;
+  ALL_STARTERS.forEach(([at, md], n) => {
+    for (const e of oneCharEdits(norm(md), EDITS_PER_STARTER, 0x296 + n)) {
+      const s = norm(e);
+      if (s === norm(md)) continue;   // the edit only touched what normalisation forgives
+      tried++;
+      const [, a, b] = triple(s);
+      assert.ok(!rows.some((r) => r[1] === a || r[2] === b), `${at}: ${JSON.stringify(s.slice(0, 40))}`);
+      assert.equal(isSandboxSample(e), false, `${at} edited`);
+    }
+  });
+  assert.ok(tried > 18 * EDITS_PER_STARTER * 0.95, `tried ${tried}`);
+  t.diagnostic(`near misses: ${tried} edits of 18 starters, 0 share a digest with any row`);
+});
+
+// The one check that needs history. Skipped — visibly — when 89a5b04 is not in this checkout.
+const HIST = '89a5b04:packages/cardtile/w/sandbox-i18n.mjs';
+const historySource = () => {
+  try {
+    return execFileSync('git', ['-C', dirname(fileURLToPath(import.meta.url)), 'show', HIST], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 20000 }).toString();
+  } catch { return null; }
+};
+
+test('history: the 9 starters of 89a5b04 are recognised, and no one-character edit of them is', async (t) => {
+  const src = historySource();
+  if (src == null) { t.skip(`SKIPPED: \`git show ${HIST}\` is not available in this checkout`); return; }
+  const old = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
+  const texts = Object.keys(old.SANDBOX_LOCALES).map((k) => [k, old.buildSandboxCard(k)]);
+  assert.equal(texts.length, 9);
+  let edits = 0;
+  for (const [k, md] of texts) {
+    assert.ok(!ALL_STARTERS.some(([, cur]) => norm(cur) === norm(md)), `${k}: must reach the digest path`);
+    assert.equal(isSandboxSample(md), true, `${k} as stored`);
+    assert.equal(isSandboxSample(md.replace(/\n/g, '\r\n') + '\r\n'), true, `${k} crlf, trailing`);
+    const s = norm(md);
+    for (let p = 0; p <= s.length; p++) {
+      for (const e of [s.slice(0, p) + s.slice(p + 1), s.slice(0, p) + (s[p] === 'x' ? 'y' : 'x') + s.slice(p + 1), s.slice(0, p) + 'x' + s.slice(p)]) {
+        if (norm(e) === s) continue;
+        edits++;
+        assert.equal(isSandboxSample(e), false, `${k} edit at ${p}`);
+      }
+    }
+  }
+  t.diagnostic(`history: 9 texts recognised; ${edits} one-character edits rejected`);
 });
