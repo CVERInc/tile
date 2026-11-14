@@ -1169,6 +1169,11 @@ export class CardLifetime {
     const allowed = languagesOf(md).files;
     const removed = held.filter((t) => !allowed.includes(t));
     const removal = removed.length ? { languages_removed: removed } : {};
+    // r2 (review r1 #1): an asset a language file that STAYS refers to is in use, not an orphan
+    if (orphans.length && held.length > removed.length) {
+      const used = await this.assetUse(gen, null, cur.meta, removed);
+      for (let i = orphans.length - 1; i >= 0; i--) if (used.has(orphans[i])) orphans.splice(i, 1);
+    }
     // r3 (codex r2 P2): the Worker's preliminary check — the lock, the size, the structural answer a
     // dry run gives — is THIS, against the held card, so a current base_version is never vetoed by a
     // stale KV read. Nothing is written (a first contact may adopt; that is not a change of the card).
@@ -1382,7 +1387,27 @@ export class CardLifetime {
     const record = await this.storage.get(cardMetaKey(gen));
     const file = record && record.from !== 'unknown' ? await this.langOf(gen, tag, record) : null;
     if (!file) return { status: 404, body: { error: 'cards_language_missing', lang: tag, why: `"${handle}" lists ${tag} but has no ${tag} file; visitors asking for it get the main file.` } };
-    return { status: 200, body: { md: file.md, version: file.version } };
+    // the asset ids any current file of the Card uses (the manifest's `referenced`, review r1 #1)
+    const main = await this.cardOf(handle, gen);
+    const used = await this.assetUse(gen, main && main.md != null ? main.md : null, record);
+    return { status: 200, body: { md: file.md, version: file.version, used: [...used.keys()] } };
+  }
+  /**
+   * which current files of the Card refer to each asset id: id → ['main', <tag>…] (main first, then
+   * the live language files in the record's order), by the same scan as the main file's
+   * (referencedAssets). `mainMd` null leaves the main file out; `except` leaves out tags going away.
+   */
+  async assetUse(gen, mainMd, record, except = []) {
+    const used = new Map();
+    const add = (file, md) => {
+      for (const id of referencedAssets(thinCard(md))) { if (!used.has(id)) used.set(id, []); if (!used.get(id).includes(file)) used.get(id).push(file); }
+    };
+    if (mainMd != null) add('main', mainMd);
+    for (const tag of Object.keys((record && record.languages) || {})) {
+      if (except.includes(tag)) continue;
+      add(tag, (await this.langOf(gen, tag, record)).md);
+    }
+    return used;
   }
   /**
    * put_asset, delete_asset and the fenced delete, against the card held here: every check against
@@ -1429,10 +1454,19 @@ export class CardLifetime {
     // — `resolveAsset` returns '' for an unresolvable ref, so the picture just silently becomes a
     // blank box on someone's live page. That is precisely the class of failure whose feedback
     // arrives too late to connect to the action that caused it.
-    if (referencedAssets(thinCard(cur.md)).has(id)) {
-      return { status: 409, body: {
+    // tile#304 r2 (review r1 #1): referenced by ANY current file of the Card — the main file or a live
+    // language file, which shares this one assets lane. A Card with language files is told which
+    // (`used_by`: 'main' and tags); one without is answered exactly as before.
+    const live = Object.keys(cur.meta.languages || {});
+    const used = await this.assetUse(gen, cur.md, cur.meta);
+    if (used.has(id)) {
+      const by = used.get(id);
+      return { status: 409, body: !live.length ? {
         error: `"${id}" is still used by this card. Remove the reference first, then delete the asset.`,
         referenced: true, ...fence,
+      } : {
+        error: `"${id}" is still used by this card's ${by.map((f) => (f === 'main' ? 'main file' : `${f} file`)).join(' and ')}. Remove the reference${by.length > 1 ? 's' : ''} first, then delete the asset.`,
+        referenced: true, used_by: by, ...fence,
       } };
     }
     if (!(id in model.assets)) return { status: 404, body: { error: `No asset "${id}" on "${handle}".`, ...fence } };
@@ -1734,12 +1768,13 @@ async function readLanguage(env, store, handle, tag, full) {
   if (!files.includes(tag)) return json({ error: 'cards_language_not_listed', lang: tag, locales: listed, why: `The main file does not list ${tag} in \`locales:\`.` }, 404);
   const held = await cardWrite(env, handle, 'language', { kind: 'get', tag });
   if (held.status !== 200) return held;
-  const { md } = await held.json();
+  const { md, used } = await held.json();
   // the file with the main file's assets lane: what `/full` hands over, and what the manifest is read
-  // against (an asset is `referenced` when THIS file refers to it)
+  // against. r2: an asset is `referenced` when ANY current file of the Card refers to it (the object's
+  // `used`), as on the main GET: that is what decides whether it may be deleted
   const withAssets = serializeCard({ ...parseCard(md), assets: parseCard(main).assets });
   if (full) return new Response(withAssets, { headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' } });
-  return json({ handle, lang: tag, version: await cardVersion(md), markdown: thinCard(md), assets: assetManifest(withAssets), total_bytes: md.length });
+  return json({ handle, lang: tag, version: await cardVersion(md), markdown: thinCard(md), assets: assetManifest(withAssets, new Set(Array.isArray(used) ? used : [])), total_bytes: md.length });
 }
 
 // 🩸 `writeCard` (write + read back + assert, carried over from reef's card-store.js) is gone since
@@ -2224,16 +2259,18 @@ export async function handleApi(request, env, url) {
       // r2: "has one" is what the main file's own record names (the same read), never a bare key.
       // A main file that lists none answers exactly as before, with no new field.
       const { listed, files } = languagesOf(row.md);
-      const languages = {};
+      const languages = {}, alsoUsed = new Set();
       for (const t of files) {
         const md = row.languages[t] ? await store.get(languageKey(handle, row.gen, t, row.languages[t])) : null;
         languages[t] = md == null ? null : await cardVersion(md);
+        // r2 (review r1 #1): an asset only a language file uses is `referenced` too
+        if (md != null) for (const id of referencedAssets(thinCard(md))) alsoUsed.add(id);
       }
       return json({
         handle,
         version: row.version,
         markdown: thinCard(row.md),
-        assets: assetManifest(row.md),
+        assets: assetManifest(row.md, alsoUsed.size ? alsoUsed : null),
         total_bytes: row.md.length,
         ...(listed.length ? { locales: listed, languages } : {}),
       });
