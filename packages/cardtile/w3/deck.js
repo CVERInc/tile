@@ -101,6 +101,9 @@
   // the two homes (twoHomes, above): lodge / settled / rehome
   const lodge=n=>{ if(twoHomes.has(n)||!n.parentNode)return; const mark=document.createComment('deck'); n.parentNode.insertBefore(mark,n); twoHomes.set(n,{mark,to:null,next:null}); };
   const settled=n=>{ const h=twoHomes.get(n); if(h){ h.to=n.parentNode; h.next=n.nextSibling; } };
+  // mv is every move of a node that may hold a frame: between the two homes, and the pile's own re-ordering (order, flight, the
+  // fan, the bench). Element.moveBefore keeps a frame's document (an embed, a playing video); insertBefore loads it again. Seen in
+  // Chromium: with insertBefore in order(), an embed loaded again on every stack ⇄ list and on every card that passed over it.
   const mv=(p,n,ref)=>{ if(!p||(n.parentNode===p&&n.nextSibling===ref))return; if(p.moveBefore&&n.isConnected&&p.isConnected){ try{ p.moveBefore(n,ref); return; }catch(_){} } p.insertBefore(n,ref); };
   const rehome=wall=>twoHomes.forEach((h,n)=>{ if(wall) mv(h.mark.parentNode,n,h.mark.nextSibling); else mv(h.to,n,h.next); });
   // the tiles that are cards: every tile of the card itself — in a grid, in a run of links, or set full-bleed (a text tile).
@@ -231,7 +234,7 @@
   // a card that leaves the window: one built from the page (a tile, our own last card) goes to the bench and comes back as it
   // was; one built from a line of a card file is text and nothing else, so it is dropped and built again when it is needed
   // (a file can hold ~850,000 of them)
-  const away=c=>{ const i=idx(c); if(i>=P&&i<P+M){ c.remove(); lazy.delete(i); } else bench.appendChild(c); };
+  const away=c=>{ const i=idx(c); if(i>=P&&i<P+M){ c.remove(); lazy.delete(i); } else mv(bench,c,null); };
   let pushed=false; addEventListener('popstate',()=>{ if(openCard){pushed=false; close();} });
   const docksInert=on=>document.querySelectorAll('dc-dock').forEach(d=>{ d.inert=on; });   /* the dice was tappable through the frosted glass */
   const open=card=>{docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
@@ -330,10 +333,10 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // So paint() keeps DOM order = pile order: deepest first, top last. Only out-of-place nodes move; a card in flight keeps its spot
   // until its own apex (see flight()), because moving a node restarts whatever animates on it.
   function order(){
-    if(LIST){ /* move only what is out of place: moving a node restarts its animation, and a closed card's put-back animation is its rest pose (it replayed on every scroll step) */ let node=gshadow.nextSibling; for(const c of cards){ while(node&&node===shade)node=node.nextSibling; if(node!==c)stack.insertBefore(c,node); else node=node.nextSibling; } return; }
+    if(LIST){ /* move only what is out of place: moving a node restarts its animation, and a closed card's put-back animation is its rest pose (it replayed on every scroll step) */ let node=gshadow.nextSibling; for(const c of cards){ while(node&&node===shade)node=node.nextSibling; if(node!==c)mv(stack,c,node); else node=node.nextSibling; } return; }
     const want=cards.filter(c=>!c.classList.contains('travel')).map(c=>[c,rel(idx(c))]).sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
     let node=gshadow.nextSibling;
-    for(const c of want){ while(node&&(node===shade||node.classList.contains('travel')))node=node.nextSibling; if(node!==c)stack.insertBefore(c,node); else node=node.nextSibling; }
+    for(const c of want){ while(node&&(node===shade||node.classList.contains('travel')))node=node.nextSibling; if(node!==c)mv(stack,c,node); else node=node.nextSibling; }
   }
   function paint(){
     syncWin();
@@ -351,7 +354,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const flight=(c,kind)=>{ c.classList.add('travel'); c.classList.remove(...FLIGHT); c.classList.toggle('side',flingDir!==0); c.style.setProperty('--fdir',String(flingDir||1)); flingDir=0; void c.offsetWidth; c.classList.add(kind+'-1');
     const onEnd1=e=>{ if(!new RegExp('^deck-'+kind+'(-side)?-1$').test(e.animationName))return; c.removeEventListener('animationend',onEnd1);
       c.classList.remove(kind+'-1');
-      if(kind==='to-back'){ stack.insertBefore(c,gshadow.nextSibling); } else { stack.appendChild(c); if(card(cur)===c)stack.insertBefore(shade,c); }
+      if(kind==='to-back'){ mv(stack,c,gshadow.nextSibling); } else { mv(stack,c,null); if(card(cur)===c)stack.insertBefore(shade,c); }
       void c.offsetWidth; c.classList.add(kind+'-2');
       const onEnd2=e2=>{ if(!new RegExp('^deck-'+kind+'(-side)?-2$').test(e2.animationName))return; c.removeEventListener('animationend',onEnd2); c.classList.remove(kind+'-2','travel'); settleHidden(c); order(); if(!running&&!stack.querySelector('.travel')){stack.classList.remove('busy'); requestAnimationFrame(hovEval); setTimeout(hovEval,560);} };
       c.addEventListener('animationend',onEnd2); };
@@ -378,7 +381,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     cards.forEach(c=>{ c.classList.remove('flipping-close'); c.style.transition='none'; c.style.opacity='1'; c.style.visibility='visible'; c.style.pointerEvents='auto'; });
     // fan = table of contents: slots are the author's order (first card leftmost, reef's card rightmost), not the pile's rotated order.
     // Draw order left-over-right, so DOM becomes reverse author order for the fan's duration; paint() restores pile order on fold.
-    [...cards].reverse().forEach(c=>stack.appendChild(c)); { const t=card(cur); if(t.parentNode===stack) stack.insertBefore(shade,t); }
+    [...cards].reverse().forEach(c=>mv(stack,c,null)); { const t=card(cur); if(t.parentNode===stack) stack.insertBefore(shade,t); }
     void stack.offsetWidth;
     document.documentElement.classList.add('fan');
     cards.forEach((c,i)=>{ c.style.transition=''; c.style.transform=fanXform(i,false); });
