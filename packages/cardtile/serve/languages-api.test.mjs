@@ -16,7 +16,7 @@ import test from 'node:test';
 import { liveCard } from './card-api.mjs';
 import { cardVersion } from '../card-save.mjs';
 import { CARD_MAX_BYTES } from '../card-core.js';
-import { GIF, MAIN, PLAIN, JA, envWith, call, save, saveLang, visit, langKeys, withMain, withJapanese, mainMetadata } from './languages-harness.mjs';
+import { GIF, MAIN, PLAIN, JA, envWith, call, save, saveLang, visit, langKeys, withMain, withJapanese, mainMetadata, kvFails } from './languages-harness.mjs';
 
 // ── the write API ────────────────────────────────────────────────────────────────────────────────
 
@@ -331,4 +331,47 @@ test('a language write-through that fails is retried by the alarm (the object is
   env.CARDS.put = realPut;
   await env.CARD_LIFETIMES.alarm('t');
   assert.equal(langKeys(env).filter((k) => k.includes(':zh-TW:')).length, 1);
+});
+
+// ── review r2 #3: a read that combines the main file and a language file takes both from one snapshot ──
+
+test('🔴 review r2 #3 — while the main file\'s KV put is pending, every read that combines it with a language file answers the object\'s main file (port of language-full-stale-main.mjs)', async () => {
+  const env = await withJapanese();
+  const replacement = Buffer.from('replacement asset bytes').toString('base64');
+  const bytes = Math.floor(replacement.replace(/=+$/, '').length * 3 / 4);
+  const fault = kvFails(env, 'put', /^card:t:[^:]+$/);
+  const put = await call(env, 'PUT', '/_api/card/t/asset/pic', { base64: replacement, mime: 'image/gif' });
+  assert.equal(put.status, 200);
+  assert.equal(fault.hits.length, 1, 'the main put failed: KV still holds the previous main file');
+  assert.equal((await liveCard(env.CARDS, 't')).md.includes(replacement), false);
+  // /full: the language file with the object's assets lane
+  const full = await call(env, 'GET', '/_api/card/t/lang/ja-JP/full');
+  assert.equal(full.status, 200);
+  assert.ok(full.text.includes(replacement), '/full carries the asset the object holds');
+  assert.match(full.text, /イラストレーター/);
+  // the language GET's manifest, and the main GET's (a Card with `locales:`), are the object's too
+  const lang = await call(env, 'GET', '/_api/card/t/lang/ja-JP');
+  assert.deepEqual(lang.json.assets.find((a) => a.id === 'pic'), { id: 'pic', mime: 'image/gif', bytes, referenced: true });
+  const main = await call(env, 'GET', '/_api/card/t');
+  assert.equal(main.json.version, put.json.version, 'the main GET answers the version the write answered');
+  assert.deepEqual(main.json.assets.find((a) => a.id === 'pic'), { id: 'pic', mime: 'image/gif', bytes, referenced: true });
+  assert.match(main.json.languages['ja-JP'], /^v1:/);
+  // after the alarm, the same answers (KV caught up)
+  fault.heal();
+  await env.CARD_LIFETIMES.alarm('t');
+  assert.equal((await call(env, 'GET', '/_api/card/t/lang/ja-JP/full')).text, full.text);
+  assert.deepEqual((await call(env, 'GET', '/_api/card/t')).json, main.json);
+});
+
+test('a main GET of a Card with `locales:` that the object does not hold yet answers from KV, every language without a file', async () => {
+  const env = envWith();
+  // a Card written before the object existed: in KV only, never written through this Worker
+  env.CARDS._m.set('card:t:0', MAIN);
+  const main = await call(env, 'GET', '/_api/card/t');
+  assert.equal(main.status, 200);
+  assert.deepEqual(main.json.languages, { 'ja-JP': null, 'zh-TW': null });
+  assert.equal(main.json.markdown.includes('Illustrator.'), true);
+  assert.equal((await call(env, 'GET', '/_api/card/t/lang/ja-JP')).json.error, 'cards_language_missing');
+  assert.equal((await call(env, 'GET', '/_api/card/t/lang/en-US')).json.error, 'cards_language_is_main');
+  assert.equal((await call(env, 'GET', '/_api/card/t/lang/fr-FR')).json.error, 'cards_language_not_listed');
 });
