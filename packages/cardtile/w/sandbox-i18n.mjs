@@ -729,6 +729,16 @@ function parseQuality(value) {
  * Traditional.
  */
 export function localeFromAcceptLanguage(header) {
+  return pickAcceptLanguage(header, resolveLocaleKey) || 'en';
+}
+
+/**
+ * The walk above with the matcher handed in: `Accept-Language` + `resolve(tag) → a value or null` → the
+ * value of the best range that resolves, or null. Same weights, same caps, same tie rule. tile#304 asks
+ * it which of a Card's own listed languages a visitor reads (packages/cardtile/languages.mjs
+ * chooseLanguage) — a set that is any BCP 47 tag, not only the nine this editor speaks.
+ */
+export function pickAcceptLanguage(header, resolve) {
   const h = String(header || '');
   let best = null;
   let bestQ = 0;
@@ -751,10 +761,10 @@ export function localeFromAcceptLanguage(header) {
       if (eq !== -1 && param.slice(0, eq).trim().toLowerCase() === 'q') { q = parseQuality(param.slice(eq + 1)); break; }
     }
     if (q <= bestQ) continue; // q=0 never wins; an equal q never displaces an earlier range
-    const key = resolveLocaleKey(tag);
+    const key = resolve(tag);
     if (key) { best = key; bestQ = q; }
   }
-  return best || 'en';
+  return best;
 }
 
 /** The editor CHROME strings for a locale key, falling back to English for anything unrecognised. */
