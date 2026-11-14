@@ -881,7 +881,8 @@ const WAYS_OFF = [
   { name: 'a drag of the top card', views: ['stack'], go: ({ p }) => { const t = p.cells[1].parentNode;
     t.dispatchEvent(ev(p, 'pointerdown', { pointerId: 7, clientX: 300, clientY: 300, pointerType: 'mouse' }));
     t.dispatchEvent(ev(p, 'pointermove', { pointerId: 7, clientX: 80, clientY: 300, pointerType: 'mouse' }));
-    t.dispatchEvent(ev(p, 'pointerup', { pointerId: 7, clientX: 80, clientY: 300, pointerType: 'mouse' })); p.win.tick(40); } },
+    t.dispatchEvent(ev(p, 'pointerup', { pointerId: 7, clientX: 80, clientY: 300, pointerType: 'mouse' })); p.win.tick(40); },
+    retap: false },   // after a drag the deck swallows the next click on the dragged card (meant for the drag's own click, which the stand-in does not send): the closing control below would be measuring that
   { name: 'a finger dragging the row', views: ['list'], go: ({ p }) => { const t = p.cells[1].parentNode;
     t.dispatchEvent(ev(p, 'pointerdown', { pointerId: 7, clientX: 320, clientY: 300, pointerType: 'touch' }));
     t.dispatchEvent(ev(p, 'pointermove', { pointerId: 7, clientX: 10, clientY: 300, pointerType: 'touch' }));
@@ -910,6 +911,7 @@ for (const way of WAYS_OFF) for (const view of way.views) for (const ending of O
     same(s.body.closest('.deck-card'), s.a, 'CONTROL: A\'s turn is not over yet');
     ENDINGS[ending](s);
     noneOpen(s, 'A\'s turn ended'); p.win.tick(3000); noneOpen(s, 'three seconds later');
+    if (way.retap === false) return;
     tap(p, p.cells[1]); p.win.tick(1000);
     assert.ok(b.classList.contains('is-open') && flagged(p).length === 1, 'CONTROL: asked for again, B turns over');
     same(s.body.closest('.deck-card'), b, 'CONTROL: asked for again, B holds the back');
