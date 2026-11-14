@@ -3,7 +3,15 @@
 // renderCardHTML — so what the editor shows in a view and what a visitor gets cannot drift apart.
 //
 // What it adds, and nothing else:
+//   <html>  data-view (the view the page opens on) and data-views (the views the file offers), read
+//           from the file's `view:` / `views:` — so the opening view is in the markup, not decided
+//           after load. data-view-pin as well when the caller names the view (the editor).
 //   <head>  the deck's stylesheet (a versioned, immutable same-origin file — see DECK_CSS_PATH)
+//           and one small inline script (DECK_HEAD_JS) that runs before the first paint: it applies
+//           a visitor's own last pick when the file offers it, and turns data-view into the classes
+//           the stylesheet keys on (html.deck, html.list). 🔴 The classes are the script's and not
+//           the markup's on purpose: a page whose scripts never run has no deck to draw the pile,
+//           so without them it stays the wall — the engine's page, readable as it is.
 //   </body> one small inline script that hands deck.js what it reads from the page:
 //             window.__cardFront    a frontmatter fence holding ONLY the keys deck.js reads (views /
 //                                   view / back) — never the whole file (given a whole file, deck.js
@@ -17,10 +25,13 @@
 //                                   anything else means out — "draw no reef.cards card or footer link":
 //                                   renderCardHTML also passes false when the PLATFORM's ctx.pool is
 //                                   set, because the renderer has then drawn them itself (or not).
-//           then deck.js itself (versioned, immutable — see DECK_JS_PATH)
+//           then deck.js itself (versioned, immutable — see DECK_JS_PATH). If it fails to load,
+//           its onerror takes the deck's classes off again, for the same reason as above.
 //
 // `view` is the editor's: it names the view it is showing, so the page opens on that one and the
-// deck's own switcher stays out of the way (the editor's header is the switcher).
+// deck's own switcher stays out of the way (the editor's header is the switcher). To show another
+// view of the same document the editor calls the page's own window.__deckView(name) — the switch a
+// visitor's tap makes, in place — instead of asking for the page again.
 //
 // 🔴 Pure string work, no DOM: it runs in the Worker and in the browser alike.
 import { DECK_VERSION } from '../serve/deck-assets.mjs';
@@ -47,6 +58,31 @@ export function frontWithView(front, view) {
   return `---\n${lines.join('\n')}\n---\n`;
 }
 
+/**
+ * The views a card file offers and the one it opens on — the file's own rule, read here so the
+ * markup can carry it: `views:` lists what a visitor may switch between (all three when absent; the
+ * order written is kept), `view:` names the one that opens when it is offered, else the first offered.
+ * 🔴 deck.js keeps the same rule for a page that was not made here (it has no markup to read);
+ * w3/deck-views.test.mjs runs both over one matrix so they cannot drift apart.
+ */
+export function openingView(md) {
+  const fm = {};
+  for (const l of frontOf(md).split('\n')) { const k = /^([\w-]+):\s*(.*)$/.exec(l); if (k) fm[k[1]] = k[2].trim(); }
+  const views = String(fm.views || DECK_VIEWS.join(' ')).split(/[\s,]+/).filter((v) => DECK_VIEWS.includes(v));
+  if (!views.length) views.push(DECK_VIEWS[0]);
+  return { view: views.includes(fm.view) ? fm.view : views[0], views };
+}
+
+/**
+ * The head script: before the first paint, the root gets the classes of the view the page opens on.
+ * A visitor's last pick (localStorage `reef-card-layout`, in the deck's inner names) wins when the
+ * file offers it and the view was not named for the page (data-view-pin). Storage that throws is
+ * storage that says nothing.
+ */
+export const DECK_HEAD_JS = "(function(d){var v=d.getAttribute('data-view');try{if(!d.hasAttribute('data-view-pin')){var s={deck:'stack',list:'list',spread:'wall'}[localStorage.getItem('reef-card-layout')];if(s&&(' '+d.getAttribute('data-views')+' ').indexOf(' '+s+' ')>=0){v=s;d.setAttribute('data-view',v);}}}catch(e){}if(v!=='wall')d.classList.add('deck');if(v==='list')d.classList.add('list');})(document.documentElement);";
+/** deck.js did not load: there is no deck, so the page is the wall */
+const DECK_ONERROR = "var d=document.documentElement;d.classList.remove('deck','list');d.setAttribute('data-view','wall')";
+
 // JSON that is safe inside an inline <script>: no `</script>`, no `<!--`
 const scriptJson = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
 
@@ -62,12 +98,15 @@ export function withDeck(html, md, { view = '', pool, handle = '', lang = '' } =
   if (handle) cfg.__deckRef = String(handle);
   if (typeof pool === 'boolean') cfg.__pool = pool;
   const boot = Object.entries(cfg).map(([k, val]) => `window.${k}=${scriptJson(val)};`).join('');
-  const head = `<link rel="stylesheet" href="${DECK_CSS_PATH}">${v ? '<style id="deck-view">.deck-seg{display:none!important}</style>' : ''}`;
-  const tail = `<script>${boot}</script><script src="${DECK_JS_PATH}"></script>`;
-  // </head> is the renderer's own and comes before any card content; </body> is taken from the END,
-  // so nothing a card carries in its body can be mistaken for it
+  const head = `<link rel="stylesheet" href="${DECK_CSS_PATH}">${v ? '<style id="deck-view">.deck-seg{display:none!important}</style>' : ''}<script>${DECK_HEAD_JS}</script>`;
+  const tail = `<script>${boot}</script><script src="${DECK_JS_PATH}" onerror="${DECK_ONERROR}"></script>`;
+  // <html is the renderer's own first tag; </head> is its own too and comes before any card content;
+  // </body> is taken from the END, so nothing a card carries in its body can be mistaken for it
+  const r = html.indexOf('<html');
   const h = html.indexOf('</head>');
   const b = html.lastIndexOf('</body>');
-  if (h < 0 || b < 0 || b < h) return html;
-  return html.slice(0, h) + head + html.slice(h, b) + tail + html.slice(b);
+  if (r < 0 || h < r || b < h) return html;
+  const o = openingView(front);
+  const root = ` data-view="${o.view}" data-views="${o.views.join(' ')}"${v ? ' data-view-pin' : ''}`;
+  return html.slice(0, r + 5) + root + html.slice(r + 5, h) + head + html.slice(h, b) + tail + html.slice(b);
 }

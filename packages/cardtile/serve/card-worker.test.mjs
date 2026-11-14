@@ -1115,13 +1115,18 @@ test('🔴 the committed deck is w3/deck.js and w3/deck.css, byte for byte', asy
 });
 
 test('every Card page carries the deck: its stylesheet in the head, the frontmatter and words, then deck.js', async () => {
-  const { DECK_CSS_PATH, DECK_JS_PATH } = await import('../w3/deck-page.mjs');
+  const { DECK_CSS_PATH, DECK_JS_PATH, DECK_HEAD_JS } = await import('../w3/deck-page.mjs');
   const md = ['---', 'title: Deck Card', 'lang: zh-TW', 'views: stack list', '---', '', '## cards', '',
     '- [ ] %% card: profile w=6 %% a bio'].join('\n') + '\n';
   const html = renderCardHTML(md, { handle: 'deckcard', cardUrl: 'https://card.feelreef.com/deckcard' });
   const head = html.slice(0, html.indexOf('</head>'));
   assert.ok(head.includes(`<link rel="stylesheet" href="${DECK_CSS_PATH}">`), 'no deck stylesheet in the head');
-  assert.ok(html.includes(`<script src="${DECK_JS_PATH}"></script></body>`), 'deck.js is not the last thing in the body');
+  // (it carries an onerror: a deck that fails to load leaves the page as the wall, not as an empty table)
+  const last = html.slice(html.lastIndexOf('<script'));
+  assert.ok(last.startsWith(`<script src="${DECK_JS_PATH}" onerror="`) && last.endsWith('"></script></body></html>'), 'deck.js is not the last thing in the body');
+  // the view the page opens on is in the markup, and the head script that turns it into the root's classes is in the head
+  assert.match(html, /^<!doctype html><html data-view="stack" data-views="stack list" lang="zh-TW">/, 'the markup does not carry the opening view');
+  assert.ok(head.includes(`<script>${DECK_HEAD_JS}</script>`), 'no head script: the opening view would be applied after the first paint');
   const boot = /<script>(window\.__cardFront=[^<]*)<\/script><script src=/.exec(html)?.[1];
   assert.ok(boot, 'the deck is not handed its frontmatter');
   const win = {}; new Function('window', boot)(win);
