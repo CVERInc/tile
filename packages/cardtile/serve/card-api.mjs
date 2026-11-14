@@ -707,7 +707,8 @@ export class CardLifetime {
       // tile#304 r2: a language GET runs in the same queue, so it never reads between a write's steps
       const write = op === '/save' ? () => this.saveCard({ ...body, gen })
         : op === '/asset' ? () => this.assetWrite({ ...body, gen })
-          : body.kind === 'get' ? () => this.languageRead({ ...body, gen }) : () => this.languageWrite({ ...body, gen });
+          : body.kind === 'get' ? () => this.languageRead({ ...body, gen })
+            : body.kind === 'republish' ? () => this.republish({ ...body, gen }) : () => this.languageWrite({ ...body, gen });
       return inWriteTurn(this, gen, () => write()
         .catch((e) => { if (e instanceof EndedDuringWrite) return { status: 409, body: { ...staleWrite(body.handle), ...fence } }; throw e; }));
     }
@@ -1478,6 +1479,27 @@ export class CardLifetime {
       commit: { gen, lifetime: life.lifetime, serial: seq }, ...(cache === 'pending' ? { cache } : {}) } };
   }
   /**
+   * 🔴 tile#304 r3 (review r2 #2): the operator's republish (POST /_api/card/<handle>/lang). The main
+   * key is put again with the language map the object holds — the KV metadata an older Worker's save
+   * dropped (a rollback) — whether or not the object thinks KV already has it, and the rest of what
+   * KV owes is paid with it (publish). Idempotent: it changes nothing the object holds, and a repeat
+   * puts the same bytes and metadata. Marked pending first, with its alarm (commitPending), so a KV
+   * failure or a crash here is retried like any write. A Card the object does not hold is refused as
+   * a language write is (no card: 404; just taken over from KV: 409, retry).
+   */
+  async republish({ handle, gen }) {
+    if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
+    const main = await this.heldCard(handle, gen);
+    if (!main || main.unknown) {
+      return { status: 404, body: { error: 'cards_language_no_card', why: `There is no card at "${handle}", so it has no languages to republish.` } };
+    }
+    if (main.unsettled) return { status: 409, body: windowRefusal(main.unsettled, 'Nothing was republished') };
+    await this.commitPending({ [cardMetaKey(gen)]: { ...main.meta, cache: 'pending' } });
+    const cache = await this.publish(gen);
+    if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
+    return { status: 200, body: { handle, republished: true, languages: Object.keys((await this.langMap(gen)).languages), ...(cache === 'pending' ? { cache } : {}) } };
+  }
+  /**
    * GET of a language file (r2: the API reads the object, the authority, never KV — KV may still hold
    * a body no map names). Reads only: no adoption, no flush, no write. A generation whose main file
    * this object does not hold has no language file.
@@ -1644,6 +1666,7 @@ function cardWriteOk(op, b) {
   const str = (v) => typeof v === 'string' && v.length > 0;
   if (!VALID_HANDLE.test(String(b.handle)) || !(b.gen == null || str(b.gen))) return false;
   if (op === '/language') {
+    if (b.kind === 'republish') return b.tag == null; // the whole map, never one tag (tile#304 r3)
     // the tag as the Worker normalised it, and nothing else: it becomes a storage slot and a KV key
     if (!(str(b.tag) && normaliseTag(b.tag) === b.tag)) return false;
     if (b.kind === 'get') return true;
@@ -2231,6 +2254,18 @@ export async function handleApi(request, env, url) {
       });
     }
     return cardWrite(env, handle, 'language', { gen, tag, kind: 'put', markdown: body.markdown, base });
+  }
+  // tile#304 r3 (review r2 #2): POST …/<handle>/lang, no tag — republish the Card's language map. After
+  // a rollback to a Worker without language files and forward again, a Card's files are not served
+  // until its object is next activated (any API call or alarm republishes what KV lacks; visitors read
+  // KV only and never activate it). This forces it, per handle: authenticated like every route here,
+  // idempotent, and it changes nothing the object holds. Any other method here is the unknown endpoint
+  // it always was.
+  const republishRoute = /^card\/([^/]+)\/lang$/.exec(rest);
+  if (republishRoute && method === 'POST') {
+    const handle = (decodeSegment(republishRoute[1]) ?? '').toLowerCase();
+    if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(republishRoute[1])}.` }, 400);
+    return cardWrite(env, handle, 'language', { kind: 'republish' });
   }
   // the main routes take no language: see above
   const mainRoute = /^card\/[^/]+(\/full)?$/.test(rest);
