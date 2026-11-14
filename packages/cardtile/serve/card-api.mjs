@@ -26,6 +26,7 @@ import { cardDestinations, cardLinkReport } from './card-destinations.mjs';
 import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
 import { handleVanity } from './card-vanity.mjs';
+import { normaliseTag, languagesOf, localesRefusal, languageFileRefusal, storedLanguageFile } from '../languages.mjs';
 
 const API_PREFIX = '/_api/';
 
@@ -76,6 +77,14 @@ export const goneKey = (handle) => `gone:${handle}`;
  */
 export const genKey = (handle) => `gen:${handle}`;
 export const cardKey = (handle, gen) => `card:${handle}:${gen}`;
+/**
+ * tile#304 — a language file of the Card: the main file's key plus the language tag (languages.mjs
+ * normaliseTag spells it). It lives and dies with the main file's generation: a write admitted in an
+ * ended lifetime lands under a dead generation's key that nothing reads, and the key is inside the
+ * `card:<handle>:` prefix DELETE already lists. No legacy form: language files are newer than generations.
+ * A tag never contains `:` and a generation is `0` or 24 hex digits, so this key is never a main file's.
+ */
+export const languageKey = (handle, gen, tag) => `card:${handle}:${gen}:${tag}`;
 export const stopKey = (handle, gen) => `stop:${handle}:${gen}`;
 export const GEN0 = '0';
 /** LEGACY (pre-generation) keys, read for generation 0 only. Remove with the fallback. */
@@ -653,14 +662,16 @@ export class CardLifetime {
   async fetch(request) {
     const op = new URL(request.url).pathname;
     const body = (await request.json().catch(() => null)) || {};
-    if (op === '/save' || op === '/asset') {
+    if (op === '/save' || op === '/asset' || op === '/language') {
       if (!cardWriteOk(op, body)) return Response.json({ error: 'bad_request' }, { status: 400 });
       if (!this.storage) return Response.json({ error: 'no_storage' }, { status: 500 });
       // an asset write is the current lifetime's; the queue's generation is read here, and checked
       // again inside the turn (a delete may end it in between)
       const gen = body.gen != null ? body.gen : (await this.read(body.handle)).gen;
       const fence = op === '/asset' && body.kind === 'fenced' ? { fence: 'if-version' } : {};
-      return inWriteTurn(this, gen, () => (op === '/save' ? this.saveCard({ ...body, gen }) : this.assetWrite({ ...body, gen }))
+      const write = op === '/save' ? () => this.saveCard({ ...body, gen })
+        : op === '/asset' ? () => this.assetWrite({ ...body, gen }) : () => this.languageWrite({ ...body, gen });
+      return inWriteTurn(this, gen, () => write()
         .catch((e) => { if (e instanceof EndedDuringWrite) return { status: 409, body: { ...staleWrite(body.handle), ...fence } }; throw e; }));
     }
     const { handle, host, gen, delivered, order, ticket } = body;
@@ -687,7 +698,7 @@ export class CardLifetime {
     await inTurn(this, async () => { const s = await this.storage.get('life'); if (s && s.handle) await this.flush(s); return {}; });
     // tile#209 r2: the card's own write-through, in its generation's write queue
     const gen = ((await this.storage.get('life')) || {}).gen || GEN0;
-    await enqueueWrite(this, gen, async () => { await this.flushCard(gen); await this.settleCard(gen); }).catch(() => {});
+    await enqueueWrite(this, gen, async () => { await this.flushCard(gen); await this.settleCard(gen); await this.flushLanguages(gen); }).catch(() => {});
   }
   /** the lifetime, its pending inverse reconciled first (rule B, see HostBindings): the WRITE paths' read */
   async load(handle) {
@@ -840,11 +851,16 @@ export class CardLifetime {
     s.cache = 'written';
     s.cardless = s.gen; // r5: a generation this object starts has no card it did not write (cardOf)
     await this.storage.put('life', s); // the lifetime ends HERE, before any host is told
+    // tile#304: which language files the ended lifetime had (a removal still owed to KV included), read
+    // before the sweep below takes their records, so DELETE removes their KV keys even when its listing
+    // of the store has not caught up — the same reason it is handed the hosts rather than listing them
+    const languages = await this.languagesHeld(ended, { owed: true });
     // tile#209 r2/r3: the ended lifetime's card is not kept here either — EVERY card key of every
     // generation but the new one, by prefix: chunks no record names (a write that failed or crashed
-    // between its chunks and its record) are private bytes too
+    // between its chunks and its record) are private bytes too. Language files are `card:<gen>@<tag>`
+    // keys (langSlot), so this takes them with the main file.
     await this.sweepCards((g) => g === s.gen);
-    return { ended, gen: s.gen, pending: s.pending };
+    return { ended, gen: s.gen, pending: s.pending, languages };
   }
   /**
    * The vanity route's read (card-vanity.mjs): the current generation, the hosts registered in it, and
@@ -983,8 +999,13 @@ export class CardLifetime {
    * key of this generation the record does not name. 🔴 r3: a write that fails partway sweeps its own
    * chunks before it fails, and the success sweep also takes whatever an earlier crash left in this
    * generation (any serial); ended generations are /end's to sweep (r4: never another generation's).
+   *
+   * tile#304: `slot` is the storage slot the file lives in — the generation itself for the main file
+   * (every key exactly as before), `<gen>@<tag>` for a language file (langSlot). The lifetime check
+   * is always against `gen`; every sweep here is confined to `slot`, so a main write never touches a
+   * language file's keys and a language write never touches the main file's.
    */
-  async keepCard(handle, gen, md, version, cache, prev, provenance = { from: 'object' }) {
+  async keepCard(handle, gen, md, version, cache, prev, provenance = { from: 'object' }, slot = gen) {
     // A chunk is CARD_CHUNK UTF-16 code units: at most 3 bytes of UTF-8 each, so ≤ 768 KiB a value —
     // under the SQLite-backed storage's per-value limit (this class is `new_sqlite_classes`,
     // wrangler.example.toml) with room to spare — and KV_MAX_BYTES (25 MiB) is at most 100 chunks.
@@ -994,21 +1015,21 @@ export class CardLifetime {
     const n = Math.max(1, Math.ceil(md.length / CARD_CHUNK));
     const meta = { handle, gen, serial, n, version, cache, ...provenance };
     try {
-      for (let i = 0; i < n; i++) await this.storage.put(cardChunkKey(gen, serial, i), md.slice(i * CARD_CHUNK, (i + 1) * CARD_CHUNK));
-      await this.storage.put(cardMetaKey(gen), meta);
+      for (let i = 0; i < n; i++) await this.storage.put(cardChunkKey(slot, serial, i), md.slice(i * CARD_CHUNK, (i + 1) * CARD_CHUNK));
+      await this.storage.put(cardMetaKey(slot), meta);
     } catch (e) {
       // its own generation's chunks only, but the record and the serial it names (r4)
-      await this.sweepCards((g, sl) => g !== gen || sl === null || (prev != null && sl === prev.serial)).catch(() => {});
+      await this.sweepCards((g, sl) => g !== slot || sl === null || (prev != null && sl === prev.serial)).catch(() => {});
       throw e;
     }
     // 🔴 r4 (codex r3 P1): a write sweeps ITS OWN generation only, and only once it has checked that
     // generation is still the current one. Per-generation queues let an ended lifetime's write run
     // beside the next lifetime's; a sweep from the dead one must never reach the live one's keys.
     if ((await this.read(handle)).gen !== gen) {
-      await this.sweepCards((g) => g !== gen);
+      await this.sweepCards((g) => g !== slot);
       throw new EndedDuringWrite();
     }
-    await this.sweepCards((g, sl) => g !== gen || sl === null || sl === serial);
+    await this.sweepCards((g, sl) => g !== slot || sl === null || sl === serial);
     return meta;
   }
   /** delete every `card:` key `keep(gen, serial | null for a record)` does not keep — by prefix, so it
@@ -1096,10 +1117,17 @@ export class CardLifetime {
       return { status: 413, body: { error: [`That would make the card ${bytes} bytes; the store's ceiling is ${KV_MAX_BYTES}.`, ...named].join(' ') } };
     }
     const wouldChange = !cur || md !== cur.md;
+    // tile#304: the language files this save takes away — every one held here whose tag the new main
+    // file no longer lists (or that is now the main file's own language). Reported by a check and a
+    // dry run, removed after the commit below. Nothing is said when nothing goes.
+    const held = await this.languagesHeld(gen);
+    const allowed = languagesOf(md).files;
+    const removed = held.filter((t) => !allowed.includes(t));
+    const removal = removed.length ? { languages_removed: removed } : {};
     // r3 (codex r2 P2): the Worker's preliminary check — the lock, the size, the structural answer a
     // dry run gives — is THIS, against the held card, so a current base_version is never vetoed by a
     // stale KV read. Nothing is written (a first contact may adopt; that is not a change of the card).
-    if (check) return { status: 200, body: { checked: true, version: cur ? cur.version : null, wouldChange, diff, orphans, carried } };
+    if (check) return { status: 200, body: { checked: true, version: cur ? cur.version : null, wouldChange, diff, orphans, carried, ...removal } };
     if ((cur ? cur.version : null) !== from) {
       const now = cardDestinations(md, { base: destBase });
       if (now.length !== dests.length || now.some((u) => !dests.includes(u))) {
@@ -1109,7 +1137,132 @@ export class CardLifetime {
     }
     const res = await this.commitCard(handle, gen, md, cur);
     if (res.conflict) return { status: 409, body: res };
-    return { status: 200, body: { ...res, created: !cur, wouldChange, diff, orphans, carried } };
+    // tile#304: removing a language removes its file, in this same turn of the write queue — no write
+    // of this lifetime runs between the main file losing the tag and the file going
+    for (const tag of removed) {
+      const file = await this.langOf(gen, tag);
+      if (file) await this.dropLanguage(handle, gen, tag, file.meta);
+    }
+    return { status: 200, body: { ...res, created: !cur, wouldChange, diff, orphans, carried, ...removal } };
+  }
+
+  // ── tile#304: the Card's language files, held and written here like the main file ──────────────
+  //
+  // A language file is stored like the main file — a record and chunks, written here first, then
+  // through to KV (`languageKey`), a failed KV write left `pending` for the alarm — in its own storage
+  // slot `card:<gen>@<tag>` (langSlot), so /end's sweep of every other generation takes it with the
+  // main file. It needs no first-contact adoption: no language file was ever written anywhere but
+  // here, so a slot this object does not hold is a file that does not exist.
+  //
+  // A removal is a record `{ gone: true }` until KV has deleted the key, then nothing.
+
+  /** the language file of `tag` held for `gen`: { md, version, meta } | null */
+  async langOf(gen, tag) {
+    const slot = langSlot(gen, tag);
+    const meta = await this.storage.get(cardMetaKey(slot));
+    if (!meta || meta.gone) return null;
+    const parts = [];
+    for (let i = 0; i < meta.n; i++) parts.push(await this.storage.get(cardChunkKey(slot, meta.serial, i)));
+    if (parts.some((p) => typeof p !== 'string')) throw new Error(`card:${slot} is missing a chunk`);
+    return { md: parts.join(''), version: meta.version, meta };
+  }
+  /** the tags this object holds a language file for in `gen`; `owed: true` adds removals KV has not taken yet */
+  async languagesHeld(gen, { owed = false } = {}) {
+    const listed = await this.storage.list({ prefix: `card:${gen}@` });
+    const tags = [];
+    for (const [k, meta] of listed) {
+      if (k.split(':').length !== 2 || !meta || (meta.gone && !owed)) continue;
+      tags.push(k.slice(`card:${gen}@`.length));
+    }
+    return tags;
+  }
+  /** KV's copy of a held language file; a failure stays `pending` for the alarm */
+  async langWriteThrough(handle, gen, tag, md, meta) {
+    try { await this.env.CARDS.put(languageKey(handle, gen, tag), md); } catch { await retryLater(this.storage); return 'pending'; }
+    const slot = langSlot(gen, tag), now = await this.storage.get(cardMetaKey(slot));
+    if (now && now.serial === meta.serial && !now.gone && now.cache !== 'written') { now.cache = 'written'; await this.storage.put(cardMetaKey(slot), now); }
+    return 'written';
+  }
+  /** remove a language file: the record says `gone` (that put IS the removal), its chunks go, then KV */
+  async dropLanguage(handle, gen, tag, prev) {
+    const slot = langSlot(gen, tag);
+    await this.storage.put(cardMetaKey(slot), { handle, gen, tag, serial: prev ? prev.serial : 0, n: 0, version: null, gone: true, cache: 'pending' });
+    await this.sweepCards((g, sl) => g !== slot || sl === null);
+    try { await this.env.CARDS.delete(languageKey(handle, gen, tag)); } catch { await retryLater(this.storage); return 'pending'; }
+    await this.storage.delete(cardMetaKey(slot));
+    return 'written';
+  }
+  /** the alarm's half: every language write-through or removal of `gen` still owed to KV */
+  async flushLanguages(gen) {
+    const listed = await this.storage.list({ prefix: `card:${gen}@` });
+    for (const [k, meta] of listed) {
+      if (k.split(':').length !== 2 || !meta || meta.cache !== 'pending') continue;
+      if ((await this.read(meta.handle)).gen !== gen) return;
+      const tag = k.slice(`card:${gen}@`.length);
+      if (meta.gone) {
+        try { await this.env.CARDS.delete(languageKey(meta.handle, gen, tag)); } catch { await retryLater(this.storage); continue; }
+        await this.storage.delete(k);
+      } else {
+        const held = await this.langOf(gen, tag);
+        if (held && (await this.langWriteThrough(meta.handle, gen, tag, held.md, held.meta)) === 'pending') continue;
+      }
+    }
+  }
+
+  /**
+   * a language file's write (PUT) or removal (DELETE), against the main file and the language file
+   * held here, in the lifetime's write queue — so a save that drops the language from `locales:` and
+   * a write of that language can never interleave. The Worker has already checked the tag's form, the
+   * file's frontmatter keys and its links; what needs the held main file is checked here:
+   *   cards_language_no_card     no main file (404)          · window refusal while it is adopted (409)
+   *   cards_language_not_listed  the main file does not list the tag (409; a removal skips this)
+   *   cards_language_is_main     the tag is the main file's own `lang:` (409)
+   *   base / If-Version          against THIS file's version (409 conflict, nothing written)
+   *   cards_language_missing     a removal of a file there is not (404)
+   */
+  async languageWrite({ handle, gen, tag, kind, markdown, base, check, ifVersion }) {
+    if ((await this.read(handle)).gen !== gen) return { status: 409, body: staleWrite(handle) };
+    const main = await this.heldCard(handle, gen);
+    if (!main || main.unknown) {
+      return { status: 404, body: { error: 'cards_language_no_card', why: `There is no card at "${handle}", so it has no languages. Save the main file first.` } };
+    }
+    if (main.unsettled) return { status: 409, body: windowRefusal(main.unsettled, kind === 'put' ? 'Nothing was saved' : 'Nothing was deleted') };
+    const cur = await this.langOf(gen, tag);
+    if (kind === 'delete') {
+      if (!cur) return { status: 404, body: { error: 'cards_language_missing', lang: tag, why: `"${handle}" has no ${tag} file.` } };
+      if (ifVersion != null && ifVersion.trim() !== cur.version) {
+        return { status: 409, body: { conflict: true, expected: ifVersion.trim(), current: cur.version, why: `The ${tag} file changed after you read it. Nothing was deleted.` } };
+      }
+      const cache = await this.dropLanguage(handle, gen, tag, cur.meta);
+      return { status: 200, body: { handle, lang: tag, deleted: true, ...(cache === 'pending' ? { cache } : {}) } };
+    }
+    const { listed, main: mainLang } = languagesOf(main.md);
+    if (tag === mainLang) {
+      return { status: 409, body: { error: 'cards_language_is_main', lang: tag, why: `${tag} is the main file's own language (its \`lang:\`); save the main file to change it.` } };
+    }
+    if (!listed.includes(tag)) {
+      return { status: 409, body: { error: 'cards_language_not_listed', lang: tag, locales: listed,
+        why: `The main file does not list ${tag} in \`locales:\`. Add it there first, then save this file. Nothing was saved.` } };
+    }
+    if (base != null && base !== '') {
+      const conflict = cur == null
+        ? { conflict: true, expected: String(base), current: null, why: `There is no ${tag} file yet, so the version you read is not of this file.` }
+        : await checkBaseVersion(base, cur.md);
+      if (conflict) return { status: 409, body: conflict };
+    }
+    const md = storedLanguageFile(markdown);
+    const bytes = utf8Bytes(md);
+    if (bytes > KV_MAX_BYTES) return { status: 413, body: { error: `That would make the ${tag} file ${bytes} bytes; the store's ceiling is ${KV_MAX_BYTES}.` } };
+    const wouldChange = !cur || md !== cur.md;
+    if (check) return { status: 200, body: { checked: true, version: cur ? cur.version : null, wouldChange } };
+    const version = await cardVersion(md);
+    const meta = await this.keepCard(handle, gen, md, version, 'pending', cur && cur.meta, { from: 'object', tag }, langSlot(gen, tag));
+    if ((await this.read(handle)).gen !== gen) { await this.sweepCards((g) => g !== langSlot(gen, tag)); return { status: 409, body: staleWrite(handle) }; }
+    const cache = await this.langWriteThrough(handle, gen, tag, md, meta);
+    const life = await this.read(handle);
+    if (life.gen !== gen) return { status: 409, body: staleWrite(handle) };
+    return { status: 200, body: { handle, lang: tag, version, bytes: md.length, created: !cur, wouldChange,
+      commit: { gen, lifetime: life.lifetime, serial: meta.serial }, ...(cache === 'pending' ? { cache } : {}) } };
   }
   /**
    * put_asset, delete_asset and the fenced delete, against the card held here: every check against
@@ -1182,6 +1335,8 @@ const windowRefusal = (seconds, nothing) => ({
 });
 const cardMetaKey = (gen) => `card:${gen}`;
 const cardChunkKey = (gen, serial, i) => `card:${gen}:${serial}:${i}`;
+/** tile#304: a language file's storage slot in CardLifetime, used where the main file's slot is its gen */
+const langSlot = (gen, tag) => `${gen}@${tag}`;
 
 /**
  * the UTF-8 byte length of a string, without encoding it. 🔴 r3 (codex r2 P1): KV's 25 MiB ceiling is
@@ -1206,6 +1361,12 @@ function utf8Bytes(str) {
 function cardWriteOk(op, b) {
   const str = (v) => typeof v === 'string' && v.length > 0;
   if (!VALID_HANDLE.test(String(b.handle)) || !(b.gen == null || str(b.gen))) return false;
+  if (op === '/language') {
+    // the tag as the Worker normalised it, and nothing else: it becomes a storage slot and a KV key
+    if (!(str(b.tag) && normaliseTag(b.tag) === b.tag)) return false;
+    if (b.kind === 'delete') return b.ifVersion == null || (str(b.ifVersion) && b.ifVersion.trim().length > 0);
+    return b.kind === 'put' && str(b.gen) && str(b.markdown) && (b.base == null || typeof b.base === 'string') && (b.check == null || typeof b.check === 'boolean');
+  }
   if (op === '/save') {
     if (!(str(b.gen) && str(b.markdown) && (b.base == null || typeof b.base === 'string') && (b.create == null || typeof b.create === 'boolean'))) return false;
     if (b.check === true) return b.from == null || str(b.from);
@@ -1392,6 +1553,29 @@ async function readCard(store, handle) {
   return { md, version: await cardVersion(md), gen };
 }
 
+/**
+ * tile#304: GET …/<handle>/lang/<tag>[/full]. Read from KV like get_cards (the pages' store), in the
+ * generation the main file is read in. Four answers that are not the file, each its own code:
+ *   cards_language_no_card    no main file (404)
+ *   cards_language_is_main    the tag is the main file's own `lang:`: read the main file (404)
+ *   cards_language_not_listed the main file does not list it (404)
+ *   cards_language_missing    listed, and no file (404): visitors asking for it get the main file
+ */
+async function readLanguage(store, handle, tag, full) {
+  const { md: main, gen } = await liveCard(store, handle);
+  if (main == null) return json({ error: 'cards_language_no_card', why: `No card at "${handle}".` }, 404);
+  const { listed, main: mainLang, files } = languagesOf(main);
+  if (tag === mainLang) return json({ error: 'cards_language_is_main', lang: tag, why: `${tag} is the main file's own language: read the main file.` }, 404);
+  if (!files.includes(tag)) return json({ error: 'cards_language_not_listed', lang: tag, locales: listed, why: `The main file does not list ${tag} in \`locales:\`.` }, 404);
+  const md = await store.get(languageKey(handle, gen, tag));
+  if (md == null) return json({ error: 'cards_language_missing', lang: tag, why: `"${handle}" lists ${tag} but has no ${tag} file; visitors asking for it get the main file.` }, 404);
+  // the file with the main file's assets lane: what `/full` hands over, and what the manifest is read
+  // against (an asset is `referenced` when THIS file refers to it)
+  const withAssets = serializeCard({ ...parseCard(md), assets: parseCard(main).assets });
+  if (full) return new Response(withAssets, { headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' } });
+  return json({ handle, lang: tag, version: await cardVersion(md), markdown: thinCard(md), assets: assetManifest(withAssets), total_bytes: md.length });
+}
+
 // 🩸 `writeCard` (write + read back + assert, carried over from reef's card-store.js) is gone since
 // tile#209 r2. Its premise was that KV is the card's truth, so the version handed back had to be read
 // from what LANDED, not what was held. KV is not the truth any more: the handle's CardLifetime holds
@@ -1477,7 +1661,9 @@ async function deleteCard(env, handle, meant = null) {
   // card still serves, and no bind of it can register.
   const ending = await askLifetime(env, handle, 'end', { handle, ...(meant != null ? { gen: meant } : {}) });
   if (ending.stale_generation) throw new StaleLifetime();
-  const { ended, pending } = ending;
+  // tile#304: `languages` — the tags the ended lifetime held a language file for, named by the object
+  // (its truth), so their KV keys go below even when the `card:<handle>:` listing missed them
+  const { ended, pending, languages = [] } = ending;
   // The marker is this DELETE's first write (r15: after the fence). It still precedes every key that
   // could make it visible: `gen:` moves at /settle and the body goes after that, so until both the card
   // still serves from KV, and a delete that dies after here leaves a 404, never a resurrected card.
@@ -1492,6 +1678,7 @@ async function deleteCard(env, handle, meant = null) {
   const owed = Object.entries(pending).flatMap(([g, hosts]) => [vanityOfKey(handle, g), ...hosts.map((h) => vanityBindKey(handle, g, h))]);
   const doomed = new Set([
     ...bodies, ...stops, cardKey(handle, gen), stopKey(handle, gen), cardKey(handle, ended), stopKey(handle, ended),
+    ...(Array.isArray(languages) ? languages : []).filter((t) => typeof t === 'string' && normaliseTag(t) === t).map((t) => languageKey(handle, ended, t)),
     legacyCardKey(handle), legacyStopKey(handle), ...bindings, ...inverses, ...owed, legacyVanityOfKey(handle), ...drafts,
   ]);
   // 🔴 Not `vanity:<host>` from here: the object cleared it above if its owner was this lifetime; the
@@ -1669,6 +1856,86 @@ export async function handleApi(request, env, url) {
     return json(r.body, r.status);
   }
 
+  // ── tile#304: one language file of the Card ───────────────────────────────────────────────────
+  //
+  //   GET    …/<handle>/lang/<tag>        the file, thin, with the main file's asset manifest and its own version
+  //   GET    …/<handle>/lang/<tag>/full   the file with the main file's assets lane (a complete file)
+  //   PUT    …/<handle>/lang/<tag>        { markdown, base_version?, dry_run? } — base_version is THIS file's
+  //   DELETE …/<handle>/lang/<tag>        the file goes (If-Version: <its version>, optional)
+  //
+  // 🔴 A PATH, NOT `?lang=` on the main routes. On those routes the query is the part a caller most
+  // easily loses (a client that rebuilds the URL, a proxy, a copy), and losing it there would turn a
+  // translation's save into an overwrite of the main file, or a language's removal into the deletion of
+  // the whole Card. A missing path segment is a different route, never a more destructive one. So the
+  // main routes refuse `?lang=` outright (`cards_language_use_path`) rather than ignore it.
+  const language = /^card\/([^/]+)\/lang\/([^/]+?)(\/full)?$/.exec(rest);
+  if (language) {
+    const handle = (decodeSegment(language[1]) ?? '').toLowerCase();
+    if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(language[1])}.` }, 400);
+    const asked = decodeSegment(language[2]);
+    const tag = asked === null ? null : normaliseTag(asked);
+    if (!tag) {
+      return json({ error: 'cards_language_tag_invalid', lang: asked ?? language[2],
+        why: 'That is not a language tag this engine takes (letters, then hyphen-separated subtags, such as en-US or zh-Hant-TW).' }, 400);
+    }
+    const wantFull = !!language[3];
+    if (method === 'GET') return readLanguage(store, handle, tag, wantFull);
+    if (wantFull) return json({ error: `${method} not allowed here.` }, 405);
+    if (method === 'DELETE') {
+      const ifVersion = request.headers.get('if-version');
+      if (ifVersion != null && !ifVersion.trim()) return json({ error: 'An If-Version header, when sent, must be the version you read. Nothing was deleted.' }, 400);
+      return cardWrite(env, handle, 'language', { kind: 'delete', tag, ...(ifVersion != null ? { ifVersion } : {}) });
+    }
+    if (method !== 'PUT') return json({ error: `${method} not allowed here.` }, 405);
+    const body = (await readJson(request)) || {};
+    if (typeof body.markdown !== 'string' || !body.markdown.length) {
+      return json({ error: 'A language file needs `markdown` — refusing to write an empty file.' }, 400);
+    }
+    if (body.base_version != null && typeof body.base_version !== 'string') {
+      return json({ error: '`base_version` must be a string — the version of this language file you read.' }, 400);
+    }
+    // the file's own frontmatter: only title and lang, and lang is the tag (languages.mjs)
+    const refusal = languageFileRefusal(body.markdown, tag);
+    if (refusal) return json(refusal, 422);
+    const base = body.base_version == null ? null : body.base_version;
+    // the generation at admission, as for a main save: a write admitted before a DELETE lands on the
+    // ended lifetime's key, which nothing serves
+    const { gen } = await liveCard(store, handle);
+    const pre = await cardWrite(env, handle, 'language', { gen, tag, kind: 'put', markdown: body.markdown, base, check: true });
+    const checked = await pre.json();
+    if (pre.status !== 200) return json(checked, pre.status);
+    // the links: the same three gates a main save passes (scheme, count, Web Risk), on the file as it
+    // will be stored. Its bytes do not depend on anything the object holds (the assets lane is dropped,
+    // never merged), so what is checked here is exactly what is written.
+    const destBase = `${url.origin}/${handle}/`;
+    const { destinations: dests, refused } = cardLinkReport(storedLanguageFile(body.markdown), { base: destBase });
+    if (refused.length) {
+      return json({
+        error: 'card_url_scheme', url: refused[0], refused,
+        message: `Card link destinations accept only safe URL schemes (http, https, mailto, tel; pictures also a raster data:image). ${JSON.stringify(refused[0])} is not one of them. Change or remove it and save again.`,
+      }, 422);
+    }
+    const many = tooManyLinks(dests, env);
+    if (many) return json(many, 422);
+    const unsafe = await checkUrls(dests, env);
+    if (unsafe) return json({ error: 'card_url_unsafe', url: unsafe.url, threat: unsafe.threat }, 422);
+    if (body.dry_run) {
+      return json({
+        handle, lang: tag, dry_run: true, valid: true, wouldChange: checked.wouldChange,
+        message: checked.wouldChange
+          ? 'Validates — nothing written (dry_run). Call again without dry_run to save.'
+          : 'Validates, but is identical to the current file — a real save would be a no-op.',
+      });
+    }
+    return cardWrite(env, handle, 'language', { gen, tag, kind: 'put', markdown: body.markdown, base });
+  }
+  // the main routes take no language: see above
+  const mainRoute = /^card\/[^/]+(\/full)?$/.test(rest);
+  if (mainRoute && url.searchParams.has('lang')) {
+    return json({ error: 'cards_language_use_path',
+      why: `A language file has its own address: /_api/${resource}/<handle>/lang/<tag>. This route is the main file's, and takes no ?lang=. Nothing was done.` }, 400);
+  }
+
   const asset = /^card\/([^/]+)\/asset\/([^/]+)$/.exec(rest);
   const fenced = /^card\/([^/]+)\/asset\/([^/]+)\/fenced$/.exec(rest);
   const card = /^card\/([^/]+)$/.exec(rest);
@@ -1781,12 +2048,22 @@ export async function handleApi(request, env, url) {
     if (method === 'GET') {
       const row = await readCard(store, handle);
       if (!row) return json({ error: `No card at "${handle}".` }, 404);
+      // tile#304: a main file that lists languages says which exist — `locales` as listed, and
+      // `languages`: each tag that may have a file → that file's version, or null when it has none.
+      // A main file that lists none answers exactly as before, with no new field.
+      const { listed, files } = languagesOf(row.md);
+      const languages = {};
+      for (const t of files) {
+        const md = await store.get(languageKey(handle, row.gen, t));
+        languages[t] = md == null ? null : await cardVersion(md);
+      }
       return json({
         handle,
         version: row.version,
         markdown: thinCard(row.md),
         assets: assetManifest(row.md),
         total_bytes: row.md.length,
+        ...(listed.length ? { locales: listed, languages } : {}),
       });
     }
 
@@ -1796,6 +2073,10 @@ export async function handleApi(request, env, url) {
       if (typeof body.markdown !== 'string' || !body.markdown.length) {
         return json({ error: 'save_cards needs `markdown` — refusing to write an empty card.' }, 400);
       }
+      // tile#304: a `locales:` line must list language tags, at most MAX_LOCALES (languages.mjs). A file
+      // without the line is never asked anything here.
+      const badLocales = localesRefusal(body.markdown);
+      if (badLocales) return json(badLocales, 422);
       // the generation is captured HERE, at admission, before Web Risk's network wait (see commitCard)
       const live = await liveCard(store, handle);
       const current = live.md == null ? null : { md: live.md, version: await cardVersion(live.md) };
@@ -1837,6 +2118,7 @@ export async function handleApi(request, env, url) {
         return json({
           handle, dry_run: true, valid: true, wouldChange: checked.wouldChange, diff: checked.diff, orphans: checked.orphans,
           assets_carried: checked.carried,
+          ...(checked.languages_removed ? { languages_removed: checked.languages_removed } : {}),
           message: checked.wouldChange
             ? 'Validates — nothing written (dry_run). Call again without dry_run to save.'
             : 'Validates, but is identical to the current card — a real save would be a no-op.',
@@ -1872,6 +2154,8 @@ export async function handleApi(request, env, url) {
         diff: res.diff,
         assets_carried: res.carried,
         ...(res.cache ? { cache: res.cache } : {}),
+        // tile#304: the language files this save removed (their tags left `locales:`); absent when none
+        ...(res.languages_removed ? { languages_removed: res.languages_removed } : {}),
         // 🔴 REPORTED, never collected. An asset nobody references is not evidence that nobody wants
         // it — an author who just deleted a cell to rewrite it would find their picture gone by the
         // time they added it back. Removing bytes from a creator's file is their decision, and this
