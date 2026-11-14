@@ -107,7 +107,15 @@ function judge(m) {
  * below. The only differences forgiven are line ends (CRLF) and how the file ends (trailing blank
  * lines, a missing final newline) — nothing inside the card. Anything else is the visitor's, kept. */
 export function isSandboxSample(cardMd) {
-  return typeof cardMd === 'string' && SANDBOX_STARTERS.has(starterForm(cardMd));
+  if (typeof cardMd !== 'string') return false;
+  const md = starterForm(cardMd);
+  if (SANDBOX_STARTERS.has(md)) return true;
+  // the common path ends here: no hashing unless the length is one of the nine below
+  const rows = OLDER_BY_LENGTH.get(md.length);
+  if (!rows) return false;
+  const a = fnv1a32(md);
+  const b = murmur3_32(md, STARTER_DIGEST_SEED);
+  return rows.some(([, fa, mb]) => fa === a && mb === b);
 }
 
 const starterForm = (md) => md.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
@@ -122,3 +130,61 @@ const SANDBOX_STARTERS = new Set(Object.keys(SANDBOX_LOCALES).flatMap((k) => {
   const current = buildSandboxCard(k);
   return [current, `${current}- [ ] %% card: text w=3 %% ${SANDBOX_LOCALES[k].textBody}\n`];
 }));
+
+// The oldest generation, known by numbers only. At 89a5b04 `buildSandboxCard` wrote 9 different
+// starters (one per locale) and the previous editor (w/editor.mjs) stored them on load; 22f9636
+// replaced that wording on purpose, so it must not come back into this source. Each row is
+//   [length in UTF-16 code units, FNV-1a 32, Murmur3 32 with STARTER_DIGEST_SEED]
+// of the text after starterForm. A stored text counts as that starter only when ALL THREE match.
+// 🔴 Why three independent checks: a match DELETES the visitor's card. One 32-bit digest alone leaves
+// a 1-in-4-billion chance per text that edited work collides; FNV-1a and Murmur3 are structurally
+// different (xor-then-multiply per byte vs. block mix with rotations and a final avalanche, different
+// constants and seed), so a collision would have to hit both at the same exact length.
+// Computed from `git show 89a5b04:packages/cardtile/w/sandbox-i18n.mjs`; sandbox-start.test.mjs
+// re-derives them from history when it is available.
+export const STARTER_DIGEST_SEED = 0x9747b28c;
+export const OLDER_STARTER_DIGESTS = Object.freeze([
+  [357, 0x59639d28, 0x8278f7ef],   // en
+  [232, 0xb52368fa, 0xd5a46d83],   // zh
+  [260, 0x359d73bd, 0xf4c0e2d7],   // ja
+  [276, 0xd1f41ec5, 0x363a053c],   // ko
+  [235, 0xea1fd1dd, 0x936d5acd],   // zh-Hans
+  [384, 0x7e2ea507, 0x77aa865c],   // de
+  [393, 0xa370463d, 0x1e923b21],   // fr
+  [387, 0xf4efc17f, 0x9b2ac02b],   // es
+  [386, 0xf4170089, 0x793c9b3e],   // pt
+].map((r) => Object.freeze(r)));
+const OLDER_BY_LENGTH = OLDER_STARTER_DIGESTS.reduce((m, r) => m.set(r[0], [...(m.get(r[0]) || []), r]), new Map());
+
+const utf8 = (s) => new TextEncoder().encode(s);
+
+/** FNV-1a, 32-bit, over the UTF-8 bytes of `s`. Unsigned. */
+export function fnv1a32(s) {
+  let h = 0x811c9dc5;
+  for (const byte of utf8(s)) h = Math.imul(h ^ byte, 0x01000193);
+  return h >>> 0;
+}
+
+/** MurmurHash3 x86_32 over the UTF-8 bytes of `s`, with `seed`. Unsigned. */
+export function murmur3_32(s, seed) {
+  const bytes = utf8(s);
+  const n = bytes.length;
+  const tail = n & ~3;
+  const mixK = (k) => Math.imul(rotl(Math.imul(k, 0xcc9e2d51), 15), 0x1b873593);
+  let h = seed | 0;
+  for (let i = 0; i < tail; i += 4) {
+    const k = bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24);
+    h = (Math.imul(rotl(h ^ mixK(k), 13), 5) + 0xe6546b64) | 0;
+  }
+  let k = 0;
+  switch (n & 3) {
+    case 3: k ^= bytes[tail + 2] << 16; // falls through
+    case 2: k ^= bytes[tail + 1] << 8; // falls through
+    case 1: k ^= bytes[tail]; h ^= mixK(k);
+  }
+  h ^= n;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+const rotl = (x, r) => (x << r) | (x >>> (32 - r));
