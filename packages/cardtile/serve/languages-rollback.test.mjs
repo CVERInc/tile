@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CardLifetime, HostBindings, _internal } from './card-api.mjs';
-import { MAIN, call, withJapanese, visit, mainMetadata, langKeys, disagreements, quiet } from './languages-harness.mjs';
+import { MAIN, GIF, call, withJapanese, visit, mainMetadata, langKeys, disagreements, quiet, kvFails } from './languages-harness.mjs';
 import { thinCard } from '../card-save.mjs';
 
 const OLD = '5d974ca1ed';
@@ -145,3 +145,106 @@ test('a Card with no language file: the previous Worker\'s save and this Worker 
   assert.equal(await mainMetadata(env), null);
   assert.ok(env.CARDS.puts.filter(([k]) => k === 'card:t:0').every(([, opts]) => opts === false), 'every main put without options');
 });
+
+// ── tile#304 r4 (closing review P1): the previous Worker can take the metadata off KV's main key
+// WITHOUT changing the record's serial (its alarm, paying a write this Worker left pending), so the
+// object's `published` marker still matches. The rule: a (re)activated object reads the main key's
+// metadata once when its language map names any file, and any difference is owed work.
+
+/** a Card with a live Japanese file whose republish is left pending (KV refused the main key's put) */
+async function pendingRepublish() {
+  const env = await withJapanese();
+  await quiet(env);
+  const storage = env.CARD_LIFETIMES.storageOf('t');
+  const rev = (await mainMetadata(env)).languages['ja-JP'];
+  const fail = kvFails(env, 'put', /^card:t:0$/);
+  const r = await call(env, 'POST', '/_api/card/t/lang');
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.json.cache, 'pending');
+  assert.equal(storage._m.get('card:0').cache, 'pending');
+  assert.deepEqual((await mainMetadata(env)).languages, { 'ja-JP': rev }, 'KV still names the file');
+  fail.heal();
+  return { env, storage, rev };
+}
+/** this Worker again, one API call (the activation), its alarms: the Japanese file is served again */
+async function forwardServesJapanese(env, rev, what) {
+  deployNew(env);
+  assert.equal((await call(env, 'GET', '/_api/card/t/lifetime')).status, 200);
+  await quiet(env);
+  assert.deepEqual(await mainMetadata(env), { languages: { 'ja-JP': rev } }, `${what}: KV names the file again`);
+  const page = await visit(env, '/t?lang=ja-JP');
+  assert.equal(page.headers.get('content-language'), 'ja-JP', `${what}: Japanese is served`);
+  assert.match(page.body, /イラストレーター/);
+  assert.deepEqual(await disagreements(env), [], what);
+}
+
+test('🔴 closing review P1 — a pending republish, the previous Worker\'s alarm writes the same serial without metadata, this Worker again: Japanese is served again', needsOld, async () => {
+  const { env, storage, rev } = await pendingRepublish();
+  const serial = storage._m.get('card:0').serial;
+  deployOld(env);
+  assert.equal(await env.CARD_LIFETIMES.tick('t'), true, 'the alarm this Worker armed fires in the previous Worker');
+  assert.equal(await mainMetadata(env), null, 'its put carries no metadata');
+  assert.equal(storage._m.get('card:0').serial, serial, 'and the record keeps its serial');
+  assert.equal(storage._m.get('card:0').cache, 'written');
+  assert.deepEqual(storage._m.get('languages:0').published, { serial, languages: { 'ja-JP': rev } }, 'the marker still says KV holds the map');
+  assert.notEqual((await visit(env, '/t?lang=ja-JP')).headers.get('content-language'), 'ja-JP');
+  await forwardServesJapanese(env, rev, 'after the old alarm');
+});
+
+test('🔴 the same, with the previous Worker\'s ordinary main save instead of its alarm', needsOld, async () => {
+  const { env, rev } = await pendingRepublish();
+  deployOld(env);
+  assert.equal((await oldCall(env, 'PUT', '/_api/card/t', { markdown: thinCard(SAVED_BY_OLD) })).status, 200);
+  assert.equal(await mainMetadata(env), null);
+  await forwardServesJapanese(env, rev, 'after the old save');
+  assert.match((await visit(env, '/t')).body, /saved by the previous Worker/);
+});
+
+test('negative control — no rollback: a fresh activation reads the main key once, writes nothing and arms nothing', async () => {
+  const env = await withJapanese();
+  await quiet(env);
+  const storage = env.CARD_LIFETIMES.storageOf('t');
+  const before = { kv: [...env.CARDS._m.entries()], meta: [...env.CARDS._meta.entries()], storage: JSON.stringify([...storage._m.entries()]) };
+  const puts = env.CARDS.puts.length;
+  env.CARD_LIFETIMES.restart('t');
+  const at = env.CARDS.reads.length;
+  assert.equal((await call(env, 'GET', '/_api/card/t/lifetime')).status, 200);
+  const fresh = env.CARDS.reads.slice(at);
+  const at2 = env.CARDS.reads.length;
+  assert.equal((await call(env, 'GET', '/_api/card/t/lifetime')).status, 200);
+  const warm = env.CARDS.reads.slice(at2);
+  assert.deepEqual(fresh, ['card:t:0', ...warm], 'the activation adds exactly one read, of the main key, before the answer\'s own');
+  assert.equal(env.CARDS.puts.length, puts, 'no KV put');
+  assert.deepEqual([...env.CARDS._m.entries()], before.kv);
+  assert.deepEqual([...env.CARDS._meta.entries()], before.meta);
+  assert.equal(JSON.stringify([...storage._m.entries()]), before.storage, 'no storage write');
+  assert.equal(storage._alarm, null, 'no alarm');
+});
+
+// the other transitions the previous Worker can make on a Card with a language file, each followed by
+// this Worker again (settle/adopt has no test: a record adopted or unknown never coexists with a map
+// that names a file, so the previous Worker's settleCard returns at its first line — see the r4 report)
+for (const [name, act] of [
+  ['stop, then resume', async (env) => {
+    assert.equal((await oldCall(env, 'PUT', '/_api/card/t/stop', { reason: 'r4' })).status, 200);
+    assert.equal((await oldCall(env, 'DELETE', '/_api/card/t/stop')).status, 200);
+  }],
+  ['put_asset', async (env) => {
+    assert.equal((await oldCall(env, 'PUT', '/_api/card/t/asset/x2', { base64: GIF, mime: 'image/gif' })).status, 200);
+  }],
+  ['put_asset, then delete_asset', async (env) => {
+    assert.equal((await oldCall(env, 'PUT', '/_api/card/t/asset/x2', { base64: GIF, mime: 'image/gif' })).status, 200);
+    const d = await oldCall(env, 'DELETE', '/_api/card/t/asset/x2');
+    assert.equal(d.status, 200, d.text);
+  }],
+]) {
+  test(`the previous Worker's ${name} on a Card with a language file, then this Worker again: KV names the map`, needsOld, async () => {
+    const env = await withJapanese();
+    await quiet(env);
+    const rev = (await mainMetadata(env)).languages['ja-JP'];
+    deployOld(env);
+    await act(env);
+    await quiet(env);
+    await forwardServesJapanese(env, rev, name);
+  });
+}
