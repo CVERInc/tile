@@ -34,11 +34,30 @@
 //   window.__pool         true when these Cards are in the card pool; absent, false or anything else: out
 // A page may instead carry a whole card file as its items (data-card-src, or window.__cardMd).
 (function(){
+  const root=document.documentElement;
+  // ---- two homes: a node that sits in one place on the wall and in another in a pile ----
+  // lodge(n) leaves a marker (a comment) where the engine put n; settled(n) notes where the pile put it. rehome() moves every
+  // such node to the one or the other. The marker stays where it is for good, so the wall gets its own markup back exactly.
+  const twoHomes=new Map();
+  let ON=false;   // a pile view is showing. On the wall the pile is still there, hidden, and must not answer the page's scroll, keys or taps
+  // 🔴 A deck that does not come up leaves the page as the wall. html.deck is on the root before the first paint and the
+  // stylesheet does not draw the engine's grid under it, so a script that throws — at its first line or half-way through
+  // building the pile — would otherwise leave an empty table. fail() sends every tile home (plain insertBefore: whatever
+  // threw may be what moveBefore needed), stops the pile answering, and says so on the root: data-deck-off, under which the
+  // stylesheet draws none of the deck's own parts (a switcher that does nothing is worse than none).
+  // window.__deckBoot is the word the page's head script waits for (deck-page.mjs): 'pending' | 'ready' | 'failed'.
+  const fail=e=>{ ON=false; window.__deckBoot='failed';
+    try{ twoHomes.forEach((h,n)=>{ const p=h.mark.parentNode; if(p&&(n.parentNode!==p||n.previousSibling!==h.mark)) p.insertBefore(n,h.mark.nextSibling); }); }catch(_){}
+    root.classList.remove('deck','list','open','fan','fan-closing','moving','list-away','swipe'); root.dataset.view='wall'; root.setAttribute('data-deck-off','');
+    try{history.scrollRestoration='auto';}catch(_){}
+    for(const k of ['__deckSetMode','__deckView','__deckLayout','__deckListHome','__deckFanToggle','__deckFan','__deckJump','__deckRiffle','__deckCount','__deckCur']) delete window[k];
+    try{console.error('deck: did not come up, the page is the wall',e);}catch(_){} };
+  const main=()=>{ try{ boot(); window.__deckBoot='ready'; }catch(e){ fail(e); } };
   // a page may carry its items as a card file instead of cells (data-card-src): fetch it, then boot with it
-  const SRC=document.documentElement.dataset.cardSrc;
-  if(SRC&&window.__cardMd==null){ fetch(SRC).then(r=>{ if(!r.ok)throw new Error('HTTP '+r.status); return r.text(); }).then(t=>{ window.__cardMd=t; main(); }).catch(e=>console.error('card file',SRC,e.message)); return; }
+  const SRC=root.dataset.cardSrc;
+  if(SRC&&window.__cardMd==null){ window.__deckBoot='pending'; fetch(SRC).then(r=>{ if(!r.ok)throw new Error('HTTP '+r.status); return r.text(); }).then(t=>{ window.__cardMd=t; main(); }).catch(e=>fail(new Error('card file '+SRC+': '+(e&&e.message)))); return; }
   main();
-  function main(){
+  function boot(){
   const LS='reef-card-layout';
   const I={deck:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.65 7.65a2 2 0 012.629-1.046l5.51 2.374a2 2 0 011.046 2.628l-3.957 9.184a2 2 0 01-2.628 1.046l-5.51-2.374a2 2 0 01-1.046-2.628z"/><path d="M18 7.777V4a2 2 0 00-2-2h-6a2 2 0 00-2 2v10a2 2 0 001.137 1.805"/><path d="m8 4.389-4.364.809a2 2 0 00-1.602 2.33l1.822 9.833a2 2 0 002.331 1.602l2.542-.47"/></svg>',
            grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 9v6"/><path d="M16 15v6"/><path d="M16 3v6"/><path d="M3 15h18"/><path d="M3 9h18"/><path d="M8 15v6"/><path d="M8 3v6"/></svg>',
@@ -74,15 +93,12 @@
   // The view the page opens on. A page made by deck-page.mjs says it on the root, with a visitor's last pick already applied
   // by its head script: that is taken as it stands. A page that says nothing (one not made there) is decided here, by the
   // same rule (w3/deck-views.test.mjs runs both over one matrix).
-  const root=document.documentElement, PIN=root.hasAttribute('data-view-pin');
+  const PIN=root.hasAttribute('data-view-pin');
   let mode=V2M[root.dataset.view]; if(!VIEWS.includes(mode)){ mode=VIEWS.includes(V2M[FM.view])?V2M[FM.view]:VIEWS[0]; if(!PIN){ try{ const s=localStorage.getItem(LS); if(VIEWS.includes(s))mode=s; }catch(_){} } }
   const paintRoot=()=>{ root.dataset.view=M2V[mode]; root.classList.toggle('deck',mode!=='spread'); root.classList.toggle('list',mode==='list'); };
   paintRoot();
   const seg=mk('div','deck-seg','<button type="button" data-m="deck" aria-label="'+escA(say('viewStack'))+'" title="'+escA(say('viewStack'))+'"><span class="ic-a">'+I.deck+'</span><span class="ic-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="12" height="18" x="6" y="3" rx="2"/></svg></span></button><button type="button" data-m="list" aria-label="'+escA(say('viewList'))+'" title="'+escA(say('viewList'))+'"><span class="ic-a">'+I.list+'</span><span class="ic-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7v10" /><path d="M6 5v14" /><rect width="12" height="18" x="10" y="3" rx="2" /></svg></span></button><button type="button" data-m="spread" aria-label="'+escA(say('viewWall'))+'" title="'+escA(say('viewWall'))+'">'+I.grid+'</button>');
-  // ---- two homes: a node that sits in one place on the wall and in another in a pile ----
-  // lodge(n) leaves a marker (a comment) where the engine put n; settled(n) notes where the pile put it. rehome() moves every
-  // such node to the one or the other. The marker stays where it is for good, so the wall gets its own markup back exactly.
-  const twoHomes=new Map();
+  // the two homes (twoHomes, above): lodge / settled / rehome
   const lodge=n=>{ if(twoHomes.has(n)||!n.parentNode)return; const mark=document.createComment('deck'); n.parentNode.insertBefore(mark,n); twoHomes.set(n,{mark,to:null,next:null}); };
   const settled=n=>{ const h=twoHomes.get(n); if(h){ h.to=n.parentNode; h.next=n.nextSibling; } };
   const mv=(p,n,ref)=>{ if(!p||(n.parentNode===p&&n.nextSibling===ref))return; if(p.moveBefore&&n.isConnected&&p.isConnected){ try{ p.moveBefore(n,ref); return; }catch(_){} } p.insertBefore(n,ref); };
@@ -159,7 +175,7 @@
   }
   // ---- the pile (stack and list). Built once; `at` is the tile to open on (null: the first card). ----
   function buildDeck(at){
-  let ON=true;   // a pile view is showing. On the wall the pile is still there, hidden, and must not answer the page's scroll, keys or taps
+  ON=true;
   let LIST=mode==='list';   // the deck engine, laid out one card under another with ordinary scrolling (Safari tab view); no pile physics
 
 

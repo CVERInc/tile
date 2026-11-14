@@ -11,6 +11,9 @@ html.deck .st-back-door{display:none}
 /* the wall: the pile is still in the page, and none of it is drawn. Of the bar, the switcher alone shows. */
 html:not(.deck) .deck-table,html:not(.deck) .deck-veil,html:not(.deck) .deck-rail,html:not(.deck) .deck-bar > :not(.deck-seg){display:none}
 html:not(.deck) .deck-bar{display:contents}   /* no box of its own on the wall: the switcher is fixed, and an empty block at the end of <body> would be one more item in whatever layout the page gives its body */
+/* a deck that did not come up (deck.js: fail): the page is the wall and none of the deck's own parts is drawn — not the
+   switcher either, which would do nothing */
+html[data-deck-off] .deck-bar,html[data-deck-off] .deck-table,html[data-deck-off] .deck-veil,html[data-deck-off] .deck-rail{display:none!important}
 /* the bench: the cards of a long pile that are not in the window around the top card wait here, not drawn */
 .deck-bench{display:none}
 /* ---- one stack on the table; every card flips; flip = open (veil + close) ---- */

@@ -54,17 +54,19 @@ const wallMarkup = (doc) => doc.querySelectorAll('main .st-grid, main .st-bleed'
  * then the deck. `layout` gives the stand-in the two measurements the deck asks a browser for: how
  * tall the document is, and where the wall's tiles are.
  */
-function open(md, { storage, moveBefore, ctx = {}, bare = false } = {}) {
+function open(md, { storage, moveBefore, ctx = {}, bare = false, deckJs = DECK_JS, quiet = false } = {}) {
   let html = renderCardHTML(md, { handle: 'specimen', ...ctx });
   if (bare) html = html.replace(/<html[^>]*>/, '<html lang="en">').replace(/<script>\(function\(d\)[\s\S]*?<\/script>/, '');
   const win = makeWindow(html, { scripts: true, storage, moveBefore });
   const doc = win.document, root = doc.documentElement;
   const cells = engineCells(doc);
-  const before = { cells, wall: wallMarkup(doc), parents: cells.map((c) => c.parentNode), rootBeforeDeck: { view: root.dataset.view, cls: root.className } };
+  const ft = doc.querySelector('footer.st-footer');
+  const before = { cells, wall: wallMarkup(doc), parents: cells.map((c) => c.parentNode), footerParent: ft && ft.parentNode, rootBeforeDeck: { view: root.dataset.view, cls: root.className } };
+  if (quiet) win.console = { ...console, error() {} };   // a deck that fails says so on the console; the test that makes it fail does not need to read it
   const inDeck = () => root.classList.contains('deck');
   doc.scrollHeightOf = (el) => (el !== root ? 0 : inDeck() ? win.innerHeight * Math.max(1, doc.querySelectorAll('.deck-snap').length) : 400 + cells.length * 300);
   doc.rectOf = (el) => (inDeck() || !cells.includes(el) ? { width: 342, height: 480 } : { top: 200 + cells.indexOf(el) * 300 - win.scrollY, left: 24, width: 342, height: 280 });
-  win.run(DECK_JS, 'deck.js'); win.tick(3000);
+  win.run(deckJs, 'deck.js'); win.tick(3000);
   const button = (v) => doc.querySelector(`.deck-seg button[data-m="${INNER[v]}"]`);
   const press = (v) => { const b = button(v); assert.ok(b, `the switcher has no ${v} button`); b.focus(); b.click(); win.tick(3000); return b; };
   return { win, doc, root, cells, before, button, press };
@@ -361,4 +363,61 @@ test('withDeck leaves a page it cannot read alone, and never writes the attribut
   assert.equal(withDeck('<p>not a page</p>', card()), '<p>not a page</p>');
   const once = renderCardHTML(card({ view: 'list' }), { handle: 'specimen' });
   assert.equal(once.split('data-view="').length, 2);
+});
+
+// ── a deck that does not come up ─────────────────────────────────────────────────────────────────
+// html.deck is on the root before the first paint and the stylesheet does not draw the engine's grid
+// under it. So ANY way the deck fails to come up must give the page back as the wall: the script
+// failing to load, the script throwing (before it has done anything, or half-way through building
+// the pile), and the script simply not having arrived yet. Otherwise the visitor has an empty table.
+const failedToWall = (p, why) => {
+  const root = p.doc.documentElement;
+  assert.equal(root.className, '', `${why}: the root still carries a pile's classes ("${root.className}")`);
+  assert.equal(root.dataset.view, 'wall', `${why}: the root does not say wall`);
+  assert.ok(root.hasAttribute('data-deck-off'), `${why}: the root does not say the deck is off`);
+};
+test('deck.js throws half-way through building the pile: every tile is back on the wall, which is the engine\'s markup', () => {
+  const at = 'const API={};';
+  assert.equal(DECK_JS.split(at).length, 2, 'CONTROL: the place the throw is injected at is in deck.js exactly once');
+  const p = open(card({ view: 'stack' }), { deckJs: DECK_JS.replace(at, 'throw new Error("injected: half-way");' + at), quiet: true });
+  assert.ok(p.doc.querySelector('.deck-card'), 'CONTROL: the throw came after cards were made');
+  failedToWall(p, 'threw half-way');
+  assert.equal(wallMarkup(p.doc), p.before.wall, 'the wall is not the engine\'s own markup');
+  p.cells.forEach((c, i) => same(c.parentNode, p.before.parents[i], `cell ${i} was left on a card nobody draws`));
+  same(p.doc.querySelector('footer.st-footer').parentNode, p.before.footerParent, 'the footer was left under the pile');
+  assert.equal(p.win.__deckView, undefined, 'a deck that failed still answers __deckView');
+  assert.equal(p.win.nav.reloads, 0);
+});
+test('deck.js throws on a page that opens on the wall: still the wall, and no switcher that does nothing', () => {
+  const at = 'bar.append(left,seg);';
+  assert.equal(DECK_JS.split(at).length, 2, 'CONTROL: the injection point exists once');
+  const p = open(card({ view: 'wall' }), { deckJs: DECK_JS.replace(at, at + 'document.body.appendChild(bar);throw new Error("injected: wall");'), quiet: true });
+  failedToWall(p, 'threw on the wall');
+  assert.equal(wallMarkup(p.doc), p.before.wall);
+});
+test('the deck\'s script threw before doing anything, or never ran: when the page is parsed and no deck has reported, it is the wall', () => {
+  const html = renderCardHTML(card({ view: 'list' }), { handle: 'specimen' });
+  const win = makeWindow(html, { scripts: true });
+  assert.equal(win.document.documentElement.className, 'deck list', 'CONTROL: the head script set the pile\'s classes');
+  assert.throws(() => win.run('throw new Error("injected: first line")', 'deck.js'));
+  win.document.dispatchEvent(new win.Event('DOMContentLoaded'));
+  failedToWall({ doc: win.document }, 'parsed, no deck');
+});
+test('a deck that came up is not taken for one that did not', () => {
+  const p = open(card({ view: 'stack' }));
+  p.doc.dispatchEvent(new p.win.Event('DOMContentLoaded')); p.win.tick(10000);
+  holds(p, 'stack', 'after DOMContentLoaded and the wait');
+  assert.ok(!p.root.hasAttribute('data-deck-off'));
+});
+test('the deck\'s script is slow: after a short wait the wall is shown, and the pile still opens when the script arrives', () => {
+  const html = renderCardHTML(card({ view: 'stack' }), { handle: 'specimen' });
+  const win = makeWindow(html, { scripts: true }); const root = win.document.documentElement;
+  win.tick(2000); assert.equal(root.className, 'deck', 'the wait is shorter than two seconds: an ordinary load would flash the wall');
+  win.tick(2000); assert.equal(root.className, '', 'four seconds on, the page is still an empty table');
+  assert.equal(root.dataset.view, 'stack', 'the wait gave up the view the page opens on');
+  assert.ok(!root.hasAttribute('data-deck-off'), 'a slow script was taken for a failed one');
+  win.document.scrollHeightOf = (el) => (el === root ? 844 * 6 : 0); win.document.rectOf = () => ({ width: 342, height: 480 });
+  win.run(DECK_JS, 'deck.js'); win.tick(3000);
+  assert.equal(root.className.split(' ').includes('deck'), true, 'the script arrived and the pile did not open');
+  assert.equal(root.dataset.view, 'stack');
 });

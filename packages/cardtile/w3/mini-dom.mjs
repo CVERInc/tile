@@ -347,6 +347,8 @@ class Document extends Node {
   querySelectorAll(s) { return queryAll(this, s); }
   getElementById(id) { return queryAll(this, '*').find((e) => e.id === id) || null; }
   elementFromPoint() { return null; }
+  /** an event fired AT the document (DOMContentLoaded): its own listeners, then the window's */
+  dispatchEvent(ev) { ev.target = this; this._fire(ev, 'target'); if (ev.bubbles && !ev._stop && this.defaultView) this.defaultView._fire(ev, 'bubble'); return !ev.defaultPrevented; }
 }
 
 /**

@@ -26,7 +26,9 @@
 //                                   renderCardHTML also passes false when the PLATFORM's ctx.pool is
 //                                   set, because the renderer has then drawn them itself (or not).
 //           then deck.js itself (versioned, immutable — see DECK_JS_PATH). If it fails to load,
-//           its onerror takes the deck's classes off again, for the same reason as above.
+//           throws, or has said nothing by the time the page is parsed, the head script's
+//           __deckFail takes the deck's classes off again, for the same reason as above (deck.js
+//           does the same itself when it throws half-way, after sending every tile home).
 //
 // `view` is the editor's: it names the view it is showing, so the page opens on that one and the
 // deck's own switcher stays out of the way (the editor's header is the switcher). To show another
@@ -79,9 +81,18 @@ export function openingView(md) {
  * file offers it and the view was not named for the page (data-view-pin). Storage that throws is
  * storage that says nothing.
  */
-export const DECK_HEAD_JS = "(function(d){var v=d.getAttribute('data-view');try{if(!d.hasAttribute('data-view-pin')){var s={deck:'stack',list:'list',spread:'wall'}[localStorage.getItem('reef-card-layout')];if(s&&(' '+d.getAttribute('data-views')+' ').indexOf(' '+s+' ')>=0){v=s;d.setAttribute('data-view',v);}}}catch(e){}if(v!=='wall')d.classList.add('deck');if(v==='list')d.classList.add('list');})(document.documentElement);";
+export const DECK_HEAD_JS = "(function(d){var v=d.getAttribute('data-view');try{if(!d.hasAttribute('data-view-pin')){var s={deck:'stack',list:'list',spread:'wall'}[localStorage.getItem('reef-card-layout')];if(s&&(' '+d.getAttribute('data-views')+' ').indexOf(' '+s+' ')>=0){v=s;d.setAttribute('data-view',v);}}}catch(e){}if(v!=='wall')d.classList.add('deck');if(v==='list')d.classList.add('list');"
+  // …and the way back. Under html.deck the stylesheet does not draw the engine's grid, so a deck that never comes up
+  // would leave an empty table. window.__deckBoot is deck.js's word ('ready', or 'pending' while it fetches a card
+  // file): no word once the page is parsed (the script threw, or was never run) is a failure, and so is the script's
+  // own onerror. No word after DECK_WAIT_MS is only a slow script: the wall is shown meanwhile, the root keeps the
+  // view it opens on, and deck.js puts the pile's classes back when it arrives.
+  + "window.__deckFail=function(){d.classList.remove('deck','list');d.setAttribute('data-view','wall');d.setAttribute('data-deck-off','');};document.addEventListener('DOMContentLoaded',function(){if(!window.__deckBoot)window.__deckFail();});setTimeout(function(){if(!window.__deckBoot)d.classList.remove('deck','list');},3000);"
+  + "})(document.documentElement);";
+/** how long a page that opens on a pile waits for deck.js before it shows the wall instead (the number in DECK_HEAD_JS) */
+export const DECK_WAIT_MS = 3000;
 /** deck.js did not load: there is no deck, so the page is the wall */
-const DECK_ONERROR = "var d=document.documentElement;d.classList.remove('deck','list');d.setAttribute('data-view','wall')";
+const DECK_ONERROR = "__deckFail()";
 
 // JSON that is safe inside an inline <script>: no `</script>`, no `<!--`
 const scriptJson = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
