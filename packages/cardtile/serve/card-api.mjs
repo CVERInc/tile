@@ -58,6 +58,8 @@ export const goneKey = (handle) => `gone:${handle}`;
  * lands on:
  *
  *   card:<handle>:<gen>   the card body          stop:<handle>:<gen>   its serving stop
+ *   card:<handle>:<gen>:<tag>:<rev>   a language file (tile#304), live only while the body's
+ *                                     metadata names it (see languageKey)
  *
  * and a parked preview carries `{ handle, gen }` in its metadata. Every write reads the generation
  * ONCE, at admission, and writes that generation's keys and no other.
@@ -675,6 +677,10 @@ export class HostBindings {
  *                                        the If-Version check (fenced), the reference check and the
  *                                        removal or replacement, against the card held here; `gen` absent
  *                                        → the current generation (this object is its authority)
+ *   POST /language { handle, gen?, tag, kind: put | delete | get, … }
+ *                                        tile#304: a language file's write, removal or read, in the same
+ *                                        queue; the record `card:<gen>` then also carries `languages`,
+ *                                        `langSeq` and `owed` (see the language section below)
  * An empty object is generation 0: `gen:` keys exist only since this PR, which ships this class, so no
  * handle was ever rotated anywhere else. Its lifetime state never comes from KV.
  */

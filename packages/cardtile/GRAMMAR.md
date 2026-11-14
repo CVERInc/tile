@@ -124,7 +124,11 @@ that is not the file's tag is refused (`cards_language_lang_mismatch`).
 
 There is one assets lane per Card, the main file's: `asset:<id>` means the same picture in every
 language, and an assets lane sent with a language file is dropped, as a save drops the caller's.
-The avatar and the icon files are always the main file's.
+The avatar and the icon files are always the main file's. An asset is in use while any current file
+of the Card refers to it, the main file or a language file: `delete_asset` (plain and fenced) refuses
+it and names the files (`used_by`), a main save does not count it among its `orphans`, and the
+manifests mark it `referenced`. A language file may name an asset the Card does not hold, as a main
+file may; it shows nothing.
 
 ### Language tags
 
@@ -138,7 +142,9 @@ A tag in `locales:`, in a route or in `?lang=` is read the same way:
 | `es-419`, `sl-rozaj` | as written | numeric regions and variants are tags |
 | `*`, `en-x-private`, `de-u-co-phonebk`, `en-`, `e`, `<x>`, over 35 characters | not a tag | the renderer's `<html lang>` shape only: letters, then 2–8 letter or digit subtags |
 
-A request is matched against the listed tags (and the main file's own `lang`) in this order:
+A request is matched against the listed tags that have a file (and the main file's own `lang`) in
+this order. A listed tag with no file is not a candidate: it would be the main file anyway, and must
+not stand in the way of a near language that has a file.
 
 | Step | Example | Served |
 |---|---|---|
@@ -161,9 +167,16 @@ keys and assets. A listed language with no file, an unlisted one and an unknown 
 file. A language is never a reason for a 404. The page (`<html lang>`), the markdown exits
 (`Accept: text/markdown`, `/<handle>.md`) and their `Content-Language` all name the file actually
 served. Every answer of a Card that lists `locales:` says `Vary: Accept, Accept-Language`, and its
-page carries one `rel="alternate" hreflang` link per listed language (its `?lang=` address) plus
-`x-default` (the bare address). A language chosen by `?lang=` is its own canonical address. A Card
-without `locales:` answers exactly as a Card always has.
+page carries one `rel="alternate" hreflang` link per language it is served in (the main file's own
+`lang`, and each listed language that has a file; its `?lang=` address) plus `x-default` (the bare
+address). A listed language with no file gets no alternate: its address serves the main file. A
+language chosen by `?lang=` is its own canonical address. A Card without `locales:` answers exactly as
+a Card always has.
+
+Which language files exist is the main file's own fact: the main file's record names each one, and
+the Worker reads only the file it names, in the same read as the main file. A removed file is never
+served again, even while its removal is still settling in the store, and a tag listed again has no
+file until a new one is saved.
 
 ### Language files through the API
 
@@ -171,7 +184,7 @@ On both prefixes, beside the main file's routes:
 
 | Method | Path | Body or header | Answer |
 |---|---|---|---|
-| `GET` | `/_api/cards/<handle>/lang/<tag>` | | `{handle, lang, version, markdown, assets, total_bytes}`: the file without an assets lane, the main file's asset manifest |
+| `GET` | `/_api/cards/<handle>/lang/<tag>` | | `{handle, lang, version, markdown, assets, total_bytes}`: the file without an assets lane, the main file's asset manifest (`referenced`: used by any file of the Card) |
 | `GET` | `/_api/cards/<handle>/lang/<tag>/full` | | the file with the main file's assets lane |
 | `PUT` | `/_api/cards/<handle>/lang/<tag>` | `{markdown, base_version?, dry_run?}` | `{handle, lang, version, commit, bytes, created, wouldChange}` |
 | `DELETE` | `/_api/cards/<handle>/lang/<tag>` | `If-Version`, optional | `{handle, lang, deleted: true}` |

@@ -66,13 +66,18 @@ writes it at the end of each DELETE. A hand value there takes the card down and 
 the object, which then refuses every bind until the next DELETE rewrites it.
 
 A Card's language files (tile#304, GRAMMAR.md "Languages") live beside the main file, under the
-same generation: `card:<handle>:<gen>:<tag>`. Write them only through the API
-(`PUT /_api/cards/<handle>/lang/<tag>`). The handle's `CardLifetime` holds each one (storage slot
-`card:<gen>@<tag>`) and is the only writer of the KV key. A hand-written key is served and read
-back by the API's GET, but the object does not know about it: a save with its version is refused
-as a conflict, its DELETE answers `cards_language_missing`, and the object does not remove it when
-the language leaves `locales:`. Only the Card's DELETE sweeps it, through its listing of
-`card:<handle>:`.
+same generation and a rev: `card:<handle>:<gen>:<tag>:<rev>`. Which ones exist is decided by the
+main file's own key: its KV metadata `{"languages": {"<tag>": "<rev>"}}`, written in the same put as
+the main body. The Worker reads a language file only when that metadata names it, and only the key
+it names. Write them only through the API (`PUT /_api/cards/<handle>/lang/<tag>`). The handle's
+`CardLifetime` holds each one (storage slot `card:<gen>@<tag>@<rev>`, named by its main record
+`card:<gen>`) and is the only writer of these keys and of that metadata.
+
+🔴 So a main body written by hand with `wrangler kv key put` carries no metadata, and from then on
+its Card is served in its main language only, until the next save through the API writes the record
+again. A hand-written language key is never served or read back: nothing names it. Only the Card's
+DELETE sweeps it, through its listing of `card:<handle>:`. A key of the form
+`card:<handle>:<gen>:<tag>` (no rev) is not read by anything.
 
 A domain binding lives under the same generation's keys (reef#2618 r5 — see `vanityKey`). Two
 Durable Objects hold the facts KV cannot be trusted with (r8):
