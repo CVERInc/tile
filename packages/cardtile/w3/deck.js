@@ -30,6 +30,7 @@
 //                         for this page (the editor's preview) — no stored pick is read or written.
 //   window.__cardFront    the card file's frontmatter only (`views:`, `view:`, `back:`)
 //   window.__deckStrings  the visitor-facing words, in the card's own language (w3/deck-i18n.mjs)
+//   window.__deckTry      the sandbox the "make your own" buttons open (w3/deck-page.mjs DECK_TRY_URL)
 //   window.__deckRef      the card's handle, for the reef.cards link's ?ref= (absent: no ref)
 //   window.__pool         true when these Cards are in the card pool; absent, false or anything else: out
 // A page may instead carry a whole card file as its items (data-card-src, or window.__cardMd).
@@ -69,6 +70,7 @@
   const OURS=HOME||DRAW||REF;
   const S=window.__deckStrings||{}; const say=k=>(S[k]!=null?String(S[k]):'');
   const escA=t=>String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  const TRY=String(window.__deckTry||'');   // the sandbox the "make your own" buttons open (w3/deck-page.mjs DECK_TRY_URL)
   const REFQ=window.__deckRef?'?ref='+encodeURIComponent(String(window.__deckRef)):'';
   const mk=(tag,cls,html)=>{const e=document.createElement(tag);e.className=cls;if(html!=null)e.innerHTML=html;return e;};
   // ---- items from a card file: one per `- [ ] %% card: … %% text` line. Kept as text; a card is built only when it is near view ----
@@ -240,7 +242,7 @@
   const pre=[], post=[], lazy=new Map(); let P=0, M=0, N=0, addingPost=false;
   const idx=c=>+c.dataset.i;
   const register=c=>{ if(!addingPost){ c.dataset.i=String(pre.length); pre.push(c); } else { c.dataset.i=String(P+M+post.length); post.push(c); } return c; };
-  const card=i=>{ if(i<P)return pre[i]||dealt(i); if(i<P+M){ let c=lazy.get(i); if(!c){ const t=esc(mdTexts[i-P]); const lines=backs.get(backAt.get(i-P)); c=buildCard(mk('div','st-cell deck-ours md-text','<h2>'+t+'</h2>'),lines?mk('div','md-back md-rare','<p class="rare-h">'+esc(lines[0]||'')+'</p>'+lines.slice(1).map(l=>'<p class="rare-d">'+esc(l)+'</p>').join('')):mk('div','md-back md-plain','<h2>'+t+'</h2><code>- [ ] %% card: text %% '+t+'</code><p>'+(i-P+1).toLocaleString('en-US')+' of '+M.toLocaleString('en-US')+'</p>')); c.dataset.i=String(i); lazy.set(i,c); } return c; } return post[i-P-M]; };
+  const card=i=>{ if(i<P)return pre[i]||dealt(i); if(i<P+M){ let c=lazy.get(i); if(!c){ const t=esc(mdTexts[i-P]); const lines=backs.get(backAt.get(i-P)); c=buildCard(mk('div','st-cell deck-ours md-text','<h2>'+t+'</h2>'),lines?mk('div','md-back md-rare','<p class="rare-h">'+esc(lines[0]||'')+'</p>'+lines.slice(1).map(l=>'<p class="rare-d">'+esc(l)+'</p>').join('')):mk('div','md-back md-plain','<h2>'+t+'</h2><code>- [ ] %% card: text %% '+t+'</code><p>'+esc(say('mdOf').replace('{i}',(i-P+1).toLocaleString('en-US')).replace('{n}',M.toLocaleString('en-US')))+'</p>')); c.dataset.i=String(i); lazy.set(i,c); } return c; } return post[i-P-M]; };
   const WIN=24, FANMAX=41, SNAPMAX=400, JUMP=12;   // a deck of up to 2·WIN+3 cards lives whole, as before; beyond that only the window does
   const syncWin=()=>{ const want=new Set(); if(N<=2*WIN+3){ for(let i=0;i<N;i++)want.add(i); } else { for(let i=Math.max(0,cur-WIN);i<=Math.min(N-1,cur+WIN);i++)want.add(i); want.add((cur+1)%N); want.add((cur+2)%N); }
     if(openCard)want.add(idx(openCard)); stack.querySelectorAll('.deck-card.travel').forEach(c=>want.add(idx(c)));
@@ -318,11 +320,11 @@
   P=pre.length; M=mdTexts.length; addingPost=true; window.__mdFirst=P; window.__mdCount=M;
   // reef's own card at the end of the pile: a plain link card like any other. front = glyph, back = one button.
   const reefFront=mk('div','deck-reef','<div class="mark" aria-hidden="true"><svg width="48" height="48" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M 39.5 78.2 C 39.6 62 39.8 46 40 29.3"/><path d="M 40 29.3 C 37.7 29.2 33.4 28.1 30.7 22.5"/><path d="M 40 29.3 C 42.3 29.2 46.6 28.1 49.3 22.1"/><path d="M 39.5 62 C 33.3 61.6 28.8 59.8 26.5 56.5 C 24.8 54 23.8 50.8 23.7 47.5"/><path d="M 39.7 53.8 C 44.1 49.5 49.6 46.1 55.6 44.1 C 62 41.9 69.5 41.6 76.8 44.1"/><path d="M 62.6 42.2 C 64.1 40.7 66.4 37.3 64.8 31.8"/></svg></div>');
-const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the capacity demo: simple English, its own ending */
-  if(HOME&&FILEDECK){ reefFront.className='deck-ours deck-ours-cta'; reefFront.insertAdjacentHTML('beforeend','<h2>That\'s all.</h2><p>'+(window.__mdCount||0).toLocaleString('en-US')+' in one file.</p>'); }
+const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the capacity demo: its own ending, in the page's words like the rest */
+  if(HOME&&FILEDECK){ reefFront.className='deck-ours deck-ours-cta'; reefFront.insertAdjacentHTML('beforeend','<h2>'+esc(say('fileEndTitle'))+'</h2><p>'+esc(say('fileEndText').replace('{n}',(window.__mdCount||0).toLocaleString('en-US')))+'</p>'); }
   else if(HOME){ reefFront.className='deck-ours deck-ours-cta'; reefFront.insertAdjacentHTML('beforeend','<h2>'+esc(say('homeCtaTitle'))+'</h2><p>'+esc(say('homeCtaText'))+'</p>'); }
   if(DRAW){ reefFront.className='deck-ours deck-ours-cta'; reefFront.insertAdjacentHTML('beforeend','<h2>'+esc(say('drawCtaTitle'))+'</h2><p>'+esc(say('drawCtaText'))+'</p>'); }
-  const reefBack=DRAW?null:(HOME&&FILEDECK)?goBack('https://card.feelreef.com/try/edit','Make your own',false,'One file. Under 25 MB.'):HOME?(b=>{b.insertAdjacentHTML('beforeend','<a class="try" href="https://card.feelreef.com/try/edit" target="_blank" rel="noopener">'+esc(say('tryNow'))+' <span class="arr">↗</span></a>');return b;})(bcard()):goBack('https://reef.cards/'+REFQ);
+  const reefBack=DRAW?null:(HOME&&FILEDECK)?goBack(TRY,esc(say('makeYourOwn')),false,esc(say('fileNote'))):HOME?(b=>{b.insertAdjacentHTML('beforeend','<a class="try" href="'+escA(TRY)+'" target="_blank" rel="noopener">'+esc(say('tryNow'))+' <span class="arr">↗</span></a>');return b;})(bcard()):goBack('https://reef.cards/'+REFQ);
   if(!REF&&(OURS||POOL)) addCard(reefFront,reefBack,DRAW?{onTap:()=>location.reload()}:{});   // home: the badge is the last card's back, where a card you were handed would be scanned
   N=P+M+post.length;
   // ---- edge-colour mat: a picture whose border is one colour sits on a mat of that colour ----

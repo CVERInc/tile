@@ -23,8 +23,8 @@ const WRITTEN = {
     drawCtaText: 'Tap for someone else.',
     drawWhere: 'Other people’s Cards, picked at random',
     tryNow: 'Try it now',
-    // ↓ words deck.js still hard-codes in English; deck.js does not say() them yet — see
-    //   DECK_AWAITING_DECK_JS below for the exact call sites. `{i}`/`{n}` are numbers deck.js fills in.
+    // ↓ a card-file page's words (the plain back of an item, and the last card of the capacity demo).
+    //   `{i}`/`{n}` are numbers deck.js fills in.
     mdOf: '{i} of {n}',
     fileEndTitle: 'That’s all.',
     fileEndText: '{n} in one file.',
@@ -197,19 +197,6 @@ export const DECK_STRINGS = Object.fromEntries(LOCALE_KEYS
   .map((k) => [k, { ...(TRANSLATED[k] || {}), ...(WRITTEN[k] || {}) }]));
 
 export const DECK_KEYS = Object.keys(DECK_STRINGS.en);
-
-// 🔴 Keys the table carries BEFORE deck.js says them (tile#298 part 2). deck.js still writes these words
-// in English at the lines named here; it is being restructured elsewhere, and the switch to say()
-// lands with that. gen-edit3-assets.mjs normally refuses a key deck.js never says; it lets exactly
-// these through, and refuses them again the moment deck.js does say one — so this list is deleted
-// by the change that makes deck.js use them, not left to rot.
-export const DECK_AWAITING_DECK_JS = {
-  mdOf: "deck.js:136 the plain md-text back: (i-P+1)+' of '+M",
-  fileEndTitle: "deck.js:192 the capacity demo's last card: <h2>That's all.</h2>",
-  fileEndText: "deck.js:192 the same card: (window.__mdCount).toLocaleString('en-US')+' in one file.'",
-  makeYourOwn: "deck.js:195 goBack(…, 'Make your own', …)",
-  fileNote: "deck.js:195 goBack(…, 'One file. Under 25 MB.')",
-};
 
 /** every (locale, key) that falls back to English — the list a translator works from */
 export const DECK_MISSING = Object.fromEntries(LOCALE_KEYS.filter((k) => k !== 'en')

@@ -18,7 +18,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { renderCardHTML } from '../serve/card-worker.mjs';
-import { withDeck, openingView, DECK_JS_PATH } from './deck-page.mjs';
+import { withDeck, openingView, DECK_JS_PATH, DECK_TRY_URL } from './deck-page.mjs';
+import { deckStrings, DECK_STRINGS } from './deck-i18n.mjs';
 import { makeWindow } from './mini-dom.mjs';
 
 const DECK_JS = readFileSync(new URL('./deck.js', import.meta.url), 'utf8');
@@ -596,4 +597,51 @@ test('inline scripts and inline handlers refused (a strict CSP): no deck → the
   win.run(DECK_JS, 'deck.js'); win.tick(3000);
   assert.equal(win.__deckBoot, 'ready');
   assert.equal(win.document.documentElement.className.split(' ').includes('deck'), true, 'deck.js alone did not open the pile the markup names');
+});
+
+// 5 — the words of a card-file page come from the table (w3/deck-i18n.mjs), in the page's language, and are text at every sink
+const smallFile = ['---', 'title: Host', '---', '', '## cards', '', '- [ ] %% card: text %% File 0.', '- [ ] %% card: text %% File 1.', '- [ ] %% card: text %% File 2.', ''].join('\n');
+const noLangHost = ['---', 'card-page: specimen', 'title: Host', 'view: stack', '---', '', '## cards', '', '- [ ] %% card: profile w=6 %% A page whose items are a card file.', ''].join('\n');
+/** the capacity demo (reef.cards home over a card file), or the plain home page, in the words of `lang`; `words` replaces some of them */
+const openOurs = ({ lang, words = null, file = true } = {}) => open(noLangHost, {
+  ctx: lang ? { chromeLang: lang } : {},
+  page: (h) => h.replace('<html', `<html data-reef-home${file ? ' data-card-src="/items.card.md"' : ''}`),
+  before: (win) => { if (file) win.__cardMd = smallFile; if (words) win.__deckStrings = { ...win.__deckStrings, ...words }; },
+});
+const textOf = (doc, sel) => doc.querySelectorAll(sel).map((e) => e.textContent.trim());
+const fill = (s, o) => s.replace(/\{(\w)\}/g, (m, k) => o[k] ?? m);
+for (const lang of ['en', 'zh-TW', 'de']) test(`a card-file page in ${lang}: the item count, the last card and its button say the table's words`, () => {
+  const S = deckStrings(lang);
+  if (lang !== 'en') for (const k of ['mdOf', 'fileEndTitle', 'fileEndText', 'makeYourOwn', 'fileNote']) assert.notEqual(S[k], DECK_STRINGS.en[k], `CONTROL: ${lang} has its own ${k}`);
+  const { doc, win } = openOurs({ lang });
+  assert.equal(win.__mdCount, 3, 'CONTROL: the pile is over the file');
+  assert.deepEqual(textOf(doc, '.md-plain p').sort(), [1, 2, 3].map((i) => fill(S.mdOf, { i, n: 3 })).sort(), 'the plain back of an item');   // (sorted: the pile lays its cards out top card last)
+  assert.deepEqual(textOf(doc, '.deck-ours-cta h2'), [S.fileEndTitle], 'the last card\'s title');
+  assert.deepEqual(textOf(doc, '.deck-ours-cta p'), [fill(S.fileEndText, { n: 3 })], 'the last card\'s line');
+  assert.deepEqual(textOf(doc, '.deck-go .note'), [S.fileNote], 'the note over the button');
+  const btn = doc.querySelectorAll('.deck-go a.btn');
+  assert.equal(btn.length, 1, 'one button on the last card\'s back');
+  assert.ok(btn[0].textContent.trim().startsWith(S.makeYourOwn), `the button reads ${JSON.stringify(btn[0].textContent)}`);
+  assert.equal(btn[0].getAttribute('href'), DECK_TRY_URL, 'the button goes to the sandbox deck-page.mjs names');
+});
+test('the home page\'s "try it" link goes to the sandbox deck-page.mjs names, and deck.js writes no address of its own', () => {
+  const { doc } = openOurs({ file: false });
+  const a = doc.querySelectorAll('a.try');
+  assert.equal(a.length, 1, 'CONTROL: the home page\'s last card has its link');
+  assert.equal(a[0].getAttribute('href'), DECK_TRY_URL);
+  assert.ok(!/https?:\/\/card\.feelreef\.com/.test(DECK_JS.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), 'deck.js still writes a card.feelreef.com address itself');
+});
+test('a translation with markup in it is text at every sink: no element is made from it', () => {
+  const evil = (k) => `<img src=x onerror=alert(1)><b>${k}</b> {i} {n} "q" & more`;
+  const KEYS = ['mdOf', 'fileEndTitle', 'fileEndText', 'makeYourOwn', 'fileNote'];
+  const { doc } = openOurs({ words: Object.fromEntries(KEYS.map((k) => [k, evil(k)])) });
+  const said = (k) => fill(evil(k), { i: 1, n: 3 });
+  assert.ok(textOf(doc, '.md-plain p').includes(said('mdOf')), 'the plain back');
+  assert.deepEqual(textOf(doc, '.deck-ours-cta h2'), [evil('fileEndTitle')], 'the last card\'s title');
+  assert.deepEqual(textOf(doc, '.deck-ours-cta p'), [fill(evil('fileEndText'), { n: 3 })], 'the last card\'s line');
+  assert.deepEqual(textOf(doc, '.deck-go .note'), [evil('fileNote')], 'the note');
+  assert.ok(doc.querySelector('.deck-go a.btn').textContent.trim().startsWith(evil('makeYourOwn')), 'the button');
+  for (const sel of ['.md-plain p', '.deck-ours-cta', '.deck-go']) for (const host of doc.querySelectorAll(sel)) {
+    assert.equal(host.querySelectorAll('img').length + host.querySelectorAll('b').length, 0, `${sel}: an element was made from a translation`);
+  }
 });

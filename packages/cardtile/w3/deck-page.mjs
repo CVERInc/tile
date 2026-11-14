@@ -20,6 +20,7 @@
 //             window.__deckStrings  the visitor's words, in the card's own `lang:` (w3/deck-i18n.mjs); for a
 //                                   card with none, the caller's `lang` is the VISITOR's (card-worker
 //                                   renderCardHTML chromeLang, tile#298) — the words only, never <html lang>
+//             window.__deckTry      DECK_TRY_URL: where the deck's "make your own" buttons go
 //             window.__deckRef      the handle, for the reef.cards link's ?ref= (absent: no ref)
 //             window.__pool         only when the caller says so. The card pool is a PLATFORM switch,
 //                                   never a file key (reef#2913). To deck.js, only true means "in the
@@ -45,9 +46,8 @@ export const DECK_CSS_PATH = `/_deck/deck-${DECK_VERSION}.css`;
 export const DECK_JS_PATH = `/_deck/deck-${DECK_VERSION}.js`;
 export const DECK_VIEWS = ['stack', 'list', 'wall'];
 
-// The sandbox the deck's "make your own" buttons open. deck.js still writes this address itself, twice,
-// at its last card's back (deck.js:195, tile#298 part 2); the switch to this constant (handed over the
-// way __deckStrings is) lands with the deck.js change, and is not on the page until then.
+// The sandbox the deck's "make your own" buttons open. deck.js does not write the address itself: it
+// is handed over as window.__deckTry, the way __deckStrings is (tile#298 part 2).
 export const DECK_TRY_URL = 'https://card.feelreef.com/try/edit';
 
 export const DECK_KEYS = ['views', 'view', 'back'];
@@ -113,7 +113,7 @@ export function withDeck(html, md, { view = '', pool, handle = '', lang = '' } =
   const v = DECK_VIEWS.includes(view) ? view : '';
   let front = frontOf(md);
   if (v) front = frontWithView(front, v);
-  const cfg = { __cardFront: front, __deckStrings: deckStrings(lang) };
+  const cfg = { __cardFront: front, __deckStrings: deckStrings(lang), __deckTry: DECK_TRY_URL };
   if (handle) cfg.__deckRef = String(handle);
   if (typeof pool === 'boolean') cfg.__pool = pool;
   const boot = Object.entries(cfg).map(([k, val]) => `window.${k}=${scriptJson(val)};`).join('');
