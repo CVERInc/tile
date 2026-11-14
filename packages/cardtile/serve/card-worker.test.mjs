@@ -1281,7 +1281,10 @@ test('production Cards on canonical and fallback hosts carry noindex on every re
       assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
       const icon = /\.(ico|svg|png)$/.test(url);
       assert.equal(res.headers.get('cache-control'), icon ? 'public, max-age=3600' : 'public, max-age=60', url);
-      assert.equal(res.headers.get('vary'), icon ? null : 'Accept', url);
+      // tile#298: SERVING_CARD declares no `lang:`, so its HTML page's chrome follows the visitor and
+      // varies by Accept-Language too; the markdown exits are the owner's file and do not
+      const page = !icon && !/\.md$/.test(url) && !init.headers;
+      assert.equal(res.headers.get('vary'), icon ? null : page ? 'Accept, Accept-Language' : 'Accept', url);
     }
   }
   // reef#2618 r2: a creator's domain routes by its binding only, so with none it names no card on
@@ -1307,7 +1310,10 @@ test('a bound vanity Card stays indexable, while preview and demo Cards include 
       assert.equal(res.headers.get('x-robots-tag'), robots, `${handle} ${preview} ${url}`);
       const icon = /\.(ico|svg|png)$/.test(url);
       assert.equal(res.headers.get('cache-control'), icon ? 'public, max-age=3600' : 'public, max-age=60', url);
-      assert.equal(res.headers.get('vary'), icon ? null : 'Accept', url);
+      // tile#298: SERVING_CARD declares no `lang:`, so its HTML page's chrome follows the visitor and
+      // varies by Accept-Language too; the markdown exits are the owner's file and do not
+      const page = !icon && !/\.md$/.test(url) && !init.headers;
+      assert.equal(res.headers.get('vary'), icon ? null : page ? 'Accept, Accept-Language' : 'Accept', url);
     }
   }
 });

@@ -9,7 +9,9 @@
 //                                   view / back) — never the whole file (given a whole file, deck.js
 //                                   builds its items from Markdown), and never the rest of the
 //                                   frontmatter: an author's other values have no business in a script
-//             window.__deckStrings  the visitor's words, in the card's own `lang:` (w3/deck-i18n.mjs)
+//             window.__deckStrings  the visitor's words, in the card's own `lang:` (w3/deck-i18n.mjs); for a
+//                                   card with none, the caller's `lang` is the VISITOR's (card-worker
+//                                   renderCardHTML chromeLang, tile#298) — the words only, never <html lang>
 //             window.__deckRef      the handle, for the reef.cards link's ?ref= (absent: no ref)
 //             window.__pool         only when the caller says so. The card pool is a PLATFORM switch,
 //                                   never a file key (reef#2913). To deck.js, only true means "in the
