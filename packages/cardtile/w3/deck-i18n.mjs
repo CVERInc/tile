@@ -5,7 +5,7 @@
 // Keyed by the sandbox's nine locale keys (w/sandbox-i18n.mjs LOCALE_KEYS). A locale without its own
 // entry for a key falls back to English, key by key; DECK_MISSING lists exactly which ones do.
 // en, zh (Traditional) and ja are written here in full; w3/locale-coverage.test.mjs fails on any
-// other missing cell that its AWAITING_TRANSLATION list does not name.
+// missing cell in any locale.
 import { LOCALE_KEYS, primaryLocale } from '../w/sandbox-i18n.mjs';
 
 // the words written here by hand: en, zh, ja, and zh-Hans's first eleven

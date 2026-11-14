@@ -3,11 +3,12 @@
 // the shared chrome (Done, Undo, the picture picker…) is sandbox-i18n.mjs's CHROME_STRINGS — this
 // table only holds what those two did not already say.
 //
-// Keyed by the sandbox's nine locale keys. `en`, `zh` (Traditional) and `ja` are complete. For the other
-// six, a string is given only where a sibling table already says the same thing in that language
-// (SAME_AS_CHROME below, and the host status words, which w2's board table carried in all nine);
-// everything else falls back to English key by key, and EDIT3_MISSING lists exactly which
-// (w3/locale-coverage.test.mjs fails on any such cell its AWAITING_TRANSLATION list does not name).
+// Keyed by the sandbox's nine locale keys. `en`, `zh` (Traditional) and `ja` are written here. For the
+// other six, a string comes from a sibling table where it already says the same thing in that language
+// (SAME_AS_CHROME below, and the host status words, which w2's board table carried in all nine), and
+// from the translation pass (the `// <translated>` block) for everything else. A missing key would fall
+// back to English key by key, and EDIT3_MISSING lists exactly which; w3/locale-coverage.test.mjs fails
+// on any missing cell in any locale.
 //
 // Placeholders are `{name}`, filled by fmt(). Every value is a plain string, so the banned-word scan
 // (w3/words.test.mjs) sees all of it.
@@ -214,6 +215,7 @@ const TRANSLATED = {
     "viewsAria": "보기",
     "wallFrame": "월",
     "editBtn": "편집",
+    "raw": "파일 내용",
     "docTitle": "{t} · Cards 편집",
     "pageTitle": "Cards 편집",
     "bcValue": "이름 + QR 코드",
@@ -224,6 +226,7 @@ const TRANSLATED = {
     "titleL": "제목",
     "titleFromProfile": "프로필에도 이 이름이 표시됩니다.",
     "rawSays": "저장된 파일 그대로의 전체 내용입니다.",
+    "openRaw": "파일 내용 편집",
     "bcL": "기본 뒷면",
     "previewFrame": "방문자에게 표시되는 화면",
     "pickHint": "하나를 선택해 시작하세요. 나중에 변경할 수 있습니다.",
@@ -328,6 +331,7 @@ const TRANSLATED = {
     "leaveKeep": "계속 편집",
     "leaveDiscard": "버리기",
     "signIn": "로그인",
+    "signInSays": "로그인하면 '저장' 시 온라인에 올라가며, 어떤 기기에서든 찾을 수 있습니다. 여기에 있는 내용도 그대로 유지됩니다.",
     "sbxStatus": "아직 로그인하지 않아 지금은 이 브라우저에만 저장됩니다.",
     "required": "필수",
     "needs": "완료하려면 ‘{f}’ 항목을 입력하세요",
@@ -347,6 +351,7 @@ const TRANSLATED = {
     "viewsAria": "视图",
     "wallFrame": "墙",
     "editBtn": "编辑",
+    "raw": "文件内容",
     "docTitle": "{t} · 编辑 Cards",
     "pageTitle": "编辑 Cards",
     "bcValue": "姓名 + QR 码",
@@ -357,9 +362,11 @@ const TRANSLATED = {
     "titleL": "标题",
     "titleFromProfile": "个人资料中也会显示此名称。",
     "rawSays": "完整文件，与存储的内容完全一致。",
+    "openRaw": "编辑文件内容",
     "bcL": "默认背面",
     "previewFrame": "访客看到的样子",
     "pickHint": "选择一种开始，稍后随时可以更改。",
+    "backInRaw": "在文件内容中编辑此背面",
     "editTile": "编辑卡片",
     "addBetween": "在第 {a} 张和第 {b} 张之间添加卡片",
     "front": "正面",
@@ -460,6 +467,7 @@ const TRANSLATED = {
     "leaveKeep": "继续编辑",
     "leaveDiscard": "放弃修改",
     "signIn": "登录",
+    "signInSays": "登录后，保存即可上线，在任何设备上都能找到。这里的内容也会一并带过去。",
     "sbxStatus": "尚未登录，目前仅保存在当前浏览器中。",
     "required": "必填",
     "needs": "填写“{f}”即可完成",
@@ -494,6 +502,7 @@ const TRANSLATED = {
     "bcL": "Standardrückseite",
     "previewFrame": "Was Besucher sehen",
     "pickHint": "Zum Starten auswählen. Kann später geändert werden.",
+    "backInRaw": "Diese Rückseite im Dateiinhalt bearbeiten",
     "editTile": "Kachel bearbeiten",
     "addBetween": "Kachel zwischen {a} und {b} hinzufügen",
     "front": "Vorderseite",
@@ -609,6 +618,8 @@ const TRANSLATED = {
   },
   "fr": {
     "untitled": "Sans titre",
+    "options": "Réglages de Cards",
+    "settingsBack": "Réglages",
     "viewsAria": "Affichages",
     "wallFrame": "Mur",
     "editBtn": "Modifier",
@@ -627,6 +638,7 @@ const TRANSLATED = {
     "bcL": "Verso par défaut",
     "previewFrame": "Ce que voient les visiteurs",
     "pickHint": "Choisissez-en un pour commencer. Vous pourrez le modifier plus tard.",
+    "backInRaw": "Modifier ce verso dans le contenu du fichier",
     "editTile": "Modifier la tuile",
     "addBetween": "Ajouter une tuile entre {a} et {b}",
     "front": "Recto",
@@ -722,6 +734,7 @@ const TRANSLATED = {
     "colon": " : ",
     "hostLoadFailed": "Cette page n'a pas pu ouvrir vos Cards. Rechargez la page pour réessayer.",
     "reload": "Recharger",
+    "proposed": "Une modification suggérée est dans votre brouillon. Rien n'est en ligne tant que vous n'appuyez pas sur Enregistrer.",
     "leaveTitle": "Modifications non enregistrées",
     "leaveKeep": "Continuer à modifier",
     "leaveDiscard": "Abandonner",
@@ -761,6 +774,7 @@ const TRANSLATED = {
     "bcL": "Reverso predeterminado",
     "previewFrame": "Lo que ven los visitantes",
     "pickHint": "Selecciona uno para empezar. Puedes cambiarlo más tarde.",
+    "backInRaw": "Editar este reverso en el contenido del archivo",
     "editTile": "Editar tarjeta",
     "addBetween": "Agregar una tarjeta entre {a} y {b}",
     "front": "Frente",
@@ -796,6 +810,7 @@ const TRANSLATED = {
     "savedLive": "Guardado. Ya está en línea.",
     "seek": "Preguntar al asistente",
     "palPh": "Indica al asistente qué hacer…",
+    "palSays": "Aún no está conectado. Una vez conectado, lo que cambie irá a tu borrador y nada estará en línea hasta que presiones Guardar.",
     "palEcho": "Dijiste: «{q}». No se cambió nada.",
     "accentL": "Color principal",
     "accentSays": "Elige un color; el resto de la paleta se genera a partir de él.",
@@ -855,10 +870,12 @@ const TRANSLATED = {
     "colon": ": ",
     "hostLoadFailed": "Esta página no ha podido abrir tus Cards. Recarga para intentarlo de nuevo.",
     "reload": "Recargar",
+    "proposed": "Hay un cambio sugerido en tu borrador. Nada estará en línea hasta que presiones Guardar.",
     "leaveTitle": "Tienes cambios sin guardar",
     "leaveKeep": "Seguir editando",
     "leaveDiscard": "Descartar",
     "signIn": "Iniciar sesión",
+    "signInSays": "Una vez que inicies sesión, Guardar lo pone en línea y podrás encontrarlo en cualquier dispositivo. Lo que está aquí viene contigo.",
     "sbxStatus": "Aún no has iniciado sesión, por lo que de momento solo se guarda en este navegador.",
     "required": "Obligatorio",
     "needs": "Completa «{f}» para terminar",
@@ -893,6 +910,7 @@ const TRANSLATED = {
     "bcL": "Verso padrão",
     "previewFrame": "O que os visitantes veem",
     "pickHint": "Escolha um para começar. Você pode alterar depois.",
+    "backInRaw": "Editar este verso no conteúdo do arquivo",
     "editTile": "Editar cartão",
     "addBetween": "Adicionar um cartão entre {a} e {b}",
     "front": "Frente",

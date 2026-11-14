@@ -3,12 +3,9 @@
 // deckStrings() and editStrings() fall back to English key by key, which is right at run time (an
 // unlabelled control is worse than one in the wrong language) and wrong as a resting state: a key
 // that is English in Korean says nothing anywhere until a Korean visitor reads it. So the rule here
-// is strict, with ONE named, explicit exception list for the cells still waiting for a translator.
+// is strict, with no exception list: every cell of both tables exists in all nine locales.
 //
-// 🔴 AWAITING_TRANSLATION is the only way a cell may be missing. It names keys, not "everything":
-// a key added to either table later is not on it, so that key fails here until it carries all
-// nine. And it may not go stale: a listed cell that HAS its translation fails too, so the list
-// shrinks as translations land, and the change that fills the last cell deletes the constant.
+// 🔴 A key added to either table later fails here until it carries all nine.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LOCALE_KEYS } from '../w/sandbox-i18n.mjs';
@@ -20,53 +17,22 @@ const TABLES = {
   'edit3-i18n': { keys: EDIT3_KEYS, own: (k) => EDIT3_STRINGS[k] || {} },
 };
 
-// The cells a translator still owes: in each entry, these keys in these locales. Nothing else.
-// The translation pass filled every other cell. These 17 came back with a word the owner's banned
-// list (banned-words.mjs) forbids, so they were withheld unchanged and go back to the translator.
-const AWAITING_TRANSLATION = [
-  { table: 'edit3-i18n', locales: ['fr'], keys: ['options', 'settingsBack', 'proposed'] },
-  { table: 'edit3-i18n', locales: ['ko', 'zh-Hans'], keys: ['raw', 'openRaw', 'signInSays'] },
-  { table: 'edit3-i18n', locales: ['zh-Hans', 'de', 'fr', 'es', 'pt'], keys: ['backInRaw'] },
-  { table: 'edit3-i18n', locales: ['es'], keys: ['palSays', 'proposed', 'signInSays'] },
-];
-
-const awaiting = new Set();
-for (const { table, locales, keys } of AWAITING_TRANSLATION) {
-  for (const l of locales) for (const key of keys) awaiting.add(`${table}|${key}|${l}`);
-}
-
 const present = (v) => typeof v === 'string' && v.trim() !== '';
 
 test('the nine locales are the sandbox’s nine', () => {
   assert.deepEqual([...LOCALE_KEYS].sort(), ['de', 'en', 'es', 'fr', 'ja', 'ko', 'pt', 'zh', 'zh-Hans'].sort());
 });
 
-test('every key exists in all nine locales, or is on AWAITING_TRANSLATION by name', () => {
+test('every key exists in all nine locales', () => {
   const missing = [];
   for (const [table, { keys, own }] of Object.entries(TABLES)) {
     for (const l of LOCALE_KEYS) {
       for (const key of keys) {
-        if (!present(own(l)[key]) && !awaiting.has(`${table}|${key}|${l}`)) missing.push(`${table} · ${key} · ${l}`);
+        if (!present(own(l)[key])) missing.push(`${table} · ${key} · ${l}`);
       }
     }
   }
-  assert.deepEqual(missing, [], 'these fall back to English and are not on AWAITING_TRANSLATION');
-});
-
-test('AWAITING_TRANSLATION is not stale: every listed cell is really missing, and names a real key', () => {
-  const stale = [];
-  for (const cell of awaiting) {
-    const [table, key, l] = cell.split('|');
-    assert.ok(TABLES[table], `AWAITING_TRANSLATION names a table that does not exist: ${table}`);
-    assert.ok(TABLES[table].keys.includes(key), `AWAITING_TRANSLATION names ${table} · ${key}, which English does not have`);
-    assert.notEqual(l, 'en', 'English is the source, never awaiting');
-    if (present(TABLES[table].own(l)[key])) stale.push(`${table} · ${key} · ${l}`);
-  }
-  assert.deepEqual(stale, [], 'these are translated now: take them off AWAITING_TRANSLATION');
-});
-
-test('en, zh and ja are never on the list: those three are written here', () => {
-  for (const cell of awaiting) assert.ok(!/\|(en|zh|ja)$/.test(cell), cell);
+  assert.deepEqual(missing, [], 'these fall back to English');
 });
 
 test('every translation keeps the English placeholders, exactly', () => {
@@ -87,7 +53,7 @@ test('every translation keeps the English placeholders, exactly', () => {
 test('control: a new key with fewer than nine locales fails, named', () => {
   const keys = [...DECK_KEYS, 'plantedNewKey'];
   const own = (l) => (l === 'en' ? { ...DECK_STRINGS.en, plantedNewKey: 'x' } : DECK_STRINGS[l] || {});
-  const missing = LOCALE_KEYS.filter((l) => !present(own(l).plantedNewKey) && !awaiting.has(`deck-i18n|plantedNewKey|${l}`));
+  const missing = LOCALE_KEYS.filter((l) => !present(own(l).plantedNewKey));
   assert.equal(keys.length, DECK_KEYS.length + 1);
   assert.deepEqual(missing.sort(), LOCALE_KEYS.filter((l) => l !== 'en').sort());
 });
