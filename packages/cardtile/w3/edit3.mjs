@@ -29,6 +29,7 @@ import { renderCardHTML } from '../serve/card-worker.mjs';
 import { cardTitle } from './card-title.mjs';
 import { typeIconSvg } from './type-icons.mjs';
 import { createHostBridge, validHostOrigin, readsAsCard } from './host-bridge.mjs';
+import { sandboxStart, SAVED_KEY, DRAFT_KEY, W2_DRAFT_KEY } from './sandbox-start.mjs';
 import { editStrings, fmt } from './edit3-i18n.mjs';
 import { createNotices } from './notice.mjs';
 import { leaveStep, resolveLeave } from './leave-edit.mjs';
@@ -106,26 +107,21 @@ for (const b of document.querySelectorAll('.modes button')) { b.innerHTML = VIEW
 // ── state: the card's Markdown is the truth; the model is re-read from it on every change ──
 // sandbox: KEY = what Save kept, DKEY = the draft being edited. host: the parent holds what is saved,
 // and the draft is kept per handle, with the saved card it was made on top of (see onLoad).
-const KEY = 'cardtile:w3:saved', DKEY = 'cardtile:w3:draft';
-const W2_DRAFT_KEY = 'cardtile:try:draft:v1';   // the previous sandbox kept every edit here, unasked
+// (the keys, and which stored card counts as nothing saved: w3/sandbox-start.mjs)
+const KEY = SAVED_KEY, DKEY = DRAFT_KEY;
 const hostDraftKey = () => `cardtile:w3:host-draft:${handle || 'card'}`;
 const EMPTY = '## cards\n\n';
 // 🔴 the sandbox starts from a NEW, EMPTY card: one big "add" on the canvas, nobody else's sample to clear first
 const SANDBOX_START = EMPTY;
 let handle = '', cardUrl = '';
-let savedMd = SANDBOX ? loadSaved() : EMPTY, md = SANDBOX ? loadDraft() : EMPTY, m = read(md), view = 'stack', editing = false, pending = {};
+// 🔴 a stored card that is still the old sample starter counts as nothing saved (tile#296): its key is
+// cleared and the sandbox opens empty; anything the visitor changed opens exactly as stored
+const START = SANDBOX ? sandboxStart(lsGet) : null;
+if (START) for (const k of START.clear) lsSet(k, null);
+let savedMd = SANDBOX ? START.saved ?? SANDBOX_START : EMPTY, md = SANDBOX ? START.draft ?? savedMd : EMPTY, m = read(md), view = 'stack', editing = false, pending = {};
 let bridge = null, hostWaiting = !SANDBOX;
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* best-effort */ } }
-function loadSaved() {
-  const saved = lsGet(KEY);
-  if (saved != null) return saved;
-  // a visitor who used the previous sandbox finds their card again, as the thing they last kept
-  const w2 = lsGet(W2_DRAFT_KEY);
-  if (w2 && readsAsCard(w2)) return w2;
-  return SANDBOX_START;
-}
-function loadDraft() { return lsGet(DKEY) ?? savedMd; }
 // Nothing goes live until Save; the draft lives in this browser; leaving with it unsaved asks first.
 function persist() {
   if (SANDBOX) lsSet(DKEY, md === savedMd ? null : md);
