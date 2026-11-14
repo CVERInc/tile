@@ -191,6 +191,25 @@ test('🔴 closing review P1 — a pending republish, the previous Worker\'s ala
   await forwardServesJapanese(env, rev, 'after the old alarm');
 });
 
+test('the same, when this Worker\'s first activation is an alarm (one left armed), not an API call: that alarm puts the map back', needsOld, async () => {
+  const { env, storage, rev } = await pendingRepublish();
+  deployOld(env);
+  assert.equal(await env.CARD_LIFETIMES.tick('t'), true);
+  assert.equal(await mainMetadata(env), null);
+  deployNew(env);
+  storage._alarm = Date.now(); // an alarm armed for anything else, due now
+  let at = env.CARDS.reads.length;
+  assert.equal(await env.CARD_LIFETIMES.tick('t'), true);
+  assert.deepEqual(env.CARDS.reads.slice(at), ['card:t:0'], 'one read of the main key');
+  assert.deepEqual(await mainMetadata(env), { languages: { 'ja-JP': rev } }, 'put back by that alarm itself');
+  at = env.CARDS.reads.length;
+  assert.equal((await call(env, 'GET', '/_api/card/t/lifetime')).status, 200);
+  assert.deepEqual(env.CARDS.reads.slice(at), [], 'the API call that follows, in the same instance, reads it no more');
+  await quiet(env);
+  assert.equal((await visit(env, '/t?lang=ja-JP')).headers.get('content-language'), 'ja-JP');
+  assert.deepEqual(await disagreements(env), []);
+});
+
 test('🔴 the same, with the previous Worker\'s ordinary main save instead of its alarm', needsOld, async () => {
   const { env, rev } = await pendingRepublish();
   deployOld(env);

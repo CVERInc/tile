@@ -743,7 +743,9 @@ export class CardLifetime {
     const gen = ((await this.storage.get('life')) || {}).gen || GEN0;
     // tile#304 r2: language bodies before the main record that names them, and the keys it no longer
     // names only after it is in KV (publish); r3: then the slots of a language write that stopped
-    // before its commit (tidyLanguages), so an alarm leaves nothing of a stopped write behind
+    // before its commit (tidyLanguages), so an alarm leaves nothing of a stopped write behind (r4: an
+    // instance the alarm started checks KV's copy of the language map in flushLanguages, checkKvMap,
+    // so what it finds missing is put back by this same run's flushCard)
     await enqueueWrite(this, gen, async () => {
       await this.flushLanguages(gen); await this.flushCard(gen); await this.settleCard(gen); await this.dropOwed(gen); await this.tidyLanguages(gen);
     }).catch(() => {});
@@ -755,8 +757,12 @@ export class CardLifetime {
    * that crashed before it re-armed, or a state written before r3). So a new instance looks: when
    * the lifetime's inverse or the current generation's card owes KV anything (owesKv: a pending
    * record, an unpublished language map — an older Worker's save included —, a live body not in KV,
-   * an owed deletion), it arms the alarm, due now. It writes nothing else and reads nothing from KV:
-   * a read (/current, a language GET) still writes no key (r15); the alarm does the work. A visitor's
+   * an owed deletion), it arms the alarm, due now. 🔴 r4 (closing review P1): on the way, for a Card
+   * whose language map names any file, it reads KV's main key once and compares the language map
+   * there with its own (owesKv → checkKvMap): an older cardtile worker can put that key without
+   * metadata at the SAME serial (its alarm paying a write this one left pending), which the
+   * `published` marker cannot see; a difference clears the marker. It writes nothing else: a read
+   * (/current, a language GET) still writes no KV key (r15); the alarm does the work. A visitor's
    * request never reaches the object, so a Card nobody calls the API for waits for its alarm or for
    * the operator's republish (POST /_api/card/<handle>/lang).
    */
@@ -767,7 +773,35 @@ export class CardLifetime {
   async wake() {
     const life = await this.storage.get('life');
     const gen = (life && life.gen) || GEN0;
-    if ((life && life.cache === 'pending') || (await this.owesKv(gen))) await this.armAlarm(Date.now());
+    if ((life && life.cache === 'pending') || (await this.owesKv(gen, true))) await this.armAlarm(Date.now());
+  }
+  /**
+   * 🔴 tile#304 r4 (closing review P1): does KV's main key name the language files the map names? The
+   * map's `published` marker is a claim about KV that an older cardtile worker can falsify without
+   * touching the marker — every main put it makes carries no metadata (5d974ca1ed writeThrough), and
+   * its alarm pays this worker's pending put at the same serial. So once per instance (an activation:
+   * the first of wake → owesKv, or flushLanguages — an alarm's run, or a write's when wake found the
+   * record pending) and only when the map names a file, the main key's metadata is READ and compared
+   * with the map: absent metadata, other revs, a tag more or less — any difference, or a read that
+   * fails, clears `published`, which makes the map owed (owesKv) and flushCard put the main key again
+   * with it. `record` and `map` are what the caller has just read, so a Card with no language file (no
+   * map, or an empty one) gets no extra read of any kind: its path is exactly as before. `arm` (wake):
+   * the change goes in the same write as its alarm, due now; flushLanguages' caller flushes right
+   * after it. Answers the map as it now is.
+   */
+  async checkKvMap(gen, record, map, arm) {
+    if (this.kvChecked === gen || record.from === 'unknown' || !Object.keys(map.languages || {}).length) return map;
+    let named = null;
+    try { named = languageRevsOf((await this.env.CARDS.getWithMetadata(cardKey(record.handle, gen))).metadata); } catch { /* unread: owed */ }
+    if ((named && sameRevs(named, map.languages)) || !map.published) { this.kvChecked = gen; return map; }
+    // the map as it is now (the KV read let other work in: an alarm's), its marker cleared
+    const now = await this.storage.get(langRecordKey(gen));
+    if (!now) { this.kvChecked = gen; return map; }
+    const owed = { ...now, published: null };
+    if (arm) await this.commitPending({ [langRecordKey(gen)]: owed }, Date.now());
+    else await this.putEntries({ [langRecordKey(gen)]: owed });
+    this.kvChecked = gen; // (only once written: a storage failure leaves the check to the next call)
+    return owed;
   }
   /** the lifetime, its pending inverse reconciled first (rule B, see HostBindings): the WRITE paths' read */
   async load(handle) {
@@ -1152,7 +1186,8 @@ export class CardLifetime {
    * the live language files (the language map, r3) go in the SAME put, as the key's metadata (see
    * languageKey) — and a Card with none is put exactly as before, with no options argument, so its key
    * carries no metadata. r3: once it has landed, the map records it as published with this record
-   * (`published`), which is how the object knows, without reading KV, whether KV carries its map.
+   * (`published`), which is how the object knows, within one activation and without reading KV,
+   * whether KV carries its map. r4: across activations it is checked against KV (checkKvMap).
    */
   async writeThrough(handle, gen, md, meta) {
     const lang = await this.storage.get(langRecordKey(gen));
@@ -1299,6 +1334,13 @@ export class CardLifetime {
   //                                while either differs from now — a change of the map, a main write,
   //                                or a save by an older Worker (it raises the serial and puts the
   //                                main key without metadata) — and the object then republishes it.
+  //                                🔴 r4: a claim about KV, and an older cardtile worker can falsify it
+  //                                WITHOUT touching it (its alarm puts the main key without metadata at
+  //                                the same serial). So it is trusted only within one activation, where
+  //                                no older worker runs beside this one: flushCard (is the main key owed
+  //                                again?), dropOwed (may owed keys go?) and owesKv read it. An instance
+  //                                compares it with KV once, when it starts (checkKvMap), and clears it
+  //                                on any difference.
   // KV's copy is the main key's metadata `{ languages }`, in the same put as the main body
   // (writeThrough). Each live file is a record `card:<gen>@<tag>@<rev>` and its chunks (langSlot): a
   // fresh slot per rev, written BEFORE the map names it — so the file the map names is always whole
@@ -1365,8 +1407,9 @@ export class CardLifetime {
   /** step 1 (and the alarm's): the body of every live file KV does not hold yet */
   async flushLanguages(gen) {
     const record = await this.storage.get(cardMetaKey(gen));
-    const map = await this.storage.get(langRecordKey(gen));
+    let map = await this.storage.get(langRecordKey(gen));
     if (!record || !map || (await this.read(record.handle)).gen !== gen) return;
+    map = await this.checkKvMap(gen, record, map, false); // r4: an instance's first look at KV's map
     for (const [tag, rev] of Object.entries(map.languages || {})) {
       const meta = await this.storage.get(cardMetaKey(langSlot(gen, tag, rev)));
       if (!meta || meta.cache === 'written') continue;
@@ -1394,13 +1437,17 @@ export class CardLifetime {
     await this.commitPending({ [langRecordKey(gen)]: { ...map, owed: left } });
     return 'pending';
   }
-  /** does KV still owe the object anything of `gen` — the main record, the language map, a live body, an owed deletion? */
-  async owesKv(gen) {
+  /**
+   * does KV still owe the object anything of `gen` — the main record, the language map, a live body, an
+   * owed deletion? `check` (wake, r4): first compare KV's copy of the map with the object's (checkKvMap)
+   */
+  async owesKv(gen, check = false) {
     const record = await this.storage.get(cardMetaKey(gen));
     if (!record) return false;
     if (record.cache === 'pending') return true;
-    const map = await this.storage.get(langRecordKey(gen));
+    let map = await this.storage.get(langRecordKey(gen));
     if (!map) return false;
+    if (check) map = await this.checkKvMap(gen, record, map, true);
     if ((map.owed || []).length || (record.from !== 'kv' && unpublished(map, record))) return true;
     for (const [tag, rev] of Object.entries(map.languages || {})) {
       const meta = await this.storage.get(cardMetaKey(langSlot(gen, tag, rev)));
