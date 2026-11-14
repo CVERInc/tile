@@ -30,6 +30,11 @@ export const DECK_CSS_PATH = `/_deck/deck-${DECK_VERSION}.css`;
 export const DECK_JS_PATH = `/_deck/deck-${DECK_VERSION}.js`;
 export const DECK_VIEWS = ['stack', 'list', 'wall'];
 
+// The sandbox the deck's "make your own" buttons open. deck.js still writes this address itself, twice,
+// at its last card's back (deck.js:195, tile#298 part 2); the switch to this constant (handed over the
+// way __deckStrings is) lands with the deck.js change, and is not on the page until then.
+export const DECK_TRY_URL = 'https://card.feelreef.com/try/edit';
+
 export const DECK_KEYS = ['views', 'view', 'back'];
 
 /** the frontmatter fence of a card file, cut down to the keys the deck reads, or '' when none is set */
