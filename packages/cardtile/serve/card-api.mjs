@@ -695,6 +695,8 @@ export class CardLifetime {
   async fetch(request) {
     const op = new URL(request.url).pathname;
     const body = (await request.json().catch(() => null)) || {};
+    // tile#304 r3: a (re)started object finds what it still owes KV before it answers anything (wake)
+    if (this.storage) await this.awake();
     if (op === '/save' || op === '/asset' || op === '/language') {
       if (!cardWriteOk(op, body)) return Response.json({ error: 'bad_request' }, { status: 400 });
       if (!this.storage) return Response.json({ error: 'no_storage' }, { status: 500 });
@@ -734,8 +736,32 @@ export class CardLifetime {
     // tile#209 r2: the card's own write-through, in its generation's write queue
     const gen = ((await this.storage.get('life')) || {}).gen || GEN0;
     // tile#304 r2: language bodies before the main record that names them, and the keys it no longer
-    // names only after it is in KV (publish)
-    await enqueueWrite(this, gen, async () => { await this.flushLanguages(gen); await this.flushCard(gen); await this.settleCard(gen); await this.dropOwed(gen); }).catch(() => {});
+    // names only after it is in KV (publish); r3: then the slots of a language write that stopped
+    // before its commit (tidyLanguages), so an alarm leaves nothing of a stopped write behind
+    await enqueueWrite(this, gen, async () => {
+      await this.flushLanguages(gen); await this.flushCard(gen); await this.settleCard(gen); await this.dropOwed(gen); await this.tidyLanguages(gen);
+    }).catch(() => {});
+  }
+  /**
+   * 🔴 tile#304 r3 (review r2 #1): what a started object does before its first answer. Every change
+   * that leaves something owed to KV arms the alarm in the same storage write (commitPending), so a
+   * crash never leaves such a state without one — but an alarm can still be lost (consumed by a run
+   * that crashed before it re-armed, or a state written before r3). So a new instance looks: when
+   * the lifetime's inverse or the current generation's card owes KV anything (owesKv: a pending
+   * record, an unpublished language map — an older Worker's save included —, a live body not in KV,
+   * an owed deletion), it arms the alarm, due now. It writes nothing else and reads nothing from KV:
+   * a read (/current, a language GET) still writes no key (r15); the alarm does the work. A visitor's
+   * request never reaches the object, so a Card nobody calls the API for waits for its alarm or for
+   * the operator's republish (POST /_api/card/<handle>/lang).
+   */
+  awake() {
+    if (!this.waking) this.waking = this.wake().catch(() => { this.waking = null; });
+    return this.waking;
+  }
+  async wake() {
+    const life = await this.storage.get('life');
+    const gen = (life && life.gen) || GEN0;
+    if ((life && life.cache === 'pending') || (await this.owesKv(gen))) await this.armAlarm(Date.now());
   }
   /** the lifetime, its pending inverse reconciled first (rule B, see HostBindings): the WRITE paths' read */
   async load(handle) {
@@ -803,7 +829,7 @@ export class CardLifetime {
     await this.adopt(s);
     if (!s.hosts.includes(host)) s.hosts.push(host);
     s.seq += 1; // the bind's place among this lifetime's binds: the newest accepted one owns the redirect
-    await this.storage.put('life', s);
+    await this.putLife(s);
     await this.flush(s);
     return { gen: s.gen, order: s.seq };
   }
@@ -836,13 +862,13 @@ export class CardLifetime {
     s.highWater[host] = ticket;
     // Another host's tickets come from another object's clock, so between hosts the registration order decides.
     if (!same && s.inverse && s.inverse.order > order) {
-      await this.storage.put('life', s); // the high water, raised by an acceptance that does not publish
+      await this.putLife(s); // the high water, raised by an acceptance that does not publish
       return { published: false, why: 'A bind that started later already set this card\'s address.' };
     }
     // the acceptance that wrote it: only a later loss clears it (r11); its order never goes back either
     s.inverse = { host, order: same ? Math.max(order, s.inverse.order) : order, ticket };
     s.cache = 'pending';
-    await this.storage.put('life', s);
+    await this.putLife(s);
     await this.flush(s);
     return { published: true, ...(s.cache === 'pending' ? { cache: 'pending' } : {}) };
   }
@@ -865,7 +891,7 @@ export class CardLifetime {
     }
     // 🔴 r10 rule 1: losing a host clears EVERY inverse that names it, the bare legacy one included
     if (s.legacy === host) { s.legacy = null; s.dropLegacy = true; s.cache = 'pending'; }
-    await this.storage.put('life', s);
+    await this.putLife(s);
     await this.flush(s);
     return {};
   }
@@ -920,7 +946,7 @@ export class CardLifetime {
       const left = (s.pending[g] || []).filter((h) => !hosts.includes(h));
       if (left.length) s.pending[g] = left; else delete s.pending[g];
     }
-    await this.storage.put('life', s);
+    await this.putLife(s);
     await this.env.CARDS.put(genKey(handle), s.gen); // the cache, written from the truth, in this object's turn
     return { gen: s.gen };
   }
@@ -961,16 +987,15 @@ export class CardLifetime {
     if (md != null) return this.adoptCard(handle, gen, md, null);
     const unknown = { handle, gen, serial: 0, n: 0, version: null, from: 'unknown', settleAt: Date.now() + CardLifetime.KV_WINDOW_MS, attempts: 0 };
     if ((await this.read(handle)).gen !== gen) throw new EndedDuringWrite();
-    await this.storage.put(cardMetaKey(gen), unknown);
-    await this.armAlarm(unknown.settleAt);
+    await this.commitPending({ [cardMetaKey(gen)]: unknown }, unknown.settleAt);
     return { unknown: true, meta: unknown };
   }
   /** keep a KV body as the ADOPTED card of `gen`, and arm the alarm that will try to settle it */
   async adoptCard(handle, gen, md, prev) {
     const version = await cardVersion(md);
     const settleAt = Date.now() + CardLifetime.KV_WINDOW_MS;
+    // (keepCard arms the alarm for `settleAt` in the same storage write as the record)
     const kept = await this.keepCard(handle, gen, md, version, 'written', prev, { from: 'kv', settleAt, attempts: 0 });
-    await this.armAlarm(settleAt);
     return { md, version, meta: kept };
   }
   /** set the object's alarm for `t` unless one is already due sooner (the write-through retry shares it) */
@@ -979,6 +1004,27 @@ export class CardLifetime {
     const due = typeof this.storage.getAlarm === 'function' ? await this.storage.getAlarm() : null;
     if (due == null || t < due) await this.storage.setAlarm(t);
   }
+  /**
+   * 🔴 tile#304 r3 (review r2 #1): put `entries` — a change after which the object owes something
+   * (KV a write-through, or a first-contact card its settlement) — and arm the alarm that pays it, due
+   * at `at` (default: the write-through retry), in the SAME storage write. The alarm is issued first
+   * and the put right after it with no await between them, so the runtime commits the two as one
+   * write (output gate, write coalescing); and even a storage that committed them one at a time would
+   * hold the alarm before the change, never the change without it (an alarm with nothing owed is a
+   * no-op). The one mechanism for every such change: main saves and asset writes (keepCard), a
+   * language file's slot and its commit (nameLanguages), owed deletions left (dropOwed), the lifetime's
+   * inverse (putLife), first contact (cardOf, settleCard). Every other path to the alarm (retryLater
+   * after a failed KV write, armAlarm) arms it for a state already owed and so already covered.
+   */
+  async commitPending(entries, at = Date.now() + CACHE_RETRY_MS) {
+    const due = typeof this.storage.getAlarm === 'function' ? await this.storage.getAlarm() : null;
+    const writes = [];
+    if (typeof this.storage.setAlarm === 'function' && (due == null || at < due)) writes.push(this.storage.setAlarm(at));
+    writes.push(this.putEntries(entries));
+    await Promise.all(writes);
+  }
+  /** the lifetime's record; one that owes KV its inverse arms the alarm with it (commitPending) */
+  putLife(s) { return s.cache === 'pending' ? this.commitPending({ life: s }) : this.storage.put('life', s); }
   /**
    * 🔴 r3/r4/r5 (codex r2, r3, r4): the card every WRITE starts from. A card adopted from KV at first
    * contact may itself be a stale KV answer, and a miss may be a cached negative — any write made on
@@ -1033,8 +1079,7 @@ export class CardLifetime {
     }
     if (attempts > backoff.length) line('card_settlement_stuck');
     const settleAt = Date.now() + backoff[Math.min(attempts, backoff.length) - 1];
-    await this.storage.put(cardMetaKey(gen), { ...meta, attempts, settleAt });
-    await this.armAlarm(settleAt);
+    await this.commitPending({ [cardMetaKey(gen)]: { ...meta, attempts, settleAt } }, settleAt);
   }
   /**
    * put a body under a fresh serial, then the record that points at it (the write), then sweep every
@@ -1063,7 +1108,9 @@ export class CardLifetime {
     const entries = { [cardMetaKey(slot)]: meta, ...(lang !== undefined ? { [langRecordKey(gen)]: lang } : {}) };
     try {
       for (let i = 0; i < n; i++) await this.storage.put(cardChunkKey(slot, serial, i), md.slice(i * CARD_CHUNK, (i + 1) * CARD_CHUNK));
-      await this.putEntries(entries);
+      // r3: a record KV does not hold yet (`pending`), or an adopted one to settle, arms its alarm with it
+      const at = cache === 'pending' ? Date.now() + CACHE_RETRY_MS : origin.settleAt;
+      if (at != null) await this.commitPending(entries, at); else await this.putEntries(entries);
     } catch (e) {
       // its own generation's chunks only, but the record and the serial it names (r4)
       await this.sweepCards((g, sl) => g !== slot || sl === null || (prev != null && sl === prev.serial)).catch(() => {});
@@ -1285,7 +1332,7 @@ export class CardLifetime {
     if (!(await this.storage.get(cardMetaKey(gen))) || (await this.read(handle)).gen !== gen) throw new EndedDuringWrite();
     const state = changeLanguages(await this.langMap(gen), changes);
     if (seq != null) state.langSeq = Math.max(state.langSeq, seq);
-    await this.storage.put(langRecordKey(gen), state);
+    await this.commitPending({ [langRecordKey(gen)]: state });
     if ((await this.read(handle)).gen !== gen) {
       await this.sweepCards((g) => g !== gen && !g.startsWith(`${gen}@`));
       await this.storage.delete(langRecordKey(gen));
@@ -1337,9 +1384,8 @@ export class CardLifetime {
     for (const [tag, rev] of map.owed) {
       try { await this.env.CARDS.delete(languageKey(record.handle, gen, tag, rev)); } catch { left.push([tag, rev]); }
     }
-    await this.storage.put(langRecordKey(gen), { ...map, owed: left });
-    if (!left.length) return 'written';
-    await retryLater(this.storage);
+    if (!left.length) { await this.storage.put(langRecordKey(gen), { ...map, owed: left }); return 'written'; }
+    await this.commitPending({ [langRecordKey(gen)]: { ...map, owed: left } });
     return 'pending';
   }
   /** does KV still owe the object anything of `gen` — the main record, the language map, a live body, an owed deletion? */

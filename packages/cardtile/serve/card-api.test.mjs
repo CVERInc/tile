@@ -1562,8 +1562,10 @@ test('🔴 codex r5 a bind from a deleted handle, held at ANY store call, never 
   // (44 rows: vanityof: was written before /point), r7 had 8 (36 rows), r5/r6 had 5 (20 rows).
   // r10 adds the adoptions: every pair's first /point reads the legacy pointer once (+1), and a's
   // generation-0 lifetime adopts its bare inverse at /register (bare get, the gen-0 key put, its
-  // cache-written put: +3). So 2 × 19 + 2 × 16 = 70.
-  assert.equal(rows, 70);
+  // cache-written put: +3). So 2 × 19 + 2 × 16 = 70. tile#304 r3: a CardLifetime first reads what it
+  // owes KV before it answers (wake: `life`, the card record, the language map — reads only), and a's
+  // generation-0 object starts inside this bind (+3 in those two pairs): 2 × 22 + 2 × 16 = 76.
+  assert.equal(rows, 76);
   assert.equal(pointerHolds, 4, 'CONTROL: the final pointer put was held in all four generation pairs');
 });
 
