@@ -33,7 +33,8 @@ const CARDS = ['specimen-rich', 'specimen-plain'];
 // 🔴 `powered-by: on`, injected here and not in the specimen: the footer has a link only when the
 // credit is on, and the specimens are generated (edit the generator, never the file). Without it
 // claim 5 would measure zero links and pass.
-const withCredit = (md) => md.replace(/^(card-page:.*)$/m, '$1\npowered-by: on');
+// (the anchor is the claim line, in either spelling: `cardtile:` is accepted beside `card-page:`)
+const withCredit = (md) => md.replace(/^((?:cardtile|card-page):.*)$/m, '$1\npowered-by: on');
 const VIEWS = [{ width: 390, height: 844 }, { width: 844, height: 390 }, { width: 1280, height: 800 }];
 const SCHEMES = ['dark', 'light'];
 
