@@ -43,13 +43,29 @@ const TOKEN_HASH = await _internal.sha256Hex(TOKEN);
 export const fakeKv = (seed = {}) => {
   const m = new Map(Object.entries(seed));
   const meta = new Map();
+  // tile#304 r2: individual writes and deletes can be made to fail or to wait (kvFails, kvHolds)
+  const faults = [];
+  const before = async (op, k) => {
+    for (const f of faults) {
+      if (!f.on || f.op !== op || !f.match(k)) continue;
+      f.hits.push(k);
+      if (f.fail) throw new Error(`simulated KV ${op} failure on ${k}`);
+      f.arrived(k);
+      await f.gate;
+    }
+  };
   return {
     _m: m,
+    _meta: meta,
+    faults,
     reads: [],
+    /** every put as it was called: [key, whether an options argument was passed at all] */
+    puts: [],
     async get(k) { this.reads.push(k); return m.has(k) ? m.get(k) : null; },
-    async getWithMetadata(k) { return { value: m.has(k) ? m.get(k) : null, metadata: meta.get(k) ?? null }; },
-    async put(k, v, opts) { m.set(k, v); if (opts?.metadata !== undefined) meta.set(k, opts.metadata); },
-    async delete(k) { m.delete(k); meta.delete(k); },
+    async getWithMetadata(k) { this.reads.push(k); return { value: m.has(k) ? m.get(k) : null, metadata: meta.get(k) ?? null }; },
+    // a KV put replaces the whole entry: a put without metadata leaves none (as Workers KV does)
+    async put(k, v, opts) { await before('put', k); this.puts.push([k, opts !== undefined]); m.set(k, v); if (opts?.metadata !== undefined) meta.set(k, opts.metadata); else meta.delete(k); },
+    async delete(k) { await before('delete', k); m.delete(k); meta.delete(k); },
     async list({ prefix = '' } = {}) {
       return { keys: [...m.keys()].filter((k) => k.startsWith(prefix)).sort().map((name) => (meta.has(name) ? { name, metadata: meta.get(name) } : { name })), list_complete: true };
     },
@@ -57,10 +73,15 @@ export const fakeKv = (seed = {}) => {
 };
 const doStorage = () => {
   const m = new Map();
+  const faults = [];
   return {
     _m: m,
+    faults,
     async get(k) { return m.has(k) ? structuredClone(m.get(k)) : undefined; },
-    async put(k, v) { m.set(k, structuredClone(v)); },
+    async put(k, v) {
+      for (const f of faults) if (f.on && f.op === 'put' && f.match(k)) { f.hits.push(k); f.arrived(k); await f.gate; }
+      m.set(k, structuredClone(v));
+    },
     async delete(k) { return m.delete(k); },
     async list({ prefix = '' } = {}) { return new Map([...m.keys()].filter((k) => k.startsWith(prefix)).sort().map((k) => [k, structuredClone(m.get(k))])); },
     _alarm: null,
@@ -120,6 +141,51 @@ export const hreflangs = (html) => [...html.matchAll(/<link rel="alternate" href
 export const canonicalOf = (html) => (/<link rel="canonical" href="([^"]*)">/.exec(html) || [])[1];
 /** every language-file key of handle `t` in KV */
 export const langKeys = (env) => [...env.CARDS._m.keys()].filter((k) => /^card:t:[^:]+:/.test(k));
+
+// ── faults (tile#304 r2): one KV write or delete, or one object-storage put, that fails or waits ──
+
+const fault = (list, op, re, extra) => {
+  const f = { op, match: (k) => re.test(k), on: true, hits: [], arrived: () => {}, ...extra };
+  list.push(f);
+  return f;
+};
+/** every KV `op` ('put' | 'delete') on a key matching `re` throws until `heal()`; `hits` = the keys it refused */
+export function kvFails(env, op, re) {
+  const f = fault(env.CARDS.faults, op, re, { fail: true });
+  return { hits: f.hits, heal() { f.on = false; } };
+}
+/** the first KV `op` on a key matching `re` waits until `release()`; `reached` resolves with the key once it waits */
+export function kvHolds(env, op, re) {
+  return hold(env.CARDS.faults, op, re);
+}
+/** the first put to the handle's object storage on a key matching `re` waits until `release()` */
+export function storageHolds(env, re, name = 't') {
+  return hold(env.CARD_LIFETIMES.storageOf(name).faults, 'put', re);
+}
+function hold(list, op, re) {
+  let release, arrived;
+  const gate = new Promise((r) => { release = r; });
+  const reached = new Promise((r) => { arrived = r; });
+  const f = fault(list, op, re, { gate, arrived: (k) => { f.on = false; arrived(k); } });
+  return { reached, hits: f.hits, release() { f.on = false; release(); } };
+}
+/** `p`, or a rejection naming `what` after `ms` — so a hold that is never reached fails the test, not the run */
+export const within = (p, what, ms = 2000) => {
+  let timer;
+  return Promise.race([p, new Promise((_, no) => { timer = setTimeout(() => no(new Error(`never happened: ${what}`)), ms); })])
+    .finally(() => clearTimeout(timer));
+};
+/** has `p` settled yet? (after letting every queued step run) */
+export async function settled(p) {
+  let done = false;
+  p.then(() => { done = true; }, () => { done = true; });
+  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+  return done;
+}
+/** the main file's KV key for handle `t`, in the generation KV names now */
+export const mainKey = async (env) => `card:t:${(await liveCard(env.CARDS, 't')).gen}`;
+/** the KV metadata on the main file's key: the record of which language files visitors may be served */
+export const mainMetadata = async (env) => env.CARDS._meta.get(await mainKey(env)) ?? null;
 
 /** a Card made as an owner makes one: the main file (a save never takes the caller's assets lane), then
  *  its picture through put_asset — so the stored main file is `md`, byte for byte */

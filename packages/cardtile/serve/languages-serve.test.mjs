@@ -1,7 +1,7 @@
 // tile#304 — a Card in several languages: serving a visitor
 //
-//   storage   `card:<handle>:<gen>:<tag>` beside the main `card:<handle>:<gen>`, written by the handle's
-//             CardLifetime like the main file, generation-scoped like it
+//   storage   `card:<handle>:<gen>:<tag>:<rev>` beside the main `card:<handle>:<gen>`, whose KV metadata
+//             names the live rev of each tag; written by the handle's CardLifetime like the main file
 //   API       GET/PUT/DELETE `/_api/card/<handle>/lang/<tag>` (+ `/full`), on both prefixes
 //   serving   no locale in the path: `?lang=`, then Accept-Language; a listed language with a file is
 //             that file over the main file's whole-Card keys and assets; anything else is the main file
@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker from './card-worker.mjs';
 import { liveCard } from './card-api.mjs';
-import { MAIN, PLAIN, call, visit, htmlLang, hreflangs, canonicalOf, withMain, withJapanese } from './languages-harness.mjs';
+import { MAIN, PLAIN, JA, call, saveLang, visit, htmlLang, hreflangs, canonicalOf, withMain, withJapanese } from './languages-harness.mjs';
 
 // ── serving ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -57,20 +57,53 @@ test('serving a language file: whole-Card keys and the assets come from the main
   assert.match(v.body, /data:image\/gif;base64,R0lGOD/, 'the main file’s picture, by the same asset id');
 });
 
-test('hreflang alternates for every listed language plus x-default, and a self-canonical for ?lang=', async () => {
+test('hreflang alternates for each language that has a file (and the main file’s), x-default, and a self-canonical for ?lang=', async () => {
   const env = await withJapanese();
   const v = await visit(env, '/t?lang=ja-JP');
+  // zh-TW is listed and has no file: its URL serves English, so it is not advertised as Chinese
   assert.deepEqual(hreflangs(v.body), [
     ['en-US', 'https://card.feelreef.com/t?lang=en-US'],
     ['ja-JP', 'https://card.feelreef.com/t?lang=ja-JP'],
-    ['zh-TW', 'https://card.feelreef.com/t?lang=zh-TW'],
     ['x-default', 'https://card.feelreef.com/t'],
   ]);
   assert.equal(canonicalOf(v.body), 'https://card.feelreef.com/t?lang=ja-JP');
   assert.match(v.body, /<meta property="og:url" content="https:\/\/card\.feelreef\.com\/t\?lang=ja-JP">/);
   const bare = await visit(env, '/t', { 'accept-language': 'ja' });
   assert.equal(canonicalOf(bare.body), 'https://card.feelreef.com/t', 'chosen by the header: the bare address is canonical');
-  assert.equal(hreflangs(bare.body).length, 4);
+  assert.equal(hreflangs(bare.body).length, 3);
+  // CONTROL: once zh-TW has a file, it is advertised, on every page
+  assert.equal((await saveLang(env, 'zh-TW', JA.replace('lang: ja-JP', 'lang: zh-TW'))).status, 200);
+  assert.deepEqual(hreflangs((await visit(env, '/t')).body).map(([t]) => t), ['en-US', 'ja-JP', 'zh-TW', 'x-default']);
+});
+
+test('🔴 review r1 #3: a listed language with no file is never advertised by hreflang (port of missing-hreflang.mjs)', async () => {
+  const env = await withMain({}, MAIN);
+  const page = await visit(env, '/t?lang=zh-TW');
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get('content-language'), 'en-US');
+  assert.equal(htmlLang(page.body), 'en-US');
+  assert.equal(canonicalOf(page.body), 'https://card.feelreef.com/t');
+  assert.match(page.body, /Illustrator\./);
+  // what that URL serves is English, so no page says it is Chinese (or Japanese: no file either)
+  assert.deepEqual(hreflangs(page.body), [
+    ['en-US', 'https://card.feelreef.com/t?lang=en-US'],
+    ['x-default', 'https://card.feelreef.com/t'],
+  ]);
+  for (const al of ['ja', 'zh-TW', 'en']) {
+    assert.deepEqual(hreflangs((await visit(env, '/t', { 'accept-language': al })).body).map(([t]) => t), ['en-US', 'x-default'], al);
+  }
+});
+
+test('the choice is among the languages that have a file: a listed sibling with no file does not shadow one that has', async () => {
+  // zh-TW listed with no file, zh-Hant with one: a reader of zh-HK gets zh-Hant, not the main file
+  const env = await withMain({}, MAIN.replace('locales: [en-US, ja-JP, zh-TW]', 'locales: [en-US, zh-TW, zh-Hant]'));
+  assert.equal((await saveLang(env, 'zh-Hant', JA.replace('lang: ja-JP', 'lang: zh-Hant').replace('イラストレーター。', '插畫家。'))).status, 200);
+  for (const [path, headers] of [['/t?lang=zh-HK', {}], ['/t', { 'accept-language': 'zh-HK' }], ['/t?lang=zh-TW', {}]]) {
+    const v = await visit(env, path, headers);
+    assert.equal(htmlLang(v.body), 'zh-Hant', `${path} ${JSON.stringify(headers)}`);
+    assert.match(v.body, /插畫家/);
+  }
+  assert.equal(htmlLang((await visit(env, '/t?lang=zh-CN')).body), 'en-US', 'CONTROL: never across scripts');
 });
 
 test('cache variance: one URL, two Accept-Language values, two bodies — and the response says it varies', async () => {

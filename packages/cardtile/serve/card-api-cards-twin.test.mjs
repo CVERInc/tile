@@ -17,3 +17,4 @@ await import('./card-vanity.test.mjs');
 await import('./card-webrisk.test.mjs');
 await import('./card-url-scheme.test.mjs');
 await import('./languages-api.test.mjs');
+await import('./languages-interleave.test.mjs');
