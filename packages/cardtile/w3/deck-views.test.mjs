@@ -496,8 +496,8 @@ const openFile = (view) => open(fileHost(view), {
     doc.rectOf = (el) => (!inDeck() && el.classList.contains('vb-space') ? { top: SPACE_TOP - win.scrollY, left: 12, width: VB_W, height: VB_H } : { width: 342, height: 480 });
   },
 });
-/** the scroll offset that puts row r of the file wall in the middle of the window */
-const rowMid = (win, r) => Math.max(0, SPACE_TOP + r * VB_ROW - win.innerHeight / 2 + VB_ROW / 2);
+/** the scroll offset that puts the tiles of row r of the file wall in the middle of the window */
+const rowMid = (win, r) => Math.max(0, SPACE_TOP + r * VB_ROW - win.innerHeight / 2 + (VB_ROW - 12) / 2);   // the tile's own middle: a row is a tile and the gap under it
 for (const pile of ['stack', 'list']) test(`a card-file page, ${pile} ⇄ wall: the item you were on is where the wall opens, and the wall's item is the card that is up`, () => {
   const p = openFile(pile), { win, doc } = p;
   const first = win.__mdFirst;

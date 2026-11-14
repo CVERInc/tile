@@ -180,7 +180,7 @@
     // is the top of the page and marks nothing. Only the rows on screen exist, so an item is addressed by where its row IS,
     // not by a node: row → virtual offset → scroll offset (toY, which also covers a file too long for one element's height).
     // hitY is where that left the page: at() reads an unmoved page as "still on that item", so a round trip is exact.
-    const show=k=>{ if(k<0){ hit=-1; hitY=-1; scrollTo({top:0,behavior:'instant'}); render(); return; } hit=Math.min(M-1,k); const r=Math.floor(hit/COLS); const spaceTop=space.getBoundingClientRect().top+scrollY; scrollTo({top:Math.max(0,spaceTop+toY(Math.max(0,r*rowH-innerHeight/2+rowH/2))),behavior:'instant'}); hitY=scrollY; render(); };
+    const show=k=>{ if(k<0){ hit=-1; hitY=-1; scrollTo({top:0,behavior:'instant'}); render(); return; } hit=Math.min(M-1,k); const r=Math.floor(hit/COLS); const spaceTop=space.getBoundingClientRect().top+scrollY; scrollTo({top:Math.max(0,spaceTop+toY(Math.max(0,r*rowH-innerHeight/2+(rowH-GAP)/2))),behavior:'instant'}); hitY=scrollY; render(); };
     // at(): the item you are on — the marked one while the page has not moved since it was shown; else the row under the middle
     // of the window (the marked item if it is in that row, else the row's first). null: the very top, or above the rows (the cover).
     const at=()=>{ if(hit>=0&&Math.abs(scrollY-hitY)<=2)return hit; if(scrollY<=2)return null; const top=space.getBoundingClientRect().top; const y=Math.max(0,-top); const v=innerHeight/2-top-y+toV(y); if(v<0)return null;
