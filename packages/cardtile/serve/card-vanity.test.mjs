@@ -6,12 +6,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  handleApi, liveCard, cardKey, genKey, vanityKey, vanityOfKey, legacyVanityOfKey, bindVanity, releaseVanity,
+  handleApi as handleApiAsWritten, liveCard, cardKey, genKey, vanityKey, vanityOfKey, legacyVanityOfKey, bindVanity, releaseVanity,
   HostBindings, CardLifetime, TICKET_TTL_MS, _internal,
 } from './card-api.mjs';
 import { vanityHost } from './card-vanity.mjs';
 import worker from './card-worker.mjs';
 import { cardVersion } from '../card-save.mjs';
+import { twinned } from './api-prefix-twin.mjs';
+// every `/_api/card/…` request below goes to `/_api/cards/…` instead when card-api-cards-twin.test.mjs runs this file
+const handleApi = twinned(handleApiAsWritten);
 
 // ── doubles (the same shapes card-api.test.mjs uses) ─────────────────────────────────────────────
 

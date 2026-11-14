@@ -6,7 +6,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { handleApi, CardLifetime, _internal } from './card-api.mjs';
+import { handleApi as handleApiAsWritten, CardLifetime, _internal } from './card-api.mjs';
+import { twinned } from './api-prefix-twin.mjs';
+// every `/_api/card/…` request below goes to `/_api/cards/…` instead when card-api-cards-twin.test.mjs runs this file
+const handleApi = twinned(handleApiAsWritten);
 import { checkUrls, ENDPOINT } from './url-risk.mjs';
 
 const TOKEN = 'webrisk-test-bearer';
