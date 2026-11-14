@@ -483,3 +483,43 @@ test('the file\'s default back (`back: "#id"`) is one node too, however many til
   }
   for (const to of ['wall', 'list', 'stack']) { p.press(to); holds(p, to, `→ ${to}`); assert.deepEqual(dupIds(p.doc), [], `→ ${to}`); }
 });
+
+// 3 — a page whose items are a card file: the place carries over, pile item N ⇄ the file wall's N-th tile
+const FILE_ITEMS = 300, SPACE_TOP = 300, VB_W = 366, VB_ROW = (VB_W - 5 * 12) / 6 + 12, VB_H = Math.ceil(FILE_ITEMS / 6) * VB_ROW;
+const fileHost = (view) => ['---', 'card-page: specimen', 'title: Host', `view: ${view}`, '---', '', '## cards', '', '- [ ] %% card: profile w=6 %% A page whose items are a card file.', ''].join('\n');
+const fileOf = (view) => ['---', 'title: Host', `view: ${view}`, '---', '', '## cards', '', ...Array.from({ length: FILE_ITEMS }, (_, i) => `- [ ] %% card: text %% File ${i}.`), ''].join('\n');
+const openFile = (view) => open(fileHost(view), {
+  before: (win) => { win.__cardMd = fileOf(view); },
+  layout: (win, doc) => {
+    const root = doc.documentElement, inDeck = () => root.classList.contains('deck');
+    doc.scrollHeightOf = (el) => (el !== root ? 0 : inDeck() ? win.innerHeight * Math.max(1, doc.querySelectorAll('.deck-snap').length) : SPACE_TOP + VB_H + 100);
+    doc.rectOf = (el) => (!inDeck() && el.classList.contains('vb-space') ? { top: SPACE_TOP - win.scrollY, left: 12, width: VB_W, height: VB_H } : { width: 342, height: 480 });
+  },
+});
+/** the scroll offset that puts row r of the file wall in the middle of the window */
+const rowMid = (win, r) => Math.max(0, SPACE_TOP + r * VB_ROW - win.innerHeight / 2 + VB_ROW / 2);
+for (const pile of ['stack', 'list']) test(`a card-file page, ${pile} ⇄ wall: the item you were on is where the wall opens, and the wall's item is the card that is up`, () => {
+  const p = openFile(pile), { win, doc } = p;
+  const first = win.__mdFirst;
+  assert.equal(win.__mdCount, FILE_ITEMS, 'CONTROL: the pile is over the file');
+  win.__deckJump(first + 200); win.tick(1000);
+  assert.equal(win.__deckCur(), first + 200, 'CONTROL: the pile is on item 200');
+  p.press('wall');
+  assert.ok(doc.querySelector('.vb-space'), 'CONTROL: the file wall is drawn');
+  assert.ok(Math.abs(win.scrollY - rowMid(win, Math.floor(200 / 6))) <= 1, `${pile} → wall: the wall is at ${win.scrollY}, item 200's row is in the middle of the window at ${rowMid(win, Math.floor(200 / 6))}`);
+  assert.equal((doc.querySelector('.vb-tile.vb-hit') || {}).textContent, 'File 200.', `${pile} → wall: the item you were on is not the one marked`);
+  p.press(pile);
+  assert.equal(win.__deckCur(), first + 200, `wall → ${pile}: the wall was left where it was entered, and the pile is not on that item`);
+  // read on down the wall: the pile opens on the row in the middle of the window
+  p.press('wall'); win.scrollTo({ top: rowMid(win, 40) }); win.tick(100);
+  p.press(pile);
+  assert.equal(Math.floor((win.__deckCur() - first) / 6), 40, `wall → ${pile}: the pile opened on card ${win.__deckCur()}, the middle of the window was row 40 (items 240–245)`);
+  // the top of the wall is the first card, as on any page
+  p.press('wall'); win.scrollTo({ top: 0 }); win.tick(100);
+  p.press(pile);
+  assert.equal(win.__deckCur(), 0, 'the top of the file wall is the first card');
+  // …and the first card is the top of the wall
+  p.press('wall');
+  assert.equal(win.scrollY, 0, 'the first card is the top of the wall');
+  assert.ok(!doc.querySelector('.vb-tile.vb-hit'), 'an item is marked although the card that was up is not an item');
+});

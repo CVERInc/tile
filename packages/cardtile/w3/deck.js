@@ -112,7 +112,9 @@
   // where you are on the wall: the tile under the middle of the window (null at the very top), so a pile opens on that card
   const wallAt=()=>{ if(scrollY<=2)return null; const mid=innerHeight/2; let best=null, far=Infinity; for(const c of tiles()){ const r=c.getBoundingClientRect(); if(!r.height)continue; const d=r.top<=mid&&r.bottom>=mid?0:Math.min(Math.abs(r.top-mid),Math.abs(r.bottom-mid)); if(d<far){far=d;best=c;} } return best; };
   // …and back: the tile of the card you were on, in the middle of the window (the first card is the top of the page)
-  const wallEnter=c=>{ try{history.scrollRestoration='auto';}catch(_){} if(mdTexts.length){ virtualBrick(); scrollTo({top:0,behavior:'instant'}); return; } if(c&&c.isConnected&&c!==tiles()[0]) c.scrollIntoView({block:'center',behavior:'instant'}); else scrollTo({top:0,behavior:'instant'}); };
+  // On a page whose items are a card file the wall's items are the file wall's own tiles (virtualBrick), not the engine's: the
+  // place is an item's number there (vb.show / vb.at), by the same rule — the item in the middle, the first card at the top.
+  const wallEnter=c=>{ try{history.scrollRestoration='auto';}catch(_){} if(mdTexts.length){ virtualBrick(); if(vb)vb.show(typeof c==='number'?c:-1); else scrollTo({top:0,behavior:'instant'}); return; } if(c&&c.isConnected&&c!==tiles()[0]) c.scrollIntoView({block:'center',behavior:'instant'}); else scrollTo({top:0,behavior:'instant'}); };
   let deck=null;   // the pile and all it needs: built the first time a pile view is entered (buildDeck), then kept
   // The switch. Never a reload: stack ⇄ list is the pile re-arranging itself; to or from the wall the tiles change homes.
   // Focus stays on the switcher (its buttons are never moved), and the place you were reading carries over.
@@ -120,7 +122,7 @@
   const setMode=(m,o)=>{ if(!VIEWS.includes(m))return false; if(m===mode)return true;
     if(!PIN&&!(o&&o.quiet)){ try{localStorage.setItem(LS,m);}catch(_){} }
     const held=seg.contains(document.activeElement)?document.activeElement:null;
-    if(mode==='spread'){ const at=wallAt(); mode=m; paintRoot(); if(deck) deck.enter(at); else deck=buildDeck(at); }
+    if(mode==='spread'){ const at=vb?vb.at():wallAt(); mode=m; paintRoot(); if(deck) deck.enter(at); else deck=buildDeck(at); }
     else if(m==='spread'){ const at=deck.leave(); mode=m; paintRoot(); wallEnter(at); }
     else { deck.layout(m); mode=m; paintRoot(); }
     seg.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.m===mode)));
@@ -158,7 +160,7 @@
     const box=document.querySelector('main .st-cells'); if(!box)return; box.classList.add('vb');
     const tpl=document.getElementById('md-cover'); if(tpl){ const c=tpl.content.firstElementChild.cloneNode(true); const r=c.querySelector('[data-range]'); if(r) r.textContent=numFmt(mdTexts[0])+' – '+numFmt(mdTexts[mdTexts.length-1]); c.classList.add('vb-cover'); box.appendChild(c); }
     const COLS=6, GAP=12, M=mdTexts.length, rows=Math.ceil(M/COLS); const space=mk('div','vb-space'), win=mk('div','vb-win'); space.appendChild(win); box.appendChild(space);
-    let rowH=100, scale=1, hit=-1, FULL=0, SH=0, VIEW=0; const pool=[];
+    let rowH=100, scale=1, hit=-1, hitY=-1, FULL=0, SH=0, VIEW=0; const pool=[];
     // scroll y ↔ virtual y. A straight ratio (vy=y·scale) only reaches the last row once the whole space has scrolled past,
     // which the page never allows: the last rows were cut off . Map the scrollable span [0, SH−VIEW] onto [0, FULL−VIEW]
     // instead, and past it move 1:1 so the rows stay attached to the space.
@@ -173,8 +175,17 @@
     addEventListener('scroll',()=>{ if(mode==='spread')render(); },{passive:true}); addEventListener('resize',()=>{ if(mode==='spread')layout(); }); layout();
     // the dice: item a (0 = the cover) → scroll its row to the middle and mark it
     const api=()=>{ window.__mdFirst=1; window.__mdCount=M; window.__deckCount=()=>M+1;
-      window.__deckJump=(i)=>{ i=(i|0)-1; if(i<0){ scrollTo({top:0,behavior:'instant'}); return; } hit=Math.min(M-1,i); const r=Math.floor(hit/COLS); const spaceTop=space.getBoundingClientRect().top+scrollY; scrollTo({top:Math.max(0,spaceTop+toY(Math.max(0,r*rowH-innerHeight/2+rowH/2))),behavior:'instant'}); render(); }; };
-    api(); vb={api,layout};
+      window.__deckJump=(i)=>show((i|0)-1); };
+    // show(k): item k's row in the middle of the window, and the item marked; k<0 (the cover, or a card that is not an item)
+    // is the top of the page and marks nothing. Only the rows on screen exist, so an item is addressed by where its row IS,
+    // not by a node: row → virtual offset → scroll offset (toY, which also covers a file too long for one element's height).
+    // hitY is where that left the page: at() reads an unmoved page as "still on that item", so a round trip is exact.
+    const show=k=>{ if(k<0){ hit=-1; hitY=-1; scrollTo({top:0,behavior:'instant'}); render(); return; } hit=Math.min(M-1,k); const r=Math.floor(hit/COLS); const spaceTop=space.getBoundingClientRect().top+scrollY; scrollTo({top:Math.max(0,spaceTop+toY(Math.max(0,r*rowH-innerHeight/2+rowH/2))),behavior:'instant'}); hitY=scrollY; render(); };
+    // at(): the item you are on — the marked one while the page has not moved since it was shown; else the row under the middle
+    // of the window (the marked item if it is in that row, else the row's first). null: the very top, or above the rows (the cover).
+    const at=()=>{ if(hit>=0&&Math.abs(scrollY-hitY)<=2)return hit; if(scrollY<=2)return null; const top=space.getBoundingClientRect().top; const y=Math.max(0,-top); const v=innerHeight/2-top-y+toV(y); if(v<0)return null;
+      const r=Math.min(rows-1,Math.floor(v/rowH)); return hit>=0&&Math.floor(hit/COLS)===r?hit:Math.min(M-1,r*COLS); };
+    api(); vb={api,layout,show,at};
   }
   // ---- the pile (stack and list). Built once; `at` is the tile to open on (null: the first card). ----
   function buildDeck(at){
@@ -533,15 +544,16 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // ---- leaving for the wall, and coming back ----
   // what the pile answers the page with (the dice asks these); taken away on the wall, where there is no pile to jump
   const API={}; for(const k of ['__mdFirst','__mdCount','__deckJump','__deckRiffle','__deckCount','__deckCur']) API[k]=window[k];
-  const seatOf=c=>Math.max(0,cells.indexOf(c));   // a tile's card has the tile's own place in the page as its number
-  // leave: put a held card back, fold the fan, stop answering, and send every tile home. Returns the tile of the card that was up.
-  const leave=()=>{ if(fanned)fanIn(); if(openCard)close(); const up=cells.length?cells[Math.min(cur,cells.length-1)]:null;
+  const seatOf=c=>typeof c==='number'?Math.max(0,Math.min(N-1,P+c)):Math.max(0,cells.indexOf(c));   // a tile's card has the tile's own place in the dealt order as its number; a number is an item of the card file (the file wall's vb.at)
+  // leave: put a held card back, fold the fan, stop answering, and send every tile home. Returns the tile of the card that was up
+  // (over a card file: the number of the item that was up).
+  const leave=()=>{ if(fanned)fanIn(); if(openCard)close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
     queue=0; drag=null; LD=null; hx=-1; ON=false; stack.classList.remove('hov'); root.classList.remove('list-away','fan','fan-closing','moving','open');
     cards.forEach(c=>c.style.removeProperty('--peek')); rehome(true); for(const k in API) delete window[k]; return up; };
   // enter: the tiles take their seats again and the pile is dealt, open on the card whose tile was in the middle of the wall
   const enter=c=>{ ON=true; LIST=mode==='list'; rehome(false); Object.assign(window,API); try{history.scrollRestoration='manual';}catch(_){}
     fit(); railSize(); queue=0; cur=seatOf(c); dealIn(); goTo(cur); listTx(); };
-  if(at){ cur=seatOf(at); paint(); goTo(cur); listTx(); }
+  if(at!=null){ cur=seatOf(at); paint(); goTo(cur); listTx(); }
   return {enter,leave,close,layout:window.__deckLayout};
   }
   }
