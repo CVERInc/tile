@@ -302,7 +302,9 @@ test('🔴 the main save’s orphans, and the manifests, count what the language
   assert.equal(main.assets.find((a) => a.id === 'pic').referenced, true);
   const { json: ja } = await call(env, 'GET', '/_api/card/t/lang/ja-JP');
   assert.equal(ja.assets.find((a) => a.id === 'pic').referenced, true);
-  // a save that removes the only language using it reports it as an orphan in the same answer
+  // a save that removes the only language using it reports it as an orphan in the same answer — while
+  // another language file, which does not use it, stays
+  assert.equal((await saveLang(env, 'zh-TW', JA.replace('lang: ja-JP', 'lang: zh-TW').replace(' avatar="asset:pic"', ''))).status, 200);
   const drop = await save(env, NO_PIC.replace('locales: [en-US, ja-JP, zh-TW]', 'locales: [en-US, zh-TW]'));
   assert.deepEqual(drop.json.languages_removed, ['ja-JP']);
   assert.deepEqual(drop.json.orphans, ['pic']);

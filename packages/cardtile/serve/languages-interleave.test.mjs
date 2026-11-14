@@ -206,6 +206,20 @@ test('🔴 row 3b — the record lands, the body does not: that language is the 
   assert.match((await visit(env, '/t?lang=ja-JP')).body, /新しい日本語/);
 });
 
+test('row 3c — while a new body is on its way to KV, visitors get the previous file (the record moves only after it)', async () => {
+  const env = await withJapanese();
+  const held = kvHolds(env, 'put', /^card:t:[^:]+:ja-JP:/);
+  const put = saveLang(env, 'ja-JP', JA2);
+  await within(held.reached, 'the new ja-JP body put');
+  for (const v of await servedFor(env, 'ja-JP')) {
+    assert.match(v.body, /イラストレーター/, 'the previous file, whole: the record still names it');
+    assert.doesNotMatch(v.body, /新しい日本語/);
+  }
+  held.release();
+  assert.equal((await put).status, 200);
+  assert.match((await visit(env, '/t?lang=ja-JP')).body, /新しい日本語/);
+});
+
 // ── row 4: the Card deleted while a language write is in flight ──────────────────────────────────
 
 test('row 4a — DELETE while the language body put is in flight: the write is stale, nothing is served', async () => {
