@@ -147,6 +147,78 @@ test('🔴 rekeyClaim refuses a value that is not a handle — it is written int
   assert.equal(String(_internal.HANDLE), String(VALID_HANDLE), 'claim.mjs repeats the API\'s handle grammar and the two have drifted');
 });
 
+// ── where the fence ends ─────────────────────────────────────────────────────────────────────────
+//
+// The fence is found the way the board parser finds it (../tugtile/board-core.js, parseFile: "End of
+// frontmatter"): line one is exactly `---`, and the FIRST later line that is exactly `---` closes it.
+// An empty frontmatter closes on line two, so nothing below it is ever inside.
+
+test('🔴 an empty frontmatter ends at its own closing fence: a claim-shaped example below it is the author\'s text', () => {
+  for (const eol of ['\n', '\r\n']) for (const key of CLAIM_KEYS) {
+    const at = `${key} ${JSON.stringify(eol)}`;
+    // the fenced example, then a horizontal rule: the rule is not this frontmatter's closing fence
+    const example = ['---', '---', '', '```yaml', `${key}: tutorial`, '```', '', '---', 'After the example.', ''].join(eol);
+    assert.equal(readClaim(example), null, `read, fenced example: ${at}`);
+    assert.equal(rekeyClaim(example, 'maple'), example, `rekey, fenced example: ${at}`);
+    // several rules, a bare claim-shaped line between two of them, and the example again
+    const rules = ['---', '---', '', 'Intro.', '', '---', `${key}: tutorial`, '---', '', '```yaml', '---', `${key}: tutorial`, '---', '```', '', '---', ''].join(eol);
+    assert.equal(readClaim(rules), null, `read, rules in the body: ${at}`);
+    assert.equal(rekeyClaim(rules, 'maple'), rules, `rekey, rules in the body: ${at}`);
+    // nothing between the empty frontmatter and the claim-shaped line at all
+    const tight = ['---', '---', `${key}: tutorial`, '---', ''].join(eol);
+    assert.equal(readClaim(tight), null, `read, directly below: ${at}`);
+    assert.equal(rekeyClaim(tight, 'maple'), tight, `rekey, directly below: ${at}`);
+    // CONTROL: the same body under a frontmatter that does claim — the claim moves, the body does not
+    const claimed = ['---', `${key}: aster`, '---', '', '```yaml', `${key}: tutorial`, '```', '', '---', 'After the example.', ''].join(eol);
+    assert.deepEqual(readClaim(claimed), { key, handle: 'aster' }, `control read: ${at}`);
+    assert.equal(rekeyClaim(claimed, 'maple'), claimed.replace('aster', 'maple'), `control rekey: ${at}`);
+  }
+});
+
+test('🔴 no frontmatter: a body that starts with a rule, or a fence that never closes, holds no claim', () => {
+  for (const eol of ['\n', '\r\n']) for (const key of CLAIM_KEYS) {
+    const at = `${key} ${JSON.stringify(eol)}`;
+    for (const first of ['***', '___', '----', '- - -', ' ---', '--- x', '# Title', '']) {
+      const md = [first, '', `${key}: tutorial`, '', '---', `${key}: tutorial`, '---', 'text', ''].join(eol);
+      assert.equal(readClaim(md), null, `read, first line ${JSON.stringify(first)}: ${at}`);
+      assert.equal(rekeyClaim(md, 'maple'), md, `rekey, first line ${JSON.stringify(first)}: ${at}`);
+    }
+    // `---` on line one and no later `---`: not a frontmatter, to the board parser or here
+    const open = ['---', `${key}: tutorial`, 'text', '----', ''].join(eol);
+    assert.equal(readClaim(open), null, `read, unclosed: ${at}`);
+    assert.equal(rekeyClaim(open, 'maple'), open, `rekey, unclosed: ${at}`);
+    // a byte-order mark before the fence: line one is not `---`, as it is not to the board parser
+    const bom = String.fromCharCode(0xfeff) + ['---', `${key}: tutorial`, '---', ''].join(eol);
+    assert.equal(readClaim(bom), null, `read, BOM: ${at}`);
+    assert.equal(rekeyClaim(bom, 'maple'), bom, `rekey, BOM: ${at}`);
+    // the closing fence is the FIRST `---` line, whatever follows it
+    const two = ['---', `${key}: aster`, '---', `${key}: tutorial`, '---', ''].join(eol);
+    assert.deepEqual(readClaim(two), { key, handle: 'aster' }, `read, first closing fence: ${at}`);
+    assert.equal(rekeyClaim(two, 'maple'), two.replace('aster', 'maple'), `rekey, first closing fence: ${at}`);
+  }
+});
+
+test('the claim reader and the board parser agree on where the frontmatter ends', () => {
+  // the board parser's rule, restated: the lines between line one and the first later `---` line
+  const boardFence = (md) => { const lines = md.split(/\r\n|\r|\n/); if (lines[0] !== '---') return null; const c = lines.indexOf('---', 1); return c === -1 ? null : lines.slice(1, c); };
+  for (const eol of ['\n', '\r\n', '\r']) for (const key of CLAIM_KEYS) {
+    for (const lines of [
+      ['---', '---', `${key}: tutorial`, '---', ''],
+      ['---', `${key}: aster`, '---', `${key}: tutorial`, '---', ''],
+      ['---', 'title: T', `${key}: aster`, '---'],
+      ['---', `${key}: aster`, 'text', ''],
+      ['***', `${key}: aster`, '---', ''],
+      ['--- ', `${key}: aster`, '---', ''],
+      ['---', `${key}: aster`, '--- ', `${key}: aster`, '---', ''],
+    ]) {
+      const md = lines.join(eol);
+      const inFence = (boardFence(md) || []).filter((l) => l.startsWith(`${key}: `)).map((l) => l.slice(key.length + 2));
+      assert.equal(readClaim(md)?.handle ?? null, inFence[0] ?? null, `${key} ${JSON.stringify(md)}`);
+      assert.equal(rekeyClaim(md, 'maple'), inFence.length ? md.replaceAll('aster', 'maple') : md, `${key} rekey ${JSON.stringify(md)}`);
+    }
+  }
+});
+
 // ── nothing else in the file's path treats the new key as anything ───────────────────────────────
 
 test('🔴 the two spellings parse to the same Cards and each round-trips byte for byte', () => {

@@ -39,23 +39,53 @@ export const CLAIM_KEY_WRITTEN = 'card-page';
 // imported, because this file has no imports — claim.test.mjs holds the two equal
 const HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
-// The frontmatter fence: `---` on the very first line, up to the next line that is `---`. Only
-// lines inside it are ever a claim; a `cardtile: x` further down the file is the author's text.
-const FENCE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+// The frontmatter fence, found by the rule the board parser underneath a Cards file uses
+// (../tugtile/board-core.js, parseFile, "End of frontmatter"):
+//
+//   if (lines[0] === '---') { const c = lines.indexOf('---', 1); if (c !== -1) fmEnd = c + 1; }
+//
+// Line one is exactly `---`; the FIRST later line that is exactly `---` closes it; a line ends at
+// `\r\n`, `\r` or `\n`. Exactly: no byte-order mark before the first fence and no blanks after
+// either one, because a file the parser does not see as having frontmatter has no claim. No
+// closing line, no frontmatter.
+//
+// 🔴 A LINE SCAN, NOT ONE PATTERN. A pattern that asks for a line break on both sides of the fence's
+// contents cannot see the closing fence of an EMPTY frontmatter (`---` directly under `---`), so it
+// reads on to the next `---` in the document, which is a horizontal rule in the author's text, and
+// takes everything above that for frontmatter. The scan stops at the first closing line it meets,
+// so the block cannot reach past it.
+//
+// Only lines inside the fence are ever a claim; a `cardtile: x` further down is the author's text.
+const EOL = /\r\n|\r|\n/g;
 const claimLine = (key) => new RegExp(`^${key}:[ \\t]*(.*?)[ \\t]*$`);
 
-/** every claim line in the fence: { key, value, index (of the line within the fence) } */
-function claimLines(md) {
-  const fence = FENCE.exec(String(md ?? ''));
-  if (!fence) return [];
+/** the lines between the two fences, each as [start, end) offsets into the text (line break excluded); null for a file with no frontmatter */
+function fenceLines(text) {
+  const inside = [];
+  let start = 0;
+  for (let n = 0; ; n++) {
+    EOL.lastIndex = start;
+    const brk = EOL.exec(text);
+    const end = brk ? brk.index : text.length;
+    const isFence = end - start === 3 && text.startsWith('---', start);
+    if (n === 0) { if (!isFence) return null; }
+    else if (isFence) return inside;
+    else inside.push([start, end]);
+    if (!brk) return null;
+    start = brk.index + brk[0].length;
+  }
+}
+
+/** every claim line in the fence: { key, value, start, end (the line's offsets in the text) } */
+function claimLines(text) {
   const found = [];
-  fence[1].split('\n').forEach((raw, index) => {
-    const line = raw.replace(/\r$/, '');
+  for (const [start, end] of fenceLines(text) || []) {
+    const line = text.slice(start, end);
     for (const key of CLAIM_KEYS) {
       const m = claimLine(key).exec(line);
-      if (m) found.push({ key, value: m[1], index });
+      if (m) found.push({ key, value: m[1], start, end });
     }
-  });
+  }
   return found;
 }
 
@@ -78,7 +108,7 @@ function claimLines(md) {
  * Within one key, the first line wins.
  */
 export function readClaim(md) {
-  const lines = claimLines(md).filter((l) => l.value !== '');
+  const lines = claimLines(String(md ?? '')).filter((l) => l.value !== '');
   for (const key of CLAIM_KEYS) {
     const hit = lines.find((l) => l.key === key);
     if (hit) return { key, handle: hit.value };
@@ -104,18 +134,15 @@ export function readClaim(md) {
 export function rekeyClaim(md, handle) {
   if (typeof handle !== 'string' || !HANDLE.test(handle)) throw new TypeError('rekeyClaim: not a handle');
   const text = String(md ?? '');
-  const fence = FENCE.exec(text);
-  if (!fence) return text;
-  const at = new Set(claimLines(text).map((l) => l.index));
-  if (!at.size) return text;
-  const body = fence[1].split('\n').map((raw, index) => {
-    if (!at.has(index)) return raw;
-    const cr = raw.endsWith('\r') ? '\r' : '';
-    const key = CLAIM_KEYS.find((k) => claimLine(k).test(raw.replace(/\r$/, '')));
-    return `${key}: ${handle}${cr}`;
-  }).join('\n');
-  const start = fence[0].indexOf(fence[1]);
-  return text.slice(0, start) + body + text.slice(start + fence[1].length);
+  // each claim line is replaced between its own offsets; its line break, and every byte outside
+  // the claim lines, is copied as it stands
+  let out = '';
+  let from = 0;
+  for (const { key, start, end } of claimLines(text)) {
+    out += text.slice(from, start) + `${key}: ${handle}`;
+    from = end;
+  }
+  return out + text.slice(from);
 }
 
 export const _internal = { HANDLE };
