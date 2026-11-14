@@ -87,7 +87,7 @@ Moved:
 
 Moving:
 
-- **Routes.** A route between services names the resource `cards`. Every route under `/_api/card/<handle>` is also served at `/_api/cards/<handle>`: the read, save and delete of the handle itself, `/full`, `/lifetime`, `/stop`, `/asset/<id>` and `/asset/<id>/fenced`, with the same methods, the same authorization and the same answers. An answer that names a path names the one it was called on.
+- **Routes.** A route between services names the resource `cards`. Every route under `/_api/card/<handle>` is also served at `/_api/cards/<handle>`: the read, save and delete of the handle itself, `/full`, `/lifetime`, `/stop`, `/asset/<id>`, `/asset/<id>/fenced`, `/lang/<tag>` and `/lang/<tag>/full`, with the same methods, the same authorization and the same answers. An answer that names a path names the one it was called on.
   1. The API accepts the new prefix. *Done.*
   2. Callers switch to it. *Not yet: the tools in this repository still call `/_api/card/…`.*
   3. Nothing is stored under a route, so there is no migration step.

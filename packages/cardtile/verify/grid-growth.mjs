@@ -53,7 +53,7 @@ const OLD = `.st-card .st-cells{grid-auto-rows:calc((100cqw - 5 * 14px) / 6)!imp
 .st-card .st-gal-img{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;aspect-ratio:auto!important}
 ${[[2,2],[3,2],[3,3],[6,1],[6,2],[6,3],[6,4]].map(([w,h])=>`.st-card [data-span="${w}x${h}"]{grid-column:span ${w}!important;grid-row:span ${h}!important}`).join('\n')}`;
 
-const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : md) };
+const store = { get: async (h) => (CARDS.includes(h) ? readCard(h) : md), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 let md = '';
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: store, PREVIEW: 'true' });

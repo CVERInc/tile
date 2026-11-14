@@ -407,8 +407,17 @@ export const FRONTMATTER = {
 };
 
 /**
+ * tile#304 — which file of a Card in several languages decides a key (see LANGUAGE_FILES):
+ *   LANGUAGE  each language file may carry its own (only `title` and `lang`)
+ *   CARD      the main file decides it for the whole Card; a language file that carries it is refused
+ *             on write, and the key is ignored on read
+ */
+export const SCOPE = { LANGUAGE: 'language', CARD: 'card' };
+
+/**
  * Every frontmatter key real code reads, and what it accepts. `disposition` as for cell params:
  * FORM = the editor's Cards settings sheet writes it; RAW = honoured, written by hand only.
+ * `scope` = which file decides it when the Card has several languages (SCOPE).
  * `setting` = the name w3/card-settings.mjs applySetting takes for it (absent: applySetting does not
  * write it). `values` = the exact words when the set is closed, else a description of the shape.
  * `default` = what happens when the line is absent.
@@ -417,107 +426,149 @@ export const FRONTMATTER = {
  *   renderer   serve/card-worker.mjs renderFlat — `fm('<key>')` / cardName, then card-render.mjs
  *   deck       w3/deck-page.mjs DECK_KEYS → w3/deck.js (`views`, `view`, `back`)
  *   editor     w3/card-settings.mjs applySetting, w3/edit3.mjs (the default back)
+ *   languages  languages.mjs (`locales`, and `title` / `lang` of a language file)
+ * The claim (`card-page:` / `cardtile:`, claim.mjs) is not a setting and is not listed here; it is
+ * SCOPE.CARD like every key below but `title` and `lang`.
  */
 export const CARD_SETTINGS = {
   // serve/card-worker.mjs cardName → <title>, the footer's owner name, share tags; the profile cell's name
   title: {
-    disposition: DISPOSITION.FORM, setting: 'title',
+    disposition: DISPOSITION.FORM, scope: SCOPE.LANGUAGE, setting: 'title',
     values: 'One line of text, unquoted (the renderer does not strip quotes from `title`).',
     default: "The card's handle.",
   },
   // card-worker fm('accent') → card-render cssColor
   accent: {
-    disposition: DISPOSITION.FORM, setting: 'accent',
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD, setting: 'accent',
     values: 'A CSS colour. The editor writes `#rrggbb` in lowercase; the renderer also accepts #rgb, #rgba, #rrggbbaa, rgb()/rgba()/hsl()/hsla() and CSS colour names. Anything else falls back to the default.',
     default: 'The platform accent, #0a8c8e.',
   },
   // card-worker fm('theme') → card-render: only `light` / `dark` pin it
   theme: {
-    disposition: DISPOSITION.FORM, setting: 'theme',
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD, setting: 'theme',
     values: ['light', 'dark'],
     default: "Follows the visitor's system setting.",
   },
   // card-worker fm('header') → card-render: `left` (case-insensitive) adds st-card-head-left
   header: {
-    disposition: DISPOSITION.FORM, setting: 'header',
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD, setting: 'header',
     values: ['left'],
     default: 'The avatar is centred above the name.',
   },
   // card-worker fm('icons') → card-render: mono|grey|gray|monochrome greys fetched marks
   icons: {
-    disposition: DISPOSITION.FORM, setting: 'icons',
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD, setting: 'icons',
     values: ['mono'],
     default: 'Fetched brand marks keep their colours.',
     note: 'The renderer also reads `grey`, `gray` and `monochrome` as `mono`; the editor writes `mono`.',
   },
   // card-worker fm('backdrop') → card-render resolveAsset
   backdrop: {
-    disposition: DISPOSITION.FORM, setting: 'backdrop',
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD, setting: 'backdrop',
     values: 'A fixed image behind the whole card: `asset:<id>` (an id in the `## assets` lane) or an image URL.',
     default: 'No backdrop.',
   },
   // card-worker fm('backdrop-dim') → colour.mjs resolveBackdropDim
   'backdrop-dim': {
-    disposition: DISPOSITION.FORM, setting: 'backdrop-dim',
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD, setting: 'backdrop-dim',
     values: 'A number from 0 to 100: how much of a scrim covers the backdrop. No `%`. The editor offers 0, 25, 45 and 65.',
     default: "Derived from the accent. A value that is not a number also means the default, not 0. Only matters with `backdrop`.",
   },
   // w3/deck.js FM.views; w3/card-settings.mjs VIEW_IDS / readViews
   views: {
-    disposition: DISPOSITION.FORM, setting: 'views',
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD, setting: 'views',
     values: ['stack', 'list', 'wall'],
     shape: 'The views a visitor may switch between, separated by spaces, written in the order stack list wall. One view hides the switcher.',
     default: 'All three.',
   },
   // w3/deck.js FM.view; written by applySetting('views', { on, open })
   view: {
-    disposition: DISPOSITION.FORM,
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD,
     values: ['stack', 'list', 'wall'],
     shape: 'The view the card opens on. Must be one of `views`. Written by the `views` setting, not on its own.',
     default: 'The first view in `views`. A visitor who switched views gets their own last pick, when it is still offered.',
   },
   // w3/deck.js FM.back; w3/edit3.mjs defId / addDefault
   back: {
-    disposition: DISPOSITION.FORM,
+    disposition: DISPOSITION.FORM, scope: SCOPE.CARD,
     values: 'A double-quoted pointer to a back lane: `back: "#about"` names `## back: about`. Same pointer as a tile\'s `back=#about`. See BACKS.',
     default: "The printed business card: the card's name, a QR code and its address.",
   },
   // card-worker fm('arrows') → card-render arrowOf: only `on`
   arrows: {
-    disposition: DISPOSITION.RAW,
+    disposition: DISPOSITION.RAW, scope: SCOPE.CARD,
     values: ['on'],
     default: 'No arrow on link rows and calls to action.',
   },
   // card-worker fm('since') → the footer's `© <since>–<this year>`
   since: {
-    disposition: DISPOSITION.RAW,
+    disposition: DISPOSITION.RAW, scope: SCOPE.CARD,
     values: 'A year, shown as the start of the footer copyright range.',
     default: 'The footer shows this year only.',
   },
   // card-worker fm('radius') → card-render: only `square`
   radius: {
-    disposition: DISPOSITION.RAW,
+    disposition: DISPOSITION.RAW, scope: SCOPE.CARD,
     values: ['square'],
     default: 'Rounded tiles.',
   },
   // card-worker fm('lang') → card-render <html lang>, and the deck's own words (w3/deck-i18n.mjs)
   lang: {
-    disposition: DISPOSITION.RAW,
+    disposition: DISPOSITION.RAW, scope: SCOPE.LANGUAGE,
     values: 'A BCP 47 language tag, e.g. `zh-TW`. Anything that does not look like one is `en`.',
     default: 'en',
   },
   // card-worker fm('generator') → card-render generatorTag
   generator: {
-    disposition: DISPOSITION.RAW,
+    disposition: DISPOSITION.RAW, scope: SCOPE.CARD,
     values: '`off` (also false/no/none) removes the generator meta tag; any other value replaces its text.',
     default: '`<meta name="generator" content="feelreef">`.',
   },
   // card-worker fm('powered-by') === 'on' → card-render footer
   'powered-by': {
-    disposition: DISPOSITION.RAW,
+    disposition: DISPOSITION.RAW, scope: SCOPE.CARD,
     values: ['on'],
     default: 'No credit link in the footer.',
     note: 'Ignored whenever the platform states whether the card is in the card pool; that switch then decides the footer link.',
+  },
+  // languages.mjs readLocales / languagesOf (tile#304) → card-worker's language choice and the language-file API
+  locales: {
+    disposition: DISPOSITION.RAW, scope: SCOPE.CARD,
+    values: 'The languages the Card exists in: BCP 47 tags as a list, e.g. `[en-US, ja-JP]`, at most 12, including the main file\'s own `lang`. Each other listed tag may have a language file (see LANGUAGE_FILES).',
+    default: 'One language: the main file only.',
+  },
+};
+
+/**
+ * tile#304 — a Card in several languages: one file per language, never several languages in one file,
+ * and never a language in the address. Plain data for every door, like the rest of this file;
+ * languages.mjs is the code, and ai-ops-card.test.mjs holds the two equal.
+ */
+export const LANGUAGE_FILES = {
+  model: 'The main file is the Card. Its `locales:` lists the languages; every listed tag other than the main file\'s own `lang` may have a language file: a complete card file in the same grammar, holding the owner\'s words in that language. Keeping its tiles in step with the main file is the writer\'s job; the engine does not compare them.',
+  keys: 'A language file\'s frontmatter may carry only `title` and `lang` (SCOPE.LANGUAGE). Every other key, the claim and `locales` included, is the main file\'s (SCOPE.CARD): refused on write (`cards_language_key_refused`), ignored on read.',
+  lang: 'A language file\'s `lang` must be the tag it is stored under (`cards_language_lang_mismatch`); without it, the tag is its `lang`.',
+  assets: 'One assets lane per Card: the main file\'s. A language file refers to the same `asset:<id>`s; an assets lane sent with a language file is dropped, as a save drops the caller\'s. An asset is in use while ANY current file refers to it: delete_asset refuses it and names the files (`used_by`: `main` and tags), a main save does not report it as an orphan, and manifests mark it `referenced`.',
+  served: 'A visitor gets a listed language\'s file by `?lang=<tag>` or by Accept-Language, chosen among the languages that have a file; the file served is the language file\'s title and tiles over the main file\'s other keys and assets. An unlisted or unknown language, or a listed one with no file, gets the main file, and gets no hreflang alternate. A removed file is never served again; a tag listed again has no file until a new one is saved.',
+  limits: 'At most 12 tags in `locales:`; each file obeys the per-file byte ceiling.',
+  routes: {
+    read: 'GET /_api/cards/<handle>/lang/<tag> → { handle, lang, version, markdown (thin), assets (the main file\'s; `referenced` = used by any file of the Card), total_bytes }',
+    read_full: 'GET /_api/cards/<handle>/lang/<tag>/full → the file with the main file\'s assets lane',
+    save: 'PUT /_api/cards/<handle>/lang/<tag> { markdown, base_version (this file\'s version), dry_run }',
+    delete: 'DELETE /_api/cards/<handle>/lang/<tag> (If-Version: <this file\'s version>, optional)',
+    main: 'The main file\'s routes take no `?lang=` (`cards_language_use_path`). Its GET adds `locales` and `languages` (tag → version, or null) when it lists any; a save that drops a tag from `locales:` removes that file (`languages_removed`).',
+  },
+  refusals: {
+    cards_language_tag_invalid: 'The tag is not a language tag.',
+    cards_language_not_listed: 'The main file does not list the tag in `locales:`.',
+    cards_language_is_main: 'The tag is the main file\'s own `lang`: save the main file instead.',
+    cards_language_key_refused: 'The language file carries a key that is the main file\'s (`key` names it).',
+    cards_language_lang_mismatch: 'The language file\'s `lang` is not the tag.',
+    cards_language_no_card: 'There is no main file.',
+    cards_language_missing: 'The tag is listed, and has no file.',
+    cards_language_use_path: '`?lang=` was sent to a main-file route.',
+    cards_locales_invalid: 'A main save lists something in `locales:` that is not a language tag.',
+    cards_locales_too_many: 'A main save lists more than 12 tags in `locales:`.',
   },
 };
 

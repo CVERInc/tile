@@ -38,7 +38,7 @@ let bad = 0;
 
 const serveOnce = async (md) => {
   const server = http.createServer(async (req, res) => {
-    const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: { get: async () => md }, PREVIEW: 'true' });
+    const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: { get: async () => md, getWithMetadata: async () => ({ value: md, metadata: null }) }, PREVIEW: 'true' });
     const b = Buffer.from(await r.arrayBuffer());
     res.writeHead(r.status, Object.fromEntries(r.headers));
     res.end(b);

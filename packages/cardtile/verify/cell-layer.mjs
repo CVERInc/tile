@@ -194,7 +194,7 @@ const NOH = ['---', 'card-page: noh', 'title: NoH', 'accent: #0556ff', '---', ''
 {
   const worker = (await import('../serve/card-worker.mjs')).default;
   const srv = http.createServer(async (req, res) => {
-    const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: { get: async () => NOH }, PREVIEW: 'true' });
+    const r = await worker.fetch(new Request('http://x' + req.url), { CARDS: { get: async () => NOH, getWithMetadata: async () => ({ value: NOH, metadata: null }) }, PREVIEW: 'true' });
     const b = Buffer.from(await r.arrayBuffer());
     res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(b);
   });

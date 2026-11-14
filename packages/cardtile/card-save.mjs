@@ -159,8 +159,12 @@ export function thinCard(md) {
   return serializeCard({ ...parseCard(String(md ?? '')), assets: {} });
 }
 
-/** The asset manifest `get_cards` returns instead of the bytes: id → mime + size. */
-export function assetManifest(md) {
+/**
+ * The asset manifest `get_cards` returns instead of the bytes: id → mime + size.
+ * `alsoReferenced` (tile#304 r2): ids the Card's OTHER current files refer to — its language files —
+ * so `referenced` means "in use by the Card", which is what decides whether delete_asset may take it.
+ */
+export function assetManifest(md, alsoReferenced = null) {
   const { assets } = parseCard(String(md ?? ''));
   const referenced = referencedAssets(thinCard(md));
   return Object.keys(assets).sort().map((id) => ({
@@ -168,6 +172,6 @@ export function assetManifest(md) {
     mime: assets[id].mime,
     // the DECODED size, because that is the number a creator recognises as "how big is this picture".
     bytes: Math.floor((assets[id].b64 || '').replace(/=+$/, '').length * 3 / 4),
-    referenced: referenced.has(id),
+    referenced: referenced.has(id) || (!!alsoReferenced && alsoReferenced.has(id)),
   }));
 }

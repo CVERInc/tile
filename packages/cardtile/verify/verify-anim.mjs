@@ -13,7 +13,7 @@ const cardMd = readCard(SPECIMEN);
 if (!/%% card(?:tile)?: embed[^%]*kind=bubbles/.test(cardMd)) {
   throw new Error(`${SPECIMEN} carries no \`kind=bubbles\` embed, so there is no pop to measure — add one to cards/gen-specimens.mjs`);
 }
-const env = { CARDS: { get: async () => cardMd } };
+const env = { CARDS: { get: async () => cardMd, getWithMetadata: async () => ({ value: cardMd, metadata: null }) } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://localhost' + req.url, { headers: req.headers }), env);
   res.writeHead(r.status, Object.fromEntries(r.headers));
