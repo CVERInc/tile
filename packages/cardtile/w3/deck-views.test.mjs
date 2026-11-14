@@ -21,6 +21,7 @@ import { renderCardHTML } from '../serve/card-worker.mjs';
 import { withDeck, openingView, DECK_JS_PATH, DECK_TRY_URL } from './deck-page.mjs';
 import { deckStrings, DECK_STRINGS } from './deck-i18n.mjs';
 import { makeWindow } from './mini-dom.mjs';
+import { hrefAllowed } from '../../sitetile/site-core.js';
 
 const DECK_JS = readFileSync(new URL('./deck.js', import.meta.url), 'utf8');
 const LS = 'reef-card-layout';
@@ -55,11 +56,11 @@ const wallMarkup = (doc) => doc.querySelectorAll('main .st-grid, main .st-bleed'
  * then the deck. `layout` gives the stand-in the two measurements the deck asks a browser for: how
  * tall the document is, and where the wall's tiles are.
  */
-function open(md, { storage, moveBefore, ctx = {}, bare = false, deckJs = DECK_JS, quiet = false, page = null, before: setUp = null, layout = null } = {}) {
+function open(md, { storage, moveBefore, ctx = {}, bare = false, deckJs = DECK_JS, quiet = false, page = null, before: setUp = null, layout = null, reducedMotion = false } = {}) {
   let html = renderCardHTML(md, { handle: 'specimen', ...ctx });
   if (bare) html = html.replace(/<html[^>]*>/, '<html lang="en">').replace(/<script>\(function\(d\)[\s\S]*?<\/script>/, '');
   if (page) html = page(html);   // what another page of ours adds to the markup (the draw page's attribute)
-  const win = makeWindow(html, { scripts: true, storage, moveBefore });
+  const win = makeWindow(html, { scripts: true, storage, moveBefore, reducedMotion });
   const doc = win.document, root = doc.documentElement;
   const cells = engineCells(doc);
   const ft = doc.querySelector('footer.st-footer');
@@ -603,10 +604,11 @@ test('inline scripts and inline handlers refused (a strict CSP): no deck → the
 const smallFile = ['---', 'title: Host', '---', '', '## cards', '', '- [ ] %% card: text %% File 0.', '- [ ] %% card: text %% File 1.', '- [ ] %% card: text %% File 2.', ''].join('\n');
 const noLangHost = ['---', 'card-page: specimen', 'title: Host', 'view: stack', '---', '', '## cards', '', '- [ ] %% card: profile w=6 %% A page whose items are a card file.', ''].join('\n');
 /** the capacity demo (reef.cards home over a card file), or the plain home page, in the words of `lang`; `words` replaces some of them */
-const openOurs = ({ lang, words = null, file = true } = {}) => open(noLangHost, {
+const openOurs = ({ lang, words = null, file = true, ...more } = {}) => open(noLangHost, {
   ctx: lang ? { chromeLang: lang } : {},
   page: (h) => h.replace('<html', `<html data-reef-home${file ? ' data-card-src="/items.card.md"' : ''}`),
-  before: (win) => { if (file) win.__cardMd = smallFile; if (words) win.__deckStrings = { ...win.__deckStrings, ...words }; },
+  before: (win) => { if (file) win.__cardMd = smallFile; if (words) win.__deckStrings = { ...win.__deckStrings, ...words };
+    if ('tryUrl' in more) { if (more.tryUrl === undefined) delete win.__deckTry; else win.__deckTry = more.tryUrl; } },   // what the page hands over as the sandbox's address (absent: nothing)
 });
 const textOf = (doc, sel) => doc.querySelectorAll(sel).map((e) => e.textContent.trim());
 const fill = (s, o) => s.replace(/\{(\w)\}/g, (m, k) => o[k] ?? m);
@@ -644,4 +646,176 @@ test('a translation with markup in it is text at every sink: no element is made 
   for (const sel of ['.md-plain p', '.deck-ours-cta', '.deck-go']) for (const host of doc.querySelectorAll(sel)) {
     assert.equal(host.querySelectorAll('img').length + host.querySelectorAll('b').length, 0, `${sel}: an element was made from a translation`);
   }
+});
+
+// ── a hand-over address becomes a link only when it is an absolute http(s) URL (tile#297 round 5) ──
+// window.__deckTry is handed to deck.js by the page (deck-page.mjs DECK_TRY_URL). A page that hands
+// over something else — or nothing — gets no button and no link; the words around it stay.
+// The table also holds the repo's rule for a Card link destination (site-core hrefAllowed, behind
+// card-render's cardHref): deck.js is a classic script and cannot import it, so its rule is a mirror —
+// stricter (absolute http(s) only, nothing before the scheme) and never wider.
+const QUOTES = 'https://example.test/" onclick="alert(1)';
+const ADDRESSES = [
+  // [handed over, a Card link may point there (hrefAllowed), the deck makes a link of it]
+  [DECK_TRY_URL, true, true],
+  ['http://example.test/a?b=1&c=2', true, true],
+  ['HTTPS://Example.test/', true, true],
+  [QUOTES, true, true],                                   // a link, and only a link: see the test below
+  ['javascript:alert(1)', false, false],
+  ['JaVaScRiPt:alert(1)', false, false],
+  ['data:text/html,<script>alert(1)</script>', false, false],
+  ['data:image/png;base64,iVBORw0KGgo=', false, false],
+  ['vbscript:msgbox(1)', false, false],
+  ['\u0001javascript:alert(1)', false, false],
+  ['\njavascript:alert(1)', false, false],
+  [' javascript:alert(1)', false, false],
+  ['java\tscript:alert(1)', false, false],
+  ['blob:https://example.test/1', false, false],
+  ['file:///etc/hosts', false, false],
+  // what a Card link may be and a hand-over address may not: not absolute http(s), or something before the scheme
+  [' https://example.test/', true, false],
+  ['\thttps://example.test/', true, false],
+  ['\u0001https://example.test/', true, false],
+  ['//example.test/x', true, false],
+  ['/try/edit', true, false],
+  ['try/edit', true, false],
+  ['#top', true, false],
+  ['http:example.test', true, false],
+  ['https://', false, false],
+  ['mailto:someone@example.test', true, false],
+  ['ftp://example.test/', true, false],
+  ['', true, false],
+  [undefined, true, false],
+];
+const SINKS = [['the card-file page\'s button', true, '.deck-go a.btn', '.deck-go'], ['the home page\'s "try it" link', false, 'a.try', '.deck-bcard']];
+const show = (v) => (v === undefined ? '(nothing handed over)' : JSON.stringify(v));
+const handed = (file, v) => openOurs({ file, tryUrl: v });
+/** the last card of the home page (the one whose front is the call to action) */
+const lastCard = (doc) => doc.querySelectorAll('.deck-card').filter((k) => k.querySelector('.deck-ours-cta'));
+test('CONTROL: the table is right about the repo\'s rule for a Card link, and the deck\'s rule is never wider', () => {
+  for (const [v, cardMay, deckMay] of ADDRESSES) {
+    assert.equal(hrefAllowed(v === undefined ? '' : v), cardMay, `hrefAllowed(${show(v)})`);
+    assert.ok(!deckMay || cardMay, `${show(v)}: the deck would link what a Card link may not be`);
+  }
+});
+for (const [what, file, linkSel, hostSel] of SINKS) {
+  test(`${what}: only an absolute http(s) address handed over is made a link`, () => {
+    for (const [v, , deckMay] of ADDRESSES) {
+      const { doc, win } = handed(file, v);
+      same(win.__deckTry, v, `CONTROL: the page was handed ${show(v)}`);
+      const last = lastCard(doc);
+      assert.equal(last.length, 1, `${show(v)}: CONTROL: the last card is there`);
+      assert.equal(last[0].querySelectorAll(hostSel).length, 1, `${show(v)}: the last card's back (${hostSel})`);
+      const hrefs = last[0].querySelectorAll('a').map((a) => a.getAttribute('href'));
+      if (!deckMay) {
+        assert.deepEqual(hrefs, [], `${show(v)}: the last card has a link`);
+        assert.equal(last[0].querySelectorAll('button').length, 0, `${show(v)}: the last card has a button`);
+        assert.equal(doc.querySelectorAll(linkSel).length, 0, `${show(v)}: ${linkSel} was drawn`);
+      } else {
+        assert.equal(hrefs.length, 1, `${show(v)}: one link`);
+        const u = new URL(hrefs[0]);
+        assert.ok(u.protocol === 'https:' || u.protocol === 'http:', `${show(v)}: the link's scheme is ${u.protocol}`);
+        assert.equal(u.href, new URL(v).href, `${show(v)}: the link goes somewhere else (${hrefs[0]})`);
+        assert.equal(doc.querySelectorAll(linkSel).length, 1, `${show(v)}: ${linkSel}`);
+      }
+      // the words around the link are drawn either way
+      assert.equal(textOf(doc, '.deck-ours-cta h2').length, 1, `${show(v)}: the last card's title`);
+      if (file) assert.equal(textOf(doc, '.deck-go .note').length, 1, `${show(v)}: the note over the button`);
+      else assert.equal(last[0].querySelectorAll('.deck-bcard .nm').length, 1, `${show(v)}: the business card`);
+    }
+  });
+  test(`${what}: an address with a quote in it stays inside the href — no attribute is made from it`, () => {
+    const { doc } = handed(file, QUOTES);
+    const a = doc.querySelectorAll(linkSel);
+    assert.equal(a.length, 1, 'CONTROL: the link is drawn');
+    for (const name of ['onclick', 'onerror', 'onload', 'onmouseover']) assert.equal(a[0].getAttribute(name), null, `the link has ${name}`);
+    assert.equal(doc.querySelectorAll('[onclick]').length, 0, 'an element in the page has onclick');
+    assert.equal(new URL(a[0].getAttribute('href')).href, new URL(QUOTES).href, 'the href is the whole address handed over');
+    assert.equal(a[0].getAttribute('target'), '_blank', 'the attributes written after the href are still its own');
+  });
+  test(`${what}: the address deck-page.mjs names is the link`, () => {
+    const { doc } = handed(file, DECK_TRY_URL);
+    assert.deepEqual(doc.querySelectorAll(linkSel).map((a) => a.getAttribute('href')), [DECK_TRY_URL]);
+  });
+}
+
+// ── a shared back stays on the card that is being put back until that turn is over (tile#297 round 5) ──
+// close() starts deck-put (560 ms) and the card shows its back for the first half of it. The back two
+// tiles name is ONE node: lent to the next card at once, the card still turning showed an empty back.
+const PUT = 560, FALLBACK = 700;   // deck.css deck-put, and a wait longer than deck.js's own fallback
+const defaultBack = (view) => ['---', 'card-page: specimen', 'title: Specimen', `view: ${view}`, 'back: "#about"', '---', '', '## cards', '',
+  '- [ ] %% card: text %% One.', '- [ ] %% card: text %% Two.', '- [ ] %% card: text noback %% Three.', '', '## back: about | About', '', '- [ ] %% card: text %% The back.', ''].join('\n');
+const tap = (p, cell) => cell.parentNode.dispatchEvent(new p.win.Event('click', { bubbles: true, isTrusted: true }));
+const escKey = (p) => p.win.dispatchEvent(new p.win.Event('keydown', { key: 'Escape' }));
+const flagged = (p) => p.doc.querySelectorAll('.deck-card.is-open');
+/** open A, put it back, and ask for B while A is still turning; returns the page with the clock at the moment of the ask */
+function midTurn(view, kind, more = {}) {
+  const p = open((kind === 'default' ? defaultBack : sharedBack)('stack'), more);
+  if (view === 'list') p.press('list');
+  const body = p.doc.querySelector('.dc-drawer-body');
+  const [a, b] = p.cells.map((c) => c.closest('.deck-card'));
+  p.win.__deckJump(0); p.win.tick(1000);
+  tap(p, p.cells[0]); p.win.tick(1000);
+  assert.ok(a.classList.contains('flipped') && p.root.classList.contains('open'), 'CONTROL: A is turned over');
+  same(body.closest('.deck-card'), a, 'CONTROL: A holds the back');
+  escKey(p);
+  assert.ok(!p.root.classList.contains('open') && flagged(p).length === 0, 'CONTROL: A is being put back');
+  if (!more.reducedMotion) assert.ok(a.classList.contains('flipping-close'), 'CONTROL: A is in its put-back turn');
+  p.win.__deckJump(1); assert.ok(b.classList.contains('is-top'), 'CONTROL: B is the card that is up');   // a tap on the NEXT card walks to it (in list too); a tap on the card that is up turns it over
+  if (!more.reducedMotion && view === 'list') assert.ok(a.classList.contains('flipping-close'), 'CONTROL: in list A is still turning after the walk');
+  tap(p, p.cells[1]);
+  return { p, body, a, b };
+}
+const bIsOpen = ({ p, body, a, b }, why) => {
+  same(body.closest('.deck-card'), b, `${why}: B does not hold the back`);
+  assert.ok(b.classList.contains('is-open') && b.classList.contains('flipped') && p.root.classList.contains('open'), `${why}: B is not turned over`);
+  assert.ok(flagged(p).length === 1 && flagged(p)[0] === b, `${why}: ${flagged(p).length} cards are flagged open`);
+  assert.ok(!a.classList.contains('is-open'), `${why}: A is still flagged open`);
+  assert.deepEqual(dupIds(p.doc), [], why);
+};
+for (const view of ['list', 'stack']) for (const kind of ['named', 'default']) {
+  test(`${view}, the ${kind} back: B asked for while A is being put back gets the back when A's turn ends, not before`, () => {
+    const s = midTurn(view, kind), { p, body, a, b } = s;
+    for (let t = 0; t < PUT; t += 40) {
+      same(body.closest('.deck-card'), a, `${t} ms into A's turn: the back has left A`);
+      assert.ok(!b.classList.contains('is-open') && !b.classList.contains('flipped') && flagged(p).length === 0, `${t} ms into A's turn: B is already turned over`);
+      p.win.tick(40);
+    }
+    a.dispatchEvent(new p.win.Event('animationend', { bubbles: true, animationName: 'deck-face-off' }));   // a face's own animation ends with the card's: not the turn
+    a.dispatchEvent(new p.win.Event('animationend', { bubbles: true, animationName: 'deck-put' }));
+    bIsOpen(s, 'A\'s turn ended');
+    p.win.tick(3000); bIsOpen(s, 'three seconds later');
+    escKey(p); p.win.tick(3000);
+    assert.equal(flagged(p).length, 0, 'B was put back and a card is still flagged open');
+  });
+  test(`${view}, the ${kind} back: an animationend that never comes does not leave B waiting`, () => {
+    const s = midTurn(view, kind), { p, body, a } = s;
+    p.win.tick(PUT / 2 - 20);
+    same(body.closest('.deck-card'), a, 'just before the half turn: the back has left A');
+    p.win.tick(FALLBACK);
+    bIsOpen(s, 'after the fallback');
+  });
+  test(`${view}, the ${kind} back: with reduced motion there is no turn to wait for — B opens at once`, () => {
+    bIsOpen(midTurn(view, kind, { reducedMotion: true }), 'at once');
+  });
+}
+test('a card asked for during a put-back turn is not turned over when it is put back first, or when the view leaves the pile', () => {
+  const s = midTurn('list', 'named'), { p, body, a, b } = s;
+  escKey(p); p.win.tick(3000);
+  assert.ok(!b.classList.contains('is-open') && flagged(p).length === 0 && !p.root.classList.contains('open'), 'Escape during the wait, and B turned over anyway');
+  same(body.closest('.deck-card'), a, 'the back moved for a card that never turned over');
+  const w = midTurn('list', 'named');
+  w.p.press('wall'); holds(w.p, 'wall', 'list (B waiting) → wall');
+  assert.ok(flagged(w.p).length === 0 && !w.p.root.classList.contains('open'), 'on the wall a card was turned over');
+});
+test('A asked for again during its own put-back turn turns over at once: the back never left it', () => {
+  const p = open(sharedBack('stack')); p.press('list');
+  const body = p.doc.querySelector('.dc-drawer-body'), a = p.cells[0].closest('.deck-card');
+  p.win.__deckJump(0); p.win.tick(1000); tap(p, p.cells[0]); p.win.tick(1000);
+  escKey(p); p.win.tick(100);
+  tap(p, p.cells[0]);
+  assert.ok(a.classList.contains('is-open') && a.classList.contains('flipped'), 'A did not turn over again');
+  same(body.closest('.deck-card'), a, 'A is turned over without its back');
+  p.win.tick(3000);
+  assert.ok(flagged(p).length === 1 && flagged(p)[0] === a, 'three seconds later');
 });
