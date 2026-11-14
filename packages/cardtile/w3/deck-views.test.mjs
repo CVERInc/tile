@@ -243,6 +243,24 @@ test('every tile is a card: a run of full-width links is dealt too', () => {
   assert.equal(p.win.__deckCount(), p.cells.length, 'the pile has a card for every tile');
 });
 
+// ── the stylesheet's half ─────────────────────────────────────────────────────────────────────────
+// deck.js leaves nodes in the page and relies on deck.css not to draw them. 🔴 This reads what the
+// stylesheet DECLARES (comments stripped, rule by rule) — there is no cascade here, so it cannot say
+// that nothing overrides a rule; verify/deck-views.mjs asks a browser which tiles have a box.
+test('deck.css declares what deck.js leaves to it: what is not drawn in a pile, and what is not drawn on the wall', () => {
+  const css = readFileSync(new URL('./deck.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sels: m[1].split(',').map((x) => x.trim()), body: m[2] }));
+  const hidden = (sel) => rules.some((r) => r.sels.includes(sel) && /(^|;)\s*display\s*:\s*none\s*(;|$)/.test(r.body));
+  assert.ok(rules.length > 300, 'CONTROL: the stylesheet was read');
+  assert.ok(!hidden('html.deck .deck-table') && !hidden('.deck-seg'), 'CONTROL: the reader does not say yes to everything');
+  for (const sel of [
+    'html.deck main > .st-card > .st-grid', 'html.deck main > .st-card > .st-bleed',   // the engine's grid, in a pile (and before deck.js has run)
+    'html.deck .st-back-door',                                                         // the wall's door to a back
+    'html:not(.deck) .deck-table', 'html:not(.deck) .deck-veil', 'html:not(.deck) .deck-rail', 'html:not(.deck) .deck-bar > :not(.deck-seg)',   // the pile, on the wall
+    '.deck-bench',                                                                     // cards outside the window
+  ]) assert.ok(hidden(sel), `deck.css no longer declares \`${sel}{display:none}\` — deck.js leaves those nodes in the page and counts on it`);
+});
+
 // ── a long Card ──────────────────────────────────────────────────────────────────────────────────
 test('200 tiles: only a window of cards is on the table, and every tile stays in the document', () => {
   const p = open(card({ view: 'stack', n: 200 }));
