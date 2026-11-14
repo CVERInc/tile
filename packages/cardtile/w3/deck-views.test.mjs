@@ -834,3 +834,97 @@ test('with reduced motion a card that is put back shows its front again at once,
     assert.ok(a.classList.contains('flipped') && a.classList.contains('is-open'), `${view}: A does not turn over a second time`);
   }
 });
+
+// ── a card that is waiting to be turned over, and the visitor moves on (tile#297 round 6) ─────────────────────────
+// A is being put back, B was asked for and waits for A's turn to end. If the visitor leaves B before that — by ANY way the
+// card that is up can change — the request is over: nothing turns over when A's turn ends, on the card they left or on the
+// one they went to, and coming back to B does not revive it. The reviewer's sequence is the first row (a jump to C).
+const backsOnAll = (n) => ['---', 'card-page: specimen', 'title: Specimen', 'view: stack', '---', '', '## cards', '',
+  ...Array.from({ length: n }, (_, i) => `- [ ] %% card: text back=#about %% Card ${i}.`), '', '## back: about | About', '', '- [ ] %% card: text %% The back.', ''].join('\n');
+/** A (card 0) is in its put-back turn and B (card 1) has been asked for; `n` cards, every one with the same back */
+function waitingOnB(view, n = 3) {
+  const p = open(backsOnAll(n));
+  if (view === 'list') p.press('list');
+  const body = p.doc.querySelector('.dc-drawer-body');
+  const cards = p.cells.map((c) => c.closest('.deck-card'));
+  const [a, b] = cards;
+  p.win.__deckJump(0); p.win.tick(1000);
+  tap(p, p.cells[0]); p.win.tick(1000);
+  assert.ok(a.classList.contains('flipped') && p.root.classList.contains('open'), 'CONTROL: A is turned over');
+  escKey(p);
+  assert.ok(a.classList.contains('flipping-close') && flagged(p).length === 0, 'CONTROL: A is in its put-back turn');
+  p.win.__deckJump(1); tap(p, p.cells[1]);
+  assert.equal(p.win.__deckCur(), 1, 'CONTROL: B is the card that is up');
+  assert.ok(flagged(p).length === 0 && !p.root.classList.contains('open'), 'CONTROL: B waits for A\'s turn');
+  same(body.closest('.deck-card'), a, 'CONTROL: the back is still on A');
+  return { p, body, a, b, cards, ph: p.win.innerHeight };
+}
+const ENDINGS = {
+  animationend: ({ p, a }) => a.dispatchEvent(new p.win.Event('animationend', { bubbles: true, animationName: 'deck-put' })),
+  'the 600 ms fallback': ({ p }) => p.win.tick(FALLBACK),
+};
+const noneOpen = ({ p, body, a, cards }, why) => {
+  // A itself is left out of `flipped`: when its animationend never comes it keeps that class (as it did before this round) — what is asked here is that no OTHER card turns over
+  const over = cards.map((c, i) => (c.classList.contains('is-open') || (c !== a && c.classList.contains('flipped')) ? i : -1)).filter((i) => i >= 0);
+  assert.deepEqual(over, [], `${why}: card ${over} is turned over (card ${p.win.__deckCur()} is up)`);
+  assert.ok(!p.root.classList.contains('open'), `${why}: the page says a card is held`);
+  same(body.closest('.deck-card'), a, `${why}: the back moved to a card that was not turned over`);
+};
+const ev = (p, type, init) => new p.win.Event(type, { bubbles: true, cancelable: true, isTrusted: true, ...init });
+// every way the card that is up changes (deck.js: every assignment to `cur`), each as the visitor does it
+const WAYS_OFF = [
+  { name: 'a jump (__deckJump) to C', views: ['list', 'stack'], go: ({ p }) => p.win.__deckJump(2) },
+  { name: 'the dice\'s riffle (__deckRiffle) to C', views: ['list', 'stack'], go: ({ p }) => { p.win.__deckRiffle(2); p.win.tick(300); }   /* the riffle starts two cards back and walks: by now it has landed */ },
+  { name: 'the arrow key (a walk)', views: ['list', 'stack'], go: ({ p }) => { p.win.dispatchEvent(ev(p, 'keydown', { key: 'ArrowRight' })); p.win.tick(40); } },
+  { name: 'a tap on the next card (a walk)', views: ['stack'], go: ({ p }) => { p.cells[2].parentNode.dispatchEvent(ev(p, 'click')); p.win.tick(40); } },
+  { name: 'a sideways wheel swipe', views: ['list', 'stack'], go: ({ p, ph }) => { p.root.dispatchEvent(ev(p, 'wheel', { deltaX: ph, deltaY: 0, deltaMode: 0, timeStamp: 5000 })); p.win.tick(40); } },
+  { name: 'a drag of the top card', views: ['stack'], go: ({ p }) => { const t = p.cells[1].parentNode;
+    t.dispatchEvent(ev(p, 'pointerdown', { pointerId: 7, clientX: 300, clientY: 300, pointerType: 'mouse' }));
+    t.dispatchEvent(ev(p, 'pointermove', { pointerId: 7, clientX: 80, clientY: 300, pointerType: 'mouse' }));
+    t.dispatchEvent(ev(p, 'pointerup', { pointerId: 7, clientX: 80, clientY: 300, pointerType: 'mouse' })); p.win.tick(40); } },
+  { name: 'a finger dragging the row', views: ['list'], go: ({ p }) => { const t = p.cells[1].parentNode;
+    t.dispatchEvent(ev(p, 'pointerdown', { pointerId: 7, clientX: 320, clientY: 300, pointerType: 'touch' }));
+    t.dispatchEvent(ev(p, 'pointermove', { pointerId: 7, clientX: 10, clientY: 300, pointerType: 'touch' }));
+    t.dispatchEvent(ev(p, 'pointerup', { pointerId: 7, clientX: 10, clientY: 300, pointerType: 'touch' })); p.win.tick(40); } },
+  { name: 'the scrollbar, one card on', views: ['list', 'stack'], go: ({ p, ph }) => { p.win.scrollTo({ top: 2 * ph }); p.win.tick(40); } },
+  { name: 'the scrollbar, far (a jump, not a walk)', views: ['stack'], n: 20, go: ({ p, ph }) => { p.win.scrollTo({ top: 17 * ph }); p.win.tick(40); } },
+  { name: 'a card picked from the fan', views: ['stack'], go: ({ p }) => { p.doc.rectOf = () => ({ top: 200, left: 24, width: 342, height: 480 });   /* the fan measures the pile to tell which card is under the finger */
+    p.win.__deckFan(); assert.ok(p.root.classList.contains('fan'), 'CONTROL: the fan is out');
+    p.doc.dispatchEvent(ev(p, 'pointerup', { pointerId: 7, clientX: 1e6, clientY: 300, pointerType: 'touch' })); } },   // far right of the pivot: the last card
+];
+for (const way of WAYS_OFF) for (const view of way.views) for (const ending of Object.keys(ENDINGS)) {
+  test(`${view}: B waits for A's turn, the visitor leaves by ${way.name}, the turn ends (${ending}) — nothing turns over`, () => {
+    const s = waitingOnB(view, way.n), { p } = s;
+    way.go(s);
+    assert.notEqual(p.win.__deckCur(), 1, `CONTROL: ${way.name} did not move off B`);
+    same(s.body.closest('.deck-card'), s.a, 'CONTROL: A\'s turn is not over yet');
+    ENDINGS[ending](s);
+    noneOpen(s, 'A\'s turn ended'); p.win.tick(3000); noneOpen(s, 'three seconds later');
+  });
+  test(`${view}: B waits, the visitor leaves by ${way.name} and comes back before the turn ends (${ending}) — the request is not revived`, () => {
+    const s = waitingOnB(view, way.n), { p, b } = s;
+    way.go(s);
+    assert.notEqual(p.win.__deckCur(), 1, `CONTROL: ${way.name} did not move off B`);
+    p.win.__deckJump(1);
+    assert.ok(p.win.__deckCur() === 1 && b.classList.contains('is-top'), 'CONTROL: B is up again');
+    same(s.body.closest('.deck-card'), s.a, 'CONTROL: A\'s turn is not over yet');
+    ENDINGS[ending](s);
+    noneOpen(s, 'A\'s turn ended'); p.win.tick(3000); noneOpen(s, 'three seconds later');
+    tap(p, p.cells[1]); p.win.tick(1000);
+    assert.ok(b.classList.contains('is-open') && flagged(p).length === 1, 'CONTROL: asked for again, B turns over');
+    same(s.body.closest('.deck-card'), b, 'CONTROL: asked for again, B holds the back');
+  });
+}
+// the ways that are not a change of card: they put the waiting card back (close), which takes the request with it
+for (const ending of Object.keys(ENDINGS)) for (const [view, other] of [['list', 'stack'], ['stack', 'list']]) {
+  test(`${view}: B waits for A's turn and the view is switched to ${other} and back, or to the wall and back (${ending}) — nothing turns over`, () => {
+    for (const via of [other, 'wall']) {
+      const s = waitingOnB(view), { p } = s;
+      p.button(via).click(); p.button(view).click();   // no clock between them: A's turn is still running
+      assert.equal(p.win.__deckCur(), 1, 'CONTROL: B is up again');
+      ENDINGS[ending](s); p.win.tick(3000);
+      const over = s.cards.filter((c) => c.classList.contains('is-open') || (c !== s.a && c.classList.contains('flipped')));
+      assert.ok(over.length === 0 && !p.root.classList.contains('open'), `${view} → ${via} → ${view}: a card turned over`);
+    }
+  });
+}
