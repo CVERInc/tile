@@ -70,7 +70,13 @@
   const OURS=HOME||DRAW||REF;
   const S=window.__deckStrings||{}; const say=k=>(S[k]!=null?String(S[k]):'');
   const escA=t=>String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-  const TRY=String(window.__deckTry||'');   // the sandbox the "make your own" buttons open (w3/deck-page.mjs DECK_TRY_URL)
+  // 🔴 An address the page hands over becomes a link only through webUrl() AND escA(). webUrl: an absolute http(s) URL with
+  // nothing before its scheme, returned in the parser's own spelling; anything else is '' and the caller draws no link and no
+  // button (the words around it stay). It mirrors the rule for a Card link (site-core hrefAllowed, behind card-render's
+  // cardHref) and is stricter — this is a classic script and cannot import that one; w3/deck-views.test.mjs holds both
+  // against one table of addresses, so this one is never the wider of the two.
+  const webUrl=t=>{ const s=String(t==null?'':t); if(!/^https?:\/\//i.test(s))return ''; try{ const u=new URL(s); return (u.protocol==='https:'||u.protocol==='http:')&&u.hostname?u.href:''; }catch(_){ return ''; } };
+  const TRY=webUrl(window.__deckTry);   // the sandbox the "make your own" buttons open (w3/deck-page.mjs DECK_TRY_URL); '' when none, or not one we link
   const REFQ=window.__deckRef?'?ref='+encodeURIComponent(String(window.__deckRef)):'';
   const mk=(tag,cls,html)=>{const e=document.createElement(tag);e.className=cls;if(html!=null)e.innerHTML=html;return e;};
   // ---- items from a card file: one per `- [ ] %% card: … %% text` line. Kept as text; a card is built only when it is near view ----
@@ -254,9 +260,16 @@
   const away=c=>{ const i=idx(c); if(i>=P&&i<P+M){ c.remove(); lazy.delete(i); } else mv(bench,c,null); };
   let pushed=false; addEventListener('popstate',()=>{ if(openCard){pushed=false; close();} });
   const docksInert=on=>document.querySelectorAll('dc-dock').forEach(d=>{ d.inert=on; });   /* the dice was tappable through the frosted glass */
-  const open=card=>{if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
+  // 🔴 ONE TURN AT A TIME. A card that is put back shows its back for the first half of deck-put, and a back two tiles name is
+  // one node (lend). So while a card is being put back (`putting`), a request to turn ANOTHER card over waits (`wants`) until
+  // that turn is over — deck-put's animationend, or PUT_MS when the event never comes (the animation was cut short by a walk
+  // in the stack, the tab was hidden) — and is then honoured only if the card may still be turned over. The same card asked
+  // for again turns at once: its back never left it. With reduced motion there is no turn, so nothing waits.
+  const PUT_MS=600; let putting=null, putT=0, wants=null;
+  const putOver=c=>{ if(putting!==c)return; clearTimeout(putT); putting=null; const k=wants; wants=null; if(k&&ON&&!openCard&&!fanned&&k.isConnected&&(LIST||k.classList.contains('is-top'))) open(k); };
+  const open=card=>{if(putting&&putting!==card){wants=card;return;}if(putting){clearTimeout(putT);putting=null;}wants=null;if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
   let lastFocus=null;
-  const close=()=>{if(!openCard)return;const c=openCard;if(pushed){pushed=false;try{history.back();}catch(_){}}c.classList.remove('is-open');c.classList.remove('flipping-open');void c.offsetWidth;c.classList.add('flipping-close');c.addEventListener('animationend',function h(e){if(e.animationName!=='deck-put')return;c.removeEventListener('animationend',h);c.classList.remove('flipped');});/* flipping-close stays: its fill IS the rest pose, so nothing re-animates after the end; the next open() removes it */openCard=null;document.documentElement.classList.remove('open');docksInert(false);if(lastFocus&&lastFocus.focus){lastFocus.focus();lastFocus=null;}};
+  const close=()=>{wants=null;/* putting back is also taking back a card that was asked for and has not turned yet */if(!openCard)return;const c=openCard;if(pushed){pushed=false;try{history.back();}catch(_){}}c.classList.remove('is-open');c.classList.remove('flipping-open');void c.offsetWidth;c.classList.add('flipping-close');c.addEventListener('animationend',function h(e){if(e.animationName!=='deck-put')return;c.removeEventListener('animationend',h);c.classList.remove('flipped');putOver(c);});if(!matchMedia('(prefers-reduced-motion: reduce)').matches){clearTimeout(putT);putting=c;putT=setTimeout(()=>putOver(c),PUT_MS);}/* flipping-close stays: its fill IS the rest pose, so nothing re-animates after the end; the next open() removes it */openCard=null;document.documentElement.classList.remove('open');docksInert(false);if(lastFocus&&lastFocus.focus){lastFocus.focus();lastFocus=null;}};
   const addCard=(frontNode,backNode,opts={})=>register(buildCard(frontNode,backNode,{...opts,seated:true}));
   // seated: the card goes on the bench BEFORE its faces are filled, so a tile moves from the page into a card that is already
   // in the page — it is never outside the document, not even while its card is being put together
@@ -286,7 +299,7 @@
     const slot=b.querySelector('.qr'); slot.setAttribute('role','button'); slot.setAttribute('aria-label',say('zoomQr')); slot.addEventListener('click',e=>{e.stopPropagation(); e.preventDefault(); heroIcon&&heroIcon.click();}); qrWaiters.push(g=>{ if(g){const c=g.cloneNode(true); const av2=slot.ownerDocument.createElement('img'); av2.className='qr-av'; av2.src=owner.av||''; slot.append(c,av2);} else slot.remove(); });
     return b;};
   const goBack=(href,label,sameTab,note)=>{let dom=href; try{const u=new URL(href,location.href); dom=u.hostname.replace(/^www\./,''); if(/(^|\.)(feelreef\.com|reef\.cards)$/.test(u.hostname)&&u.pathname!=='/') dom+=u.pathname.replace(/\/$/,''); }catch(_){}   // our own domains: the path is the identity (card.feelreef.com/wtg); elsewhere the host is enough
-    return mk('div','deck-go',(note?'<p class="note">'+note+'</p>':'')+'<a class="btn" '+(sameTab?'':'target="_blank" rel="noopener noreferrer" ')+'href="'+href+'">'+(label||dom)+' <span class="arr">↗</span></a>');};
+    return mk('div','deck-go',(note?'<p class="note">'+note+'</p>':'')+(href?'<a class="btn" '+(sameTab?'':'target="_blank" rel="noopener noreferrer" ')+'href="'+escA(href)+'">'+(label||dom)+' <span class="arr">↗</span></a>':''));};   // no address: the note alone, never a button that goes nowhere
   /* the default back — frontmatter `back: "#id"` names one back lane, the same pointer a tile's back=#id is, for the whole Cards. Every tile without a back of its own (and not a link or a video) gets a copy */
   const DEFB=String(FM.back||'').replace(/^["']|["']$/g,'').replace(/^#/,'');
   // A tile's card is made when the window around the top card first reaches it (card(i) → dealt(i)), not all at once: a long
@@ -324,7 +337,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   if(HOME&&FILEDECK){ reefFront.className='deck-ours deck-ours-cta'; reefFront.insertAdjacentHTML('beforeend','<h2>'+esc(say('fileEndTitle'))+'</h2><p>'+esc(say('fileEndText').replace('{n}',(window.__mdCount||0).toLocaleString('en-US')))+'</p>'); }
   else if(HOME){ reefFront.className='deck-ours deck-ours-cta'; reefFront.insertAdjacentHTML('beforeend','<h2>'+esc(say('homeCtaTitle'))+'</h2><p>'+esc(say('homeCtaText'))+'</p>'); }
   if(DRAW){ reefFront.className='deck-ours deck-ours-cta'; reefFront.insertAdjacentHTML('beforeend','<h2>'+esc(say('drawCtaTitle'))+'</h2><p>'+esc(say('drawCtaText'))+'</p>'); }
-  const reefBack=DRAW?null:(HOME&&FILEDECK)?goBack(TRY,esc(say('makeYourOwn')),false,esc(say('fileNote'))):HOME?(b=>{b.insertAdjacentHTML('beforeend','<a class="try" href="'+escA(TRY)+'" target="_blank" rel="noopener">'+esc(say('tryNow'))+' <span class="arr">↗</span></a>');return b;})(bcard()):goBack('https://reef.cards/'+REFQ);
+  const reefBack=DRAW?null:(HOME&&FILEDECK)?goBack(TRY,esc(say('makeYourOwn')),false,esc(say('fileNote'))):HOME?(b=>{if(TRY)b.insertAdjacentHTML('beforeend','<a class="try" href="'+escA(TRY)+'" target="_blank" rel="noopener">'+esc(say('tryNow'))+' <span class="arr">↗</span></a>');return b;})(bcard()):goBack('https://reef.cards/'+REFQ);
   if(!REF&&(OURS||POOL)) addCard(reefFront,reefBack,DRAW?{onTap:()=>location.reload()}:{});   // home: the badge is the last card's back, where a card you were handed would be scanned
   N=P+M+post.length;
   // ---- edge-colour mat: a picture whose border is one colour sits on a mat of that colour ----
@@ -341,7 +354,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   let homing=0, wasAt=0; window.__deckListHome=()=>{ if(!ON||!LIST)return; const ph=pageH(); if(scrollY<=ph/2&&wasAt>0){ homing=Date.now(); scrollTo({top:wasAt*ph,behavior:'smooth'}); wasAt=0; return; } wasAt=cur; document.documentElement.classList.remove('list-away'); homing=Date.now(); scrollTo({top:0,behavior:'smooth'}); };
   window.__deckFanToggle=()=>{ if(!ON||LIST)return; if(fanned)fanIn(); else fanOut(); };
   // stack ⇄ list without a reload: the same cards glide from one arrangement to the other (FLIP), then the other arrangement's scrolling takes over
-  window.__deckLayout=(m)=>{ const toList=m==='list'; if(!ON||toList===LIST)return; if(fanned)fanIn(); if(openCard)close(); if(!toList)document.documentElement.classList.remove('list-away');     const before=new Map(cards.map(c=>[c,c.getBoundingClientRect()]));   // cards that join the window during the switch have no before: they just appear
+  window.__deckLayout=(m)=>{ const toList=m==='list'; if(!ON||toList===LIST)return; if(fanned)fanIn(); close(); if(!toList)document.documentElement.classList.remove('list-away');     const before=new Map(cards.map(c=>[c,c.getBoundingClientRect()]));   // cards that join the window during the switch have no before: they just appear
     cards.forEach(c=>{ c.style.transition='none'; c.style.opacity='1'; c.style.visibility='visible'; c.style.transform=''; });
     LIST=toList; document.documentElement.classList.toggle('list',LIST); paint();
     fit(); goTo(cur); listTx();
@@ -553,7 +566,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const seatOf=c=>typeof c==='number'?Math.max(0,Math.min(N-1,P+c)):Math.max(0,cells.indexOf(c));   // a tile's card has the tile's own place in the dealt order as its number; a number is an item of the card file (the file wall's vb.at)
   // leave: put a held card back, fold the fan, stop answering, and send every tile home. Returns the tile of the card that was up
   // (over a card file: the number of the item that was up).
-  const leave=()=>{ if(fanned)fanIn(); if(openCard)close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
+  const leave=()=>{ if(fanned)fanIn(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
     queue=0; drag=null; LD=null; hx=-1; ON=false; stack.classList.remove('hov'); root.classList.remove('list-away','fan','fan-closing','moving','open');
     cards.forEach(c=>c.style.removeProperty('--peek')); rehome(true); for(const k in API) delete window[k]; return up; };
   // enter: the tiles take their seats again and the pile is dealt, open on the card whose tile was in the middle of the wall

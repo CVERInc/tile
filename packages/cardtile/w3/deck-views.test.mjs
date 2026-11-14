@@ -608,7 +608,7 @@ const openOurs = ({ lang, words = null, file = true, ...more } = {}) => open(noL
   ctx: lang ? { chromeLang: lang } : {},
   page: (h) => h.replace('<html', `<html data-reef-home${file ? ' data-card-src="/items.card.md"' : ''}`),
   before: (win) => { if (file) win.__cardMd = smallFile; if (words) win.__deckStrings = { ...win.__deckStrings, ...words };
-    if ('tryUrl' in more) { if (more.tryUrl === undefined) delete win.__deckTry; else win.__deckTry = more.tryUrl; } },   // what the page hands over as the sandbox's address (absent: nothing)
+    if ('tryUrl' in more) { if (more.tryUrl === undefined) win.run('delete window.__deckTry'); else win.__deckTry = more.tryUrl; } },   // what the page hands over as the sandbox's address (absent: nothing — taken away INSIDE the page: a delete from out here leaves the page's own global holding it)
 });
 const textOf = (doc, sel) => doc.querySelectorAll(sel).map((e) => e.textContent.trim());
 const fill = (s, o) => s.replace(/\{(\w)\}/g, (m, k) => o[k] ?? m);
@@ -702,7 +702,7 @@ for (const [what, file, linkSel, hostSel] of SINKS) {
   test(`${what}: only an absolute http(s) address handed over is made a link`, () => {
     for (const [v, , deckMay] of ADDRESSES) {
       const { doc, win } = handed(file, v);
-      same(win.__deckTry, v, `CONTROL: the page was handed ${show(v)}`);
+      same(win.run('window.__deckTry'), v, `CONTROL: the page was handed ${show(v)}`);   // asked inside the page, where deck.js reads it
       const last = lastCard(doc);
       assert.equal(last.length, 1, `${show(v)}: CONTROL: the last card is there`);
       assert.equal(last[0].querySelectorAll(hostSel).length, 1, `${show(v)}: the last card's back (${hostSel})`);
