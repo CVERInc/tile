@@ -142,7 +142,7 @@ test('avatar path returns 404 for stopped handles before fetching or reading the
     assert.equal(res.status, 404, url);
     assert.notEqual(res.headers.get('content-type'), 'image/png');
     // A stopped shared-host avatar is empty; an own-domain avatar matches the unbound host.
-    const absent = await get(url, { PREVIEW: 'false', CARDS: { get: async () => null } });
+    const absent = await get(url, { PREVIEW: 'false', CARDS: { get: async () => null, getWithMetadata: async () => ({ value: null, metadata: null }) } });
     assert.deepEqual([...res.headers], [...absent.headers], url);
     assert.deepEqual(await bytesOf(res), await bytesOf(absent), url);
   }
@@ -154,7 +154,7 @@ test('avatar path returns 404 for unknown handles on canonical and bound vanity 
   for (const url of [...URLS, 'https://card.feelreef.com/missing/avatar']) {
     const res = await get(url, envWith(null));
     assert.equal(res.status, 404, url);
-    const absent = await get(url, { PREVIEW: 'false', CARDS: { get: async () => null } });
+    const absent = await get(url, { PREVIEW: 'false', CARDS: { get: async () => null, getWithMetadata: async () => ({ value: null, metadata: null }) } });
     assert.deepEqual([...res.headers], [...absent.headers], url);
     assert.deepEqual(await bytesOf(res), await bytesOf(absent), url);
   }

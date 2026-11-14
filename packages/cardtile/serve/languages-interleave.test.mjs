@@ -147,7 +147,7 @@ test('row 2a — PUT first, the removing save waits for it, then removes it', as
 test('row 2b — the removing save first: a PUT admitted before it is refused by the object', async () => {
   const env = await withJapanese();
   const life = env.CARD_LIFETIMES.get({ name: 't' });
-  const ask = async (body) => { const r = await life.fetch('https://card-lifetime/language', { method: 'POST', body: JSON.stringify({ handle: 't', ...body }) }); return { status: r.status, json: await r.json() }; };
+  const ask = async (body) => { const r = await life.fetch('https://card-lifetime.example/language', { method: 'POST', body: JSON.stringify({ handle: 't', ...body }) }); return { status: r.status, json: await r.json() }; };
   const { gen } = await liveCard(env.CARDS, 't');
   // the Worker's admission check passes (the tag is listed) …
   assert.equal((await ask({ gen, tag: 'zh-TW', kind: 'put', markdown: ZH, check: true })).status, 200);
@@ -266,7 +266,7 @@ test('🔴 row 5 — a reused handle: no key of the previous lifetime, and no ke
   assert.equal((await call(env, 'GET', '/_api/card/t/lang/ja-JP')).json.error, 'cards_language_missing');
   assert.equal((await call(env, 'GET', '/_api/card/t')).json.languages['ja-JP'], null);
   // a write admitted in the ended lifetime is refused by the object
-  const late = await env.CARD_LIFETIMES.get({ name: 't' }).fetch('https://card-lifetime/language', {
+  const late = await env.CARD_LIFETIMES.get({ name: 't' }).fetch('https://card-lifetime.example/language', {
     method: 'POST', body: JSON.stringify({ handle: 't', gen: first, tag: 'ja-JP', kind: 'put', markdown: JA }),
   });
   assert.equal(late.status, 409);

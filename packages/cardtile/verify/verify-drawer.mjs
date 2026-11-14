@@ -12,7 +12,7 @@ import worker from '../serve/card-worker.mjs';
 const pw = (await import(PLAYWRIGHT)).default;
 const { chromium } = pw;
 const md = readCard('specimen-rich');
-const env = { CARDS: { get: async () => md } };
+const env = { CARDS: { get: async () => md, getWithMetadata: async () => ({ value: md, metadata: null }) } };
 const server = http.createServer(async (req, res) => {
   const r = await worker.fetch(new Request('http://localhost' + req.url, { headers: req.headers }), env);
   res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(Buffer.from(await r.arrayBuffer()));

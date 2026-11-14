@@ -54,6 +54,8 @@ const FIXTURE_STORE = {
     const { readCard } = await import('../verify/paths.mjs');
     return readCard(h);
   },
+  // the Worker reads a Card's main key with its metadata (tile#304 r2); a fixture carries none
+  async getWithMetadata(h) { return { value: await this.get(h), metadata: null }; },
 };
 const isCardPath = (p) => {
   const seg = p.replace(/^\/+|\/+$/g, '').split('/')[0] || '';

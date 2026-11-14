@@ -606,16 +606,20 @@ const VARY_VISITOR_LANG = { Vary: 'Accept, Accept-Language' };
 // they are cached for an hour without varying, and the picture is an asset (one per Card).
 
 /**
- * cardLanguage: (main file, handle, gen, url, request, store) → what to serve.
+ * cardLanguage: (main file, the language files its record names, handle, gen, url, request, store) → what to serve.
  *   { md, lang, listed, matched, by }  md = the file to serve (the main file when no language file
  *   applies); lang = its language (the tag served, or the main file's own `lang:`, or '');
  *   listed = the main file's `locales:` ([] = a Card in one language, and nothing below applies).
+ * 🔴 r2 (review r1 #2): `revs` is the main key's own metadata, from the same read as `mainMd`
+ * (liveCard). A language is served only when it names the tag, and only from exactly the key it names;
+ * nothing else under `card:<handle>:` is ever read, so a removed or superseded body is unreachable.
  */
-async function cardLanguage(mainMd, handle, gen, url, request, store) {
+async function cardLanguage(mainMd, revs, handle, gen, url, request, store) {
   const { listed, main } = languagesOf(mainMd);
   if (!listed.length) return { md: mainMd, lang: '', listed, matched: null, by: null };
   const choice = chooseLanguage(mainMd, { query: url.searchParams.get('lang'), acceptLanguage: request.headers.get('accept-language') }, pickAcceptLanguage);
-  const file = choice.tag ? await store.get(languageKey(handle, gen, choice.tag)) : null;
+  const rev = choice.tag ? revs[choice.tag] : null;
+  const file = rev ? await store.get(languageKey(handle, gen, choice.tag, rev)) : null;
   if (file == null) return { md: mainMd, lang: main || '', listed, matched: choice.tag ? null : choice.matched, by: choice.by };
   return { md: composeLanguage(mainMd, file, choice.tag), lang: choice.tag, listed, matched: choice.tag, by: choice.by };
 }
@@ -1208,7 +1212,7 @@ const router = {
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
-    const { md: liveMd, stopped, gen } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
+    const { md: liveMd, stopped, gen, languages: revs } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
     // 🔴 A stopped Card IS a missing one from here on, on every exit — page, markdown, avatar, icons,
     // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
     // never-existed must be indistinguishable; see notFound. The stop still wins over everything.
@@ -1291,7 +1295,7 @@ const router = {
     // tile#304 — the file this request is served: the main file, or (for a Card with `locales:`) the
     // visitor's language over it. `blank` stays the main file's: whether a Card is still the template
     // is a fact about the Card, as are its robots headers.
-    const served = await cardLanguage(cardMd, resolved.handle, gen, url, request, store);
+    const served = await cardLanguage(cardMd, revs, resolved.handle, gen, url, request, store);
     const servedMd = served.md;
     const langExtra = { ...probe, ...languageHeaders(served) };
     if (wantFat) return markdown(servedMd, { env, originalLength: servedMd, handle: resolved.handle, at, blank, extra: langExtra });
