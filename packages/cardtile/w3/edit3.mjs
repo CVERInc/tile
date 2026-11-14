@@ -32,6 +32,7 @@ import { createHostBridge, validHostOrigin, readsAsCard } from './host-bridge.mj
 import { editStrings, fmt } from './edit3-i18n.mjs';
 import { createNotices } from './notice.mjs';
 import { leaveStep, resolveLeave } from './leave-edit.mjs';
+import { previewStep } from './preview-switch.mjs';
 import { withRaw, backId, freshBackId, insertCell, removeCell, pair, unpair, canPair } from './pairing.mjs';
 import { VIEW_IDS, fmRead, fmWrite, readViews, toggleView, applySetting } from './card-settings.mjs';
 import { NETWORKS, parseSocial, composeSocial } from './social-rows.mjs';
@@ -1261,6 +1262,10 @@ function saveRaw() {
   closeSheet(true);
   draw(); show(); setPaint();
 }
+// What the preview frame holds: the document it was given (everything the page is made from) and the view it shows.
+// The same document in another view is the SAME page — the frame is asked to switch in place (the deck's own
+// window.__deckView, the switch a visitor's tap makes), not handed the document again (w3/preview-switch.mjs).
+let shown = null;
 function show() {
   if (!hostWaiting && !m.cells.length && view !== 'wall') editing = true;   // nothing to look at yet: the row's one big "+"
   paintViews(); paintMain();
@@ -1273,7 +1278,11 @@ function show() {
     lsSet('reef-card-layout', null);   // the deck remembers a visitor's last pick; the editor names the view instead
     // the sandbox always says its pool switch out loud (true unless set off): deck.js counts only `true` as in the
     // pool, so a page that says nothing — host mode today, until the platform side exists — shows no reef.cards card
-    el('deckframe').srcdoc = renderCardHTML(md, { handle, deck: { view, ...(SANDBOX ? { pool: poolOn() } : {}) } });
+    const deck = { view, ...(SANDBOX ? { pool: poolOn() } : {}) };
+    const doc = JSON.stringify([md, handle, deck.pool]);
+    const f = el('deckframe');
+    if (previewStep(shown, { doc, view }, (v) => f.contentWindow.__deckView(v)) === 'render') f.srcdoc = renderCardHTML(md, { handle, deck });
+    shown = { doc, view };
   }
 }
 // The row and the wall are edit mode. Going from either to a view a visitor gets, with something unsaved, asks
