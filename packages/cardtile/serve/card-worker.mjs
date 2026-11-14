@@ -124,11 +124,12 @@ async function relayAvatar(ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE } from './card-api.mjs';
+import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE, languageKey } from './card-api.mjs';
+import { languagesOf, chooseLanguage, composeLanguage } from '../languages.mjs';
 import { vanityHost } from './card-vanity.mjs';
 import { EDIT3_BODY_HTML, EDIT3_BASE_CSS, EDIT3_CSS, EDIT3_JS, BORROWED, FONT_FILES } from './edit3-assets.mjs';
 import { DECK_CSS, DECK_JS } from './deck-assets.mjs';
-import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
+import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES, pickAcceptLanguage } from '../w/sandbox-i18n.mjs';
 import { validHostOrigin } from '../w3/host-bridge.mjs';
 import { withDeck, DECK_CSS_PATH, DECK_JS_PATH } from '../w3/deck-page.mjs';
 import { handleReport, REPORT_PATH } from './card-report.mjs';
@@ -590,6 +591,54 @@ const visitorLocale = (params, request) => primaryLocale(params.get('lang') || p
 // and avatar relays only, under their own image URLs), and `?lang=` is in the URL, which is every
 // cache's key already. A card that declares `lang:` does not vary, and its headers stay exactly as they were.
 const VARY_VISITOR_LANG = { Vary: 'Accept, Accept-Language' };
+
+// ── tile#304: a Card in several languages ────────────────────────────────────────────────────────
+//
+// A main file that lists `locales:` is served in the visitor's language when it has a file for it
+// (languages.mjs chooseLanguage: `?lang=`, then Accept-Language; composeLanguage: that file's words over
+// the main file's whole-Card keys and assets). Anything that cannot be honoured is the main file — never
+// a 404 because of language. Such a Card's answer depends on Accept-Language whenever no `?lang=` says
+// otherwise, so every one of its page and markdown answers carries VARY_VISITOR_LANG, plus
+// `Content-Language` (the language of the file actually served) — the markdown exits have no `<html lang>`.
+// A main file with no `locales:` is never asked: no extra read, no new header, the same bytes.
+//
+// The avatar and the icon files are the main file's in every language: their URLs carry no language,
+// they are cached for an hour without varying, and the picture is an asset (one per Card).
+
+/**
+ * cardLanguage: (main file, handle, gen, url, request, store) → what to serve.
+ *   { md, lang, listed, matched, by }  md = the file to serve (the main file when no language file
+ *   applies); lang = its language (the tag served, or the main file's own `lang:`, or '');
+ *   listed = the main file's `locales:` ([] = a Card in one language, and nothing below applies).
+ */
+async function cardLanguage(mainMd, handle, gen, url, request, store) {
+  const { listed, main } = languagesOf(mainMd);
+  if (!listed.length) return { md: mainMd, lang: '', listed, matched: null, by: null };
+  const choice = chooseLanguage(mainMd, { query: url.searchParams.get('lang'), acceptLanguage: request.headers.get('accept-language') }, pickAcceptLanguage);
+  const file = choice.tag ? await store.get(languageKey(handle, gen, choice.tag)) : null;
+  if (file == null) return { md: mainMd, lang: main || '', listed, matched: choice.tag ? null : choice.matched, by: choice.by };
+  return { md: composeLanguage(mainMd, file, choice.tag), lang: choice.tag, listed, matched: choice.tag, by: choice.by };
+}
+
+/** the headers every page and markdown answer of a Card with `locales:` adds (none for one without) */
+const languageHeaders = (served) => (!served.listed.length ? {}
+  : { ...VARY_VISITOR_LANG, ...(served.lang ? { 'Content-Language': served.lang } : {}) });
+
+/** `<base>?lang=<tag>`: the one way a language of a Card is addressed (no locale in the path, ever) */
+const withLang = (base, tag) => `${base}?lang=${encodeURIComponent(tag)}`;
+
+/**
+ * the alternates a search engine reads: one `hreflang` per listed language (its `?lang=` URL) and
+ * `x-default` (the bare address, which negotiates). Put into the page's own <head>: the renderer's
+ * `</head>` is the first one (withDeck finds it the same way), before any of the owner's content.
+ */
+function withAlternates(page, base, listed) {
+  if (!listed.length || !base) return page;
+  const links = [...listed.map((t) => [t, withLang(base, t)]), ['x-default', base]]
+    .map(([t, href]) => `<link rel="alternate" hreflang="${escLite(t)}" href="${escLite(href)}">`).join('');
+  const h = page.indexOf('</head>');
+  return h < 0 ? page : page.slice(0, h) + links + page.slice(h);
+}
 
 const html = (body, status = 200, env = null, handle = '', at = {}, blank = false, extra = {}) =>
   new Response(body, {
@@ -1239,15 +1288,23 @@ const router = {
       : resolved.root ? `https://${host}/${ROOT_HANDLE}.md` : `${resolved.cardUrl}.md`;
 
     const probe = cardHandleHeader(vanityHandle);
-    if (wantFat) return markdown(cardMd, { env, originalLength: cardMd, handle: resolved.handle, at, blank, extra: probe });
+    // tile#304 — the file this request is served: the main file, or (for a Card with `locales:`) the
+    // visitor's language over it. `blank` stays the main file's: whether a Card is still the template
+    // is a fact about the Card, as are its robots headers.
+    const served = await cardLanguage(cardMd, resolved.handle, gen, url, request, store);
+    const servedMd = served.md;
+    const langExtra = { ...probe, ...languageHeaders(served) };
+    if (wantFat) return markdown(servedMd, { env, originalLength: servedMd, handle: resolved.handle, at, blank, extra: langExtra });
 
     if (wantsMarkdown(request)) {
       // 🔴 Strip the assets by round-tripping through card-core, not by cutting text. parseCard
       // hoists `## assets` out of `cells` already, and serializeCard writes them back sorted at the
       // end — so dropping and re-attaching is byte-exact (measured on all three cards). A regex over
       // the file would be a second, weaker idea of where the lane begins.
-      const thin = serializeCard({ ...parseCard(cardMd), assets: {} });
-      return markdown(thin, { env, originalLength: cardMd, alternate: fatUrl, handle: resolved.handle, at, blank, extra: probe });
+      const thin = serializeCard({ ...parseCard(servedMd), assets: {} });
+      // a language file's whole file is addressed with its language, whatever chose it here
+      const alternate = served.listed.length && served.md !== cardMd ? withLang(fatUrl, served.lang) : fatUrl;
+      return markdown(thin, { env, originalLength: servedMd, alternate, handle: resolved.handle, at, blank, extra: langExtra });
     }
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
@@ -1259,16 +1316,21 @@ const router = {
     // Failure is not propagated. resolveChannels never throws and returns {} when YouTube is
     // unreachable, which lands the block on its designed degraded state (condition 3). A creator's
     // card must not go down because a video platform did.
-    const videos = await resolveChannels(cardMd, ytFetch);
+    const videos = await resolveChannels(servedMd, ytFetch);
 
     // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
     // address under the switch (reef.cards' root card = the bare origin), whatever host answered.
-    const canonicalUrl = vanityHandle ? resolved.cardUrl : cardUrlFor(resolved.handle, {}, env);
+    const baseUrl = vanityHandle ? resolved.cardUrl : cardUrlFor(resolved.handle, {}, env);
+    // tile#304 — a language a visitor asked for by `?lang=` and was served is its own page to a search
+    // engine: its canonical (and og:url) carry that `?lang=`, beside the alternates. Chosen by the header,
+    // the page is the bare address's, which negotiates, so the bare address is canonical.
+    const canonicalUrl = served.by === 'query' && served.matched ? withLang(baseUrl, served.matched) : baseUrl;
     // tile#298 — a card that names its language speaks it, chrome and all, to everyone (unchanged). One
     // that names none gets its CHROME in the visitor's language, and the response varies by it.
-    const chromeLang = frontmatter(cardMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
-    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(chromeLang ? { chromeLang } : {}) }),
-      200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
+    const chromeLang = frontmatter(servedMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
+    const page = withAlternates(renderCardHTML(servedMd, { ...resolved, canonicalUrl, videos, ...(chromeLang ? { chromeLang } : {}) }), baseUrl, served.listed);
+    return html(page, 200, env, resolved.handle, at, blank,
+      chromeLang ? { ...langExtra, ...VARY_VISITOR_LANG } : langExtra);
   },
 };
 
