@@ -105,11 +105,33 @@ routes = [
 
 [env.production.vars]
 PREVIEW = "false"
-# reef#2725 — the switch. Unset (or any value but exactly "reef.cards") = today: card.feelreef.com is
-# canonical, every non-vanity Card is noindex, nofollow. "reef.cards" = the move:
-#   card.feelreef.com/*        → 301 https://reef.cards/<same path + query>  (except /_api, POST, /edit)
-#   feelreef.com/<handle>      → 301 https://reef.cards/<handle>  (only reaches the Worker if routed)
-#   reef.cards/                → the root card (handle `feelreef`), indexable; other Cards there noindex
+# reef.cards has three stages, decided by two settings (card-worker.mjs `cardsHostStage`). Each setting
+# is on only when it is exactly "reef.cards"; unset or ANY other value ("true", "1", a typo) is off.
+#
+#   dark       neither set (today). reef.cards answers 404 to everything and reads nothing.
+#   open       CARDS_HOST_OPEN only (tile#299). Check the new host against the old one, handle by handle,
+#              before any printed QR code redirects:
+#                reef.cards/<handle>, reef.cards/   → exactly what card.feelreef.com answers for the same
+#                                                     path (same store read, same render), plus
+#                                                     X-Robots-Tag: noindex, nofollow; its canonical,
+#                                                     og:url and QR still name card.feelreef.com
+#                reef.cards: the page's own files   → the same (/_deck, /_coral, /_icon, /_yt, avatar, icons)
+#                reef.cards: everything else        → 404, dark (/_api, /report, security.txt, /edit,
+#                                                     /try/…, /_preview, POST to anything)
+#                card.feelreef.com, feelreef.com,
+#                creators' domains, saas, workers.dev → unchanged, byte for byte
+#   canonical  CARD_CANONICAL_HOST (reef#2725) — the move, whatever CARDS_HOST_OPEN says:
+#                card.feelreef.com/*      → 301 https://reef.cards/<same path + query>  (except /_api, POST, /edit)
+#                feelreef.com/<handle>    → 301 https://reef.cards/<handle>  (only reaches the Worker if routed)
+#                reef.cards/              → the root card (handle `feelreef`); Cards there are indexable
+#                                           (a blank-template Card is noindex)
+#
+# Forward: set CARDS_HOST_OPEN, compare, then set CARD_CANONICAL_HOST (leaving CARDS_HOST_OPEN set is
+# harmless). Back from open: remove CARDS_HOST_OPEN (nothing was redirected, nothing to undo). Back from
+# canonical to open: remove CARD_CANONICAL_HOST only — but the 301s it sent carry max-age=86400, so a
+# browser that followed one keeps going to reef.cards for up to a day: a Card path there gets the open
+# mirror, but a moved /try/edit, /report or security.txt gets the open stage's 404 until that day is up.
+# CARDS_HOST_OPEN = "reef.cards"
 # CARD_CANONICAL_HOST = "reef.cards"
 
 [[env.production.kv_namespaces]]

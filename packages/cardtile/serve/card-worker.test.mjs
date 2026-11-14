@@ -747,6 +747,28 @@ test('sandbox: locale comes from Accept-Language, one of the nine console locale
   }
 });
 
+// tile#298 r2 — the editor routes share the matcher, so they honour quality weights too.
+const Q_EDITOR_CASES = [
+  // [Accept-Language, sandbox <html lang>, host-mode locale]
+  ['ja;q=0,en;q=1', 'lang="en-US"', 'en'],
+  ['en;q=0.1,ja;q=1', 'lang="ja-JP"', 'ja'],
+  ['ja;q=0.2,zh-TW;q=0.9', 'lang="zh-TW"', 'zh'],
+];
+for (const [al, wantLang, wantLocale] of Q_EDITOR_CASES) {
+  test(`sandbox + host mode: Accept-Language ${JSON.stringify(al)} is read by quality → ${wantLocale}`, async () => {
+    const sandbox = await (await worker.fetch(
+      new Request('https://card.feelreef.com/try/edit', { headers: { 'accept-language': al } }), NEVER_TOUCHED,
+    )).text();
+    assert.ok(sandbox.includes(wantLang), `/try/edit ${al}: expected ${wantLang}`);
+    const { env } = untouchableEnv();
+    const host = await (await worker.fetch(new Request(
+      `https://card.feelreef.com/edit?host=${encodeURIComponent('https://feelreef.com')}`, { headers: { 'accept-language': al } },
+    ), env)).text();
+    const opts = JSON.parse(/window\.__CARDTILE_W3_OPTS__ = (\{.*?\});/.exec(host)[1]);
+    assert.equal(opts.locale, wantLocale, `/edit ${al}`);
+  });
+}
+
 test('sandbox: `?locale=` overrides Accept-Language, for manual testing/linking', async () => {
   const res = await worker.fetch(
     new Request('https://card.feelreef.com/try/edit?locale=ko', { headers: { 'accept-language': 'en-US' } }),
@@ -1286,7 +1308,10 @@ test('production Cards on canonical and fallback hosts carry noindex on every re
       assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
       const icon = /\.(ico|svg|png)$/.test(url);
       assert.equal(res.headers.get('cache-control'), icon ? 'public, max-age=3600' : 'public, max-age=60', url);
-      assert.equal(res.headers.get('vary'), icon ? null : 'Accept', url);
+      // tile#298: SERVING_CARD declares no `lang:`, so its HTML page's chrome follows the visitor and
+      // varies by Accept-Language too; the markdown exits are the owner's file and do not
+      const page = !icon && !/\.md$/.test(url) && !init.headers;
+      assert.equal(res.headers.get('vary'), icon ? null : page ? 'Accept, Accept-Language' : 'Accept', url);
     }
   }
   // reef#2618 r2: a creator's domain routes by its binding only, so with none it names no card on
@@ -1312,7 +1337,10 @@ test('a bound vanity Card stays indexable, while preview and demo Cards include 
       assert.equal(res.headers.get('x-robots-tag'), robots, `${handle} ${preview} ${url}`);
       const icon = /\.(ico|svg|png)$/.test(url);
       assert.equal(res.headers.get('cache-control'), icon ? 'public, max-age=3600' : 'public, max-age=60', url);
-      assert.equal(res.headers.get('vary'), icon ? null : 'Accept', url);
+      // tile#298: SERVING_CARD declares no `lang:`, so its HTML page's chrome follows the visitor and
+      // varies by Accept-Language too; the markdown exits are the owner's file and do not
+      const page = !icon && !/\.md$/.test(url) && !init.headers;
+      assert.equal(res.headers.get('vary'), icon ? null : page ? 'Accept, Accept-Language' : 'Accept', url);
     }
   }
 });
