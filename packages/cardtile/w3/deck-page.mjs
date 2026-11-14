@@ -9,7 +9,9 @@
 //                                   view / back) — never the whole file (given a whole file, deck.js
 //                                   builds its items from Markdown), and never the rest of the
 //                                   frontmatter: an author's other values have no business in a script
-//             window.__deckStrings  the visitor's words, in the card's own `lang:` (w3/deck-i18n.mjs)
+//             window.__deckStrings  the visitor's words, in the card's own `lang:` (w3/deck-i18n.mjs); for a
+//                                   card with none, the caller's `lang` is the VISITOR's (card-worker
+//                                   renderCardHTML chromeLang, tile#298) — the words only, never <html lang>
 //             window.__deckRef      the handle, for the reef.cards link's ?ref= (absent: no ref)
 //             window.__pool         only when the caller says so. The card pool is a PLATFORM switch,
 //                                   never a file key (reef#2913). To deck.js, only true means "in the
@@ -29,6 +31,11 @@ import { deckStrings } from './deck-i18n.mjs';
 export const DECK_CSS_PATH = `/_deck/deck-${DECK_VERSION}.css`;
 export const DECK_JS_PATH = `/_deck/deck-${DECK_VERSION}.js`;
 export const DECK_VIEWS = ['stack', 'list', 'wall'];
+
+// The sandbox the deck's "make your own" buttons open. deck.js still writes this address itself, twice,
+// at its last card's back (deck.js:195, tile#298 part 2); the switch to this constant (handed over the
+// way __deckStrings is) lands with the deck.js change, and is not on the page until then.
+export const DECK_TRY_URL = 'https://card.feelreef.com/try/edit';
 
 export const DECK_KEYS = ['views', 'view', 'back'];
 
