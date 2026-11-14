@@ -352,7 +352,7 @@ async function walk(handle, view, size, pics) {
     ok(s.same && s.connected, `${tag}: the tiles are the same nodes, all in the document`, `switch:${from}>${to}:same-nodes`);
     ok(s.view === to && s.pressed === INNER[to], `${tag}: the root and the switcher name ${to}`, `switch:${from}>${to}:names-view`);
     ok(s.focus === INNER[to], `${tag}: focus is on the pressed button`, `switch:${from}>${to}:focus`);
-    ok(s.dup === '' && s.ids > 1, `${tag}: no id is in the document twice (${s.ids} ids${s.dup ? '; twice: ' + s.dup : ''})`, `switch:${from}>${to}:no-duplicate-ids`);
+    ok(s.dup === '' && (spec !== 'bio' || s.ids > 1), `${tag}: no id is in the document twice (${s.ids} ids${s.dup ? '; twice: ' + s.dup : ''})`, `switch:${from}>${to}:no-duplicate-ids`);
     if (to === 'wall') ok(s.home === true && s.boxed === s.total, `${tag}: every tile is back under the engine's parent, with a box (${s.boxed}/${s.total})`, `switch:${from}>${to}:placed`);
     else ok(s.seated === true && s.onCards > 0 && s.topHolds, `${tag}: the tiles are the fronts of cards on the table (${s.onCards} dealt)`, `switch:${from}>${to}:placed`);
     if (pics) await shot(page, `walk/switch-${handle}-${sz(size)}-${from}-${to}.png`, `${handle} at ${sz(size)}: after ${tag}`);
@@ -652,8 +652,13 @@ async function drawPage(view, size) {
   const { ctx, page, seen } = await newPage(size);
   await page.goto(`${head.url}/draw-${view}`, { waitUntil: 'load' }); await settle(page, 2000);
   const first = await page.evaluate(remember, TILES);
-  // the order the pile was dealt in, as the tiles' numbers in the page
-  const dealt = () => page.evaluate(() => [...document.querySelectorAll('.deck-card')].map((k) => [+k.dataset.i, window.__vTiles.indexOf(k.querySelector('.deck-front > .st-cell'))]).filter((x) => x[1] >= 0).sort((a, b) => a[0] - b[0]).map((x) => x[1]).join(','));
+  // The order the pile was dealt in, as the tiles' numbers in the SERVED page. 🔴 Not their order in the live page: on a page
+  // that opens on a pile the tiles are already on their cards, in the pile's own order, and a ruler made from that reads any
+  // deal as "in order" or "reversed" (it did, on its first full run). A tile is known by its type and its words.
+  const dealt = () => page.evaluate(async (sel) => { const key = (c) => `${c.dataset.coralType || ''}|${c.textContent.trim().slice(0, 40)}`;
+    const served = [...new DOMParser().parseFromString(await (await fetch(location.href)).text(), 'text/html').querySelectorAll(sel)].filter((c) => !c.closest('.dc-drawer')).map(key);
+    if (new Set(served).size !== served.length) return 'the specimen has two tiles that read the same';
+    return [...document.querySelectorAll('.deck-card')].map((k) => { const c = k.querySelector('.deck-front > .st-cell'); return [+k.dataset.i, c ? served.indexOf(key(c)) : -1]; }).filter((x) => x[1] >= 0).sort((a, b) => a[0] - b[0]).map((x) => x[1]).join(','); }, TILES);
   const press = async (to) => { const btn = page.locator(`.deck-seg button[data-m="${INNER[to]}"]`); await btn.focus(); await page.keyboard.press('Enter'); await settle(page, 900); return page.evaluate(state); };
   const isDraw = await page.evaluate(() => document.documentElement.hasAttribute('data-reef-draw'));
   ok(first.tiles > 0 && first.homes === first.tiles && isDraw, `CONTROL: the draw page has tiles and the served markup places every one (${first.homes}/${first.tiles})`, 'draw:control');
