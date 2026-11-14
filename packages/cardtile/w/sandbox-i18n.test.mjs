@@ -112,6 +112,47 @@ test('localeFromAcceptLanguage: first recognised tag in header order wins, check
   assert.equal(localeFromAcceptLanguage('pt-BR,es-ES;q=0.9'), 'pt');
 });
 
+// tile#298 r2 — quality weights are read, not assumed to be in descending order.
+const Q_CASES = [
+  // [what, header, expected]
+  ['q=0 excludes a language, even when it is written first', 'ja;q=0,en;q=1', 'en'],
+  ['a later range with a higher q wins', 'en;q=0.1,ja;q=1', 'ja'],
+  ['a later range with a higher q wins (Traditional Chinese)', 'ja;q=0.2,zh-TW;q=0.9', 'zh'],
+  ['the only language excluded with q=0 → en', 'ja;q=0', 'en'],
+  ['the wildcard is not a language we speak: ignored', '*;q=0.5, ja;q=0.4', 'ja'],
+  ['equal q keeps header order', 'de;q=0.5,fr;q=0.5', 'de'],
+  ['equal q keeps header order (reversed)', 'fr;q=0.5,de;q=0.5', 'fr'],
+  ['no q means q=1, and ties with an explicit q=1 by order', 'ko,ja;q=1', 'ko'],
+  ['an explicit q=1 beats a later default', 'ja;q=1,ko', 'ja'],
+  ['spaces around ; and = are allowed', 'en ; q = 0.1 , ja ; q = 0.8', 'ja'],
+  ['a q above 1 clamps to 1 (ties, header order)', 'de;q=1,ja;q=5', 'de'],
+  ['a malformed q drops that range', 'ja;q=abc,en;q=0.1', 'en'],
+  ['an empty q drops that range', 'ja;q=,en;q=0.1', 'en'],
+  ['a negative q drops that range', 'ja;q=-1,en;q=0.1', 'en'],
+  ['a malformed q on the only range → en', 'ja;q=high', 'en'],
+  ['other parameters do not hide the q', 'ja;foo=bar;q=0,ko', 'ko'],
+];
+for (const [what, header, want] of Q_CASES) {
+  test(`localeFromAcceptLanguage: ${what} — ${JSON.stringify(header)}`, () => {
+    assert.equal(localeFromAcceptLanguage(header), want);
+  });
+}
+
+test('localeFromAcceptLanguage: only the first 32 ranges are considered', () => {
+  const filler = Array.from({ length: 31 }, (_, i) => `x${i};q=0.5`);
+  assert.equal(localeFromAcceptLanguage([...filler, 'ja;q=0.1'].join(',')), 'ja', 'the 32nd range still counts');
+  assert.equal(localeFromAcceptLanguage([...filler, 'it', 'ja'].join(',')), 'en', 'the 33rd range does not');
+  assert.equal(localeFromAcceptLanguage([...filler, 'en;q=0.1', 'ja;q=1'].join(',')), 'en', 'a better 33rd range does not win');
+});
+
+test('localeFromAcceptLanguage: an absurd 1 MB header stays fast', () => {
+  const huge = 'ja;q=0.5,' + 'x'.repeat(1 << 20) + ';q=' + ';'.repeat(1 << 20);
+  const t0 = performance.now();
+  assert.equal(localeFromAcceptLanguage(huge), 'ja');
+  assert.equal(localeFromAcceptLanguage(Array(1 << 18).fill('ja;q=0').join(',') + ',en'), 'en');
+  assert.ok(performance.now() - t0 < 200, 'well under 200 ms');
+});
+
 test('localeFromAcceptLanguage: no header, or nothing recognised, → en', () => {
   assert.equal(localeFromAcceptLanguage(''), 'en');
   assert.equal(localeFromAcceptLanguage(undefined), 'en');

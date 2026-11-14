@@ -396,13 +396,19 @@ const cardName = (cardMd, handle) => /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim(
  *     With no `deck.pool` either, the page says nothing about the pool and deck.js draws nothing:
  *     only `true` is in, so an unknown switch never opts a Card in.
  * An editIndex render never carries the closing tile: that wall is the author's own boxes only.
+ *
+ * `ctx.chromeLang` (tile#298, CALLER-supplied — only the Worker's card exit sets it, from visitorLocale)
+ * is the language of the deck's own words (its view switcher, its calls to action) for a card that
+ * declares NO `lang:`. A card that declares one keeps its own and never reads chromeLang, so its page is
+ * byte-identical with or without it. Never `<html lang>` (renderFlat reads the card's own `lang:`
+ * only) and never the owner's content: the deck's words are all it reaches.
  */
 export function renderCardHTML(cardMd, ctx = {}) {
   const pool = ctx.editIndex ? undefined : poolOf(ctx);
   const flat = renderFlat(cardMd, ctx.editIndex && ctx.pool !== undefined ? { ...ctx, pool: undefined } : ctx);
   if (ctx.deck === false || ctx.editIndex) return flat;
   const deck = ctx.deck && typeof ctx.deck === 'object' ? ctx.deck : {};
-  return withDeck(flat, cardMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: frontmatter(cardMd, 'lang') });
+  return withDeck(flat, cardMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: frontmatter(cardMd, 'lang') || ctx.chromeLang || '' });
 }
 
 function renderFlat(cardMd, ctx) {
@@ -570,6 +576,20 @@ const CARD_HEADERS = (env, handle, at, blank = false) => ({
   // (the CARD_NOINDEX_ALL header is NOT added here: withNoindexAll wraps every exit, see the bottom)
   ...ROBOTS_HEADERS(env, handle, at, blank),
 });
+
+// tile#298 — the visitor's language, for the page CHROME of a card that declares no `lang:`: `?lang=`,
+// then the older `?locale=`, then Accept-Language, then English. One rule with the editor's two routes
+// below (and the same matcher, sandbox-i18n's): a visitor who arrives speaking Japanese gets Japanese
+// buttons on the card page and in the editor alike.
+const visitorLocale = (params, request) => primaryLocale(params.get('lang') || params.get('locale')
+  || localeFromAcceptLanguage(request.headers.get('accept-language')));
+
+// 🔴 …and the cache rule that comes with it. A card page whose words follow the visitor differs by
+// Accept-Language, so it says so — beside Accept, never instead of it (see CARD_HEADERS). Nothing else
+// keys this page: the Worker keeps no copy of rendered HTML (caches.default holds the /_icon/, /_yt/
+// and avatar relays only, under their own image URLs), and `?lang=` is in the URL, which is every
+// cache's key already. A card that declares `lang:` does not vary, and its headers stay exactly as they were.
+const VARY_VISITOR_LANG = { Vary: 'Accept, Accept-Language' };
 
 const html = (body, status = 200, env = null, handle = '', at = {}, blank = false, extra = {}) =>
   new Response(body, {
@@ -927,8 +947,7 @@ const router = {
           headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' },
         });
       }
-      const locale = primaryLocale(params.get('lang') || params.get('locale')
-        || localeFromAcceptLanguage(request.headers.get('accept-language')));
+      const locale = visitorLocale(params, request);
       return new Response(editorHtml(locale, { host }), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
@@ -952,8 +971,7 @@ const router = {
       // always match the tag verbatim (Traditional/Simplified Chinese in particular — see
       // sandbox-i18n.mjs's `resolveLocaleKey`). Passing the tag straight to the lookup below would
       // silently fall back to English for exactly the links this override exists to make work.
-      const locale = primaryLocale(params.get('lang') || params.get('locale')
-        || localeFromAcceptLanguage(request.headers.get('accept-language')));
+      const locale = visitorLocale(params, request);
       return new Response(editorHtml(locale), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
@@ -1246,7 +1264,11 @@ const router = {
     // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
     // address under the switch (reef.cards' root card = the bare origin), whatever host answered.
     const canonicalUrl = vanityHandle ? resolved.cardUrl : cardUrlFor(resolved.handle, {}, env);
-    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos }), 200, env, resolved.handle, at, blank, probe);
+    // tile#298 — a card that names its language speaks it, chrome and all, to everyone (unchanged). One
+    // that names none gets its CHROME in the visitor's language, and the response varies by it.
+    const chromeLang = frontmatter(cardMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
+    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(chromeLang ? { chromeLang } : {}) }),
+      200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
   },
 };
 
