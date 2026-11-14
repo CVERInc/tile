@@ -25,7 +25,12 @@
 //   print     each view under print media: a picture and the count of tiles with a box, beside --base
 //   boot      THE DECK DOES NOT COME UP: the script fails to load, throws at its first line, throws
 //             half-way through building the pile, or is merely slow. Each must leave the wall on
-//             screen (every tile with a box), never an empty table.
+//             screen (every tile with a box), never an empty table. So must a page under a policy
+//             that refuses inline scripts and inline handlers (csp-*), and a page whose card file
+//             is refused or slow (file-*).
+//   draw      the draw page (data-reef-draw: the tiles are dealt in a shuffled order): the wall after
+//             a pile is the engine's own grid, runs of links and full-bleed text.
+//             🔴 SYNTHETIC like `file`: a Card page of this Worker with the attribute added.
 //   long      200 tiles: the six switches, and the time from navigation start to the top card being
 //             on the table — interleaved with --base, medians side by side.
 //   editor    /try/edit with a card in it: the preview frame changes view in place (its window
@@ -46,7 +51,7 @@
 //   … --no-move-before           take Element.moveBefore away before the page runs: the path WebKit and
 //                                Firefox take today. 🔴 Still Chromium underneath — it shows what the
 //                                fallback does to a frame, not how another engine paints.
-//   … --only a,b                 just these steps (prepaint walk print boot long editor file before)
+//   … --only a,b                 just these steps (prepaint walk print boot long editor file draw before)
 //   … --dry                      no browser: serve the pages, read the markup back, exit
 //
 // Pictures: out/card-verify/deck-views/<engine>/ (walk/ holds one per switch), listed in
@@ -119,6 +124,9 @@ async function serve(w) {
       // the card-file specimen (see the header: synthetic)
       const f = /^\/file-(stack|list|wall)$/.exec(req.url), fm = /^\/_file\/(stack|list|wall)\.card\.md$/.exec(req.url);
       if (fm) { res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' }); res.end(fileMd(fm[1])); return; }
+      // the draw page (see the header: synthetic) — the link-in-bio specimen with the draw page's attribute
+      const dr = /^\/draw-(stack|list|wall)$/.exec(req.url);
+      if (dr) { const r = await ask(`/bio-${dr[1]}`); const t = (await r.text()).replace('<html', '<html data-reef-draw'); const h = Object.fromEntries(r.headers); delete h['content-length']; res.writeHead(r.status, h); res.end(t); return; }
       if (f) {
         const r = await ask(`/filehost-${f[1]}`); let t = await r.text();
         t = t.replace('<html', `<html data-card-src="/_file/${f[1]}.card.md"`);
@@ -245,6 +253,7 @@ function state() {
     focus: a && a.closest('.deck-seg') ? a.dataset.m : (a ? a.tagName.toLowerCase() : ''),
     pressed: [...document.querySelectorAll('.deck-seg button[aria-pressed="true"]')].map((b) => b.dataset.m).join(','),
     scrollY: Math.round(scrollY), cur: typeof window.__deckCur === 'function' ? window.__deckCur() : null,
+    dup: (() => { const n = new Map(); for (const e of document.querySelectorAll('[id]')) n.set(e.id, (n.get(e.id) || 0) + 1); return [...n].filter(([, k]) => k > 1).map(([id, k]) => `${id}×${k}`).join(' '); })(), ids: document.querySelectorAll('[id]').length,
     moveBefore: typeof Element.prototype.moveBefore === 'function',
   };
 }
@@ -343,6 +352,7 @@ async function walk(handle, view, size, pics) {
     ok(s.same && s.connected, `${tag}: the tiles are the same nodes, all in the document`, `switch:${from}>${to}:same-nodes`);
     ok(s.view === to && s.pressed === INNER[to], `${tag}: the root and the switcher name ${to}`, `switch:${from}>${to}:names-view`);
     ok(s.focus === INNER[to], `${tag}: focus is on the pressed button`, `switch:${from}>${to}:focus`);
+    ok(s.dup === '' && s.ids > 1, `${tag}: no id is in the document twice (${s.ids} ids${s.dup ? '; twice: ' + s.dup : ''})`, `switch:${from}>${to}:no-duplicate-ids`);
     if (to === 'wall') ok(s.home === true && s.boxed === s.total, `${tag}: every tile is back under the engine's parent, with a box (${s.boxed}/${s.total})`, `switch:${from}>${to}:placed`);
     else ok(s.seated === true && s.onCards > 0 && s.topHolds, `${tag}: the tiles are the fronts of cards on the table (${s.onCards} dealt)`, `switch:${from}>${to}:placed`);
     if (pics) await shot(page, `walk/switch-${handle}-${sz(size)}-${from}-${to}.png`, `${handle} at ${sz(size)}: after ${tag}`);
@@ -374,6 +384,17 @@ async function walk(handle, view, size, pics) {
           await page.keyboard.press('Escape'); await settle(page, 1000);
           const cl = await page.evaluate(() => { const k = document.querySelector('.deck-card.is-top'); return { open: document.documentElement.classList.contains('open'), front: !!k && getComputedStyle(k.querySelector('.deck-front')).visibility === 'visible' }; });
           ok(o.open && o.back && o.text && o.front === 'hidden' && !cl.open && cl.front, `${to}${wasWall ? ' (after the wall)' : ''}: a card turns over to its own back and goes back (open=${o.open} back=${o.back} its text=${o.text} · put back=${!cl.open} front=${cl.front})`, `flip:${to}${wasWall ? ':after-wall' : ''}`);
+        }
+        // the OTHER tile that names the same back (tile 8): the back is one node, on whichever card is turned over
+        await page.evaluate(() => window.__deckJump && window.__deckJump(8)); await settle(page, 900);
+        const c8 = await page.evaluate(() => { const t = document.querySelector('.deck-card.is-top.can-flip'); if (!t || !t.querySelector('[data-drawer="about"]')) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + Math.min(60, r.height / 4) }; });
+        if (!c8) fail(`${to}: the card of the second tile that names the back is not up, or cannot be turned over`);
+        else {
+          await page.mouse.click(c8.x, c8.y); await settle(page, 1000);
+          const o = await page.evaluate(() => { const k = document.querySelector('.deck-card.is-open'); const b = k && k.querySelector('.deck-back'); const r = b && b.getBoundingClientRect(); const t = document.getElementById('drawer-about-title'); const tr = t && t.getBoundingClientRect();
+            return { open: !!k && !!k.querySelector('.deck-front [data-drawer="about"]'), back: !!b && r.width > 0 && getComputedStyle(b).visibility === 'visible', text: !!b && b.textContent.includes('The back of the card'), title: !!t && !!k && k.contains(t) && tr.width > 0, titles: document.querySelectorAll('[id="drawer-about-title"]').length, bodies: document.querySelectorAll('.dc-drawer-body').length }; });
+          await page.keyboard.press('Escape'); await settle(page, 1000);
+          ok(o.open && o.back && o.text && o.title && o.titles === 1, `${to}${wasWall ? ' (after the wall)' : ''}: the second tile naming the same back turns over to it — the one node, its title's id on this card (back=${o.back} its text=${o.text} title here=${o.title}, ${o.titles} title id, ${o.bodies} back bodies in the page)`, `flip-shared:${to}${wasWall ? ':after-wall' : ''}`);
         }
         await page.evaluate(() => window.__deckJump && window.__deckJump(0)); await settle(page, 500);
         // walking the pile re-orders the cards: does a frame on one of them load again?
@@ -428,27 +449,49 @@ async function boot(variant, handle) {
     if (variant === 'load-error') return route.abort();
     if (variant === 'throws-first-line') return route.fulfill({ contentType: 'text/javascript', body: 'throw new Error("injected: first line");' });
     if (variant === 'throws-half-way') { const r = await route.fetch(); const t = await r.text(); control = t.split(HALF).length === 2; return route.fulfill({ response: r, body: t.replace(HALF, 'throw new Error("injected: half-way");' + HALF) }); }
+    if (variant === 'csp-no-deck') return route.abort();
+    if (variant === 'csp-throws-half-way') { const r = await route.fetch(); const t = await r.text(); control = t.split(HALF).length === 2; return route.fulfill({ response: r, body: t.replace(HALF, 'throw new Error("injected: half-way");' + HALF) }); }
+    if (variant.startsWith('csp-') || variant.startsWith('file-')) return route.continue();
     await new Promise((r) => setTimeout(r, 5000)); return route.continue();   // slow
   });
+  // a policy that refuses every inline script and every inline handler: the head script, the hand-over script and onerror alike
+  if (variant.startsWith('csp-')) await page.route((u) => u.pathname === `/${handle}`, async (route) => { const r = await route.fetch(); return route.fulfill({ response: r, headers: { ...r.headers(), 'content-security-policy': "script-src 'self'" } }); });
+  // the card file of a data-card-src page: refused, or five seconds late
+  if (variant === 'file-refused') await page.route(/\/_file\//, (route) => route.abort());
+  if (variant === 'file-slow') await page.route(/\/_file\//, async (route) => { await new Promise((r) => setTimeout(r, 5000)); return route.continue(); });
+  const view = handle.split('-')[1], what = variant === 'file-slow' ? 'the card file' : 'deck.js';
   const look = () => page.evaluate((sel) => { const tiles = [...document.querySelectorAll(sel)].filter((c) => !c.closest('.dc-drawer, .deck-table')); const seg = document.querySelector('.deck-seg'); const r = seg && seg.getBoundingClientRect();
-    return { cls: document.documentElement.className, view: document.documentElement.dataset.view, off: document.documentElement.hasAttribute('data-deck-off'), boot: window.__deckBoot || '', boxed: tiles.filter((c) => { const b = c.getBoundingClientRect(); return b.width > 0 && b.height > 0; }).length, total: tiles.length, seg: !!(r && r.width > 0), top: !!document.querySelector('.deck-stack > .deck-card.is-top') }; }, TILES);
+    return { cls: document.documentElement.className, view: document.documentElement.dataset.view, off: document.documentElement.hasAttribute('data-deck-off'), boot: window.__deckBoot || '', inline: typeof window.__deckFail === 'function' || window.__deckStrings !== undefined, boxed: tiles.filter((c) => { const b = c.getBoundingClientRect(); return b.width > 0 && b.height > 0; }).length, total: tiles.length, seg: !!(r && r.width > 0), top: !!document.querySelector('.deck-stack > .deck-card.is-top') }; }, TILES);
   const nav = page.goto(`${head.url}/${handle}`, { waitUntil: 'load' }).catch(() => {});
-  if (variant === 'slow') {
+  if (variant === 'slow' || variant === 'file-slow') {
     await page.waitForSelector('footer.st-footer', { state: 'attached' }); await page.waitForTimeout(3700);
     const w = await look();
-    await shot(page, `boot-slow-1-wall-while-waiting-${handle}.png`, `deck.js is slow (5 s): ${handle} after 3.7 s — the wall, not an empty table`);
-    console.log(`  slow ${handle}: after 3.7 s class="${w.cls}" view=${w.view} tiles with a box ${w.boxed}/${w.total}`);
-    ok(w.boxed === w.total && w.total > 0 && !w.off && w.view === handle.split('-')[1], `the script is slow: the wall is on screen after the wait (${w.boxed}/${w.total}), and the page still means to open on ${handle.split('-')[1]}`, 'boot:slow:wall-meanwhile');
-    await nav; await settle(page, 2500);
+    await shot(page, `boot-${variant}-1-wall-while-waiting-${handle}.png`, `${what} is slow (5 s): ${handle} after 3.7 s — the wall, not an empty table`);
+    console.log(`  ${variant} ${handle}: after 3.7 s class="${w.cls}" view=${w.view} boot="${w.boot}" tiles with a box ${w.boxed}/${w.total}`);
+    if (variant === 'file-slow') ok(w.boot === 'pending', `CONTROL: the deck is waiting for its card file (boot="${w.boot}")`, 'boot:file-slow:control');
+    ok(w.boxed === w.total && w.total > 0 && !w.off && w.view === view, `${what} is slow: the wall is on screen after the wait (${w.boxed}/${w.total}), and the page still means to open on ${view}`, `boot:${variant}:wall-meanwhile`);
+    await nav; await settle(page, variant === 'file-slow' ? 4000 : 2500);
     const a = await look();
-    await shot(page, `boot-slow-2-pile-after-arrival-${handle}.png`, `deck.js is slow (5 s): ${handle} once it arrived — the pile`);
-    ok(a.cls.split(' ').includes('deck') && a.top && a.boot === 'ready', `…and the pile opens when the script arrives (class="${a.cls}")`, 'boot:slow:pile-after');
+    await shot(page, `boot-${variant}-2-pile-after-arrival-${handle}.png`, `${what} is slow (5 s): ${handle} once it arrived — the pile`);
+    ok(a.cls.split(' ').includes('deck') && a.top && a.boot === 'ready', `…and the pile opens when it arrives (class="${a.cls}")`, `boot:${variant}:pile-after`);
+  } else if (variant.startsWith('csp-')) {
+    await nav; await settle(page, 1500);
+    const a = await look();
+    await shot(page, `boot-${variant}-${handle}.png`, `${variant} (inline scripts and handlers refused): ${handle}`);
+    console.log(`  ${variant} ${handle}: class="${a.cls}" view=${a.view} deck-off=${a.off} boot="${a.boot}" inline ran=${a.inline} tiles with a box ${a.boxed}/${a.total} top card=${a.top}`);
+    ok(!a.inline, 'CONTROL: the policy held — no inline script of the page ran', `boot:${variant}:control`);
+    if (variant === 'csp-deck-runs') ok(a.boot === 'ready' && a.cls.split(' ').includes('deck') && a.top, `inline refused, deck.js allowed: the pile comes up from the markup alone (class="${a.cls}")`, `boot:${variant}:pile`);
+    else {
+      if (variant === 'csp-throws-half-way') ok(control && a.off, 'CONTROL: the script ran, threw where it was told to, and said the deck is off', `boot:${variant}:threw`);
+      ok(a.boxed === a.total && a.total > 0 && !a.cls.split(' ').includes('deck'), `${variant}: the page is the wall — every tile has a box (${a.boxed}/${a.total})`, `boot:${variant}:wall`);
+    }
   } else {
     await nav; await settle(page, 1500);
     const a = await look();
     await shot(page, `boot-${variant}-${handle}.png`, `deck.js ${variant}: ${handle} — must be the wall`);
     console.log(`  ${variant} ${handle}: class="${a.cls}" view=${a.view} deck-off=${a.off} boot="${a.boot}" tiles with a box ${a.boxed}/${a.total} switcher drawn=${a.seg}`);
     if (variant === 'throws-half-way') ok(control, 'CONTROL: the place the throw is injected at is in the served script exactly once', 'boot:control');
+    if (variant === 'file-refused') ok(a.boot === 'failed', `CONTROL: the deck asked for its card file and was refused (boot="${a.boot}")`, 'boot:file-refused:control');
     if (variant !== 'load-error') ok(seen.errs.some((e) => /injected|did not come up/.test(e)), 'CONTROL: the script did throw (the page\'s console says so)', `boot:${variant}:threw`);
     ok(a.boxed === a.total && a.total > 0 && !a.cls.split(' ').includes('deck'), `${variant}: the page is the wall — every tile has a box (${a.boxed}/${a.total})`, `boot:${variant}:wall`);
     ok(a.off && a.view === 'wall' && !a.seg, `${variant}: the root says the deck is off, and no switcher is drawn`, `boot:${variant}:says-so`);
@@ -569,7 +612,69 @@ async function filePage(view, size) {
     }
     from = to;
   }
+  // the place carries over: pile item N ⇄ the file wall's N-th tile (item 300 is the tile that reads "301")
+  const press = async (to) => { const btn = page.locator(`.deck-seg button[data-m="${INNER[to]}"]`); await btn.focus(); await page.keyboard.press('Enter'); await settle(page, 900); };
+  const onWall = () => page.evaluate(() => { const h = document.querySelector('.vb-tile.vb-hit'); const r = h && !h.hidden ? h.getBoundingClientRect() : null; const mid = innerHeight / 2;
+    const under = [...document.querySelectorAll('.vb-tile')].filter((t) => { if (t.hidden) return false; const b = t.getBoundingClientRect(); return b.top <= mid && b.bottom >= mid; }).map((t) => t.textContent);
+    return { hit: h ? h.textContent : '', off: r ? Math.round((r.top + r.bottom) / 2 - mid) : null, rowH: r ? Math.round(r.height) + 12 : 0, y: Math.round(scrollY), under }; });
+  for (const pile of view === 'list' ? ['list', 'stack'] : ['stack', 'list']) {
+    if ((await look()).view !== pile) await press(pile);
+    const firstItem = await page.evaluate(() => window.__mdFirst);
+    await page.evaluate((i) => window.__deckJump(i), firstItem + 300); await settle(page, 700);
+    const a = await look();
+    await press('wall');
+    const w = await onWall();
+    console.log(`    place: ${pile} cur=${a.cur} (item 300) → wall scrollY=${w.y}, marked "${w.hit}", its centre ${w.off}px from the middle of the window; under the middle: ${w.under.join(' ')}`);
+    ok(a.cur === firstItem + 300, `CONTROL: the ${pile} is on item 300 (cur=${a.cur}, the items start at ${firstItem})`, `file:place:${pile}:control`);
+    ok(w.hit === '301' && w.y > 0 && w.off !== null && Math.abs(w.off) <= 2, `${pile} → wall: the wall opens on the item that was up — "${w.hit}" is marked, ${w.off}px from the middle of the window (scrollY ${w.y})`, `file:place:${pile}>wall`);
+    if (pile === 'stack') await shot(page, `file-place-wall-after-${pile}-${view}-${sz(size)}.png`, `SYNTHETIC card-file page opened on ${view}: the wall entered from ${pile} on item 300 — the tile "301" marked, in the middle`);
+    await press(pile);
+    const b = await look();
+    ok(b.cur === firstItem + 300, `wall → ${pile}: the wall was left where it was entered, and the pile is on item 300 again (cur=${b.cur})`, `file:place:wall>${pile}:same`);
+    // read on down the wall (seven rows), then back: the card that is up is one of the tiles under the middle of the window
+    await press('wall');
+    const w1 = await onWall(); await page.evaluate((d) => scrollBy(0, d), w1.rowH * 7); await settle(page, 400);
+    const w2 = await onWall();
+    await press(pile);
+    const c = await look();
+    ok(w2.under.length > 0 && w2.under.includes(String(c.cur - firstItem + 1)), `wall (scrolled on to ${w2.under[0]}…${w2.under.at(-1)}) → ${pile}: the card that is up is a tile from the middle of the window (item "${c.cur - firstItem + 1}")`, `file:place:wall>${pile}:scrolled`);
+    await press('wall'); await page.evaluate(() => scrollTo(0, 0)); await settle(page, 300); await press(pile);
+    const t = await look();
+    ok(t.cur === 0, `wall at its top → ${pile}: the first card (cur=${t.cur})`, `file:place:wall-top>${pile}`);
+  }
   ok(seen.errs.length === 0, `no console errors (${seen.errs.slice(0, 3).join(' | ') || 'none'})`, 'file:no-errors');
+  await ctx.close();
+}
+
+// ── draw: the draw page deals a shuffled pile; its wall is the engine's own markup ───────────────
+async function drawPage(view, size) {
+  at('draw', 'draw', view, sz(size));
+  const { ctx, page, seen } = await newPage(size);
+  await page.goto(`${head.url}/draw-${view}`, { waitUntil: 'load' }); await settle(page, 2000);
+  const first = await page.evaluate(remember, TILES);
+  // the order the pile was dealt in, as the tiles' numbers in the page
+  const dealt = () => page.evaluate(() => [...document.querySelectorAll('.deck-card')].map((k) => [+k.dataset.i, window.__vTiles.indexOf(k.querySelector('.deck-front > .st-cell'))]).filter((x) => x[1] >= 0).sort((a, b) => a[0] - b[0]).map((x) => x[1]).join(','));
+  const press = async (to) => { const btn = page.locator(`.deck-seg button[data-m="${INNER[to]}"]`); await btn.focus(); await page.keyboard.press('Enter'); await settle(page, 900); return page.evaluate(state); };
+  const isDraw = await page.evaluate(() => document.documentElement.hasAttribute('data-reef-draw'));
+  ok(first.tiles > 0 && first.homes === first.tiles && isDraw, `CONTROL: the draw page has tiles and the served markup places every one (${first.homes}/${first.tiles})`, 'draw:control');
+  let s = await page.evaluate(state), from = view, order = '';
+  if (view === 'wall') ok(s.home === true && s.boxed === s.total, `opened on the wall: the engine's markup (${s.boxed}/${s.total} with a box)`, 'draw:opens-on-wall');
+  for (const to of WALK[view]) {
+    s = await press(to); const tag = `${from} → ${to}`;
+    if (to === 'wall') {
+      ok(s.home === true && s.boxed === s.total && s.same && s.connected, `${tag}: after a shuffled pile every tile is back under the engine's own parent, in its own place, with a box (${s.boxed}/${s.total})`, `draw:${from}>${to}:wall`);
+      await shot(page, `draw-wall-after-${from}-${view}-${sz(size)}.png`, `SYNTHETIC draw page opened on ${view}: its wall after ${from}`);
+    } else {
+      const o = await dealt();
+      if (!order) { order = o; ok(o.split(',').length === first.tiles && o !== [...Array(first.tiles).keys()].join(','), `CONTROL: the pile is dealt shuffled (${o})`, 'draw:shuffled'); }
+      else ok(o === order, `${tag}: the pile kept the order it was dealt in`, `draw:${from}>${to}:order`);
+      ok(s.seated === true && s.onCards > 0 && s.topHolds, `${tag}: the tiles are the fronts of cards on the table (${s.onCards} dealt)`, `draw:${from}>${to}:pile`);
+    }
+    ok(s.dup === '', `${tag}: no id is in the document twice${s.dup ? ' (' + s.dup + ')' : ''}`, `draw:${from}>${to}:no-duplicate-ids`);
+    from = to;
+  }
+  const pe = seen.errs.filter((e) => e.startsWith('PAGEERROR'));
+  ok(pe.length === 0, `no script errors (${pe.slice(0, 3).join(' | ') || 'none'})`, 'draw:no-errors');
   await ctx.close();
 }
 
@@ -611,8 +716,9 @@ try {
   }
   if (want('boot')) {
     console.log('── boot: the deck does not come up');
-    for (const variant of FULL ? ['load-error', 'throws-first-line', 'throws-half-way', 'slow'] : ['throws-half-way']) await boot(variant, 'bio-stack');
+    for (const variant of FULL ? ['load-error', 'throws-first-line', 'throws-half-way', 'slow', 'csp-no-deck', 'csp-throws-half-way', 'csp-deck-runs'] : ['throws-half-way', 'csp-throws-half-way']) await boot(variant, 'bio-stack');
     if (FULL) await boot('throws-half-way', 'bio-list');
+    for (const variant of FULL ? ['file-refused', 'file-slow'] : ['file-refused']) await boot(variant, 'file-stack');
   }
   if (want('long')) {
     console.log('── long: 200 tiles, time to the top card');
@@ -626,6 +732,11 @@ try {
     console.log('── file: a page whose items are a card file (SYNTHETIC specimen)');
     for (const v of FULL ? VIEWS : ['wall']) await filePage(v, PHONE);
     if (FULL) await filePage('stack', DESK);
+  }
+  if (want('draw')) {
+    console.log('── draw: the draw page, a shuffled pile (SYNTHETIC specimen)');
+    for (const v of FULL ? VIEWS : ['stack']) await drawPage(v, PHONE);
+    if (FULL) await drawPage('stack', DESK);
   }
 } catch (e) { at('harness'); fail(`the harness itself stopped: ${String(e && e.stack || e).split('\n').slice(0, 4).join(' | ')}`); }
 
