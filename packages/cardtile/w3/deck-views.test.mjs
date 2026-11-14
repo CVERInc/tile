@@ -523,3 +523,30 @@ for (const pile of ['stack', 'list']) test(`a card-file page, ${pile} ⇄ wall: 
   assert.equal(win.scrollY, 0, 'the first card is the top of the wall');
   assert.ok(!doc.querySelector('.vb-tile.vb-hit'), 'an item is marked although the card that was up is not an item');
 });
+
+// 4 — the draw page deals its tiles in a shuffled order; the wall is still the engine's own markup
+test('the draw page: a shuffled pile, and the wall after it is the engine\'s grid, runs and bleed again', () => {
+  const p = open(card({ view: 'stack' }), { page: (h) => h.replace('<html', '<html data-reef-draw'), before: (win) => win.run('{ let k = 0; const seq = [0.9, 0.05, 0.5, 0.3, 0.7, 0.1]; Math.random = () => seq[k++ % seq.length]; }', 'a fixed shuffle') });
+  const { doc, cells, before } = p;
+  assert.ok(doc.documentElement.hasAttribute('data-reef-draw'), 'CONTROL: this is the draw page');
+  const tileOf = (k) => cells.indexOf(k.querySelector('.deck-front').firstElementChild);
+  const dealt = () => doc.querySelectorAll('.deck-card').filter((k) => tileOf(k) >= 0).sort((a, b) => a.dataset.i - b.dataset.i).map(tileOf);
+  const order = dealt();
+  assert.equal(order.length, cells.length, 'CONTROL: every tile was dealt');
+  assert.notDeepEqual(order, cells.map((_, i) => i), 'CONTROL: the pile is shuffled');
+  for (const c of cells) assert.ok(c.isConnected, 'a tile is outside the document');
+  p.press('wall');
+  assert.equal(wallMarkup(doc), before.wall, 'stack → wall on the draw page: the wall is not the engine\'s own markup');
+  cells.forEach((c, i) => same(c.parentNode, before.parents[i], `cell ${i} is not back where the engine put it`));
+  p.press('list');
+  assert.deepEqual(dealt(), order, 'the pile kept the order it was dealt in');
+  p.press('wall');
+  assert.equal(wallMarkup(doc), before.wall, 'list → wall on the draw page');
+  assert.equal(doc.left.filter((n) => cells.some((c) => n === c || n.contains(c))).length, 0, 'a tile left the document at some point');
+});
+test('the draw page that opens on the wall: the engine\'s markup stays as it was while the pile is dealt from it', () => {
+  const p = open(card({ view: 'wall' }), { page: (h) => h.replace('<html', '<html data-reef-draw') });
+  assert.equal(wallMarkup(p.doc), p.before.wall);
+  p.press('stack'); p.press('wall');
+  assert.equal(wallMarkup(p.doc), p.before.wall, 'wall → stack → wall');
+});

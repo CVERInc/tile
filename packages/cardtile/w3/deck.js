@@ -195,7 +195,11 @@
 
   // reef.cards home: every public Card's first card, shuffled on each visit (random draw is a game we play at our place only); bottom card = make your own
   const cells=tiles();   /* a text tile is set full-bleed, outside the grid — it is still a card. Grid-only lost every text tile from stack/list, and a card of only text had no grid at all. A run of full-width links is a wrapper inside the grid: its tiles are cards too (they used to be left out, and stack / list silently had fewer cards than the wall). A back lane sets its text tiles full-bleed too: those are backs, not cards */
-  if(DRAW){ for(let i=cells.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [cells[i],cells[j]]=[cells[j],cells[i]]; } const box=cells[0]&&cells[0].parentElement; if(box) cells.forEach(c=>box.appendChild(c)); }
+  // The draw page shuffles the ORDER THE TILES ARE DEALT IN — this list — and nothing in the page. A tile is moved once, from
+  // where the engine put it onto its card (seat() marks that place first), so the wall after a shuffled pile is still the
+  // engine's own grid, runs of links and full-bleed text. (It used to re-append every tile under the first one's parent, from
+  // when the wall was a reload; with the wall in place, that left the wall as the shuffle, all under one parent.)
+  if(DRAW){ for(let i=cells.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [cells[i],cells[j]]=[cells[j],cells[i]]; } }
   const drawers={}; document.querySelectorAll('.dc-drawer').forEach(d=>drawers[d.id]=d.querySelector('.dc-drawer-body'));
   const hero=document.querySelector('main .st-hero');
   const owner={name:(hero&&hero.querySelector('.st-figure')||{}).dataset?.name||document.title, url:(hero&&hero.querySelector('.st-figure')||{}).dataset?.url||location.origin, av:hero&&hero.querySelector('.cp-icon')?.src};
