@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sandboxStart, SAVED_KEY, DRAFT_KEY, W2_DRAFT_KEY } from './sandbox-start.mjs';
 import { isSandboxSample } from '../card-blank.mjs';
+import { readsAsCard } from './host-bridge.mjs';
 import { buildSandboxCard, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
 
 const LOCALES = Object.keys(SANDBOX_LOCALES);
@@ -167,7 +168,9 @@ test('review cases: kept byte for byte under each of the three keys, nothing cle
     const edited = f(md);
     const at = `${k} ${shape} ${name}`;
     assert.deepEqual(sandboxStart(store({ [SAVED_KEY]: edited })), { saved: edited, draft: null, clear: [] }, `saved ${at}`);
-    assert.deepEqual(sandboxStart(store({ [W2_DRAFT_KEY]: edited })), { saved: edited, draft: null, clear: [] }, `w2 ${at}`);
+    // the previous editor's key is only adopted when it reads as a card (both tiles deleted leaves no
+    // cell) — unchanged from before; either way it is never cleared
+    assert.deepEqual(sandboxStart(store({ [W2_DRAFT_KEY]: edited })), { saved: readsAsCard(edited) ? edited : null, draft: null, clear: [] }, `w2 ${at}`);
     assert.deepEqual(sandboxStart(store({ [DRAFT_KEY]: edited })), { saved: null, draft: edited, clear: [] }, `draft ${at}`);
   }
 });

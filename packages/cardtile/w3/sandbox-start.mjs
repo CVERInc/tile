@@ -6,8 +6,8 @@
 // there on load) or the saved key (the first-day w3 wrote it there on Save). Either one opened the
 // sample again.
 //
-// 🔴 ONE-SIDED. Only what card-blank.mjs `isSandboxSample` recognises — the starter exactly as it was
-// seeded, in any locale — counts as nothing saved, and only a key holding THAT is cleared. Anything
+// 🔴 ONE-SIDED. Only what card-blank.mjs `isSandboxSample` recognises — the starter text exactly as an
+// old editor stored it, in any locale — counts as nothing saved, and only a key holding THAT is cleared. Anything
 // the visitor changed is their work: it opens, byte for byte, and its key is never touched.
 import { readsAsCard } from './host-bridge.mjs';
 import { isSandboxSample } from '../card-blank.mjs';
@@ -23,11 +23,12 @@ export function sandboxStart(get) {
   const stale = (key, v) => { if (v != null && isSandboxSample(v)) { clear.push(key); return true; } return false; };
   let saved = get(SAVED_KEY);
   if (stale(SAVED_KEY, saved)) saved = null;
-  if (saved == null) {
-    // a visitor who used the previous sandbox finds their card again, as the thing they last kept
-    const w2 = get(W2_DRAFT_KEY);
-    if (w2 && readsAsCard(w2) && !stale(W2_DRAFT_KEY, w2)) saved = w2;
-  }
+  // Each key is inspected for cleanup on its own (tile#300 review): an untouched sample under the
+  // previous editor's key is removed whichever card opens, not only when it is the one opened.
+  const w2 = get(W2_DRAFT_KEY);
+  const w2Sample = stale(W2_DRAFT_KEY, w2);
+  // a visitor who used the previous sandbox finds their card again, as the thing they last kept
+  if (saved == null && w2 && !w2Sample && readsAsCard(w2)) saved = w2;
   let draft = get(DRAFT_KEY);
   if (stale(DRAFT_KEY, draft)) draft = null;
   return { saved, draft, clear };

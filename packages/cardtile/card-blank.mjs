@@ -24,7 +24,7 @@
 // not read at all: `title` is the creator's name and is always there; the rest is styling.
 import { parseCard } from './card-core.js';
 import { BLANKS } from './ai-ops.mjs';
-import { SANDBOX_LOCALES } from './w/sandbox-i18n.mjs';
+import { SANDBOX_LOCALES, buildSandboxCard } from './w/sandbox-i18n.mjs';
 import { CELL_STRINGS_BY_KEY } from './w/cell-i18n.mjs';
 
 // `blankish` is ONLY for "is there anything here at all" (a section label, text around the lanes).
@@ -98,29 +98,27 @@ function judge(m) {
  * first-day w3 wrote it under its saved key on Save. A browser holding only that still opened on
  * somebody else's sample after the sandbox started from an empty card.
  *
- * The cells are judged by isTemplateOnly, above — every body a blank-card writer seeds, in every
- * locale, including the older starter's "tap to edit" text tile. What isTemplateOnly deliberately
- * leaves out is the frontmatter, and in a browser's own copy that is where a visitor's work can be:
- * the title they typed, a setting they chose. So here the frontmatter must be EXACTLY what the
- * starter wrote — `card-page: try`, one persona's `title`, the SAME persona's `lang`, nothing else.
- * One-sided like the rest of this file: anything not recognised is the visitor's, and is kept. */
+ * 🔴 EXACT, NOT isTemplateOnly (tile#300 review). The caller DELETES the key this answers yes for,
+ * and a deletion cannot be taken back. isTemplateOnly's rule is broad on purpose — any number and
+ * order of template tiles, any width, a cleared link — because for noindex a wrong "not blank" is
+ * harmless; here every one of those is something the visitor did in the editor (delete, reorder,
+ * resize, clear an address, add a tile, edit the raw Markdown), and round 1 erased it. So this is a
+ * string comparison against the finite set of texts the old editors actually stored: SANDBOX_STARTERS,
+ * below. The only differences forgiven are line ends (CRLF) and how the file ends (trailing blank
+ * lines, a missing final newline) — nothing inside the card. Anything else is the visitor's, kept. */
 export function isSandboxSample(cardMd) {
-  if (!isTemplateOnly(cardMd)) return false;
-  const fm = frontmatterOf(cardMd);
-  if (!fm || fm.size !== 3 || fm.get('card-page') !== 'try') return false;
-  return personas.some((p) => fm.get('title') === p.name && fm.get('lang') === p.lang);
+  return typeof cardMd === 'string' && SANDBOX_STARTERS.has(starterForm(cardMd));
 }
 
-// `key: value` lines between the opening fences → Map, or null for anything else (no frontmatter, a
-// line that is not `key: value`, a key twice).
-function frontmatterOf(md) {
-  const fm = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(md);
-  if (!fm) return null;
-  const out = new Map();
-  for (const line of fm[1].split(/\r?\n/)) {
-    const kv = /^([A-Za-z][\w-]*):[ \t]*(.*?)[ \t]*$/.exec(line);
-    if (!kv || out.has(kv[1])) return null;
-    out.set(kv[1], kv[2]);
-  }
-  return out;
-}
+const starterForm = (md) => md.replace(/\r\n/g, '\n').replace(/\n*$/, '\n');
+
+// Every text an old editor stored unasked, 9 locales × 2 shapes, built once:
+//   - the current starter, `buildSandboxCard(locale)` (unchanged in output since fe6b0d5; the first-day
+//     w3, d671762, seeded it and stored it verbatim on Save; w2 stored it on load);
+//   - the older starter, the same card plus the persona's `textBody` as a third tile — byte for byte
+//     what `buildSandboxCard` wrote at 22f9636, the last version before fe6b0d5 dropped the tile (w2
+//     stored it on load). sandbox-start.test.mjs pins it against that version's text.
+const SANDBOX_STARTERS = new Set(Object.keys(SANDBOX_LOCALES).flatMap((k) => {
+  const current = buildSandboxCard(k);
+  return [current, `${current}- [ ] %% card: text w=3 %% ${SANDBOX_LOCALES[k].textBody}\n`];
+}));
