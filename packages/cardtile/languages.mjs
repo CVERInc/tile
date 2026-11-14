@@ -291,13 +291,20 @@ export function composeLanguage(mainMd, langMd, tag) {
  *   Accept-Language  then, with q-weights, through `pickRange` (sandbox-i18n's walker): highest q wins,
  *                ties keep header order, q=0 excludes, `*` matches nothing.
  * `tag` is null whenever the answer is the main file: no candidate matched, or the match IS the main
- * file's own language. Whether the chosen language has a file is the caller's question (a missing file
- * is also the main file).
+ * file's own language.
+ *
+ *   `files`      (tile#304 r2) the listed tags that HAVE a file, when the caller knows (the Worker: the
+ *                tags the main record names). Only those, and the main file's own language, are then
+ *                candidates: a listed language with no file is the main file anyway, and must not stand
+ *                in the way of one that has (`zh-HK` → `zh-Hant` with a file, not `zh-TW` without). Not
+ *                given: every listed tag is a candidate, and whether it has a file is the caller's
+ *                question (a missing file is also the main file).
  */
-export function chooseLanguage(mainMd, { query = null, acceptLanguage = null } = {}, pickRange) {
+export function chooseLanguage(mainMd, { query = null, acceptLanguage = null, files = null } = {}, pickRange) {
   const { listed, main } = languagesOf(mainMd);
   if (!listed.length) return { tag: null, matched: null, by: null };
-  const candidates = main && !listed.includes(main) ? [...listed, main] : listed;
+  const offered = Array.isArray(files) ? listed.filter((t) => t === main || files.includes(t)) : listed;
+  const candidates = main && !offered.includes(main) ? [...offered, main] : offered;
   const answer = (matched, by) => ({ tag: matched && matched !== main ? matched : null, matched, by });
   if (query != null && normaliseTag(query)) return answer(matchTag(query, candidates), 'query');
   const picked = typeof pickRange === 'function' ? pickRange(acceptLanguage, (t) => matchTag(t, candidates)) : null;

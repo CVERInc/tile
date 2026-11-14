@@ -200,6 +200,17 @@ test('chooseLanguage: the resolution table (query, header, listed, unlisted, mal
   }
 });
 
+test('chooseLanguage with `files`: only languages that have a file (and the main file’s own) are candidates', () => {
+  // MAIN lists en-US (its own), ja-JP and zh-TW
+  const pick = (q, al, files) => chooseLanguage(MAIN, { query: q, acceptLanguage: al, files }, pickAcceptLanguage);
+  assert.equal(pick('zh-TW', null, ['ja-JP']).tag, null, 'listed with no file: the main file');
+  assert.equal(pick('zh-TW', null, ['ja-JP']).matched, null, 'and nothing matched (no canonical names it)');
+  assert.equal(pick(null, 'zh-TW,ja;q=0.5', ['ja-JP']).tag, 'ja-JP', 'the header walks on to a language that has one');
+  assert.equal(pick(null, 'zh-TW,ja;q=0.5', null).tag, 'zh-TW', 'CONTROL: without `files`, every listed tag is a candidate');
+  assert.equal(pick('en-US', null, []).matched, 'en-US', 'the main file’s own language stays a candidate');
+  assert.equal(pick(null, 'ja', []).tag, null);
+});
+
 test('chooseLanguage: a Card with no locales: never chooses, whatever is asked', () => {
   const plain = MAIN.replace(/^locales:.*\n/m, '');
   for (const [q, al] of [[null, 'ja'], ['ja-JP', null], ['en-US', 'zh-TW']]) {

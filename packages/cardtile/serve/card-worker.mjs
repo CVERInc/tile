@@ -616,12 +616,16 @@ const VARY_VISITOR_LANG = { Vary: 'Accept, Accept-Language' };
  */
 async function cardLanguage(mainMd, revs, handle, gen, url, request, store) {
   const { listed, main } = languagesOf(mainMd);
-  if (!listed.length) return { md: mainMd, lang: '', listed, matched: null, by: null };
-  const choice = chooseLanguage(mainMd, { query: url.searchParams.get('lang'), acceptLanguage: request.headers.get('accept-language') }, pickAcceptLanguage);
+  if (!listed.length) return { md: mainMd, lang: '', listed, alternates: [], matched: null, by: null };
+  // r2 (review r1 #3): the languages this Card is served in — its own and each listed one its record
+  // names — are both the candidates of the choice and the only ones a page advertises
+  const files = listed.filter((t) => t !== main && revs[t]);
+  const alternates = listed.filter((t) => t === main || files.includes(t));
+  const choice = chooseLanguage(mainMd, { query: url.searchParams.get('lang'), acceptLanguage: request.headers.get('accept-language'), files }, pickAcceptLanguage);
   const rev = choice.tag ? revs[choice.tag] : null;
   const file = rev ? await store.get(languageKey(handle, gen, choice.tag, rev)) : null;
-  if (file == null) return { md: mainMd, lang: main || '', listed, matched: choice.tag ? null : choice.matched, by: choice.by };
-  return { md: composeLanguage(mainMd, file, choice.tag), lang: choice.tag, listed, matched: choice.tag, by: choice.by };
+  if (file == null) return { md: mainMd, lang: main || '', listed, alternates, matched: choice.tag ? null : choice.matched, by: choice.by };
+  return { md: composeLanguage(mainMd, file, choice.tag), lang: choice.tag, listed, alternates, matched: choice.tag, by: choice.by };
 }
 
 /** the headers every page and markdown answer of a Card with `locales:` adds (none for one without) */
@@ -632,13 +636,16 @@ const languageHeaders = (served) => (!served.listed.length ? {}
 const withLang = (base, tag) => `${base}?lang=${encodeURIComponent(tag)}`;
 
 /**
- * the alternates a search engine reads: one `hreflang` per listed language (its `?lang=` URL) and
- * `x-default` (the bare address, which negotiates). Put into the page's own <head>: the renderer's
- * `</head>` is the first one (withDeck finds it the same way), before any of the owner's content.
+ * the alternates a search engine reads: one `hreflang` per language the Card is SERVED in (its
+ * `?lang=` URL) — the main file's own and each listed one its record names a file for — and
+ * `x-default` (the bare address, which negotiates). r2 (review r1 #3): a listed language with no file
+ * is not one: its URL serves the main file, so advertising it as that language would be false. Put
+ * into the page's own <head>: the renderer's `</head>` is the first one (withDeck finds it the same
+ * way), before any of the owner's content.
  */
-function withAlternates(page, base, listed) {
-  if (!listed.length || !base) return page;
-  const links = [...listed.map((t) => [t, withLang(base, t)]), ['x-default', base]]
+function withAlternates(page, base, served) {
+  if (!served.length || !base) return page;
+  const links = [...served.map((t) => [t, withLang(base, t)]), ['x-default', base]]
     .map(([t, href]) => `<link rel="alternate" hreflang="${escLite(t)}" href="${escLite(href)}">`).join('');
   const h = page.indexOf('</head>');
   return h < 0 ? page : page.slice(0, h) + links + page.slice(h);
@@ -1332,7 +1339,7 @@ const router = {
     // tile#298 — a card that names its language speaks it, chrome and all, to everyone (unchanged). One
     // that names none gets its CHROME in the visitor's language, and the response varies by it.
     const chromeLang = frontmatter(servedMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
-    const page = withAlternates(renderCardHTML(servedMd, { ...resolved, canonicalUrl, videos, ...(chromeLang ? { chromeLang } : {}) }), baseUrl, served.listed);
+    const page = withAlternates(renderCardHTML(servedMd, { ...resolved, canonicalUrl, videos, ...(chromeLang ? { chromeLang } : {}) }), baseUrl, served.alternates);
     return html(page, 200, env, resolved.handle, at, blank,
       chromeLang ? { ...langExtra, ...VARY_VISITOR_LANG } : langExtra);
   },
