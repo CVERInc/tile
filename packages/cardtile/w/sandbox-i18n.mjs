@@ -691,22 +691,70 @@ export function primaryLocale(tag) {
   return resolveLocaleKey(tag) || 'en';
 }
 
+// Only this many ranges of an `Accept-Language` header are read, and only this many parameters of
+// each range: a real browser sends a handful, and a hostile 1 MB header must cost no more than a
+// real one.
+const MAX_LANGUAGE_RANGES = 32;
+const MAX_RANGE_PARAMS = 8;
+
+/**
+ * One range's `q` parameter (the text after `q=`) → its weight in 0..1. A missing `q` is 1. A value
+ * that is not a plain non-negative decimal (`abc`, empty, `-1`, `1e0`) is MALFORMED and reads as 0,
+ * i.e. the range is ignored — guessing at what a broken weight meant could pick a language the
+ * visitor excluded. Values above 1 clamp to 1. Checked character by character: no regex, so no
+ * backtracking on a hostile value.
+ */
+function parseQuality(value) {
+  const v = value.trim();
+  let dots = 0;
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i);
+    if (c === 46 /* . */) { if (++dots > 1 || i === 0) return 0; } else if (c < 48 || c > 57) return 0;
+  }
+  if (!v) return 0;
+  const q = Number(v);
+  return Number.isFinite(q) ? Math.min(1, Math.max(0, q)) : 0;
+}
+
 /**
  * `Accept-Language` (as the header arrives — `ja,en-US;q=0.9,zh-TW;q=0.8`) → the best locale key we
- * speak. First candidate we recognise wins; quality weights are read as WRITTEN ORDER, which is what
- * every browser already sends (highest q first) — parsing q values would be solving a problem this
- * header does not have. Each candidate is checked as a FULL tag (not just its primary subtag), so
- * `zh-CN` in the header resolves to Simplified even though `zh-TW` earlier/later in the same header
- * resolves to Traditional.
+ * speak. Each range's quality weight is read (`q`, default 1; see `parseQuality`); a range with q=0
+ * is EXCLUDED, never chosen; of the ranges we speak, the highest q wins, and ties keep header order.
+ * Written order alone is not enough: `ja;q=0,en` names Japanese only to refuse it, and
+ * `en;q=0.1,ja` prefers the later range. The wildcard `*` is not a language we speak and is
+ * ignored like any other unrecognised tag. Only the first MAX_LANGUAGE_RANGES ranges count.
+ *
+ * Each candidate is checked as a FULL tag (not just its primary subtag), so `zh-CN` in the header
+ * resolves to Simplified even though `zh-TW` earlier/later in the same header resolves to
+ * Traditional.
  */
 export function localeFromAcceptLanguage(header) {
-  for (const part of String(header || '').split(',')) {
-    const tag = part.split(';')[0].trim();
+  const h = String(header || '');
+  let best = null;
+  let bestQ = 0;
+  let start = 0;
+  for (let n = 0; n < MAX_LANGUAGE_RANGES && start <= h.length; n++) {
+    let end = h.indexOf(',', start);
+    if (end === -1) end = h.length;
+    const range = h.slice(start, end);
+    start = end + 1;
+
+    let semi = range.indexOf(';');
+    const tag = (semi === -1 ? range : range.slice(0, semi)).trim();
     if (!tag) continue;
+    let q = 1;
+    for (let p = 0; semi !== -1 && p < MAX_RANGE_PARAMS; p++) {
+      const next = range.indexOf(';', semi + 1);
+      const param = range.slice(semi + 1, next === -1 ? range.length : next);
+      semi = next;
+      const eq = param.indexOf('=');
+      if (eq !== -1 && param.slice(0, eq).trim().toLowerCase() === 'q') { q = parseQuality(param.slice(eq + 1)); break; }
+    }
+    if (q <= bestQ) continue; // q=0 never wins; an equal q never displaces an earlier range
     const key = resolveLocaleKey(tag);
-    if (key) return key;
+    if (key) { best = key; bestQ = q; }
   }
-  return 'en';
+  return best || 'en';
 }
 
 /** The editor CHROME strings for a locale key, falling back to English for anything unrecognised. */
