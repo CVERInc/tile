@@ -796,7 +796,10 @@ for (const view of ['list', 'stack']) for (const kind of ['named', 'default']) {
     bIsOpen(s, 'after the fallback');
   });
   test(`${view}, the ${kind} back: with reduced motion there is no turn to wait for — B opens at once`, () => {
-    bIsOpen(midTurn(view, kind, { reducedMotion: true }), 'at once');
+    const s = midTurn(view, kind, { reducedMotion: true });
+    bIsOpen(s, 'at once');
+    // no animation means no animationend: a card that waited for one to turn its face back kept showing its back — now without the words
+    assert.ok(!s.a.classList.contains('flipped'), 'A was put back and still shows its back face (flipped), which B now holds');
   });
 }
 test('a card asked for during a put-back turn is not turned over when it is put back first, or when the view leaves the pile', () => {
@@ -818,4 +821,16 @@ test('A asked for again during its own put-back turn turns over at once: the bac
   same(body.closest('.deck-card'), a, 'A is turned over without its back');
   p.win.tick(3000);
   assert.ok(flagged(p).length === 1 && flagged(p)[0] === a, 'three seconds later');
+});
+test('with reduced motion a card that is put back shows its front again at once, in stack and list', () => {
+  for (const view of ['stack', 'list']) {
+    const p = open(sharedBack('stack'), { reducedMotion: true }); if (view === 'list') p.press('list');
+    const a = p.cells[0].closest('.deck-card');
+    p.win.__deckJump(0); p.win.tick(1000); tap(p, p.cells[0]); p.win.tick(1000);
+    assert.ok(a.classList.contains('flipped'), `${view}: CONTROL: A is turned over`);
+    escKey(p);
+    assert.ok(!a.classList.contains('flipped') && !a.classList.contains('is-open'), `${view}: A was put back and is still flipped`);
+    tap(p, p.cells[0]); p.win.tick(1000);
+    assert.ok(a.classList.contains('flipped') && a.classList.contains('is-open'), `${view}: A does not turn over a second time`);
+  }
 });
