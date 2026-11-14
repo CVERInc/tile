@@ -33,6 +33,7 @@ import { sandboxStart, SAVED_KEY, DRAFT_KEY, W2_DRAFT_KEY } from './sandbox-star
 import { editStrings, fmt } from './edit3-i18n.mjs';
 import { createNotices } from './notice.mjs';
 import { leaveStep, resolveLeave } from './leave-edit.mjs';
+import { previewStep } from './preview-switch.mjs';
 import { withRaw, backId, freshBackId, insertCell, removeCell, pair, unpair, canPair } from './pairing.mjs';
 import { VIEW_IDS, fmRead, fmWrite, readViews, toggleView, applySetting } from './card-settings.mjs';
 import { NETWORKS, parseSocial, composeSocial } from './social-rows.mjs';
@@ -1257,11 +1258,22 @@ function saveRaw() {
   closeSheet(true);
   draw(); show(); setPaint();
 }
+// What the preview frame holds: the document it was given (everything the page is made from) and the view it shows.
+// The same document in another view is the SAME page — the frame is asked to switch in place (the deck's own
+// window.__deckView, the switch a visitor's tap makes), not handed the document again (w3/preview-switch.mjs).
+let shown = null;
+// …and the card its pile is on. A frame that is hidden (display:none, behind the row or the wall) has a window of no
+// size: the browser puts its page back at the top and tells it nothing while it is hidden, so the pile cannot keep its own
+// place (seen in Chromium: back from the wall, the preview was on its first card again). The editor is what hides the
+// frame, so the editor asks where the pile is before hiding it and puts it back there after showing it.
+let previewAt = null;
 function show() {
   if (!hostWaiting && !m.cells.length && view !== 'wall') editing = true;   // nothing to look at yet: the row's one big "+"
   paintViews(); paintMain();
   if (hostWaiting) return;
   const pane = view === 'wall' ? 'layout' : editing ? 'edit' : 'preview';
+  const wasHidden = el('preview').hidden;
+  if (!wasHidden && pane !== 'preview') { try { previewAt = el('deckframe').contentWindow.__deckCur?.() ?? null; } catch { previewAt = null; } }
   for (const id of ['preview', 'edit', 'layout']) el(id).hidden = id !== pane;
   if (pane === 'edit') edges();
   if (pane === 'layout') paintLayout(); else picked = null;
@@ -1269,7 +1281,12 @@ function show() {
     lsSet('reef-card-layout', null);   // the deck remembers a visitor's last pick; the editor names the view instead
     // the sandbox always says its pool switch out loud (true unless set off): deck.js counts only `true` as in the
     // pool, so a page that says nothing — host mode today, until the platform side exists — shows no reef.cards card
-    el('deckframe').srcdoc = renderCardHTML(md, { handle, deck: { view, ...(SANDBOX ? { pool: poolOn() } : {}) } });
+    const deck = { view, ...(SANDBOX ? { pool: poolOn() } : {}) };
+    const doc = JSON.stringify([md, handle, deck.pool]);
+    const f = el('deckframe');
+    if (previewStep(shown, { doc, view }, (v) => f.contentWindow.__deckView(v)) === 'render') { f.srcdoc = renderCardHTML(md, { handle, deck }); previewAt = null; }
+    else if (wasHidden && previewAt != null) { try { f.contentWindow.__deckJump?.(previewAt); } catch { /* a frame with no pile */ } }
+    shown = { doc, view };
   }
 }
 // The row and the wall are edit mode. Going from either to a view a visitor gets, with something unsaved, asks

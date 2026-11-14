@@ -21,7 +21,8 @@ const NO_LANG = [
 const WITH_LANG = NO_LANG.replace('title: Test Card', 'title: Test Card\nlang: zh-TW');
 
 const deckWords = (html) => JSON.parse(/window\.__deckStrings=(\{.*?\});/.exec(html)[1]);
-const htmlLang = (html) => /<html lang="([^"]*)"/.exec(html)[1];
+// (the root tag carries the deck's opening view too — data-view / data-views, tile#297 — so `lang` is not its first attribute)
+const htmlLang = (html) => /<html\b[^>]*\slang="([^"]*)"/.exec(html)[1];
 // the page without the deck's words: what the owner wrote and the renderer drew
 const withoutWords = (html) => html.replace(/window\.__deckStrings=\{.*?\};/, '');
 
