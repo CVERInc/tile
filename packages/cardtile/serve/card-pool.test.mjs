@@ -1,7 +1,7 @@
 // The card pool's render contract (reef#2913). run: node --test card-pool.test.mjs
 //
 // One PLATFORM switch, `ctx.pool`, decides two things the page draws: the reef.cards footer link and
-// the closing reef.cards card. true → both, false → neither, absent → the page exactly as it was
+// the closing reef.cards tile. true → both, false → neither, absent → the page exactly as it was
 // before the pool existed (`powered-by: on` drives the old "Powered by feelreef" footer). And the
 // switch has ONE writer — the Worker's own call site — so nothing in card.md, the query or the
 // headers can reach it.
@@ -49,7 +49,7 @@ for (const pool of [true, false, undefined]) {
       const [wantPool, wantPowered, wantCard] = EXPECT[key];
       assert.equal(has.poolFooter(html), wantPool, 'reef.cards footer link');
       assert.equal(has.poweredFooter(html), wantPowered, 'Powered by feelreef footer');
-      assert.equal(has.closingCard(html), wantCard, 'closing reef.cards card count');
+      assert.equal(has.closingCard(html), wantCard, 'closing reef.cards tile count');
       assert.ok(has.owner(html), "the owner's copyright line always stays");
       // the pool's link never carries a referral, anywhere on the page
       assert.ok(!/reef\.cards\/?\?ref=/.test(html), 'no ?ref= on reef.cards');

@@ -6,10 +6,13 @@
 // refused. Where the pairing is not obvious the comment says which half is the control.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleApi, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, CardLifetime, ENDED_KEEP_MS, TICKET_TTL_MS, PREVIEW_TTL, _internal } from './card-api.mjs';
+import { handleApi as handleApiAsWritten, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, CardLifetime, ENDED_KEEP_MS, TICKET_TTL_MS, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
+import { twinned, asCalled, onCards } from './api-prefix-twin.mjs';
+// every `/_api/card/…` request below goes to `/_api/cards/…` instead when card-api-cards-twin.test.mjs runs this file
+const handleApi = twinned(handleApiAsWritten);
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -390,7 +393,7 @@ test('the stop path refuses other methods and leaves unrelated endpoints unknown
   for (const path of ['/_api/card/t/stopped', '/_api/card/t/stop/extra', '/_api/whatever']) {
     const res = await call(env, 'PUT', path);
     assert.equal(res.status, 404, path);
-    assert.deepEqual(await res.json(), { error: `No such endpoint: ${path}` });
+    assert.deepEqual(await res.json(), { error: `No such endpoint: ${asCalled(path)}` });
   }
   assert.deepEqual([...env.CARDS._m], [['t', CARD]]);
   assert.equal((await call(env, 'PUT', '/_api/card/t/stop')).status, 200);
@@ -3568,4 +3571,227 @@ test('🔴 reef#2725 a save whose embed blows the byte ceiling is refused 413, n
   const res2 = await call(env, 'PUT', '/_api/card/t', { markdown: other });
   assert.equal(res2.status, 413);
   assert.doesNotMatch((await res2.json()).error, /embed/);
+});
+
+// ── the two prefixes: `/_api/cards/<handle>…` beside `/_api/card/<handle>…` ───────────────────────
+//
+// Every route under `/_api/card/<handle>` also answers at `/_api/cards/<handle>` (card-api.mjs
+// `resourceOf`; docs/VOCABULARY.md, "Routes"). The table below is every route, each with its
+// refusals, and each row is a short story played twice on two stores seeded alike: once as written
+// and once on the other prefix. Step by step the two answers must be the same status, the same
+// headers and the same bytes, and the two stores must end holding the same keys and values.
+//
+// These call the API as imported, never through the twin switch above: the comparison is its own
+// two runs. (card-api-cards-twin.test.mjs is the other half: every older test in this file, again,
+// on the new prefix.)
+//
+// Three things differ between any two runs and are levelled before comparing, on both sides alike:
+// a generation a DELETE starts is random, a stop and a tombstone record the time, and the API
+// answers with the path it was called on (asserted exactly, further down).
+const level = (text) => String(text)
+  .replace(/\b[0-9a-f]{24}\b/g, '<gen>')
+  .replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z/g, '<time>')
+  .replaceAll('/_api/cards/', '/_api/card/');
+const SAVED = thinCard(CARD).replace('hello', 'edited');
+const lastVersion = (answers) => answers.findLast((a) => a.json && a.json.version).json.version;
+
+/** [method, path as written for the old prefix, { body, token, headers }] — headers may read the answers so far */
+const ROUTE_STORIES = {
+  'get_cards: a card, no card, a bad handle, an upper-case handle': [
+    ['GET', '/_api/card/t'], ['GET', '/_api/card/nobody'], ['GET', '/_api/card/' + encodeURIComponent('bad handle!')], ['GET', '/_api/card/T'],
+  ],
+  'auth: no token and a wrong token, on every route': [
+    ...['', '/full', '/lifetime', '/stop', '/asset/pic', '/asset/pic/fenced'].flatMap((tail) => [
+      ['GET', `/_api/card/t${tail}`, { token: null }], ['PUT', `/_api/card/t${tail}`, { token: 'wrong', body: { markdown: SAVED } }],
+      ['DELETE', `/_api/card/t${tail}`, { token: null }],
+    ]),
+    ['GET', '/_api/card/t'],
+  ],
+  'auth: no MCP_TOKEN_HASH configured fails closed': { noHash: true, steps: [
+    ['GET', '/_api/card/t'], ['PUT', '/_api/card/t', { body: { markdown: SAVED } }], ['DELETE', '/_api/card/t'], ['PUT', '/_api/card/t/stop'],
+  ] },
+  'full: the bytes, no card, another method, a bad handle, an empty handle': [
+    ['GET', '/_api/card/t/full'], ['GET', '/_api/card/nobody/full'], ['POST', '/_api/card/t/full'], ['GET', '/_api/card/bad%20handle/full'], ['GET', '/_api/card//full'],
+  ],
+  'lifetime: the generation, another method, a bad handle': [
+    ['GET', '/_api/card/t/lifetime'], ['POST', '/_api/card/t/lifetime'], ['GET', '/_api/card/-bad/lifetime'], ['GET', '/_api/card//lifetime'],
+  ],
+  'save_cards: a save, a dry run, a stale base, an empty body, a wrong type, other methods': [
+    ['PUT', '/_api/card/t', { body: { markdown: SAVED, dry_run: true } }],
+    ['PUT', '/_api/card/t', { body: { markdown: SAVED } }],
+    ['GET', '/_api/card/t'],
+    ['PUT', '/_api/card/t', { body: { markdown: thinCard(CARD), base_version: 'not-the-version' } }],
+    ['PUT', '/_api/card/t', { body: { markdown: '' } }],
+    ['PUT', '/_api/card/t', { body: { markdown: SAVED, base_version: 7 } }],
+    ['PUT', '/_api/card/t', { body: { markdown: thinCard(CARD) } }],
+    ['POST', '/_api/card/t', { body: { markdown: SAVED } }], ['PATCH', '/_api/card/t'],
+    ['GET', '/_api/card/t/full'],
+  ],
+  'save_cards: a new handle needs create, and create over a card is a conflict': [
+    ['PUT', '/_api/card/fresh', { body: { markdown: SAVED, base_version: 'anything' } }],
+    ['PUT', '/_api/card/fresh', { body: { markdown: SAVED, create: true } }],
+    ['PUT', '/_api/card/fresh', { body: { markdown: SAVED, create: true } }],
+    ['GET', '/_api/card/fresh'], ['GET', '/_api/card/fresh/lifetime'],
+  ],
+  'stop: stop, the owner read while stopped, resume, other methods, near misses': [
+    ['PUT', '/_api/card/t/stop', { body: { reason: 'owner asked' } }], ['GET', '/_api/card/t/full'], ['GET', '/_api/card/t'],
+    ['DELETE', '/_api/card/t/stop'], ['GET', '/_api/card/t/stop'], ['POST', '/_api/card/t/stop'],
+    ['PUT', '/_api/card/bad%20handle/stop'], ['PUT', '/_api/card//stop'],
+    ['PUT', '/_api/card/t/stopped'], ['PUT', '/_api/card/t/stop/extra'],
+  ],
+  'put_asset and delete_asset: put, bad input, referenced, unreferenced, missing, no card': [
+    ['PUT', '/_api/card/t/asset/fresh', { body: { base64: GIF, mime: 'image/gif' } }],
+    ['PUT', '/_api/card/t/asset/fresh', { body: { base64: '!!not base64!!' } }],
+    ['PUT', '/_api/card/t/asset/fresh', { body: { base64: 7 } }],
+    ['PUT', '/_api/card/t/asset/' + encodeURIComponent('bad id!'), { body: { base64: GIF } }],
+    ['DELETE', '/_api/card/t/asset/pic'], ['DELETE', '/_api/card/t/asset/unused'], ['DELETE', '/_api/card/t/asset/nope'],
+    ['GET', '/_api/card/t/asset/pic'], ['GET', '/_api/card/nobody/asset/pic'], ['PUT', '/_api/card/nobody/asset/pic', { body: { base64: GIF } }],
+    ['PUT', '/_api/card/bad%20handle/asset/pic', { body: { base64: GIF } }], ['PUT', '/_api/card/t/asset/pic/extra', { body: { base64: GIF } }],
+    ['GET', '/_api/card/t'],
+  ],
+  'fenced delete_asset: no If-Version, a stale one, the current one, referenced, other methods': [
+    ['GET', '/_api/card/t'],
+    ['DELETE', '/_api/card/t/asset/unused/fenced'],
+    ['DELETE', '/_api/card/t/asset/unused/fenced', { headers: { 'if-version': '   ' } }],
+    ['DELETE', '/_api/card/t/asset/unused/fenced', { headers: { 'if-version': 'stale' } }],
+    ['DELETE', '/_api/card/t/asset/pic/fenced', { headers: (answers) => ({ 'if-version': lastVersion(answers) }) }],
+    ['DELETE', '/_api/card/t/asset/unused/fenced', { headers: (answers) => ({ 'if-version': lastVersion(answers) }) }],
+    ['DELETE', '/_api/card/t/asset/unused/fenced', { headers: (answers) => ({ 'if-version': lastVersion(answers) }) }],
+    ['PUT', '/_api/card/t/asset/pic/fenced', { body: { base64: GIF } }], ['GET', '/_api/card/t/asset/pic/fenced'],
+    ['DELETE', '/_api/card/nobody/asset/pic/fenced', { headers: { 'if-version': 'x' } }],
+    ['DELETE', '/_api/card/t/asset/' + encodeURIComponent('bad id!') + '/fenced', { headers: { 'if-version': 'x' } }],
+    ['DELETE', '/_api/card/bad%20handle/asset/pic/fenced', { headers: { 'if-version': 'x' } }],
+    ['GET', '/_api/card/t'],
+  ],
+  'delete_card: a bad If-Generation, a stale one, the current one, again, then the handle is free': [
+    ['DELETE', '/_api/card/t', { headers: { 'if-generation': 'abc' } }],
+    ['DELETE', '/_api/card/t', { headers: { 'if-generation': '0123456789abcdef01234567' } }],
+    ['GET', '/_api/card/t'],
+    ['DELETE', '/_api/card/t', { headers: { 'if-generation': '0' } }],
+    ['GET', '/_api/card/t'], ['GET', '/_api/card/t/full'], ['GET', '/_api/card/t/lifetime'],
+    ['DELETE', '/_api/card/t'],
+    ['PUT', '/_api/card/t', { body: { markdown: SAVED, create: true } }],
+    ['GET', '/_api/card/t'],
+    ['DELETE', '/_api/card/nobody'], ['DELETE', '/_api/card/bad%20handle'],
+  ],
+  // This Worker keeps no list of reserved handles (the registry that hands names out does), so a
+  // word that is also a route's own name is a handle like any other, on both prefixes.
+  'a handle that is also a route word (cards, card, try, preview, vanity, report, stop, full, asset)': [
+    ...['cards', 'card', 'try', 'preview', 'vanity', 'report', 'stop', 'full', 'asset'].flatMap((word) => [
+      ['GET', `/_api/card/${word}`],
+      ['PUT', `/_api/card/${word}`, { body: { markdown: SAVED, create: true } }],
+      ['GET', `/_api/card/${word}`], ['GET', `/_api/card/${word}/full`], ['GET', `/_api/card/${word}/lifetime`],
+      ['PUT', `/_api/card/${word}/asset/fresh`, { body: { base64: GIF, mime: 'image/gif' } }],
+      ['PUT', `/_api/card/${word}/stop`], ['DELETE', `/_api/card/${word}/stop`],
+    ]),
+    ['POST', '/_api/cards', { body: { handles: ['cards', 'card', 'try', 'nobody'] } }],
+    ['DELETE', '/_api/card/cards'], ['GET', '/_api/card/cards'], ['GET', '/_api/card/card'],
+  ],
+  'no handle, and broken percent-encoding': [
+    ['GET', '/_api/card/'], ['PUT', '/_api/card/', { body: { markdown: SAVED } }], ['POST', '/_api/card/'], ['DELETE', '/_api/card/'],
+    ['GET', '/_api/card//'], ['GET', '/_api/card//asset/pic'], ['GET', '/_api/card/t/'], ['GET', '/_api/card/t/asset/'],
+    ['GET', '/_api/card/%E0%A4'], ['GET', '/_api/card/t/asset/%zz'], ['GET', '/_api/card/%/asset/pic'], ['DELETE', '/_api/card/%/asset/pic/fenced', { headers: { 'if-version': 'x' } }],
+    ['GET', '/_api/card/%/full'], ['GET', '/_api/card/%/lifetime'], ['PUT', '/_api/card/%/stop'],
+  ],
+};
+
+const playStory = async (story, prefixed) => {
+  const { steps, noHash = false } = Array.isArray(story) ? { steps: story } : story;
+  const env = envWith({ t: CARD });
+  if (noHash) delete env.MCP_TOKEN_HASH;
+  const answers = [];
+  for (const [method, path, { body, token = TOKEN, headers = {} } = {}] of steps) {
+    const url = new URL('https://card.feelreef.com' + prefixed(path));
+    const res = await handleApiAsWritten(new Request(url, {
+      method,
+      headers: {
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...(body ? { 'content-type': 'application/json' } : {}),
+        ...(typeof headers === 'function' ? headers(answers) : headers),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }), env, url);
+    assert.ok(res, `${method} ${url.pathname} was not answered by the API at all`);
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* the owner read answers markdown */ }
+    answers.push({ step: `${method} ${path}`, status: res.status, headers: [...res.headers].sort(), body: text, json });
+  }
+  return { answers, store: [...env.CARDS._m].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)) };
+};
+const levelled = ({ answers, store }) => ({
+  answers: answers.map(({ step, status, headers, body }) => ({ step, status, headers, body: level(body) })),
+  store: JSON.parse(level(JSON.stringify(store))),
+});
+
+for (const [name, story] of Object.entries(ROUTE_STORIES)) {
+  test(`🔴 both prefixes — ${name}: /_api/cards/<handle>… answers what /_api/card/<handle>… answers`, async () => {
+    const old = await playStory(story, (p) => p);
+    const neu = await playStory(story, onCards);
+    assert.deepEqual(levelled(neu), levelled(old));
+  });
+}
+
+test('🔴 both prefixes — CONTROL: the stories reach every kind of answer, and each route answers 200 somewhere', async () => {
+  // what the table above is worth. A table of 404s would compare equal on any two prefixes, so: on
+  // the OLD prefix, every refusal class shows up, and every route has a step that succeeds.
+  const seen = new Set(), ok = new Set();
+  for (const story of Object.values(ROUTE_STORIES)) {
+    for (const a of (await playStory(story, (p) => p)).answers) {
+      seen.add(a.status);
+      if (a.status === 200) ok.add(a.step.replace(/\/_api\/card\/[^/]+/, '/_api/card/<handle>').replace(/\/asset\/[^/]+/, '/asset/<id>'));
+    }
+  }
+  for (const status of [200, 400, 401, 404, 405, 409, 412, 503]) assert.ok(seen.has(status), `no step of any story answers ${status}`);
+  for (const route of ['GET /_api/card/<handle>', 'PUT /_api/card/<handle>', 'DELETE /_api/card/<handle>',
+    'GET /_api/card/<handle>/full', 'GET /_api/card/<handle>/lifetime', 'PUT /_api/card/<handle>/stop', 'DELETE /_api/card/<handle>/stop',
+    'PUT /_api/card/<handle>/asset/<id>', 'DELETE /_api/card/<handle>/asset/<id>', 'DELETE /_api/card/<handle>/asset/<id>/fenced']) {
+    assert.ok(ok.has(route), `no story has a ${route} that succeeds`);
+  }
+});
+
+test('🔴 both prefixes — the list stays where it was: POST /_api/cards is list_cards, and only that exact path', async () => {
+  const env = envWith({ t: CARD, other: CARD });
+  const list = await call(env, 'POST', '/_api/cards', { handles: ['t', 'other', 'nope'] });
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).cards.map((c) => c.handle), ['t', 'other']);
+  // no handle is not a handle: neither prefix reads the bare word, or a trailing slash, as one
+  for (const [method, path] of [['GET', '/_api/cards'], ['PUT', '/_api/cards'], ['DELETE', '/_api/cards'],
+    ['POST', '/_api/cards/'], ['GET', '/_api/cards/'], ['POST', '/_api/card'], ['GET', '/_api/card'], ['GET', '/_api/card/']]) {
+    const url = new URL('https://card.feelreef.com' + path);
+    const res = await handleApiAsWritten(new Request(url, { method, headers: { authorization: `Bearer ${TOKEN}` } }), env, url);
+    assert.equal(res.status, 404, `${method} ${path}`);
+    assert.deepEqual(await res.json(), { error: `No such endpoint: ${path}` }, `${method} ${path}`);
+  }
+  // a handle spelled `cards` is one handle on either prefix, and the list still lists
+  assert.equal((await call(env, 'PUT', '/_api/card/cards', { markdown: SAVED, create: true })).status, 200);
+  for (const path of ['/_api/card/cards', '/_api/cards/cards']) {
+    const url = new URL('https://card.feelreef.com' + path);
+    const res = await handleApiAsWritten(new Request(url, { headers: { authorization: `Bearer ${TOKEN}` } }), env, url);
+    assert.equal(res.status, 200, path);
+    assert.equal((await res.json()).handle, 'cards', path);
+  }
+  assert.deepEqual((await (await call(env, 'POST', '/_api/cards', { handles: ['cards'] })).json()).cards.map((c) => c.handle), ['cards']);
+  // POST to a handle is not the list: it is a method the handle's route refuses
+  const url = new URL('https://card.feelreef.com/_api/cards/t');
+  const post = await handleApiAsWritten(new Request(url, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: '{"handles":["t"]}' }), env, url);
+  assert.equal(post.status, 405);
+});
+
+test('🔴 both prefixes — an answer that names a path names the one it was called on', async () => {
+  const env = envWith({ t: CARD });
+  const ask = async (method, path, headers = {}) => {
+    const url = new URL('https://card.feelreef.com' + path);
+    return (await handleApiAsWritten(new Request(url, { method, headers: { authorization: `Bearer ${TOKEN}`, ...headers } }), env, url)).json();
+  };
+  // an unknown endpoint is echoed whole
+  assert.deepEqual(await ask('PUT', '/_api/card/t/stopped'), { error: 'No such endpoint: /_api/card/t/stopped' });
+  assert.deepEqual(await ask('PUT', '/_api/cards/t/stopped'), { error: 'No such endpoint: /_api/cards/t/stopped' });
+  // the DELETE that refuses a malformed If-Generation says where to read a good one: beside the door the caller used
+  assert.match((await ask('DELETE', '/_api/card/t', { 'if-generation': 'abc' })).why, /GET \/_api\/card\/t\/lifetime returned/);
+  assert.match((await ask('DELETE', '/_api/cards/t', { 'if-generation': 'abc' })).why, /GET \/_api\/cards\/t\/lifetime returned/);
+  // nothing else moved: the other routes under /_api/ have one spelling each
+  for (const path of ['/_api/previews', '/_api/trys/x', '/_api/vanitys/t', '/_api/cardss/t', '/_api/Cards/t']) {
+    assert.deepEqual(await ask('GET', path), { error: `No such endpoint: ${path}` }, path);
+  }
 });

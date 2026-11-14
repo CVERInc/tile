@@ -159,6 +159,7 @@ const EXITS = [
   ['/edit without host 400', `${C}/edit`, { expect: 400 }],
   ['/_preview expired', `${C}/_preview/${'0'.repeat(32)}`],
   ['/_api unauthenticated', `${C}/_api/card/maple`, { method: 'POST', body: '{}' }],
+  ['/_api unauthenticated, the cards prefix', `${C}/_api/cards/maple`, { method: 'POST', body: '{}' }],
 ];
 test('CARD_NOINDEX_ALL on: EVERY exit of the worker carries X-Robots-Tag (enumerated, incl. 301s and icon/asset 404s)', async () => {
   const missing = [];

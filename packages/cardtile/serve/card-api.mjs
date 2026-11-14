@@ -1502,6 +1502,40 @@ async function deleteCard(env, handle, meant = null) {
 }
 
 /**
+ * resourceOf: the path after `/_api/` → { resource, rest }. Pure. THE ONE PLACE the two spellings of
+ * one handle's resource meet.
+ *
+ * A route between services names the resource `cards` (docs/VOCABULARY.md, "Routes"), and every
+ * caller written so far says `card`. So `/_api/cards/<handle>…` is read as `/_api/card/<handle>…`
+ * here, once, before any matcher runs: one set of handlers, and nothing a caller can observe differs
+ * between the two prefixes except the path it used. Both are served until the callers have switched;
+ * then the old one is dropped here, in this function, and nowhere else.
+ *
+ * 🔴 `cards` ALONE IS THE LIST, AND STAYS THE LIST. Only `cards/` followed by something is one
+ * handle's resource; `POST /_api/cards` has no slash after the word, so it never reaches the
+ * rewrite, and list_cards matches it exactly as before. The two cannot be confused in either
+ * direction: a handle is at least one character (VALID_HANDLE), so there is no handle whose route
+ * is the bare word, and `cards/` with nothing after it is rewritten to `card/`, which no matcher
+ * takes, so it is the 404 it always was.
+ *
+ * 🔴 A HANDLE SPELLED `cards` (or `card`) IS A HANDLE LIKE ANY OTHER. This Worker keeps no list of
+ * reserved handles: which names may be registered is the registry's question (see the note above
+ * NOT_FOUND_CARD in card-worker.mjs), and this API serves whatever handle it is handed. Such a
+ * card is `/_api/card/cards` or `/_api/cards/cards`: the first segment is the resource, the second
+ * the handle, and only the first is ever rewritten.
+ *
+ * `resource` is echoed in one answer (DELETE's `bad_generation`, which tells the caller which GET
+ * to read a generation from). The unknown-endpoint 404 echoes `url.pathname` itself. Either way a
+ * caller is answered with the path it called.
+ */
+export function resourceOf(afterPrefix) {
+  const path = String(afterPrefix);
+  return path.startsWith('cards/')
+    ? { resource: 'cards', rest: 'card/' + path.slice('cards/'.length) }
+    : { resource: 'card', rest: path };
+}
+
+/**
  * handleApi: the `/_api/*` surface, or null when the request is not ours (the card renderer takes it).
  *
  * Routes:
@@ -1528,6 +1562,9 @@ async function deleteCard(env, handle, meant = null) {
  *   GET    /_api/vanity/<handle>             —             the card's own domain: { host|null, redirect, … }
  *   PUT    /_api/vanity/<handle>             —             { host, redirect?, expect? } → bind it (card-vanity.mjs)
  *   DELETE /_api/vanity/<handle>             —             { expect?, host? } → release it
+ *
+ * Every `/_api/card/<handle>…` route above also answers at `/_api/cards/<handle>…`: same methods,
+ * same guard, same handlers, same answers (see `resourceOf`). The others have one spelling each.
  */
 export async function handleApi(request, env, url) {
   if (!url.pathname.startsWith(API_PREFIX)) return null;
@@ -1538,7 +1575,10 @@ export async function handleApi(request, env, url) {
   const store = env && env.CARDS;
   if (!store) return json({ error: 'card store not bound' }, 500);
 
-  const rest = url.pathname.slice(API_PREFIX.length);
+  // `rest` is the path every matcher below reads, with one handle's resource spelled `card/`
+  // whichever way the caller spelled it; `resource` is the caller's own word, for the one answer
+  // that names a sibling route. Nothing below looks at the prefix again.
+  const { resource, rest } = resourceOf(url.pathname.slice(API_PREFIX.length));
   const method = request.method.toUpperCase();
 
   // ── list_cards ─────────────────────────────────────────────────────────────────────────────────
@@ -1848,7 +1888,7 @@ export async function handleApi(request, env, url) {
       // `meant || null` read an empty value as "no header" and rotated whatever lifetime was current.
       const meant = request.headers.get('if-generation');
       if (meant != null && !VALID_GEN.test(meant)) {
-        return json({ error: 'bad_generation', why: `If-Generation must be the "gen" GET /_api/card/${handle}/lifetime returned (or be left out). Nothing was deleted.` }, 400);
+        return json({ error: 'bad_generation', why: `If-Generation must be the "gen" GET /_api/${resource}/${handle}/lifetime returned (or be left out). Nothing was deleted.` }, 400);
       }
       try { deleted = await deleteCard(env, handle, meant); } catch (e) {
         if (e instanceof StaleLifetime) {

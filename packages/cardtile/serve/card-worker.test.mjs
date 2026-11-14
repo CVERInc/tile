@@ -1489,7 +1489,7 @@ test('reef#2725 ①: reef.cards routes by path exactly like the old host, and it
     const get = store.get;
     store.get = async (key) => { reads.push(key); return get(key); };
     const env = { PREVIEW: 'false', CARDS: store, ...off };
-    for (const path of ['/t', '/', '/feelreef', '/favicon.ico', '/apple-touch-icon.png', '/_api/card/t']) {
+    for (const path of ['/t', '/', '/feelreef', '/favicon.ico', '/apple-touch-icon.png', '/_api/card/t', '/_api/cards/t']) {
       const res = await worker.fetch(new Request(`https://reef.cards${path}`), env);
       assert.equal(res.status, 404, `switch off: ${path}`);
     }
@@ -1553,6 +1553,7 @@ test('reef#2725 ②: with the switch on, the old card addresses 301 to reef.card
   // is not a single handle-shaped segment — the marketing site's own paths are never a Card.
   for (const [url, init] of [
     ['https://card.feelreef.com/_api/card/t', {}],
+    ['https://card.feelreef.com/_api/cards/t', {}],
     ['https://card.feelreef.com/_api', {}],
     ['https://card.feelreef.com/try/park', { method: 'POST', body: 'x' }],
     ['https://card.feelreef.com/edit?host=https%3A%2F%2Ffeelreef.com', {}],

@@ -50,7 +50,9 @@ Recoverable, checked before they moved: all three answer 200 on their public URL
 ## Deploying a change
 
 Prefer the write API (`PUT /_api/card/<handle>`): it checks the version, carries the stored
-assets and runs Web Risk. A direct KV write skips all three. When it has to be direct, the body
+assets and runs Web Risk. A direct KV write skips all three. (Every `/_api/card/<handle>…` route
+also answers at `/_api/cards/<handle>…`, with the same answers; the tools in this package still
+call the first. See `docs/VOCABULARY.md`, "Routes".) When it has to be direct, the body
 goes under the handle's CURRENT generation (reef#2618 r3 — see `genKey` in `serve/card-api.mjs`):
 
     export CLOUDFLARE_API_TOKEN=$(security find-generic-password -w -s cver-cf-kv)

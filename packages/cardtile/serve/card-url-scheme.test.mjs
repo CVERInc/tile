@@ -11,7 +11,10 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 import { renderCardHTML } from './card-worker.mjs';
 import { cardLinkReport } from './card-destinations.mjs';
-import { handleApi, CardLifetime, _internal } from './card-api.mjs';
+import { handleApi as handleApiAsWritten, CardLifetime, _internal } from './card-api.mjs';
+import { twinned } from './api-prefix-twin.mjs';
+// every `/_api/card/…` request below goes to `/_api/cards/…` instead when card-api-cards-twin.test.mjs runs this file
+const handleApi = twinned(handleApiAsWritten);
 
 const require5 = createRequire(new URL('../../sitetile/astro/package.json', import.meta.url));
 let parseHtml = null;
