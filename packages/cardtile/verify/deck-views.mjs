@@ -40,6 +40,9 @@
 //             on the table — interleaved with --base, medians side by side.
 //   editor    /try/edit with a card in it: the preview frame changes view in place (its window
 //             survives), and hiding and showing the frame keeps the pile on the card it was on.
+//   turn      two cards that turn over to ONE back: A is put back and B is asked for inside A's
+//             560 ms turn. The back stays on A until that turn is over (the page keeps the times),
+//             then B turns over with it. Pictures every ~100 ms: <engine>/shared-back-turn/.
 //   file      a page that carries its items as a card file (data-card-src → window.__cardMd): the
 //             file wall (virtualBrick), the pile over it, and the switches between them.
 //             🔴 SYNTHETIC: no page in this repository is served that way. The specimen is a Card
@@ -56,7 +59,7 @@
 //   … --no-move-before           take Element.moveBefore away before the page runs: the path WebKit and
 //                                Firefox take today. 🔴 Still Chromium underneath — it shows what the
 //                                fallback does to a frame, not how another engine paints.
-//   … --only a,b                 just these steps (prepaint lang walk print boot long editor file draw before)
+//   … --only a,b                 just these steps (prepaint lang walk print boot long editor file draw turn before)
 //   … --dry                      no browser: serve the pages, read the markup back, exit
 //
 // Pictures: out/card-verify/deck-views/<engine>/ (walk/ holds one per switch), listed in
@@ -113,8 +116,14 @@ const fileHost = (view) => ['---', 'card-page: filehost', 'title: Numbers', `vie
 const FILE_N = 600;
 const fileMd = (view) => ['---', 'title: Numbers', `view: ${view}`, '---', '', '## cards', '',
   ...Array.from({ length: FILE_N }, (_, i) => `- [ ] %% card: text${i === 6 ? ' back=#rare' : ''} %% ${i + 1}`), '', '## back: rare | Rare', '', '- [ ] %% card: text %% A rare one', ''].join('\n');
+/** two tiles next to each other that turn over to ONE back: named by each (`back=#about`), or the file's default (`back: "#about"`) */
+const shared = (view, def) => ['---', 'card-page: shared', 'title: Specimen — one back, two cards', `view: ${view}`, ...(def ? ['back: "#about"'] : []), '---', '', '## cards', '',
+  `- [ ] %% card: text w=6${def ? '' : ' back=#about'} %% Card A: turn me over.`,
+  `- [ ] %% card: text w=6${def ? '' : ' back=#about'} %% Card B: I turn over to the same back.`,
+  '- [ ] %% card: text w=6 noback %% Card C has no back.',
+  '', '', '## back: about | About', '', '- [ ] %% card: text %% THE ONE BACK. If a card shows its back, these words are on it.', ''].join('\n');
 const CARDS = {};
-for (const v of VIEWS) { CARDS[`bio-${v}`] = bio(v); CARDS[`long-${v}`] = long(v); CARDS[`rich-${v}`] = withView(readCard('specimen-rich'), v); CARDS[`filehost-${v}`] = fileHost(v); }
+for (const v of VIEWS) { CARDS[`bio-${v}`] = bio(v); CARDS[`long-${v}`] = long(v); CARDS[`rich-${v}`] = withView(readCard('specimen-rich'), v); CARDS[`filehost-${v}`] = fileHost(v); CARDS[`shared-${v}`] = shared(v, false); CARDS[`shareddef-${v}`] = shared(v, true); }
 
 const store = {
   get: async (h) => CARDS[h] ?? null,
@@ -732,6 +741,79 @@ async function drawPage(view, size) {
   await ctx.close();
 }
 
+// ── turn: a back two tiles name stays on the card that is being put back until that turn is over ──
+// Open A, put it back (Escape), walk to B and tap it — all inside A's 560 ms deck-put. The page
+// itself keeps the times (when Escape came, when B was tapped, when deck-put ended, when the back's
+// node changed cards), so the claim does not rest on how fast this harness can look; the pictures,
+// one every ~100 ms through the turn, are for eyes.
+async function turn(view, kind, size, more = {}) {
+  const reduced = more.reducedMotion === 'reduce';
+  const tag = `${view}, the ${kind} back${reduced ? ', reduced motion' : ''}`;
+  at('turn', `shared${kind === 'default' ? 'def' : ''}`, view, sz(size));
+  const { ctx, page, seen } = await newPage(size, more);
+  await page.goto(`${head.url}/shared${kind === 'default' ? 'def' : ''}-${view}`, { waitUntil: 'load' }); await settle(page, 2000);
+  const dir = `shared-back-turn/${view}-${kind}${reduced ? '-reduced' : ''}`;
+  fs.mkdirSync(join(SHOTS, dir), { recursive: true });
+  const top = () => page.evaluate(() => { const t = document.querySelector('.deck-card.is-top.can-flip'); if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + Math.min(60, r.height / 4), i: +t.dataset.i }; });
+  await page.evaluate(() => window.__deckJump(0)); await settle(page, 900);
+  const ca = await top();
+  if (!ca || ca.i !== 0) { fail(`${tag}: the first card is not up, or cannot be turned over`); await ctx.close(); return; }
+  await page.mouse.click(ca.x, ca.y); await settle(page, 1000);
+  // the page's own clock: what happened, and when
+  const armed = await page.evaluate(() => {
+    const body = document.querySelector('.dc-drawer-body'), cards = [...document.querySelectorAll('.deck-card')];
+    const a = cards.find((k) => k.dataset.i === '0'), b = cards.find((k) => k.dataset.i === '1');
+    const T = window.__turn = { a, b, body, esc: null, tapB: null, putEnd: null, moves: [], closingAtTap: null };
+    addEventListener('keydown', (e) => { if (e.key === 'Escape' && T.esc === null) T.esc = performance.now(); }, true);
+    document.addEventListener('click', (e) => { if (e.isTrusted && T.tapB === null && b.contains(e.target)) { T.tapB = performance.now(); T.closingAtTap = a.classList.contains('flipping-close'); } }, true);
+    a.addEventListener('animationend', (e) => { if (e.animationName === 'deck-put' && e.target === a) T.putEnd = performance.now(); }, true);
+    new MutationObserver(() => { const k = body.closest('.deck-card'); const last = T.moves[T.moves.length - 1]; if (!last || last.on !== k) T.moves.push({ t: performance.now(), on: k }); }).observe(document.documentElement, { childList: true, subtree: true });
+    return { open: a.classList.contains('is-open'), onA: body.closest('.deck-card') === a, b: !!b };
+  });
+  ok(armed.open && armed.onA && armed.b, `${tag}: CONTROL: A is turned over and holds the back`, `turn:${view}:${kind}:control-open`);
+  await shot(page, `${dir}/open-a.png`, `${tag}: A turned over, before it is put back`);
+  await page.keyboard.press('Escape');
+  const cb = await page.evaluate(() => { window.__deckJump(1); const t = window.__turn.b; const r = t.getBoundingClientRect(); return { top: t.classList.contains('is-top'), x: innerWidth / 2, y: Math.max(40, r.top + Math.min(60, r.height / 4)) }; });
+  await page.mouse.click(cb.x, cb.y);
+  const look = () => page.evaluate(() => { const T = window.__turn, vis = (k) => { const f = k.querySelector('.deck-back'); return !!f && getComputedStyle(f).visibility === 'visible'; };
+    return { t: Math.round(performance.now() - T.esc), aBackShown: vis(T.a), aHolds: T.body.closest('.deck-card') === T.a, bHolds: T.body.closest('.deck-card') === T.b, bOpen: T.b.classList.contains('is-open'), aClosing: T.a.classList.contains('flipping-close'), flagged: document.querySelectorAll('.deck-card.is-open').length }; });
+  const samples = [];
+  for (let i = 0; i < 9; i++) {
+    const s = await look(); samples.push(s);
+    await shot(page, `${dir}/t${String(i).padStart(2, '0')}-${String(s.t).padStart(4, '0')}ms.png`, `${tag}: ${s.t} ms after Escape — the back is on ${s.aHolds ? 'A' : s.bHolds ? 'B' : 'neither'}${s.aBackShown ? ', A still shows its back face' : ''}${s.bOpen ? ', B is turned over' : ''}`);
+    const next = (i + 1) * 100, now = await page.evaluate(() => performance.now() - window.__turn.esc);
+    if (now < next) await page.waitForTimeout(next - now);
+  }
+  await settle(page, 900);
+  const end = await page.evaluate(() => { const T = window.__turn; const r = T.body.getBoundingClientRect();
+    return { esc: T.esc, tapB: T.tapB === null ? null : Math.round(T.tapB - T.esc), closingAtTap: T.closingAtTap, putEnd: T.putEnd === null ? null : Math.round(T.putEnd - T.esc),
+      moves: T.moves.map((m) => ({ t: Math.round(m.t - T.esc), on: m.on === T.a ? 'A' : m.on === T.b ? 'B' : 'other' })),
+      bOpen: T.b.classList.contains('is-open') && T.b.classList.contains('flipped') && document.documentElement.classList.contains('open'), bHolds: T.body.closest('.deck-card') === T.b, bodyDrawn: r.width > 0 && r.height > 0,
+      flagged: document.querySelectorAll('.deck-card.is-open').length, bodies: document.querySelectorAll('.dc-drawer-body').length, titles: document.querySelectorAll('[id="drawer-about-title"]').length }; });
+  await shot(page, `${dir}/end-b-open.png`, `${tag}: afterwards — B turned over, holding the back`);
+  const toB = end.moves.filter((m) => m.on === 'B'), line = samples.map((s) => `${s.t}:${s.aHolds ? 'A' : s.bHolds ? 'B' : '-'}${s.aBackShown ? '*' : ''}`).join(' ');
+  num(`turn:${view}:${kind}${reduced ? ':reduced' : ''}:tap-b`, end.tapB, 'ms'); num(`turn:${view}:${kind}${reduced ? ':reduced' : ''}:put-end`, end.putEnd, 'ms'); num(`turn:${view}:${kind}${reduced ? ':reduced' : ''}:back-moved`, toB.length ? toB[0].t : null, 'ms');
+  console.log(`   · ${tag}: B tapped ${end.tapB} ms after Escape, deck-put ended at ${end.putEnd === null ? '— (no animationend)' : end.putEnd + ' ms'}, the back moved ${JSON.stringify(end.moves)}; looked at ${line}  (* = A shows its back face)`);
+  if (reduced) {
+    ok(end.tapB !== null && toB.length === 1 && toB[0].t - end.tapB < 100, `${tag}: no turn to wait for — the back is on B ${toB.length ? toB[0].t - end.tapB : '?'} ms after the tap`, `turn:${view}:${kind}:reduced:at-once`);
+    const late = samples.filter((s) => s.t >= 400);   // (a face's visibility follows its card a quarter of a second later — deck.css .deck-face)
+    ok(late.length >= 3 && late.every((s) => !s.aBackShown), `${tag}: A, put back, shows its front — its back face is not up while B holds the back (${late.filter((s) => s.aBackShown).length} of ${late.length} looks from 400 ms on had it up)`, `turn:${view}:${kind}:reduced:a-front`);
+  } else {
+    ok(end.tapB !== null && end.tapB < 560 && (view === 'stack' || end.closingAtTap === true), `${tag}: CONTROL: B was tapped inside A's turn (${end.tapB} ms after Escape${view === 'list' ? ', A in flipping-close' : ''})`, `turn:${view}:${kind}:control-inside`);
+    // in list the turn runs to its end (animationend); in the stack the walk to B cuts the animation short, so no event comes and the fallback decides
+    const over = end.putEnd !== null ? end.putEnd : 560;
+    if (view === 'list') ok(end.putEnd !== null && end.putEnd >= 540, `${tag}: CONTROL: deck-put ran to its end (${end.putEnd} ms)`, `turn:${view}:${kind}:control-put-end`);
+    ok(toB.length === 1 && toB[0].t >= over - 2, `${tag}: the back went to B once, when A's turn was over (${toB.length ? toB[0].t : '—'} ms, the turn ${end.putEnd !== null ? 'ended at ' + end.putEnd : 'had no end event; 560'} ms)`, `turn:${view}:${kind}:after-turn`);
+    const shown = samples.filter((s) => s.aBackShown);
+    ok(shown.every((s) => s.aHolds) && samples.filter((s) => s.t < over - 20).every((s) => s.aHolds && !s.bOpen), `${tag}: at every look during the turn A holds the back (${samples.filter((s) => s.t < over - 20).length} looks; A showed its back face at ${shown.length} of them)`, `turn:${view}:${kind}:a-holds`);
+    if (view === 'list') ok(shown.length >= 1, `${tag}: CONTROL: A was seen with its back face showing during the turn`, `turn:${view}:${kind}:control-seen`);
+  }
+  ok(end.bOpen && end.bHolds && end.bodyDrawn && end.flagged === 1 && end.bodies === 1 && end.titles === 1, `${tag}: afterwards B is turned over and holds the back — one card flagged open, one back node (open=${end.bOpen} holds=${end.bHolds} drawn=${end.bodyDrawn} flagged=${end.flagged} bodies=${end.bodies} title ids=${end.titles})`, `turn:${view}:${kind}${reduced ? ':reduced' : ''}:b-open`);
+  const pe = seen.errs.filter((e) => e.startsWith('PAGEERROR'));
+  ok(pe.length === 0, `${tag}: no script errors (${pe.slice(0, 3).join(' | ') || 'none'})`, `turn:${view}:${kind}${reduced ? ':reduced' : ''}:no-errors`);
+  await ctx.close();
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────────────────────────
 const OPEN = FULL ? VIEWS : ['stack', 'wall'];
 try {
@@ -798,6 +880,11 @@ try {
     console.log('── draw: the draw page, a shuffled pile (SYNTHETIC specimen)');
     for (const v of FULL ? VIEWS : ['stack']) await drawPage(v, PHONE);
     if (FULL) await drawPage('stack', DESK);
+  }
+  if (want('turn')) {
+    console.log('── turn: a shared back while its card is still being put back');
+    for (const v of ['list', 'stack']) for (const k of FULL ? ['named', 'default'] : ['named']) await turn(v, k, PHONE);
+    if (FULL) await turn('list', 'named', PHONE, { reducedMotion: 'reduce' });
   }
 } catch (e) { at('harness'); fail(`the harness itself stopped: ${String(e && e.stack || e).split('\n').slice(0, 4).join(' | ')}`); }
 
