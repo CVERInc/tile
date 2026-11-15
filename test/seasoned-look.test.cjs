@@ -88,7 +88,7 @@ ok(reset > Math.max(plainH, plainMk, chip, font), 'the Plain-mode reset still co
 // ── the Rendered icon ────────────────────────────────────────────────────────────────────────────────────────
 const rendered = /\{ key: 'rendered', cls: 'tugtile-preview', icon: '([a-z-]+)'/.exec(core);
 ok(rendered, 'EDITOR_MODES has a rendered entry');
-eq(rendered && rendered[1], 'book-open', 'Rendered wears a reading icon, not a pen');
+eq(rendered && rendered[1], 'square-pilcrow', 'Rendered wears square-pilcrow, the family icon beside square-m and square-code');
 
 // ── the settings tab's strings, in every locale ──────────────────────────────────────────────────────────────
 const KEYS = ['mtSeasonedPalette', 'mtSeasonedPaletteDesc', 'mtPaletteAccent', 'mtPaletteColor', 'mtPalettePlain',

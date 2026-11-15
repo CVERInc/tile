@@ -123,7 +123,7 @@ class MarktileView extends TextFileView {
     if (vc && vc.isConnected) {
       vc.empty();
       const _m = this._currentMode();
-      setIcon(vc.createSpan({ cls: 'tugtile-viewcycle-icon' }), _m.icon);   // square-m Seasoned · square-pen Rendered · square-code Plain
+      setIcon(vc.createSpan({ cls: 'tugtile-viewcycle-icon' }), _m.icon);   // square-m Seasoned · square-pilcrow Rendered · square-code Plain
       vc.createSpan({ cls: 'tugtile-viewcycle-name', text: t(_m.name) });
     }
     const lk = this._lockBtnEl;
