@@ -72,6 +72,25 @@ export const DEFAULT_LANG = 'zh-Hant';
  * (works with zero JS); the AJAX enhancement intercepts the same click to reset and re-show the
  * form in place instead of navigating.
  */
+const EN = {
+  fieldRequired: 'This field is required.',
+  sentWithEmail: "Your message was received. The reply will go to {email}.",
+  sentWithEmailGeneric: "Your message was received. The reply will go to the address you entered.",
+  sentNoEmail: "Leave an email if you'd like a reply.",
+  submitting: 'Sending…',
+  successHeading: 'Sent',
+  backHome: 'Back to homepage',
+  errorNetwork: 'Your connection seems to be having trouble — check it and try again.',
+  errorServer: "Couldn't send that — please try again.",
+  errorNotClaimed: "This site isn't taking messages right now.",
+  errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
+  errorTooLong: 'That message is too long — please shorten it and send again.',
+  errorRateLimited: 'Too many messages were sent just now — please wait a moment and try again.',
+  sendAnother: 'Send another',
+};
+
+// One row per locale the platform ships — the nine of cardtile's SANDBOX_LOCALES, the same nine the
+// inbox-bubble coral carries (tile#318). inbox-form-locales.test.mjs asks that list, not this one.
 const INBOX_FORM_LOCALE = {
   ja: {
     fieldRequired: 'この項目は必須です。',
@@ -137,31 +156,32 @@ const INBOX_FORM_LOCALE = {
     errorRateLimited: '너무 자주 보냈습니다. 잠시 후 다시 시도해 주세요.',
     sendAnother: '다시 보내기',
   },
-  en: {
-    fieldRequired: 'This field is required.',
-    sentWithEmail: "Your message was received. The reply will go to {email}.",
-    sentWithEmailGeneric: "Your message was received. The reply will go to the address you entered.",
-    sentNoEmail: "Leave an email if you'd like a reply.",
-    submitting: 'Sending…',
-    successHeading: 'Sent',
-    backHome: 'Back to homepage',
-    errorNetwork: 'Your connection seems to be having trouble — check it and try again.',
-    errorServer: "Couldn't send that — please try again.",
-    errorNotClaimed: "This site isn't taking messages right now.",
-    errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
-    errorTooLong: 'That message is too long — please shorten it and send again.',
-    errorRateLimited: 'Too many messages were sent just now — please wait a moment and try again.',
-    sendAnother: 'Send another',
-  },
+  en: EN,
+  // English placeholders until these four are translated. Each row is its own object so a
+  // translation replaces one row without touching the others. The locale test lists these four as
+  // awaiting translation and fails once a row stops being English, so the list cannot go stale.
+  de: { ...EN },
+  fr: { ...EN },
+  es: { ...EN },
+  'pt-br': { ...EN },
 };
-/** A site's raw `lang:` (BCP-47-ish, whatever an author wrote) → one of the table's keys. */
-function inboxFormLocaleKey(lang) {
+
+/** The table's row keys, in table order. */
+export const INBOX_FORM_LOCALES = Object.freeze(Object.keys(INBOX_FORM_LOCALE));
+
+/**
+ * A site's raw `lang:` (BCP-47-ish, whatever an author wrote) → one of the table's keys.
+ * Same routing as the inbox-bubble coral's `resolveLocale`, so both corals pick one row per page:
+ *   - `zh` with `hans` / `-cn` / `-sg` → `zh-cn`; any other `zh` → `zh-tw`
+ *   - any `pt` tag (`pt`, `pt-BR`, `pt-PT`) → `pt-br`, the one Portuguese row
+ *   - otherwise the primary subtag when it has a row (`ja`, `ko`, `de`, `fr`, `es`, `en`), else `en`
+ */
+export function inboxFormLocaleKey(lang) {
   const tag = String(lang || '').toLowerCase();
   const primary = tag.split('-')[0];
-  if (primary === 'ja') return 'ja';
-  if (primary === 'ko') return 'ko';
   if (primary === 'zh') return /hans|-cn\b|-sg\b/.test(tag) ? 'zh-cn' : 'zh-tw';
-  return 'en';
+  if (primary === 'pt') return 'pt-br';
+  return Object.hasOwn(INBOX_FORM_LOCALE, primary) ? primary : 'en';
 }
 export function inboxFormCopy(lang) {
   return INBOX_FORM_LOCALE[inboxFormLocaleKey(lang)];
