@@ -2342,8 +2342,10 @@ function wireToc(opts) {
 // literally one thing everywhere it appears.
 const EDITOR_MODES = [
   { key: 'seasoned', cls: '', icon: 'square-m', name: 'mtModeSeasoned' },
-  // book-open, not square-pen: Rendered is the mode closest to READING, and a pen says the opposite.
-  { key: 'rendered', cls: 'tugtile-preview', icon: 'book-open', name: 'mtModeRendered' },
+  // square-pilcrow: one icon family across the three modes (square-m · square-pilcrow · square-code). Not
+  // square-pen (a pen says the opposite of reading) and not book-open (a book is pagetile, the book reader).
+  // Every non-Obsidian host draws it from its obsidian-shim.js ICONS map — test/view-mode-icons.test.mjs.
+  { key: 'rendered', cls: 'tugtile-preview', icon: 'square-pilcrow', name: 'mtModeRendered' },
   { key: 'plain', cls: 'tugtile-plain', icon: 'square-code', name: 'mtModePlain' },
 ];
 // Rendered mode hides the literal `[ ]` / `[x]` and puts a box glyph in its place (styles.css,
@@ -2652,7 +2654,7 @@ class MarktileView extends TextFileView {
     if (vc && vc.isConnected) {
       vc.empty();
       const _m = this._currentMode();
-      setIcon(vc.createSpan({ cls: 'tugtile-viewcycle-icon' }), _m.icon);   // square-m Seasoned · square-pen Rendered · square-code Plain
+      setIcon(vc.createSpan({ cls: 'tugtile-viewcycle-icon' }), _m.icon);   // square-m Seasoned · square-pilcrow Rendered · square-code Plain
       vc.createSpan({ cls: 'tugtile-viewcycle-name', text: t(_m.name) });
     }
     const lk = this._lockBtnEl;

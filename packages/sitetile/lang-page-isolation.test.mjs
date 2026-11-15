@@ -180,7 +180,7 @@ await test('🔴 the route hands its sheet to the layout as text; it does not im
   assert.ok(layout.includes("typeof routeCss === 'function' ? routeCss(themeCss)"), 'the layout no longer hands the theme to routeCss');
   const emit = layout.indexOf('{routeCss && <style');
   assert.ok(emit > -1, 'the layout does not emit routeCss');
-  assert.ok(emit < layout.indexOf('{themeCss && <style'), 'routeCss must be emitted before the theme');
+  assert.ok(emit < layout.indexOf('{themeCssBlock && <style'), 'routeCss must be emitted before the theme');
 });
 
 // ── pure: name it and you own it ─────────────────────────────────────────────────────────────
