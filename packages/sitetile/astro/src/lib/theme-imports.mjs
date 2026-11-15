@@ -7,10 +7,21 @@
 // usually) was dropped by the browser without a word: no import rule, no request.
 //
 // What is lifted is exactly what a stylesheet of the author's own would have honoured: the
-// `@import` rules that LEAD the text, with only whitespace, comments and `@charset` before or
-// between them. An `@import` after any other rule is invalid CSS in every stylesheet and stays
-// where it is. So does everything after the first thing this scanner does not recognise as a
-// complete import: a rule it cannot read is left for the browser to judge, as it always was.
+// `@import` rules that LEAD the text. Before or between them there may be only whitespace,
+// comments, one `@charset` as the very first rule, and `@layer` STATEMENTS (`@layer a, b;`, no
+// block). A byte order mark at the start of the text is an encoding marker, not content: it is
+// skipped, and dropped from the text when anything is lifted (left in front of the first rule
+// still inside the block, it would become part of that rule's selector). An `@import` after any
+// other rule — a style rule, a block, a second or late `@charset` — is invalid CSS in every
+// stylesheet and stays where it is. So does everything after the first thing this scanner does
+// not recognise as a complete import or layer statement: a rule it cannot read is left for the
+// browser to judge, as it always was.
+//
+// A `@layer` statement ahead of an import is lifted WITH it, and the lifted rules are emitted in
+// their source order. Layers are ordered by first declaration, so the statement must still come
+// first: `@layer theme, base;  @import url(x) layer(base);` puts `theme` below `base`, and lifting
+// only the import would declare `base` first and flip the two. Statements after the last import
+// gain nothing from moving and stay inside the block.
 //
 // Each lifted rule is placed in the theme's own layer, so the imported rules sit in the cascade
 // where the rest of the theme sits:
@@ -24,7 +35,11 @@
 // `layer(fonts)` inside the block would have named `reef.theme.fonts`, so that is the name it gets
 // outside it; left as `fonts` it would become a NEW top-level layer, declared after
 // `reef.responsive` and therefore above it. The bare keyword (an anonymous layer) has no spelling
-// that nests under a named layer from an `@import`, so it joins `reef.theme` itself.
+// that nests under a named layer from an `@import`, so it joins `reef.theme` itself. A lifted
+// layer statement's names are mapped the same way, so a statement and an import that name the
+// same layer still name the same layer:
+//
+//   @layer base, fonts;           →  @layer reef.theme.base, reef.theme.fonts;
 //
 // No CSS parser dependency: the scanner below reads only as much grammar as an import's prelude
 // has (strings, `url()` quoted and unquoted, comments, parentheses, escapes) and refuses anything
@@ -38,8 +53,25 @@ export const CUSTOM_CSS_MARKER = 'reef:has-custom-css';
 
 const WS = new Set([' ', '\t', '\n', '\r', '\f']);
 const NEWLINE = new Set(['\n', '\r', '\f']);
+const BOM = '\uFEFF';
+const HEX = /[0-9A-Fa-f]/;
 const isIdentChar = (c) => c !== undefined && (/[-\w\\]/.test(c) || c.charCodeAt(0) > 127);
 const LAYER_NAME = /^-?[A-Za-z_][\w-]*(?:\.-?[A-Za-z_][\w-]*)*$/;
+
+/** A layer name as it is written outside the block: what it would have named inside it.
+ *  `reef.theme[.…]` is taken as already the theme's own. */
+const inThemeLayer = (name) => (name === THEME_LAYER || name.startsWith(`${THEME_LAYER}.`) ? name : `${THEME_LAYER}.${name}`);
+
+/** `s[j]` is a backslash; the index after the escape it starts. A hex escape is one to six hex
+ *  digits plus ONE optional whitespace that terminates it (CRLF counts as one), so `\29 b` is `)b`. */
+function escapeEnd(s, j) {
+  let k = j + 1;
+  if (!HEX.test(s[k] ?? '')) return s[k] === '\r' && s[k + 1] === '\n' ? k + 2 : k + 1;
+  const stop = k + 6;
+  while (k < stop && HEX.test(s[k] ?? '')) k += 1;
+  if (s[k] === '\r' && s[k + 1] === '\n') return k + 2;
+  return WS.has(s[k]) ? k + 1 : k;
+}
 
 // Outcomes of reading one construct: an index (where it ends), INVALID (not something this scanner
 // vouches for — stop lifting here), or EOF (the text ended inside it — lift nothing at all).
@@ -63,7 +95,7 @@ function readString(s, i) {
   const quote = s[i];
   for (let j = i + 1; j < s.length; j += 1) {
     const c = s[j];
-    if (c === '\\') { if (s[j + 1] === '\r' && s[j + 2] === '\n') j += 1; j += 1; continue; }
+    if (c === '\\') { j = escapeEnd(s, j) - 1; continue; }
     if (c === quote) return j + 1;
     if (NEWLINE.has(c)) return INVALID;
   }
@@ -84,7 +116,12 @@ function readUrl(s, i) {
   for (; j < s.length; j += 1) {
     const c = s[j];
     if (c === ')') return j + 1;
-    if (c === '\\') { if (NEWLINE.has(s[j + 1])) return INVALID; j += 1; continue; }
+    if (c === '\\') {
+      if (j + 1 >= s.length) return EOF;
+      if (NEWLINE.has(s[j + 1])) return INVALID; // not a valid escape in an unquoted url
+      j = escapeEnd(s, j) - 1; // the whitespace ending a hex escape is part of it, not the url's
+      continue;
+    }
     if (c === '"' || c === "'" || c === '(') return INVALID;
     if (WS.has(c)) {
       while (WS.has(s[j])) j += 1;
@@ -108,7 +145,7 @@ function readToSemicolon(s, i) {
       if (end === -1) return EOF;
       j = end + 1; continue;
     }
-    if (c === '\\') { j += 1; continue; }
+    if (c === '\\') { j = escapeEnd(s, j) - 1; continue; }
     if (c === '(') { depth += 1; continue; }
     if (c === ')') { depth -= 1; if (depth < 0) return INVALID; continue; }
     if (c === '{' || c === '}') return INVALID;
@@ -140,8 +177,8 @@ function readImport(s, i) {
     if (close === -1) return EOF;
     const name = s.slice(k + 6, close).trim();
     if (!LAYER_NAME.test(name)) return INVALID;
-    const own = name === THEME_LAYER || name.startsWith(`${THEME_LAYER}.`);
-    head = s.slice(i, k) + (own ? s.slice(k, close + 1) : `layer(${THEME_LAYER}.${name})`);
+    const mapped = inThemeLayer(name);
+    head = s.slice(i, k) + (mapped === name ? s.slice(k, close + 1) : `layer(${mapped})`);
     tail = close + 1;
   } else if (startsWithWord(s, k, 'layer') && !isIdentChar(s[k + 5])) {
     head = `${s.slice(i, k)}layer(${THEME_LAYER})`;
@@ -155,38 +192,63 @@ function readImport(s, i) {
   return { end, text: head + s.slice(tail, end) };
 }
 
+/** `s[i]` starts `@layer`. A STATEMENT (`@layer a, b.c;`) → { end, text } with its names in the
+ *  theme layer; a block, an empty list, or a name this scanner does not vouch for → INVALID. */
+function readLayerStatement(s, i) {
+  const from = i + '@layer'.length;
+  const end = readToSemicolon(s, from);
+  if (end < 0) return end;
+  const prelude = s.slice(from, end - 1);
+  if (/["']/.test(prelude)) return INVALID; // no string belongs here, and none may hide a `/*`
+  const names = prelude.replace(/\/\*[\s\S]*?\*\//g, ' ').split(',').map((n) => n.trim());
+  if (!names.every((n) => LAYER_NAME.test(n))) return INVALID;
+  return { end, text: `@layer ${names.map(inThemeLayer).join(', ')};` };
+}
+
+const atKeyword = (s, i, word) => startsWithWord(s, i, word) && !isIdentChar(s[i + word.length]);
+
 /**
- * The `@import` rules that lead `css`, lifted out of it.
+ * The `@import` rules that lead `css`, lifted out of it, with the `@layer` statements ahead of them.
  * @param {string} css  a stylesheet's text (comments still in it)
- * @returns {{ imports: string[], rest: string }}  `imports` in source order, each rewritten into
- *   the theme layer; `rest` is `css` without them. Nothing to lift ⇒ `rest === css`, byte for byte.
+ * @returns {{ imports: string[], rest: string }}  `imports`: the lifted rules in source order, each
+ *   rewritten into the theme layer — every `@import`, and every `@layer` statement before the last
+ *   of them; `rest` is `css` without them (and without a leading byte order mark). Nothing to lift
+ *   ⇒ `rest === css`, byte for byte.
  */
 export function hoistLeadingImports(css) {
   const s = String(css ?? '');
   const none = { imports: [], rest: s };
   const found = [];
-  let i = 0;
-  for (;;) {
+  const start = s.startsWith(BOM) ? BOM.length : 0;
+  let i = start;
+  let first = true; // nothing but trivia read yet: the one place a @charset may stand
+  for (;; first = false) {
     i = skipTrivia(s, i);
     if (i === EOF) return none;
     if (s[i] !== '@') break;
-    if (startsWithWord(s, i, '@charset') && !isIdentChar(s[i + 8])) {
-      const end = readToSemicolon(s, i + 8);
-      if (end === EOF) return none;
-      if (end === INVALID) break;
-      i = end;
+    let rule;
+    if (atKeyword(s, i, '@charset')) {
+      if (!first) break; // a late or second @charset is a rule like any other: imports stop here
+      rule = readToSemicolon(s, i + '@charset'.length);
+      if (rule === EOF) return none;
+      if (rule === INVALID) break;
+      i = rule;
       continue;
     }
-    if (!startsWithWord(s, i, '@import') || isIdentChar(s[i + 7])) break;
-    const rule = readImport(s, i);
+    const layer = atKeyword(s, i, '@layer');
+    if (layer) rule = readLayerStatement(s, i);
+    else if (atKeyword(s, i, '@import')) rule = readImport(s, i);
+    else break;
     if (rule === EOF) return none;
     if (rule === INVALID) break;
-    found.push({ start: i, ...rule });
+    found.push({ start: i, layer, ...rule });
     i = rule.end;
   }
+  // Layer statements after the last import keep their place: nothing they precede is lifted.
+  while (found.length > 0 && found[found.length - 1].layer) found.pop();
   if (found.length === 0) return none;
   let rest = '';
-  let at = 0;
+  let at = start;
   for (const f of found) {
     rest += s.slice(at, f.start);
     at = f.end;
