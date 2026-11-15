@@ -3,11 +3,70 @@ const t=(k)=>k;
 function tileRenderText(tileLines) {
   const out = [];
   const m = tileLines[0].match(/^- \[.\] ?(.*)/);    // Do not use $ (remaining \r in CRLF causes (.*)$ to fail to match the end of line)
-  out.push((m ? m[1] : tileLines[0]).replace(/\s*%%tg-home:.*?%%/, ''));   // hide the archive home-lane token (archived cards only; no-op on active cards)
+  out.push(stripHomeToken(m ? m[1] : tileLines[0]));   // hide the archive home-lane token (archived cards only; no-op on active cards)
   for (let i = 1; i < tileLines.length; i++) {
     out.push(tileLines[i].replace(/^(?:\t| {1,4})/, ''));   // Remove indentation for wrapped lines: one tab or 1-4 spaces
   }
   return out.join('\n');
+}
+
+// Four readers that each replaced an unanchored regex. Every one of those regexes was retried from
+// each character of a long run when the text it was looking for was not there, so a card's cost grew
+// with the SQUARE of the run: one text cell holding 40,000 spaces took seconds to parse. Each reader
+// below visits a character a bounded number of times and returns exactly what its regex did.
+const RE_WS = /\s/;                             // the same class the regexes used: NBSP, U+2028, U+FEFF … included
+const RE_DOT_STOP = /[\n\r\u2028\u2029]/;       // what `.` does not match
+const RE_BLOCK_ID_CHAR = /[A-Za-z0-9-]/;
+// Where the whitespace run that ends just before `end` begins.
+function wsRunStart(s, end) {
+  let i = end;
+  while (i > 0 && RE_WS.test(s.charAt(i - 1))) i--;
+  return i;
+}
+// s.replace(/\s*%%tg-home:.*?%%/, ''): drop the first `%%tg-home:…%%` whose inside holds no line
+// break, with the whitespace before it. A token cannot close past the next `%%`, and the next token
+// cannot start before it, so each stretch between two `%%` is read once.
+function stripHomeToken(s) {
+  let q = s.indexOf('%%tg-home:');
+  while (q !== -1) {
+    const e = s.indexOf('%%', q + 10);
+    if (e === -1) return s;
+    if (!RE_DOT_STOP.test(s.slice(q + 10, e))) return s.slice(0, wsRunStart(s, q)) + s.slice(e + 2);
+    q = s.indexOf('%%tg-home:', e);
+  }
+  return s;
+}
+// /\s+\^([A-Za-z0-9-]+)$/.exec(s) as { index, id }, or null: read from the END of the line — the id,
+// the `^` before it, then the whitespace before that (at least one, and the match starts at its first).
+function trailingBlockId(s) {
+  let k = s.length;
+  while (k > 0 && RE_BLOCK_ID_CHAR.test(s.charAt(k - 1))) k--;
+  if (k === s.length || k === 0 || s.charAt(k - 1) !== '^') return null;
+  const index = wsRunStart(s, k - 1);
+  return index === k - 1 ? null : { index, id: s.slice(k) };
+}
+// The first group of /```\s*\n([\s\S]*?)\n```/.exec(post), or null. An opening fence is ``` followed by
+// whitespace holding a newline; it is closed by the first "\n```" after that whitespace's last newline.
+// Whether ANY closer lies ahead is asked of one lastIndexOf, so an opener with none costs nothing more
+// (N lines of "a```" used to read to the end of the text N times). The one other way the regex
+// matched: the whitespace itself ends in a newline followed by ```, and holds an earlier newline.
+function settingsFenceBody(post) {
+  const lastClose = post.lastIndexOf('\n```');
+  if (lastClose === -1) return null;
+  let o = post.indexOf('```');
+  while (o !== -1) {
+    let w = o + 3, nl = -1, prevNl = -1;
+    while (w < post.length && RE_WS.test(post.charAt(w))) {
+      if (post.charCodeAt(w) === 10) { prevNl = nl; nl = w; }
+      w++;
+    }
+    if (nl !== -1) {
+      if (lastClose > nl) return post.slice(nl + 1, post.indexOf('\n```', nl + 1));
+      if (lastClose === nl && prevNl !== -1) return post.slice(prevNl + 1, nl);
+    }
+    o = post.indexOf('```', o + 1);
+  }
+  return null;
 }
 
 // For table view: strip markdown formatting (headings, bold, italics, strikethrough, inline code, and links) to get plain text. Table styling is completely managed by us to ensure uniform font sizes.
@@ -89,7 +148,7 @@ function parseFile(text) {
     }
   }
   const laneEnd = archiveIdx === -1 ? end : archiveIdx;
-  const archive = archiveIdx === -1 ? '' : lines.slice(archiveIdx, end).join('\n').replace(/^\s+/, '').replace(/\s+$/, '');
+  const archive = archiveIdx === -1 ? '' : lines.slice(archiveIdx, end).join('\n').trim();   // trim() strips the class \s matches, from both ends, in one pass each
 
   // The first valid lane (inside the lanes section, not within a fence), falls back to laneEnd if not found
   let firstCol = -1;
@@ -111,10 +170,10 @@ function parseFile(text) {
       const cl = tileLines.slice();
       while (cl.length && cl[cl.length - 1].trim() === '') cl.pop();
       const cm = /^- \[(.)\]/.exec(cl[0]);
-      const bm = /\s+\^([A-Za-z0-9-]+)$/.exec(cl[0]);   // blockId (hidden during display but preserved verbatim in raw to prevent breaking links like [[#^id]])
+      const bm = trailingBlockId(cl[0]);   // blockId (hidden during display but preserved verbatim in raw to prevent breaking links like [[#^id]])
       const clForText = cl.slice();
       if (bm) clForText[0] = cl[0].slice(0, bm.index);
-      col.tiles.push({ raw: cl.join('\n'), text: tileRenderText(clForText), check: cm ? cm[1] : ' ', block: bm ? bm[1] : null });
+      col.tiles.push({ raw: cl.join('\n'), text: tileRenderText(clForText), check: cm ? cm[1] : ' ', block: bm ? bm.id : null });
     }
     tileLines = null;
   };
@@ -134,27 +193,29 @@ function parseFile(text) {
   }
   flush();
   for (const c of columns) {            // Trim leading/trailing blank lines from lead text (preserving internal lines)
-    while (c.lead.length && c.lead[0].trim() === '') c.lead.shift();
-    while (c.lead.length && c.lead[c.lead.length - 1].trim() === '') c.lead.pop();
+    let from = 0, to = c.lead.length;   // two indexes and one slice: shift() moves the whole array once per blank line
+    while (from < to && c.lead[from].trim() === '') from++;
+    while (to > from && c.lead[to - 1].trim() === '') to--;
+    c.lead = c.lead.slice(from, to);
   }
   // Fault-tolerant parser for settings JSON (only used for reading flags like show-checkboxes; serialization still preserves the raw post as-is without rewriting)
   let settings = {};
-  const sm = /```\s*\n([\s\S]*?)\n```/.exec(post);
-  if (sm) { try { settings = JSON.parse(sm[1]); } catch (e) { settings = {}; } }
+  const sm = settingsFenceBody(post);
+  if (sm !== null) { try { settings = JSON.parse(sm); } catch (e) { settings = {}; } }
 
   return { pre, columns, archive, post, settings, eol };
 }
 
 function serializeFile(model) {
-  const pre = (model.pre || '').replace(/\s+$/, '');
+  const pre = (model.pre || '').trimEnd();
   const body = model.columns
     .map((c) => {
       const lead = (c.lead && c.lead.length) ? c.lead.join('\n') + '\n\n' : '';
       return c.header + '\n\n' + lead + c.tiles.map((cd) => cd.raw).join('\n');
     })
     .join('\n\n\n');
-  const archive = (model.archive || '').replace(/^\s+/, '').replace(/\s+$/, '');  // Preserve the archive section as-is
-  const post = (model.post || '').replace(/^\s+/, '').replace(/\s+$/, '');  // Trim leading/trailing spaces → idempotent (preventing file from bloating on multiple saves)
+  const archive = (model.archive || '').trim();  // Preserve the archive section as-is
+  const post = (model.post || '').trim();  // Trim leading/trailing spaces → idempotent (preventing file from bloating on multiple saves)
   let out = (pre ? pre + '\n\n' : '') + body;
   if (archive) out += '\n\n\n' + archive;
   if (post) out += '\n\n\n' + post;
