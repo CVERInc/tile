@@ -24,9 +24,20 @@
 //             after a trip through the wall). On each wall: the engine's drawer is opened from its
 //             tile and closed (also after a trip through a pile). An `embed` frame is asked for
 //             the random word it wrote when it loaded, before and after every switch: a changed
-//             word is a reload. 🔴 That is REPORTED, per engine, and only held as a failure where
-//             the browser has Element.moveBefore (without it a moved frame loads again; --base
-//             reloads the whole page).
+//             word is a reload (the frame's own navigations are counted beside it). Between stack
+//             and list, and walking a pile, that is held in EVERY engine (tile#317: the pile
+//             re-orders its cards through slots where there is no moveBefore). To or from the wall
+//             a tile changes its parent: held where the browser has Element.moveBefore, or where
+//             the `frames` step saw this engine keep a frame through a change of parent; elsewhere
+//             REPORTED, with that step's answer as the reason.
+//   frames    WHAT THIS ENGINE KEEPS A FRAME'S DOCUMENT THROUGH, asked of the bare DOM: a move to
+//             another parent (insertBefore), a move of its ancestor, display:none and back, a slot
+//             reassigned, a slot moved, and moveBefore where it exists. The slots are what the pile
+//             relies on (deck.js pileOrder) and are held; the rest are the evidence for `walk`.
+//   paint     AN EMBED IS DRAWN OVER ITS WHOLE TILE (tile#317). A frame whose document is one colour
+//             over its whole window: the box that colour covers in a screenshot, beside the frame's
+//             own box on the card, within 2 px — in list on a phone (zoomed, ~71%), stack on a
+//             landscape phone (~51%), and two views at k = 1 as the ruler's CONTROL.
 //   print     each view under print media: a picture and the count of tiles with a box, beside --base
 //   boot      THE DECK DOES NOT COME UP: the script fails to load, throws at its first line, throws
 //             half-way through building the pile, or is merely slow. Each must leave the wall on
@@ -59,7 +70,7 @@
 //   … --no-move-before           take Element.moveBefore away before the page runs: the path WebKit and
 //                                Firefox take today. 🔴 Still Chromium underneath — it shows what the
 //                                fallback does to a frame, not how another engine paints.
-//   … --only a,b                 just these steps (prepaint lang walk print boot long editor file draw turn before)
+//   … --only a,b                 just these steps (prepaint lang frames paint walk print boot long editor file draw turn before)
 //   … --dry                      no browser: serve the pages, read the markup back, exit
 //
 // Pictures: out/card-verify/deck-views/<engine>/ (walk/ holds one per switch), listed in
@@ -122,8 +133,14 @@ const shared = (view, def) => ['---', 'card-page: shared', 'title: Specimen — 
   `- [ ] %% card: text w=6${def ? '' : ' back=#about'} %% Card B: I turn over to the same back.`,
   '- [ ] %% card: text w=6 noback %% Card C has no back.',
   '', '', '## back: about | About', '', '- [ ] %% card: text %% THE ONE BACK. If a card shows its back, these words are on it.', ''].join('\n');
+/** an embed whose document is one colour over its whole window, between two other tiles (tile#317's reproduction) */
+const FILL = [255, 204, 136];
+const fill = (view) => ['---', 'card-page: fill', 'title: Specimen — a frame that fills its window', `view: ${view}`, '---', '', '## cards', '',
+  '- [ ] %% card: profile w=6 %% A profile.',
+  `- [ ] %% card: embed w=6 %% <div style="position:fixed;inset:0;background:rgb(${FILL.join(',')})"></div>`,
+  '- [ ] %% card: text w=6 %% A last word.', ''].join('\n');
 const CARDS = {};
-for (const v of VIEWS) { CARDS[`bio-${v}`] = bio(v); CARDS[`long-${v}`] = long(v); CARDS[`rich-${v}`] = withView(readCard('specimen-rich'), v); CARDS[`filehost-${v}`] = fileHost(v); CARDS[`shared-${v}`] = shared(v, false); CARDS[`shareddef-${v}`] = shared(v, true); }
+for (const v of VIEWS) { CARDS[`fill-${v}`] = fill(v); CARDS[`bio-${v}`] = bio(v); CARDS[`long-${v}`] = long(v); CARDS[`rich-${v}`] = withView(readCard('specimen-rich'), v); CARDS[`filehost-${v}`] = fileHost(v); CARDS[`shared-${v}`] = shared(v, false); CARDS[`shareddef-${v}`] = shared(v, true); }
 
 const store = {
   get: async (h) => CARDS[h] ?? null,
@@ -273,6 +290,7 @@ function state() {
     scrollY: Math.round(scrollY), cur: typeof window.__deckCur === 'function' ? window.__deckCur() : null,
     dup: (() => { const n = new Map(); for (const e of document.querySelectorAll('[id]')) n.set(e.id, (n.get(e.id) || 0) + 1); return [...n].filter(([, k]) => k > 1).map(([id, k]) => `${id}×${k}`).join(' '); })(), ids: document.querySelectorAll('[id]').length,
     moveBefore: typeof Element.prototype.moveBefore === 'function',
+    slots: !!(document.querySelector('.deck-stack') || {}).shadowRoot,
   };
 }
 
@@ -379,12 +397,95 @@ const madePairs = new Set();
 let frameSilent = 0;
 const askFrame = (f) => { const q = f.evaluate(() => { const e = document.getElementById('t'); return e ? e.textContent : null; }); q.catch(() => {});
   return Promise.race([q, new Promise((_, no) => setTimeout(() => no(new Error('silent')), 3000))]).catch((e) => { if (e && e.message === 'silent') frameSilent++; return null; }); };
-const embedWord = async (page) => { for (const f of page.frames()) { if (f === page.mainFrame()) continue; const t = await askFrame(f); if (t && t.startsWith('embed ')) return t; } return null; };
+const embedWord = async (page) => { for (const f of page.frames()) { if (f === page.mainFrame() || f.isDetached()) continue; const t = await askFrame(f); if (t && t.startsWith('embed ')) return t; } return null; };
 const drawerShown = (page) => page.evaluate(() => {
   const p = document.querySelector('[data-drawer-panel="about"]'); if (!p) return { on: false, why: 'no panel' };
   const cs = getComputedStyle(p), r = p.getBoundingClientRect();
   return { on: cs.visibility === 'visible' && Number(cs.opacity) > 0.5 && r.width > 100 && r.top < innerHeight && r.bottom > 0, text: p.textContent.includes('The back of the card') };
 });
+// ── frames: what this engine keeps a frame's document through (the bare DOM, no deck) ─────────────
+// Each case starts from a fresh sandboxed srcdoc frame that writes a random word when it loads; the
+// word is read before and after one operation. The frame's page is this harness's own, set with
+// setContent: nothing of the deck is in it.
+const FRAME_OPS = {
+  'removed and put back (CONTROL: a removed frame always loads again)': () => { const f = document.querySelector('iframe'), p = f.parentNode; f.remove(); p.appendChild(f); },
+  'moved to another parent (insertBefore)': () => { document.getElementById('b').insertBefore(document.querySelector('iframe'), null); },
+  'its ancestor moved to another parent': () => { document.body.appendChild(document.getElementById('a')); },
+  'a sibling moved in front of it (the frame itself stays)': () => { const f = document.querySelector('iframe'), s = document.createElement('p'); f.parentNode.appendChild(s); f.parentNode.insertBefore(s, f); },
+  'its ancestor display:none, then shown': async () => { const a = document.getElementById('a'); a.style.display = 'none'; await new Promise((r) => setTimeout(r, 200)); a.style.display = ''; },
+  'slot: its card reassigned to another slot': () => { const [, s2] = window.__sr.querySelectorAll('slot'); s2.assign(window.__card); },
+  'slot: its slot moved in the shadow tree': () => { const [s1, s2] = window.__sr.querySelectorAll('slot'); window.__sr.insertBefore(s2, s1); },
+  'moveBefore to another parent': () => { if (typeof document.body.moveBefore !== 'function') return 'absent'; document.getElementById('b').moveBefore(document.querySelector('iframe'), null); },
+};
+let FRAMES = null;
+async function framesOnce() {
+  if (FRAMES) return FRAMES;
+  const was = CTX;   // asked from inside a walk: its checks stay the walk's
+  at('frames', 'dom', '', sz(PHONE));
+  const { ctx, page } = await newPage(PHONE);
+  await page.setContent('<div id="a"></div><div id="b"></div><div id="host"></div>');
+  const word = async () => { await page.waitForTimeout(400); for (const f of page.frames()) { if (f === page.mainFrame() || f.isDetached()) continue; const t = await askFrame(f); if (t && t.startsWith('embed ')) return t; } return null; };
+  const kept = {};
+  for (const [name, op] of Object.entries(FRAME_OPS)) {
+    const slot = name.startsWith('slot');
+    await page.evaluate((slot) => { document.querySelectorAll('iframe').forEach((f) => f.remove()); const h = document.getElementById('host'); h.replaceChildren(); document.body.prepend(document.getElementById('a'));
+      const f = document.createElement('iframe'); f.sandbox = 'allow-scripts'; f.srcdoc = '<p id="t"></p><script>document.getElementById("t").textContent="embed "+Math.random().toString(36).slice(2,8)</script>';
+      if (!slot) { document.getElementById('a').appendChild(f); return; }
+      const sr = h.shadowRoot || h.attachShadow({ mode: 'open', slotAssignment: 'manual' }); sr.innerHTML = '<slot></slot><p>between</p><slot></slot>';
+      const card = document.createElement('div'); card.appendChild(f); h.appendChild(card); window.__sr = sr; window.__card = card; sr.querySelector('slot').assign(card); }, slot);
+    const w0 = await word();
+    let r; try { r = await page.evaluate(`(${op})()`); } catch (e) { r = 'threw: ' + String(e && e.message || e).split('\n')[0]; }
+    const w1 = await word();
+    kept[name] = r === 'absent' ? null : !!w0 && w0 === w1;
+    console.log(`   · ${name.padEnd(68)} ${r === 'absent' ? 'n/a (no moveBefore)' : typeof r === 'string' ? r : kept[name] ? 'kept its document' : 'LOADED AGAIN'}  (${w0} → ${w1})`);
+    num(`frames:${name}`, kept[name] === null ? null : kept[name] ? 1 : 0, 'kept');
+  }
+  await ctx.close();
+  const k = (n) => kept[n];
+  ok(k(Object.keys(FRAME_OPS)[0]) === false, 'CONTROL: the probe sees a reload when a frame is removed and put back', 'frames:control');
+  ok(k('slot: its card reassigned to another slot') && k('slot: its slot moved in the shadow tree'), 'a frame on a slotted card keeps its document when its slot is reassigned or moved (what deck.js pileOrder relies on)', 'frames:slots');
+  if (k('moveBefore to another parent') !== null) ok(k('moveBefore to another parent'), 'moveBefore moves a frame to another parent and it keeps its document', 'frames:move-before');
+  FRAMES = { reparent: !!(k('moved to another parent (insertBefore)') || k('its ancestor moved to another parent')), kept };
+  if (!FRAMES.reparent && k('moveBefore to another parent') === null) note('this engine has no Element.moveBefore and keeps no frame whose parent (or an ancestor\'s) changes: a tile that moves between the wall and its card reloads its frame, and nothing in the page can change that');
+  CTX = was;
+  return FRAMES;
+}
+
+// ── paint: an embed is drawn over the whole of its tile ─────────────────────────────────────────
+// 🔴 The ruler is the SCREENSHOT, not a box: the frame's box was right in both engines while WebKit drew its document into a
+// corner (tile#317). The picture is decoded by the browser itself (a canvas in a blank page): the box the frame's one colour
+// covers, beside the frame's own box on the card (the tile's face — in every engine the frame is inset 0 in its tile).
+async function paint(view, size, control) {
+  at('paint', 'fill', view, sz(size));
+  const { ctx, page, seen } = await newPage(size);
+  await page.goto(`${head.url}/fill-${view}`, { waitUntil: 'load' }); await settle(page, 1500);
+  if (view !== 'wall') { await page.evaluate(() => window.__deckJump && window.__deckJump(1)); await settle(page, 1200); }
+  else { await page.evaluate(() => document.querySelector('.st-embed-html').scrollIntoView({ block: 'center', behavior: 'instant' })); await settle(page, 1200); }
+  const g = await page.evaluate(() => { const f = document.querySelector('.st-embed-html iframe'); if (!f) return null; const r = f.getBoundingClientRect(), face = f.closest('.deck-face'), q = face && face.getBoundingClientRect();
+    return { k: getComputedStyle(document.documentElement).getPropertyValue('--deck-k').trim() || '1', frame: [r.left, r.top, r.width, r.height].map(Math.round), face: q ? [q.width, q.height].map(Math.round) : null, onCard: !!f.closest('.deck-front') }; });
+  let inner = null;
+  for (const f of page.frames()) { if (f === page.mainFrame()) continue; const q = f.evaluate(() => [innerWidth, innerHeight, devicePixelRatio]); q.catch(() => {}); inner = await Promise.race([q, new Promise((r) => setTimeout(() => r(null), 3000))]).catch(() => null); if (inner) break; }
+  const png = await page.screenshot();
+  await shot(page, `paint-${view}-${sz(size)}.png`, `an embed whose document is one colour, on its card in ${view} at ${sz(size)}: that colour should cover the frame's whole box`);
+  const dec = await ctx.newPage();
+  const box = await dec.evaluate(async ({ b64, rgb }) => { const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const g2 = c.getContext('2d'); g2.drawImage(img, 0, 0); const d = g2.getImageData(0, 0, c.width, c.height).data;
+    let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1, n = 0;
+    for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) { const i = (y * c.width + x) * 4; if (Math.abs(d[i] - rgb[0]) < 6 && Math.abs(d[i + 1] - rgb[1]) < 6 && Math.abs(d[i + 2] - rgb[2]) < 6) { n++; if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; } }
+    return n ? { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, n } : null; }, { b64: png.toString('base64'), rgb: FILL });
+  await dec.close();
+  const tag = `${view} at ${sz(size)} (k ${g ? g.k : '?'})`;
+  console.log(`  paint ${tag}: the frame's box ${g ? g.frame.join(',') : '—'}${g && g.face ? ` on a face ${g.face.join('×')}` : ''}; its document's window ${inner ? `${inner[0]}×${inner[1]} at devicePixelRatio ${+(+inner[2]).toFixed(3)}` : '— (no answer)'}; drawn in its colour: ${box ? `${box.x},${box.y},${box.w},${box.h}` : 'nowhere'}`);
+  if (box && g) { num('paint:drawn-w', box.w, 'px'); num('paint:drawn-h', box.h, 'px'); num('paint:frame-w', g.frame[2], 'px'); num('paint:frame-h', g.frame[3], 'px'); }
+  if (inner) { num('paint:document-w', inner[0], 'px'); num('paint:document-dpr', +(+inner[2]).toFixed(3)); }
+  ok(!!g && (view === 'wall' || g.onCard) && !!box, `CONTROL: the frame is on screen${view === 'wall' ? '' : ' on its card'} and its colour is in the picture (${box ? box.n : 0} px)`, `paint:${view}:${sz(size)}:control`);
+  if (g && box) {
+    const d = [box.x - g.frame[0], box.y - g.frame[1], box.w - g.frame[2], box.h - g.frame[3]];
+    ok(d.every((v) => Math.abs(v) <= 2), `${control ? 'CONTROL (k = 1): ' : ''}${tag}: the embed's document is drawn over its whole frame — ${box.w}×${box.h} at ${box.x},${box.y} for a frame of ${g.frame[2]}×${g.frame[3]} at ${g.frame[0]},${g.frame[1]} (off by ${d.join(', ')}; ≤ 2 px)`, `paint:${view}:${sz(size)}:fills`);
+  }
+  ok(seen.errs.length === 0, `no console errors (${seen.errs.slice(0, 3).join(' | ') || 'none'})`, `paint:${view}:${sz(size)}:no-errors`);
+  await ctx.close();
+}
+
 async function walk(handle, view, size, pics) {
   const spec = handle.split('-')[0];
   at('walk', spec, view, sz(size));
@@ -401,11 +502,35 @@ async function walk(handle, view, size, pics) {
   await shot(page, `after-${handle}-${sz(size)}.png`, `after (this branch): ${spec} opened on ${view} at ${sz(size)}`);
   let word = spec === 'bio' ? await embedWord(page) : null;
   if (spec === 'bio') ok(!!word, `CONTROL: the embed frame loaded and wrote its word (${word})`, 'embed:control');
-  let from = view, wasWall = view === 'wall', wasPile = view !== 'wall'; const flips = { stack: 0, list: 0 }; let drawers = 0;
+  const keeps = spec === 'bio' ? await framesOnce() : null;   // may a wall switch be held? (the frames step's answer for this engine)
+  let from = view, wasWall = view === 'wall', wasPile = view !== 'wall'; const flips = { stack: 0, list: 0 }; let drawers = 0, woken = 0;
+  // 🔴 The embed is LOOKED AT before it is asked whether a switch kept its document, whenever it is off screen or has none.
+  // Its frame is loading="lazy", and in WebKit a frame of the deck that has not been on screen since it loaded loads AGAIN the
+  // first time it is (on 1f2cc78 too: a page opened on list loads it off screen, and a jump in list, which moves no node, loads
+  // it again). A frame that moved and is off screen may also have no document yet. Either way the switch that first puts
+  // it on screen would be blamed for that load (seen: list → stack on a page opened on list). So the walk looks at it first, as
+  // a visitor would before caring whether it kept its state, and says how often it had to.
+  const lookAtEmbed = async (when) => {
+    const w = await embedWord(page);
+    const off = await page.evaluate(() => { const f = document.querySelector('.st-embed-html iframe'); if (!f) return true; const r = f.getBoundingClientRect(); return !(r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight); });
+    if (w && !off) return w;
+    woken++;
+    // …and then goes back to where it was, so the switch is made from the same place as without the look (left on the embed's
+    // card, the stack's re-order happened not to move that card on 1f2cc78, and list → stack stopped telling old from new)
+    const back = await page.evaluate(() => { const t = document.querySelector('.st-embed-html'); const k = t && t.closest('.deck-card'); const pile = document.documentElement.classList.contains('deck');
+      const was = { pile, cur: window.__deckCur ? window.__deckCur() : null, y: scrollY };
+      if (k && pile && window.__deckJump) window.__deckJump(+k.dataset.i); else if (t) t.scrollIntoView({ block: 'center', behavior: 'instant' }); return was; });
+    await settle(page, 1500);
+    const w2 = await embedWord(page);
+    await page.evaluate((was) => { if (was.pile && was.cur != null) window.__deckJump(was.cur); else scrollTo({ top: was.y, behavior: 'instant' }); }, back);
+    await settle(page, 900);
+    console.log(`   · ${when}: the embed was ${w ? 'off screen' : 'without a document'}; looked at it: ${w} → ${w2}`);
+    return w2;
+  };
   for (const to of WALK[view]) {
     const btn = page.locator(`.deck-seg button[data-m="${INNER[to]}"]`);
-    const b4 = { docs: seen.docs, navs: seen.navs, unload: (await page.evaluate(state)).unload };
-    if (spec === 'bio') word = await embedWord(page);   // just before the switch: what happens in between (a card turned over) is asked separately
+    const b4 = { docs: seen.docs, navs: seen.navs, childNavs: seen.childNavs, unload: (await page.evaluate(state)).unload };
+    if (spec === 'bio') { word = await lookAtEmbed(`before ${from} → ${to}`); b4.childNavs = seen.childNavs; }   // just before the switch (a load caused by looking is not the switch's); what happens in between (a card turned over) is asked separately
     await btn.focus(); await page.keyboard.press('Enter');
     await settle(page);
     const s = await page.evaluate(state);
@@ -424,20 +549,21 @@ async function walk(handle, view, size, pics) {
       // the embed: did its frame load again?
       await settle(page, 300);
       const now = await embedWord(page);
-      const reloaded = now !== word;
+      const reloaded = now !== word, loads = seen.childNavs - b4.childNavs;
       results.numbers.push({ ...CTX, key: `embed-reload:${from}>${to}`, value: reloaded ? 1 : 0, unit: s.moveBefore ? 'moveBefore' : 'no moveBefore' });
+      num(`embed-frame-navigations:${from}>${to}`, loads);
+      const how = `${word} → ${now}; the frame navigated ${loads} time(s)`;
       if (from === 'wall' || to === 'wall') {
-        if (s.moveBefore) ok(!reloaded, `${tag}: the embed frame kept its document (${word} → ${now})`, `embed:${from}>${to}`);
-        else if (reloaded) note(`${tag}: the embed frame LOADED AGAIN (${word} → ${now}) — this engine has no Element.moveBefore`);
-        else console.log(`   · ${tag}: the embed frame kept its document without moveBefore`);
-      } else if (s.moveBefore) ok(!reloaded, `${tag}: the embed frame kept its document (the cards are re-ordered, not re-inserted)`, `embed:${from}>${to}`);
-      else if (reloaded) note(`${tag}: the embed frame LOADED AGAIN (${word} → ${now}) — the pile re-orders its cards, and without Element.moveBefore that is an insert`);
+        if (s.moveBefore || keeps.reparent) ok(!reloaded, `${tag}: the embed frame kept its document (${how})`, `embed:${from}>${to}`);
+        else if (reloaded) note(`${tag}: the embed frame LOADED AGAIN (${how}) — the tile changes its parent, this engine has no Element.moveBefore, and the frames step saw it keep no frame through a change of parent`);
+        else console.log(`   · ${tag}: the embed frame kept its document without moveBefore (${how})`);
+      } else ok(!reloaded, `${tag}: the embed frame kept its document (${how}) — the cards are re-ordered ${s.moveBefore ? 'with moveBefore' : s.slots ? 'through slots' : 'by insertBefore'}`, `embed:${from}>${to}`);
       word = now;
       // a card with a back of its own turns over and goes back — in each pile, and again after the wall
       if (to !== 'wall' && (flips[to] === 0 || wasWall)) {
         flips[to]++;
         await settle(page, 1300);   // coming from the wall the pile is dealt, and the top card lands last
-        const w0 = await embedWord(page);
+        const w0 = await lookAtEmbed(`before walking the ${to}`);
         await page.evaluate(() => window.__deckJump && window.__deckJump(1)); await settle(page, 900);   // tile 1 names a back
         const c = await page.evaluate(() => { const t = document.querySelector('.deck-card.is-top.can-flip'); if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + Math.min(60, r.height / 4) }; });
         if (!c) fail(`${to}: the card of the tile that names a back cannot be turned over`);
@@ -463,7 +589,7 @@ async function walk(handle, view, size, pics) {
         await page.evaluate(() => window.__deckJump && window.__deckJump(0)); await settle(page, 500);
         // walking the pile re-orders the cards: does a frame on one of them load again?
         const w1 = await embedWord(page);
-        if (flips[to] === 1) { if (s.moveBefore) ok(w1 === w0, `${to}: walking the pile (two jumps, a card turned over) leaves the embed frame its document`, `embed:walking-${to}`); else if (w1 !== w0) note(`${to}: walking the pile LOADED the embed frame AGAIN — no Element.moveBefore here (the same on --base)`); }
+        if (flips[to] === 1) ok(w1 === w0, `${to}: walking the pile (two jumps, a card turned over) leaves the embed frame its document (${w0} → ${w1})`, `embed:walking-${to}`);
       }
       // the wall: the engine's drawer opens from its tile — and again after a pile
       if (to === 'wall' && drawers < 2) {
@@ -486,6 +612,7 @@ async function walk(handle, view, size, pics) {
     from = to;
   }
   ok(seen.errs.length === 0, `no console errors (${seen.errs.slice(0, 3).join(' | ') || 'none'})`, 'walk:no-errors');
+  if (spec === 'bio') { num('embed-looked-at-before-a-switch', woken); if (woken) console.log(`   · ${woken} time(s) the embed was looked at first (off screen, or without a document)`); }
   if (frameSilent) { num('frame-silent', frameSilent); note(`${frameSilent} question(s) to a frame went unanswered for 3 s in this walk (read as "no word": an embed check after one is not evidence)`); frameSilent = 0; }
   await ctx.close();
 }
@@ -837,6 +964,19 @@ try {
     const en = await langPage('en-US', deckStrings('en'), PHONE);
     at('lang');
     ok(ja.length === 3 && ja.every((l, i) => l && l !== en[i]), `CONTROL: the Japanese labels are not the English ones (${JSON.stringify(ja)} / ${JSON.stringify(en)})`, 'lang:differs');
+  }
+  if (want('frames')) {
+    console.log('── frames: what this engine keeps a frame\'s document through');
+    await framesOnce();
+  }
+  if (want('paint')) {
+    console.log('── paint: an embed is drawn over its whole tile');
+    const LAND = { width: PHONE.height, height: PHONE.width };
+    await paint('list', PHONE, false);    // a phone's list: the card is zoomed out to ~71%
+    await paint('stack', LAND, false);    // a landscape phone's stack: ~51%
+    await paint('stack', PHONE, true);    // k = 1: the ruler on a frame that nothing zooms
+    await paint('wall', PHONE, true);
+    if (FULL) await paint('list', DESK, true);
   }
   if (want('walk')) {
     console.log('── walk: load, the six switches, a card turned over, the drawer, the embed');
