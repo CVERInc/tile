@@ -526,14 +526,20 @@ just this coral, without changing any deployment's channels:
 
 ```sh
 node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
-sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.8.1/inbox-bubble.js
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.9.0/inbox-bubble.js
 ```
 
 The registry directory passed to the build belongs to the caller. `out/` above is ignored
 scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
 repository described in [the registry README](../registry/README.md). A published version
-is immutable: if that deployment already has different bytes at 0.8.1, stop and choose a
+is immutable: if that deployment already has different bytes at 0.9.0, stop and choose a
 new version before publishing.
+
+**0.9.0 resizes the corner and moves bubbles in and out** (reef#3306). The dock's bubbles are 52px with a
+22px glyph and sit 20px off the edges from 700px wide, 44px / 20px / 16px below that; an installed app's
+bar keeps its 3.5rem. A bubble that really appears pops in (320ms, from half size) and one that really
+leaves shrinks out first (160ms); an item's first join of the page, re-renders, re-ordering and
+`prefers-reduced-motion: reduce` play nothing. A minor version: no attribute changes.
 
 **0.8.1 lists possibly related pages under a KAITO refusal** (tile#288, reef#3133). On a refusal
 whose response carries `related` (page URLs, as `{ url }` objects or plain strings), the panel shows
@@ -552,7 +558,7 @@ it is above the 0.7.12 floor.
 
 > **Historical for the version steps.** The first three steps are done: checked 2026-11-10, the
 > public registry serves `inbox-bubble` v0 = latest = 0.8.0 and `dock` v0 = latest = 0.1.0
-> (`X-Coral-Resolved`). Don't re-run them for a later version. To publish 0.8.1 (or any later
+> (`X-Coral-Resolved`). Don't re-run them for a later version. To publish 0.9.0 (or any later
 > patch), publish it as a new immutable version, repoint `latest` and then `v0` to it, and verify
 > `X-Coral-Resolved` and the body stamp name that version, as in "Publishing" above. The last two
 > steps are about the dock embed and the appbar engine, not a version number. They were not
