@@ -91,3 +91,5 @@ packages/sitetile/.smoke-surface-band/
 packages/sitetile/.smoke-share-buttons-*/
 # the reef#2554 noindex smoke builds (throwaway siblings of astro/; see astro/smoke-build.mjs buildNoindexFixture)
 packages/sitetile/.smoke-noindex-*/
+# the declared-colour-scheme builds (throwaway mkdtemp siblings of astro/; see packages/sitetile/color-scheme.test.mjs)
+packages/sitetile/.smoke-color-scheme-*/

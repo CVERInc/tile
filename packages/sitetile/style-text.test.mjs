@@ -348,8 +348,8 @@ test('every <style set:html> sink in astro/src goes through styleText', { skip: 
   }
   assert.ok(FILES.length >= 20, `the census saw only ${FILES.length} .astro files`);
   assert.deepEqual(bad, [], 'style sinks the census cannot prove safe');
-  // The six inline sheets SiteLayout fills today, by the identifier each one passes. A census
+  // The seven inline sheets SiteLayout fills today, by the identifier each one passes. A census
   // that finds fewer has stopped seeing the layout.
   const layout = sinks.filter((k) => k.at.startsWith('layouts/SiteLayout.astro:')).map((k) => k.arg).sort();
-  assert.deepEqual(layout, ['APPBAR_CSS', 'layerOrder', 'localeBannerBlock', 'pkgCssBlock', 'routeCssText', 'themeCssBlock']);
+  assert.deepEqual(layout, ['APPBAR_CSS', 'colorSchemeSheet', 'layerOrder', 'localeBannerBlock', 'pkgCssBlock', 'routeCssText', 'themeCssBlock']);
 });

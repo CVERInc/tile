@@ -6,6 +6,12 @@
 // entry for a key falls back to English, key by key; DECK_MISSING lists exactly which ones do.
 // en, zh (Traditional) and ja are written here in full; w3/locale-coverage.test.mjs fails on any
 // missing cell in any locale.
+//
+// 🔴 viewStack / viewList / viewWall are also the EDITOR's view names, in every locale: edit3-i18n.mjs
+// takes them from here and writes none of its own (tile#306; w3/view-names.test.mjs).
+// The three views: viewStack, the cards laid on one another; viewList, the cards SPREAD OUT side by
+// side, the card-table act of spreading a hand (not a "list", in any language; the key name is
+// historical); viewWall, every card at once.
 import { LOCALE_KEYS, primaryLocale } from '../w/sandbox-i18n.mjs';
 
 // the words written here by hand: en, zh, ja, and zh-Hans's first eleven
@@ -49,13 +55,14 @@ const WRITTEN = {
     makeYourOwn: '做一份自己的',
     fileNote: '一個檔案，不到 25 MB。',
   },
-  // 重ね / 縦並び / 一覧: native words, not katakana loans. 重ね (cards laid on one another) and 縦並び
-  // (lined up top to bottom, the list view's own movement) say what each view does; 一覧 is the word
-  // Japanese interfaces already use for "everything at once". ウォール does not read as a view in
-  // Japanese, and タイル is taken: it is the unit word in every Japanese table here.
+  // 重ね / 並び / 一覧: native words, not katakana loans. 重ね (cards laid on one another) and 並び
+  // (cards set out side by side, in a row) say what each view does — nothing about the spread view is
+  // vertical, so not 縦並び; 一覧 is the word Japanese interfaces already use for "everything at once".
+  // ウォール does not read as a view in Japanese, and タイル is taken: it is the unit word in every
+  // Japanese table here.
   ja: {
     viewStack: '重ね',
-    viewList: '縦並び',
+    viewList: '並び',
     viewWall: '一覧',
     zoomQr: 'QR コードを拡大',
     putBack: 'カードを戻す',
@@ -94,7 +101,7 @@ const WRITTEN = {
 const TRANSLATED = {
   "ko": {
     "viewStack": "스택",
-    "viewList": "목록",
+    "viewList": "펼침",
     "viewWall": "모아보기",
     "zoomQr": "QR 코드 확대",
     "putBack": "돌려놓기",
@@ -119,7 +126,7 @@ const TRANSLATED = {
   },
   "de": {
     "viewStack": "Stapel",
-    "viewList": "Liste",
+    "viewList": "Fächer",
     "viewWall": "Wand",
     "zoomQr": "QR-Code vergrößern",
     "putBack": "Zurücklegen",
@@ -137,7 +144,7 @@ const TRANSLATED = {
   },
   "fr": {
     "viewStack": "Pile",
-    "viewList": "Liste",
+    "viewList": "Éventail",
     "viewWall": "Mur",
     "zoomQr": "Agrandir le code QR",
     "putBack": "Replacer",
@@ -155,7 +162,7 @@ const TRANSLATED = {
   },
   "es": {
     "viewStack": "Pila",
-    "viewList": "Lista",
+    "viewList": "Abanico",
     "viewWall": "Muro",
     "zoomQr": "Ampliar el código QR",
     "putBack": "Volver a colocar",
@@ -173,7 +180,7 @@ const TRANSLATED = {
   },
   "pt": {
     "viewStack": "Pilha",
-    "viewList": "Lista",
+    "viewList": "Leque",
     "viewWall": "Mural",
     "zoomQr": "Ampliar código QR",
     "putBack": "Colocar de volta",

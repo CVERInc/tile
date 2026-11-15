@@ -121,6 +121,11 @@ for each key and how to compile it. A few rules that matter in practice:
   that sets three colours changes three colours.
 - Any token can carry a dark-scheme value: `gd-bg@dark: #16130f` beside `gd-bg: #fbf8f3`. It is
   used when the site sets `color-scheme: toggle` in `_site.md` and the visitor picks dark.
+- `color-scheme` in `_site.md` is also what the built pages tell the browser, so that it draws its
+  own parts (the canvas, scrollbars, native form controls) to match: `light`, `dark`, or
+  `light dark` for a design that follows the visitor's OS setting through its own
+  `@media (prefers-color-scheme: dark)` custom CSS. `toggle` declares whichever side the switch is
+  on. A site without the key declares nothing; the renderer never infers it from the theme's CSS.
 - `type-scale` with `gd-font-size` derives the three heading sizes (h3 = size × r, h2 = size × r²,
   h1 = size × r³). Set `gd-h1`/`gd-h2`/`gd-h3` only to override one step.
 - `surface-<name>: #rrggbb` paints every section marked `surface=<name>` as a full-width band.

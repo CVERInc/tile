@@ -35,6 +35,7 @@ import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
 // whatever the producer stripped (the theme compiler strips too; neither relies on the other).
 import { styleText } from '../lib/style-text.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
+import { declaredColorScheme, colorSchemeCss, TOGGLE_COLOR_SCHEME_CSS } from '../lib/color-scheme.mjs';
 import NavNode from '../components/NavNode.astro';
 // Every link-bearing chrome key (nav, footer, footer-cols, the `Label=href` lists, header-cta,
 // header-actions, sidebar-nav, the whole-value hrefs) is read by chrome-links.mjs and nothing else —
@@ -599,6 +600,14 @@ const showFooterWidgets = !!footWidgets && !isHomePath;
 // (packages/theme-toggle/theme-toggle.js), same pattern as locale-banner.js.
 const colorScheme = meta['color-scheme'] ? String(meta['color-scheme']).trim() : '';
 const themeToggle = colorScheme === 'toggle';
+// The same key, said to the BROWSER (reef#3262): `light`, `dark` or `light dark` becomes
+// `<meta name="color-scheme">` plus the property on :root, so the canvas, the scrollbars and the
+// native controls are drawn for the scheme the site's design supports. A `toggle` site declares
+// per `data-theme` instead (the switch's answer, not the OS's) and carries no meta. A site that
+// does not set the key gains nothing. 🔴 The key is the only source: the theme's CSS text is never
+// read to guess whether it "has dark styles" — see lib/color-scheme.mjs for what a wrong guess costs.
+const colorSchemeDeclared = declaredColorScheme(meta['color-scheme']);
+const colorSchemeSheet = themeToggle ? TOGGLE_COLOR_SCHEME_CSS : colorSchemeCss(colorSchemeDeclared);
 
 // ── AGE GATE (opt-in adult-content confirmation overlay) ─────────────────────
 // `age-gate: true` mounts a full-screen "are you 18+?" modal over the page (e.g. an
@@ -847,6 +856,8 @@ const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content={viewportContent} />
+    {/* Before every sheet and script: this is what colours the canvas while the CSS is still arriving. */}
+    {colorSchemeDeclared && <meta name="color-scheme" content={colorSchemeDeclared} />}
     {(bleed || hasPwa) && <meta name="theme-color" content={themeColorLight} media="(prefers-color-scheme: light)" />}
     {(bleed || hasPwa) && <meta name="theme-color" content={themeColorDark} media="(prefers-color-scheme: dark)" />}
     {/* 🩸 PROVENANCE. Until this tag existed, a feelreef site said nothing about what built it:
@@ -963,6 +974,7 @@ const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
         emits the three-name statement character for character, so declaring is the only thing
         that can name `reef.corals` on a page. */}
     <style is:inline set:html={styleText(layerOrder)}></style>
+    {colorSchemeSheet && <style is:inline set:html={styleText(colorSchemeSheet)}></style>}
     <style is:inline>@view-transition { navigation: auto; }</style>
     {/* hreflang — ABSOLUTE URLs when a `site` is configured (Astro.site), matching a real
         <head>; falls back to root-relative when unset. `localePath` is page-aware (same page,
