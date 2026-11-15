@@ -46,10 +46,10 @@ Two spellings of one name coexist for a short time, and always in this order:
 | A front tile plus the back it opens, in the editor | a **pair** | Pair as front and back |
 | The editor's numbered place | a **slot** (editor only, never stored) | — |
 | The file's leading block | **frontmatter** | — |
-| How a visitor sees Cards | the **views** `stack`, `list`, `wall` | Stack, List, Wall |
+| How a visitor sees Cards | the **views** `stack`, `list`, `wall` (the `list` view's shown name is Spread: the cards spread out side by side; the value `list` stays) | Stack, Spread, Wall |
 | The link tile the platform draws after the author's last tile, for Cards that are in the pool | the **closing reef.cards tile**: a tile, never "the closing card" | — |
 
-Retired inside Cards (being phased out of code, docs and copy): the singular noun **card**, **cell**, **deck**, **spread**, **face**, **drawer**, and **grid** as a lane name.
+Retired inside Cards (being phased out of code, docs and copy): the singular noun **card**, **cell**, **deck**, **spread**, **face**, **drawer**, and **grid** as a lane name. (**spread** is retired as a code word; Spread as the product copy for the `list` view is the one exception.)
 
 ## Lines and lanes on disk
 

@@ -201,7 +201,14 @@ if (existsSync(join(ASTRO, 'node_modules'))) {
     const theme = bodies.filter((b) => b.includes('data-probe="after-closer"'));
     assert.equal(theme.length, 1, 'the text after the theme\'s closer is not inside the theme\'s <style> element');
     assert.ok(theme[0].includes('.y{}'), 'the theme\'s element ended before the end of the theme');
-    assert.ok(theme[0].includes(legit), 'legitimate theme CSS was not inlined byte-identical');
+    // The leading @import is the one deliberate rewrite (tile#211): CSS ignores an @import inside a
+    // block, so it is lifted ahead of the theme's layer block and named into that layer itself.
+    // Everything after it is inlined byte-identical.
+    const [legitImport, ...legitRest] = legit.split('\n');
+    assert.ok(theme[0].startsWith('@import url("/fonts/x.css") layer(reef.theme);\n@layer reef.theme {\n'),
+      'the leading @import was not lifted ahead of the theme\'s layer block');
+    assert.ok(!theme[0].includes(legitImport), 'the original @import is still in the theme\'s sheet');
+    assert.ok(theme[0].includes(legitRest.join('\n')), 'legitimate theme CSS was not inlined byte-identical');
   });
 }
 

@@ -34,6 +34,7 @@ import { announceModel, ANNOUNCE_GUARD_SCRIPT } from '../lib/announce.mjs';
 // Every inline <style set:html> below goes through styleText, so its text cannot close the element
 // whatever the producer stripped (the theme compiler strips too; neither relies on the other).
 import { styleText } from '../lib/style-text.mjs';
+import { splitThemeImports } from '../lib/theme-imports.mjs';
 import { DYNAMIC_CORAL_CSS_KEY, DYNAMIC_CORAL_CSS_LAYERED, dynamicCoralCssMode } from '../lib/dynamic-coral-css.mjs';
 import { declaredColorScheme, colorSchemeCss, TOGGLE_COLOR_SCHEME_CSS } from '../lib/color-scheme.mjs';
 import NavNode from '../components/NavNode.astro';
@@ -81,7 +82,6 @@ const themeName = meta.theme ? String(meta.theme).trim() : '';
 // literal (verified), so the non-greedy comment-pair match is safe and functionally inert.
 const stripCssComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
 const themeRaw = themeName ? (themes[`../themes/${themeName}.css`] || '') : '';
-const themeCss = themeName ? stripCssComments(themeRaw) : '';
 // Is this a HAND-ROLLED theme (layout decisions of its own) or a COMPILED one (ir/_theme.md → a
 // token-only `html:root` block)? Only the compiler writes that header line, and it survives here
 // because we test the RAW text, before stripCssComments. Base's "born paint" is gated on this: a
@@ -102,6 +102,12 @@ const compiled = /^\s*\/\*\s*Compiled from ir\/_theme\.md/.test(themeRaw);
 // nothing else would have. Match the token, never the prose.
 const hasResidue = /reef:has-custom-css/.test(themeRaw);
 const customTheme = !!themeRaw.trim() && (!compiled || hasResidue);
+// The theme's leading `@import` rules (a web-font stylesheet, usually) cannot go inside the layer
+// block the theme is wrapped in below — CSS drops an `@import` inside any block — so they are split
+// off here, from the RAW text (a URL may legitimately contain `/*`), and emitted ahead of the block.
+// lib/theme-imports.mjs says which rules count as leading and how each keeps the theme's layer.
+const themeSplit = splitThemeImports(themeRaw, { compiled });
+const themeCss = themeName ? stripCssComments(themeSplit.css) : '';
 // IR-driven footer (substrate rule: single-line frontmatter): `footer: Label /href | Label2 /href2`
 // and `copyright: …`. Any site can set them; absent → the footer falls back to the title.
 // The footer is flat: a `>>` dropdown (header-only) collapses to just its parent link here.
@@ -849,7 +855,11 @@ const layerOrder = dynamicCoralCss === DYNAMIC_CORAL_CSS_LAYERED
 const pkgCssBlock = pkgCss ? `@layer reef.theme {\n${pkgCss}\n}` : '';
 const localeBannerBlock = localeBannerCss ? `@layer reef.theme {\n${localeBannerCss}\n}` : '';
 const routeCssText = routeCss ? (typeof routeCss === 'function' ? routeCss(themeCss) : stripCssComments(routeCss)) : '';
-const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
+// 🔴 The imports come FIRST in this sheet and nothing may be put ahead of them: `@import` is only
+// honoured before every other rule of its own stylesheet. The layer ORDER is not theirs to set — it
+// was declared by `layerOrder`, in an earlier <style> — and each import names `reef.theme` itself.
+const themeLayerBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
+const themeCssBlock = themeName ? [...themeSplit.imports, themeLayerBlock].filter(Boolean).join('\n') : '';
 ---
 <!doctype html>
 <html lang={htmlLang} data-lingo-root data-dynamic-coral-css={dynamicCoralCss || undefined} class={toggleActions.length > 0 ? 'rf-preload' : undefined}>
@@ -1021,7 +1031,7 @@ const themeCssBlock = themeCss ? `@layer reef.theme {\n${themeCss}\n}` : '';
         not because of where this tag sits. The previous comment here claimed it won by being last
         in <head>; the served HTML disagreed (theme at ~1.3k, Astro's site.css <link> at ~12.8k),
         and that wrong-but-confident comment is part of how the trap survived being looked at. */}
-    {themeCss && <style is:inline set:html={styleText(themeCssBlock)}></style>}
+    {themeCssBlock && <style is:inline set:html={styleText(themeCssBlock)}></style>}
     {themeToggle && (
       <script is:inline define:vars={{ storageKey: 'rf-theme' }}>
         (function () {

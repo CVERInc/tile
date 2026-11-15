@@ -689,6 +689,14 @@ function dockInk(bg) {
 // the name may change, the reply is always marked AI.
 /** The en heading over KAITO's related-page links; the locales not yet translated show it as is. */
 const RELATED_HEADING_EN = 'Possibly related pages';
+/**
+ * tile#187: a 404 `not_claimed` (the owner never claimed Inbox) is terminal, so the bubble says the
+ * form coral's `errorNotClaimed` (packages/sitetile/inbox-form-copy.js), never a "try again". That
+ * table has en, ja, ko, zh-tw and zh-cn and shows its English sentence on every other page; the
+ * bubble's de, fr, es and pt-br do the same, so both corals say one thing on one page. The
+ * mount test holds every locale to `inboxFormCopy(locale).errorNotClaimed`.
+ */
+const NOT_CLAIMED_EN = "This site isn't taking messages right now.";
 
 export const COPY = {
 	en: {
@@ -716,6 +724,7 @@ export const COPY = {
 		them: 'Reply',
 		error: "That didn't go through. Please try again.",
 		errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
+		errorNotClaimed: NOT_CLAIMED_EN,
 		rate: "That's a lot of messages — please try again in a minute.",
 		closeNamed: (l) => `Close ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
@@ -759,6 +768,7 @@ export const COPY = {
 		them: '回覆',
 		error: '沒有送出去，請再試一次。',
 		errorInboxStorageFull: "這個網站的收件匣已滿，目前無法接收新訊息。",
+		errorNotClaimed: '這個網站目前沒有開放留言。',
 		rate: '訊息有點多，請稍等一分鐘再試。',
 		closeNamed: (l) => `關閉「${l}」`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
@@ -786,7 +796,7 @@ export const COPY = {
 		toHumanAfterRefusal: '人に取り次いでもらう',
 		kaitoUnavailable: 'AIは今お答えできません。',
 		kaitoUnavailableToHuman: 'AIは今お答えできません。人に取り次ぐこともできます。',
-		sentToHuman: '担当者に取り次ぎました。返信はここに表示されます。',
+		sentToHuman: '人に取り次ぎました。返信はここに表示されます。',
 		name: 'お名前（任意）',
 		email: 'メールアドレス（任意）',
 		emailNote: 'メールアドレスを残していただくと、返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。',
@@ -802,13 +812,14 @@ export const COPY = {
 		them: '返信',
 		error: '送信できませんでした。もう一度お試しください。',
 		errorInboxStorageFull: "このサイトの受信箱はいっぱいで、現在新しいメッセージを受け取れません。",
+		errorNotClaimed: 'このサイトは現在メッセージを受け付けていません。',
 		rate: '送信が多すぎます。1分ほどお待ちください。',
 		closeNamed: (l) => `「${l}」を閉じる`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
 		statusNoAi: '送った内容は人が読みます',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}がこのサイトの内容から回答します`,
-		statusHandedOffEmail: '担当者に取り次ぎました。返信はメールで届きます。',
-		statusHandedOffNoEmail: '担当者に取り次ぎました。返信はここに表示されます。',
+		statusHandedOffEmail: '人に取り次ぎました。返信はメールで届きます。',
+		statusHandedOffNoEmail: '人に取り次ぎました。返信はここに表示されます。',
 		askAgain: (a) => `もう一度${a}に聞く`,
 		newConversation: '新しい会話を始める',
 		backToHuman: 'やり取りに戻る',
@@ -816,7 +827,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '入力中はブラウザの中だけで探します。ボタンを押すまで何も送信されません。',
 		askAi: 'AI に聞く',
-		sendOwner: '担当者に送る',
+		sendOwner: '人に送る',
 		// Heading over the page links a KAITO refusal may carry. They are search results, not an answer.
 		relatedHeading: '関連する可能性のあるページ'
 	},
@@ -845,6 +856,7 @@ export const COPY = {
 		them: '回复',
 		error: '没有发送出去，请再试一次。',
 		errorInboxStorageFull: "这个网站的收件箱已满，目前无法接收新消息。",
+		errorNotClaimed: '这个网站目前没有开放留言。',
 		rate: '消息有点多，请稍等一分钟再试。',
 		closeNamed: (l) => `关闭「${l}」`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
@@ -894,6 +906,7 @@ export const COPY = {
 		them: 'Antwort',
 		error: 'Das hat nicht geklappt. Bitte versuchen Sie es noch einmal.',
 		errorInboxStorageFull: "Das Postfach dieser Website ist voll und kann derzeit keine neuen Nachrichten empfangen.",
+		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a German page
 		rate: 'Das sind viele Nachrichten — bitte versuchen Sie es in einer Minute noch einmal.',
 		closeNamed: (l) => `${l} schließen`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
@@ -937,6 +950,7 @@ export const COPY = {
 		them: 'Réponse',
 		error: 'L’envoi a échoué. Veuillez réessayer.',
 		errorInboxStorageFull: "La boîte de réception de ce site est pleine et ne peut pas recevoir de nouveaux messages pour le moment.",
+		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a French page
 		rate: 'Cela fait beaucoup de messages — réessayez dans une minute.',
 		closeNamed: (l) => `Fermer ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
@@ -980,6 +994,7 @@ export const COPY = {
 		them: 'Respuesta',
 		error: 'No se ha podido enviar. Inténtalo de nuevo.',
 		errorInboxStorageFull: "La bandeja de entrada de este sitio está llena y no puede recibir mensajes nuevos en este momento.",
+		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a Spanish page
 		rate: 'Son muchos mensajes: vuelve a intentarlo en un minuto.',
 		closeNamed: (l) => `Cerrar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
@@ -1023,6 +1038,7 @@ export const COPY = {
 		them: 'Resposta',
 		error: 'Não foi possível enviar. Tente de novo.',
 		errorInboxStorageFull: "A caixa de entrada deste site está cheia e não pode receber novas mensagens no momento.",
+		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a Portuguese page
 		rate: 'São muitas mensagens — tente de novo daqui a um minuto.',
 		closeNamed: (l) => `Fechar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
@@ -1066,6 +1082,7 @@ export const COPY = {
 		them: '답장',
 		error: '보내지 못했어요. 다시 시도해 주세요.',
 		errorInboxStorageFull: "이 사이트의 받은편지함이 가득 차서 현재 새 메시지를 받을 수 없습니다.",
+		errorNotClaimed: '이 사이트는 현재 메시지를 받지 않고 있습니다.',
 		rate: '메시지가 너무 많아요. 1분 뒤에 다시 시도해 주세요.',
 		closeNamed: (l) => `${l} 닫기`,
 		// No subject particle after the name: 이/가 depends on the name's last syllable, and the
@@ -3786,8 +3803,21 @@ async function askKaito(apiBase, kind, id, query, copy) {
 	return null;
 }
 
+/**
+ * A refusal no retry of the same send can turn into a success: the inbox is full (507) or the
+ * owner never claimed Inbox (404 `not_claimed`, tile#187). Each has its own sentence and neither
+ * may be answered with "try again" — in words or with a button.
+ */
+function terminalInboxReason(status, body) {
+	if (status === 507 && body?.reason === 'inbox_storage_full') return 'inbox_storage_full';
+	if (status === 404 && body?.reason === 'not_claimed') return 'not_claimed';
+	return null;
+}
+
 function inboxErrorText(status, body, copy) {
-	if (status === 507 && body?.reason === 'inbox_storage_full') return copy.errorInboxStorageFull;
+	const terminal = terminalInboxReason(status, body);
+	if (terminal === 'inbox_storage_full') return copy.errorInboxStorageFull;
+	if (terminal === 'not_claimed') return copy.errorNotClaimed;
 	return status === 429 ? copy.rate : copy.error;
 }
 
@@ -4500,8 +4530,14 @@ export async function mount(el, handoff = null) {
 			await refresh();
 			return;
 		}
-		button.disabled = false;
-		button.textContent = copyRef.toHumanAfterRefusal;
+		// tile#187: after a terminal refusal the button goes. Re-armed as "Send this to a person" it
+		// asked for the one press that cannot succeed, right under the sentence saying so.
+		if (terminalInboxReason(status, body)) {
+			button.remove();
+		} else {
+			button.disabled = false;
+			button.textContent = copyRef.toHumanAfterRefusal;
+		}
 		showError(status, copyRef, body);
 	}
 
