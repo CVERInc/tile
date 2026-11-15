@@ -111,9 +111,30 @@ test('🔴 an import that already names a layer is not given a second one', () =
     assert.deepEqual(got, { imports: [want], rest: '' }, input);
     assert.equal(got.imports[0].match(/layer\(/gi).length, 1, `${input}: exactly one layer()`);
   }
-  // a layer name this scanner does not vouch for (an escape, a string) is left where it was
-  untouched('@import url(x.css) layer(a\\.b);\n.a{}');
-  untouched('@import url(x.css) layer("a");\n.a{}');
+});
+
+test('🔴 review r3: what is inside layer( … ) is carried as balanced text, not judged — a Unicode or escaped name is lifted', () => {
+  // The reviewer's second input, exactly: `café` is a CSS <ident>, so this import is valid CSS.
+  assert.deepEqual(hoistLeadingImports('@import url(font.css) layer(café);\nbody{}'), {
+    imports: ['@import url(font.css) layer(reef.theme.café);'],
+    rest: 'body{}',
+  });
+  const cases = [
+    ['@import url(x.css) layer(a\\.b);', '@import url(x.css) layer(reef.theme.a\\.b);'],      // an escaped `.`: one identifier
+    ['@import url(x.css) layer(a\\29 b) print;', '@import url(x.css) layer(reef.theme.a\\29 b) print;'], // an escaped `)` does not close it
+    ['@import url(x.css) layer(\\66 onts);', '@import url(x.css) layer(reef.theme.\\66 onts);'],
+    ['@import url(x.css) layer(fonts.naïve);', '@import url(x.css) layer(reef.theme.fonts.naïve);'],
+    // r2 left this one in the block. It is invalid CSS either way: prefixed, it is still not a
+    // layer name, so the browser ignores it outside the block exactly as it did inside.
+    ['@import url(x.css) layer("a");', '@import url(x.css) layer(reef.theme."a");'],
+  ];
+  for (const [input, want] of cases) {
+    assert.deepEqual(hoistLeadingImports(`${input}\n.a{}`), { imports: [want], rest: '.a{}' }, input);
+  }
+  // `layer()` names nothing; a prefix must not turn it into a name. It ends the run.
+  untouched('@import url(x.css) layer();\n.a{}');
+  untouched('@import url(x.css) layer(  );\n.a{}');
+  untouched('@import url(x.css) layer(fonts', 'the text ends inside layer(');
 });
 
 test('CRLF input: the rules are lifted and their line ends go with them', () => {
@@ -162,43 +183,81 @@ test('🔴 review: an import after a misplaced or repeated @charset stays where 
   });
   untouched('@charset "utf-8";\n@charset "utf-8";\n@import url(a.css);\nbody{}');
   untouched('@layer a;\n@charset "utf-8";\n@import url(a.css);\nbody{}');
-  // A comment before the one leading @charset is not a rule: that @charset is still the first.
-  assert.deepEqual(hoistLeadingImports('/* c */\n@CHARSET "utf-8";\n@import url(a.css);\n.a{}'), {
+});
+
+test('🔴 review r3: only the exact `@charset "…";` at the very start is an encoding declaration; any other is a rule', () => {
+  // The reviewer's inputs, exactly. A comment before it, or a malformed one, makes it an ordinary
+  // unknown at-rule, so the import after it is ignored by CSS — and must stay in the block.
+  untouched('/* comment */\n@charset "utf-8";\n@import url(font.css);\nbody{}');
+  untouched('@charset bogus;\n@import url(font.css);\nbody{}');
+  // (r2 lifted the first of these: a comment ahead of `@CHARSET` was taken as trivia, and the
+  // keyword's case was not looked at.)
+  for (const lead of [
+    '/* c */\n@CHARSET "utf-8";',
+    '\n@charset "utf-8";',            // whitespace before it
+    ' @charset "utf-8";',
+    '@CHARSET "utf-8";',              // the declaration is a byte sequence: lower case only
+    '@charset  "utf-8";',             // exactly one space
+    '@charset\t"utf-8";',
+    "@charset 'utf-8';",              // double quotes only
+    '@charset "utf-8" ;',             // nothing between the quote and the `;`
+    '@charset "utf-8"',               // no `;` before the import
+    '@charset "utf;8";',
+    '@charset "utf-8";;',             // the stray `;` is not trivia
+    `@charset "${'x'.repeat(1100)}";`, // past the first 1024 bytes
+    '﻿\n@charset "utf-8";',
+  ]) untouched(`${lead}\n@import url(a.css);\nbody{}`, JSON.stringify(lead));
+  // The exact form, alone or after the mark, still lets the run that follows it be lifted.
+  for (const lead of ['@charset "utf-8";', '@charset "";', '@charset "UTF-8";/* c */', '﻿@charset "iso-8859-15";']) {
+    assert.deepEqual(hoistLeadingImports(`${lead}\n@import url(a.css);\nbody{}`), {
+      imports: ['@import url(a.css) layer(reef.theme);'],
+      rest: `${lead.replace('﻿', '')}\nbody{}`,
+    }, JSON.stringify(lead));
+  }
+});
+
+test('🔴 review r3: a @layer statement ends the run like any other rule — nothing at or after it is lifted', () => {
+  // r2 lifted leading `@layer` statements along with the imports. Doing that correctly needs the
+  // whole layer-name grammar (finding 1: it rejected `café`, a valid name) and the rule that imports
+  // must be consecutive (finding 3: it emitted an import after a statement, which CSS ignores). It
+  // is withdrawn: a statement now stops the lift, and it and everything after it stay in the block,
+  // exactly as before this change. The cost, stated: an import AFTER a leading statement is still
+  // not lifted (still ignored, as it always was).
+  //
+  // Finding 3's input, exactly: the second import follows a statement, so CSS ignores it; only the
+  // first, which leads, is lifted.
+  assert.deepEqual(hoistLeadingImports('@import url(a.css);\n@layer b;\n@import url(c.css);\nbody{}'), {
     imports: ['@import url(a.css) layer(reef.theme);'],
-    rest: '/* c */\n@CHARSET "utf-8";\n.a{}',
+    rest: '@layer b;\n@import url(c.css);\nbody{}',
+  });
+  // Finding 1's first input, exactly: a KNOWN LIMIT — valid CSS whose import would load on its own,
+  // but which leads with a statement, so nothing is lifted and the import stays ignored.
+  untouched('@layer café, fonts;\n@import url(font.css) layer(fonts);\nbody{}');
+  // r2's own input (it was lifted then, statement and import together): now nothing moves.
+  untouched('@layer base, theme;\n@import url(font.css);\nbody{}');
+  for (const lead of ['@layer a;', '@LAYER a, b;', '@layer a {}', '@layer;', '@charset "utf-8";\n@layer a;', '﻿@layer a;']) {
+    untouched(`${lead}\n@import url(a.css);\n.a{}`, JSON.stringify(lead));
+  }
+  // After a lifted run, the statement and whatever follows it keep their place.
+  assert.deepEqual(hoistLeadingImports('@import url(a.css) layer(x);\r\n@layer y, x;\r\n@import url(b.css);\r\n.a{}'), {
+    imports: ['@import url(a.css) layer(reef.theme.x);'],
+    rest: '@layer y, x;\r\n@import url(b.css);\r\n.a{}',
+  });
+  // Not even read: a statement the text ends inside does not cancel the imports ahead of it.
+  assert.deepEqual(hoistLeadingImports('@import url(a.css);\n@layer a, b'), {
+    imports: ['@import url(a.css) layer(reef.theme);'],
+    rest: '@layer a, b',
   });
 });
 
-test('🔴 review: @layer statements may precede the imports; they are lifted with them, in source order', () => {
-  // The reviewer's input, exactly.
-  assert.deepEqual(hoistLeadingImports('@layer base, theme;\n@import url(font.css);\nbody{}'), {
-    imports: ['@layer reef.theme.base, reef.theme.theme;', '@import url(font.css) layer(reef.theme);'],
-    rest: 'body{}',
-  });
-  // Why the statement must come FIRST: layers are ordered by first declaration. Here the author put
-  // `theme` below `base`; emitting the import (which declares `base`) ahead of the statement would
-  // flip them. A statement after the last import precedes nothing lifted and stays in the block.
-  assert.deepEqual(hoistLeadingImports('@layer theme, base;\n@import url(x.css) layer(base);\n@layer late;\nbody{}'), {
-    imports: ['@layer reef.theme.theme, reef.theme.base;', '@import url(x.css) layer(reef.theme.base);'],
-    rest: '@layer late;\nbody{}',
-  });
-  // Statements and imports may alternate; every one keeps its place in the sequence.
-  assert.deepEqual(hoistLeadingImports('@import url(a.css) layer(x);\n@layer y, x;\n@import url(b.css);\n.a{}'), {
-    imports: ['@import url(a.css) layer(reef.theme.x);', '@layer reef.theme.y, reef.theme.x;', '@import url(b.css) layer(reef.theme);'],
+test('a bracket outside every parenthesis is more grammar than an import prelude has: the run ends there', () => {
+  // `[` opens a block in which a `;` does not end the rule; reading to that `;` would cut the
+  // rule in two. Inside supports( … ) a bracket is just part of the condition.
+  untouched('@import url(a.css) [x;y];\n.a{}');
+  assert.deepEqual(hoistLeadingImports('@import url(a.css) supports(selector(a[href])) screen;\n.a{}'), {
+    imports: ['@import url(a.css) layer(reef.theme) supports(selector(a[href])) screen;'],
     rest: '.a{}',
   });
-  // Spellings: comments in the list, case, a name already in the theme's layer, CRLF, @charset first.
-  assert.deepEqual(hoistLeadingImports('@charset "utf-8";\r\n@LAYER a /* c */ , reef.theme.b,c.d;\r\n@import url(a.css);\r\n.a{}'), {
-    imports: ['@layer reef.theme.a, reef.theme.b, reef.theme.c.d;', '@import url(a.css) layer(reef.theme);'],
-    rest: '@charset "utf-8";\r\n.a{}',
-  });
-  // Not a statement this scanner vouches for, or no import after it: nothing moves.
-  for (const lead of ['@layer a {}', '@layer a { .x{} }', '@layer;', '@layer ;', '@layer a b;', '@layer a,,b;', '@layer "a";', '@layer a\\.b;', '@layers a;']) {
-    untouched(`${lead}\n@import url(a.css);\n.a{}`, lead);
-  }
-  untouched('@layer a, b;\n.a{}');
-  untouched('@layer a;\n@layer b;\n');
-  untouched('@layer a;\n@import url(a.css)', 'the text ends inside the import');
 });
 
 test('🔴 review: a hex escape in an unquoted url() ends with ONE whitespace, which is the escape\'s', () => {
@@ -227,7 +286,7 @@ test('🔴 only LEADING imports move: after any other rule, an import stays exac
   for (const css of [
     '.a { color: red; }\n@import url(a.css);\n',
     '@font-face { font-family: X; src: url(x.woff2); }\n@import url(a.css);',
-    '@layer one { .a{} }\n@import url(a.css);',     // a layer BLOCK is a rule (a statement is not: see above)
+    '@layer one { .a{} }\n@import url(a.css);',     // a layer block, like a layer statement, ends the run
     '@media print { .a{} }\n@import url(a.css);',
     '@important url(a.css);',                        // a different at-keyword
     '@import-rule url(a.css);',
@@ -278,16 +337,17 @@ test('🔴 text that ends inside an import (or a comment) changes nothing at all
     '@import url(a.css) layer(fonts',
     '@import url(a.css) /* never closed',
     '/* never closed @import url(a.css);',
-    '@layer a, b',
   ]) {
     untouched(cut);
     untouched(`@import url(first.css);\n${cut}`, `a complete import followed by: ${cut}`);
   }
-  // An unfinished @charset as the first rule changes nothing either. After an import it is no
-  // longer leading trivia but a misplaced rule, so the run ends before it is read, exactly as at
-  // an unfinished style rule: the import ahead of it leads, and is lifted.
+  // An unfinished @charset or @layer statement changes nothing either. After an import neither is
+  // part of the run, so the run ends before it is read, exactly as at an unfinished style rule: the
+  // import ahead of it leads, and is lifted. (r2 read a trailing `@layer a, b` as part of the run,
+  // and so lifted nothing.)
   untouched('@charset "utf-8"');
-  for (const late of ['@charset "utf-8"', '.a { color: red']) {
+  untouched('@layer a, b');
+  for (const late of ['@charset "utf-8"', '@layer a, b', '.a { color: red']) {
     assert.deepEqual(hoistLeadingImports(`@import url(first.css);\n${late}`), {
       imports: ['@import url(first.css) layer(reef.theme);'],
       rest: late,
@@ -426,61 +486,33 @@ const LIFTED = [
   '@import url("/fonts/local.css") layer(reef.theme.fonts);',
   '@import url("https://fonts.example/a<\\/style><i data-probe=escaped>.css") layer(reef.theme);',
 ].join('\n');
-const LATE_CSS = '.first { color: red; }\n@import url("https://fonts.example/late.css");\n';
-// A hand-written theme file saved with a byte order mark, whose author orders two layers of their
-// own with a statement before the import that fills one of them (review findings 1 and 2).
-const ORDERED_THEME = '\uFEFF@layer type, fonts;\n@import url("/fonts/x.css") layer(fonts);\nhtml:root { --gd-accent: #0a7a7c; }\n@layer type { body { font-family: serif; } }\n';
-
-/** Layer names in the order a page DECLARES them — first appearance wins (CSS Cascade 5 §6.4) —
- *  read from the only spellings these sheets use: `@layer a, b;`, `@import … layer(a)`, and
- *  `@layer a {` blocks, whose statements and blocks inside name sublayers. Not a browser: a model
- *  of the one rule the lifted statements must not break, kept small enough to read. */
-function declaredLayerOrder(sheets) {
-  const order = [];
-  const declare = (name) => { if (!order.includes(name)) order.push(name); };
-  for (const css of sheets) {
-    const stack = []; // the enclosing layer of each open brace, or null for a non-layer block
-    for (const m of css.matchAll(/@layer\s+([^;{]+);|layer\(([^)]*)\)|@layer\s+([\w.-]+)\s*\{|\{|\}/g)) {
-      const prefix = stack.filter(Boolean).join('.');
-      const full = (n) => (prefix ? `${prefix}.${n.trim()}` : n.trim());
-      if (m[1] !== undefined) m[1].split(',').forEach((n) => declare(full(n)));
-      else if (m[2] !== undefined) declare(full(m[2]));
-      else if (m[3] !== undefined) { declare(full(m[3])); stack.push(m[3].trim()); }
-      else if (m[0] === '{') stack.push(null);
-      else stack.pop();
-    }
-  }
-  return order;
-}
+// Nothing to lift: the author's own CSS leads with a layer statement (review r3: a statement ends
+// the run), so neither it nor the import after it moves, and neither does the late import.
+const LATE_CSS = '@layer type, fonts;\n@import url("/fonts/x.css") layer(fonts);\n.first { color: red; }\n@import url("https://fonts.example/late.css");\n';
+// A hand-written theme file saved with a byte order mark and led by the exact `@charset` form.
+const BOM_THEME = '\uFEFF@charset "utf-8";\n@import url("/fonts/x.css") layer(fonts);\nhtml:root { --gd-accent: #0a7a7c; }\n';
 
 if (!existsSync(join(ASTRO, 'node_modules'))) {
   console.log('  · theme-imports BUILT HALF SKIPPED — no packages/sitetile/astro/node_modules (run npm install there)');
 } else {
   let lifted = null;
   let plain = null;
-  let ordered = null;
-  await test('▸ builds: a theme whose own CSS leads with imports, one with nothing to lift, one that orders its layers first', () => {
+  let bomLed = null;
+  await test('▸ builds: a theme whose own CSS leads with imports, one with nothing to lift, one saved with a byte order mark', () => {
     lifted = buildSite({ theme: COMPILED_HEAD + MARKER_LINE + OWN_CSS });
     plain = buildSite({ theme: COMPILED_HEAD + MARKER_LINE + LATE_CSS, siteLines: 'dynamic-coral-css: layered\n' });
-    ordered = buildSite({ theme: ORDERED_THEME });
+    bomLed = buildSite({ theme: BOM_THEME });
   });
 
-  await test('🔴 built page: a BOM-led theme\'s layer statement and import are lifted, and the author\'s layer order holds', () => {
-    assert.ok(ordered, 'the site did not build');
-    for (const [rel, html] of ordered) {
+  await test('🔴 built page: a BOM-led theme\'s import is lifted past its exact @charset, and the mark is gone', () => {
+    assert.ok(bomLed, 'the site did not build');
+    for (const [rel, html] of bomLed) {
       const sheet = themeSheetOf(html, rel);
       assert.equal(sheet,
-        '@layer reef.theme.type, reef.theme.fonts;\n@import url("/fonts/x.css") layer(reef.theme.fonts);\n@layer reef.theme {\nhtml:root { --gd-accent: #0a7a7c; }\n@layer type { body { font-family: serif; } }\n\n}',
+        '@import url("/fonts/x.css") layer(reef.theme.fonts);\n@layer reef.theme {\n@charset "utf-8";\nhtml:root { --gd-accent: #0a7a7c; }\n\n}',
         `${rel}: the theme sheet`);
       assert.ok(!sheet.includes('\uFEFF'), `${rel}: the byte order mark reached the page`);
-      // The author declared `type` before `fonts`; on the page, inside the theme, it still is.
-      assert.deepEqual(declaredLayerOrder([sheetsOf(html)[0], sheet]),
-        ['reef.base', 'reef.theme', 'reef.responsive', 'reef.theme.type', 'reef.theme.fonts'], `${rel}: declared layer order`);
     }
-    // Control: the same rules with the import emitted ahead of the statement — what lifting only
-    // the import would produce — declare `fonts` first. The order above is not the model's default.
-    assert.deepEqual(declaredLayerOrder(['@import url("/fonts/x.css") layer(reef.theme.fonts);\n@layer reef.theme {\n@layer type, fonts;\n}']),
-      ['reef.theme.fonts', 'reef.theme', 'reef.theme.type']);
   });
 
   await test('🔴 built page: the leading imports are the first rules of the theme\'s sheet, outside the layer block', () => {
