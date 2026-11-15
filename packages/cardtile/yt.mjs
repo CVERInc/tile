@@ -101,7 +101,12 @@ export function channelsIn(cardMd) {
   // run BEFORE the first word character is not part of the name, so `--channel=` is `channel`). The
   // lookbehind refuses a word character, with or without hyphens after it, directly before `channel`:
   // `yt-channel=`, `a--channel=`, `x_channel=` are other names, and a plain \b would have read them.
-  for (const m of String(cardMd || '').matchAll(/(?<!\w-*)channel\s*=\s*"?(@?[A-Za-z0-9_.-]+)"?/g)) {
+  //
+  // An ASSIGNMENT is the name, `=`, the value, with nothing between them — parseParams' one form, and
+  // the form every other Card parameter is read and written in. `channel = x` leaves `channel`
+  // without a value there, so the card draws no channel video; this used to allow spaces on both
+  // sides of the `=` and the Worker made an upstream request for a reference the card never uses.
+  for (const m of String(cardMd || '').matchAll(/(?<!\w-*)channel="?(@?[A-Za-z0-9_.-]+)"?/g)) {
     if (isChannelRef(m[1])) out.add(m[1]);
   }
   return [...out];

@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { channelsIn, latestFromFeed, resolveChannel, resolveChannels, resolveHandle, channelIdFromPage, posterPath, CHANNEL_RE, VIDEO_RE, HANDLE_RE } from './yt.mjs';
 import { renderCardHTML } from './serve/card-worker.mjs';
+import { parseParams } from '../sitetile/site-core.js';
 
 const CH = 'UCabcdefghijklmnopqrstuv';          // UC + 22
 const FEED = (id, title) => `<?xml version="1.0"?>
@@ -223,4 +224,60 @@ test('🔴 #1929: channelsIn reads a NAME whole — `yt-channel=` is not `channe
   assert.deepEqual(channelsIn(`- [ ] %% card: video channel="${CH}" %% x`), [CH]);
   assert.deepEqual(channelsIn(`%% card: video --channel=${HANDLE} %%`), [HANDLE]);
   assert.deepEqual(channelsIn(`%% card: video yt-channel="${CH}" channel=${HANDLE} %%`), [HANDLE], 'the real one beside the decoy');
+});
+
+// ── the two readers of a `channel=` token ───────────────────────────────────────────────────────
+// A Card line is read twice: channelsIn (the Worker, BEFORE rendering, to decide what to fetch) and
+// parseParams (the renderer, to decide what to draw). The param grammar has one assignment form —
+// the name, `=`, the value, nothing between them — and that is how every other Card parameter is
+// read and written (parseParams' token scan; card-core's setToken/removeToken). A space on either
+// side of the `=` is not an assignment: parseParams leaves the name without a value.
+const SPACED = [
+  ['space on both sides', (v) => `channel = ${v}`],
+  ['space before the =', (v) => `channel =${v}`],
+  ['space after the =', (v) => `channel= ${v}`],
+  ['tab on both sides', (v) => `channel\t=\t${v}`],
+  ['spaced, quoted', (v) => `channel = "${v}"`],
+];
+const TIGHT = [
+  ['bare', (v) => `channel=${v}`],
+  ['quoted', (v) => `channel="${v}"`],
+];
+const LINE = (params) => `- [ ] %% card: video ${params} %% x`;
+
+test('🔴 channelsIn: `channel = x` is not an assignment — no upstream request for a channel the card does not draw', async () => {
+  for (const ref of [CH, HANDLE]) {
+    for (const [name, write] of SPACED) {
+      assert.deepEqual(channelsIn(LINE(write(ref))), [], `${name}: ${write(ref)}`);
+    }
+    // CONTROLS: the one assignment form still resolves.
+    for (const [name, write] of TIGHT) {
+      assert.deepEqual(channelsIn(LINE(write(ref))), [ref], `${name}: ${write(ref)}`);
+    }
+  }
+  assert.deepEqual(channelsIn(LINE(`channel = ${CH} channel=${HANDLE}`)), [HANDLE], 'the real one beside the spaced one');
+  // and nothing is fetched for it
+  let calls = 0;
+  const got = await resolveChannels(LINE(`channel = ${CH}`), async () => { calls++; return ok(FEED('dQw4w9WgXcQ', 't')); });
+  assert.deepEqual(got, {});
+  assert.equal(calls, 0, 'no request');
+});
+
+test('parseParams: `channel = x` sets no channel, so the card draws no channel video — the same answer channelsIn gives', () => {
+  const draw = (params) => markup(renderCardHTML(CARD(LINE(params)), { handle: 't', videos: {} }));
+  for (const ref of [CH, HANDLE]) {
+    for (const [name, write] of SPACED) {
+      assert.equal(typeof parseParams(`video ${write(ref)}`).channel, 'undefined', `${name}: ${write(ref)}`);
+      assert.doesNotMatch(draw(write(ref)), /data-yt-(channel|handle)="/, `${name}: nothing to play`);
+    }
+    for (const [name, write] of TIGHT) {
+      assert.equal(parseParams(`video ${write(ref)}`).channel, ref, name);
+      assert.match(draw(write(ref)), /data-yt-(channel|handle)="/, `${name}: the card has a channel to play`);
+    }
+    // The agreement itself, form by form: a reference is fetched exactly when it is drawn.
+    for (const [name, write] of [...SPACED, ...TIGHT]) {
+      const drawn = parseParams(`video ${write(ref)}`).channel === ref;
+      assert.equal(channelsIn(LINE(write(ref))).includes(ref), drawn, `${name}: fetched if and only if drawn`);
+    }
+  }
 });
