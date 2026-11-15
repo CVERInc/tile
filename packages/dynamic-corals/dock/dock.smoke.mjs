@@ -142,7 +142,7 @@ ${item('id="b" data-label="B"', '<div id="b-content"><h2>B</h2></div>')}
       const b = h.shadowRoot.querySelector('.b, .dc-inbox-open').getBoundingClientRect();
       return [Math.round(b.width), Math.round(b.height)];
     }));
-    check(engine, 'every bubble is the same 56×56, whichever bundle drew it', sizes.every(([w, h]) => w === 56 && h === 56), JSON.stringify(sizes));
+    check(engine, 'every bubble is the same 44×44, whichever bundle drew it', sizes.every(([w, h]) => w === 44 && h === 44), JSON.stringify(sizes));
     // Margin + shadow reach, computed.
     const geo = await p.evaluate(() => {
       const h = document.querySelector('dc-dock[name="right"]').firstElementChild;
@@ -218,7 +218,7 @@ ${item('id="b" data-label="B"', '<div id="b-content"><h2>B</h2></div>')}
     await p.waitForTimeout(100);
     const s1 = await snapshot(p);
     await p.evaluate(() => { document.getElementById('b-content').hidden = true; });
-    await p.waitForTimeout(100);
+    await p.waitForTimeout(300); // the 160ms exit (reef#3306) first
     const s2 = await snapshot(p);
     const pos = (s, id) => s.find((d) => d.name === 'right').items.find((i) => i.id === id);
     check(engine, 'content hiding itself retires the whole item', pos(s2, 'b').hidden === true, JSON.stringify(pos(s2, 'b')));
@@ -595,7 +595,7 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
     const anchored = await p.evaluate(() => { const h = document.querySelector('.dc-inbox-host'); return !!h && h.dockAnchor === document.querySelector('[data-dynamic-coral="inbox-bubble"]'); });
     check(engine, 'replace the container and mountAll(): exactly one live bubble, the new container\'s', n0 === 1 && n1 === 1 && anchored, JSON.stringify({ n0, n1, anchored }));
     await p.evaluate(() => document.querySelector('[data-dynamic-coral="inbox-bubble"]').remove());
-    await p.waitForTimeout(150);
+    await p.waitForTimeout(300); // the 160ms exit (reef#3306) first
     const n2 = await live();
     // A later open request reaches no ghost (and, through it, closes nothing else).
     await p.evaluate(() => { document.getElementById('s1').shadowRoot.querySelector('.b').click(); });
@@ -613,7 +613,7 @@ ${item('id="t2" data-label="T2" data-dock="left"')}`,
       s2Open: !window.__s2.shadowRoot.querySelector('.p').hidden, s2Expanded: window.__s2.shadowRoot.querySelector('.b').getAttribute('aria-expanded') }));
     check(engine, 'navigating to a retired item\'s #name closes nothing on screen and opens nothing', n3.s1 === true && !n3.s2InDock && n3.s2Open === false && n3.s2Expanded === 'false', JSON.stringify(n3));
     await p.evaluate(() => document.getElementById('sec').remove());
-    await p.waitForTimeout(150);
+    await p.waitForTimeout(300); // the 160ms exit (reef#3306) first
     const items = await p.evaluate(() => [...document.querySelectorAll('dc-dock')].flatMap((d) => [...d.children].map((c) => c.id || c.className)));
     check(engine, 'removing the section a dock item was written in removes the item from the dock', items.length === 0, JSON.stringify(items));
     check(engine, 'no page errors (retire page)', errs.length === 0, errs.join(' | '));

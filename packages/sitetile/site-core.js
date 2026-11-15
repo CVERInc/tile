@@ -341,6 +341,21 @@ function slugify(s, fallback) {
   return out || fallback;
 }
 
+// One frontmatter line as [line, key, value] — what /^([\w-]+):\s*(.*)$/ captured — or null.
+//
+// 🩸 It was that regex. `.` stops at U+2028 / U+2029 and a lone \r (a line here is split on \n only),
+// and when the value held one, `\s*` handed back the whitespace after the colon one character at a
+// time and `(.*)` re-read the value each time: `title:` followed by 40,000 spaces, a word and a
+// U+2028 cost seconds per parse. The value is what follows that whitespace, and a value holding a
+// line break is not a key line — the same answer, read once.
+const RE_FRONTMATTER_KEY = /^([\w-]+):/;
+function frontmatterLine(line) {
+  const k = RE_FRONTMATTER_KEY.exec(line);
+  if (!k) return null;
+  const value = line.slice(k[0].length).trimStart();
+  return RE_LINE_BREAK.test(value) ? null : [line, k[1], value];
+}
+
 // Minimal frontmatter reader — key: value pairs only, NO YAML dependency (family rule; copied from
 // book-core.js splitFrontmatter). Preserves source key order (object insertion order).
 function splitFrontmatter(text) {
@@ -349,7 +364,7 @@ function splitFrontmatter(text) {
   const meta = {};
   const lines = m[1].split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const kv = /^([\w-]+):\s*(.*)$/.exec(lines[i]);
+    const kv = frontmatterLine(lines[i]);
     if (!kv) continue;
     const key = kv[1];
     const marker = kv[2].trim();
@@ -3652,6 +3667,9 @@ export {
   // the link/image matcher and its shapes, exported so their test can hold each shape against the
   // regex it replaced — see bracketMatches' own comment.
   bracketMatches, replaceMatches, BRACKET_SHAPES,
+  // one frontmatter line's key and value, exported so cardtile's parse-card-run-cost test can hold it
+  // against the regex it replaced — see frontmatterLine's own comment.
+  frontmatterLine,
   // the seeded placeholder site titles and the site-name chain that treats one as unset.
   PLACEHOLDER_SITE_TITLES, isPlaceholderSiteTitle, siteName, routeSiteName,
   // …and which key answered: { name, key } (see siteNameSource).

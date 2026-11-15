@@ -98,14 +98,26 @@ corner reach up the screen, and that is what the page asked for.
 | `--dc-dock-panel-bg` / `--dc-dock-panel-fg` | the panel frame's background and text colour (default white / `#111`) |
 | `--dc-dock-bar-bg` / `--dc-dock-bar-fg` | the installed-app bar's background and ink |
 
-`--dc-dock-margin`, `--dc-dock-size`, `--dc-dock-gap`, `--dc-dock-radius`, `--dc-dock-shadow`,
+`--dc-dock-margin`, `--dc-dock-size`, `--dc-dock-icon`, `--dc-dock-gap`, `--dc-dock-radius`, `--dc-dock-shadow`,
 `--dc-dock-room` and `--dc-dock-panel-w` are the dock's own, set on the dock for its items to read.
 
 ## Shadows
 
 A shadow may not reach further than the edge margin, or the screen edge cuts it. Measured on an
 iPhone 14 (390×664 visible): the inbox panel's former `0 12px 40px` was cut by 18 / 24 / 36 px. The
-budget is `0 1px 3px` + `0 4px 12px` — 16px down, 12px sideways, inside the `max(1rem, 16px)` margin.
+budget is `0 1px 3px` + `0 4px 12px` — 16px down, 12px sideways, inside the margin, which is
+`max(1rem, 16px)` on a phone and `max(1.25rem, 20px)` from 700px up.
+
+## Size and motion
+
+From 700px wide a bubble is 52px with a 22px glyph, 20px off the right/left and bottom edges; below
+that 44px, a 20px glyph, 16px. Both corners alike. The installed-app bar is not a bubble and keeps
+its own `--dc-dock-bar-size` (3.5rem). A bubble that really appears pops in from half size (320ms,
+`cubic-bezier(.34,1.3,.64,1)`, after 180ms when it is the first in an empty corner); one that really
+leaves shrinks and fades out (160ms) before it is removed, and a newcomer waits for it. Nothing plays
+for an item's first join of the page (however late: an inbox behind its claim gate, a new route's
+items), a re-render, a re-order, or `prefers-reduced-motion: reduce`. An item whose panel is open
+simply goes, without the shrink. A leaving item is `inert` and `aria-hidden` until it is gone.
 
 ## The bubble, open
 
