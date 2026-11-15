@@ -2414,3 +2414,91 @@ test('reef#2790 docked: the host joins the right dock, keeps the digests, and th
 	const { el } = await mountFresh();
 	assert.equal(el.children.length, 1);
 });
+
+// tile#187: a 404 `not_claimed` is as terminal as a full inbox. The bubble says the form coral's
+// own sentence for the page's language (no "try again"), and the send-to-a-person button that
+// failed on a terminal refusal goes away instead of inviting a press that cannot succeed.
+test('tile#187: every bubble locale renders the form coral\'s errorNotClaimed for a 404 not_claimed', async () => {
+	const { inboxFormCopy } = await import('../../sitetile/inbox-form-copy.js');
+	const locales = Object.keys(coral.COPY);
+	assert.equal(locales.length, 9, 'the bubble ships nine locales');
+	for (const locale of locales) {
+		const shown = await failedCompose(404, { ok: false, reason: 'not_claimed' }, locale);
+		assert.equal(shown, inboxFormCopy(locale).errorNotClaimed, `${locale}: the form's sentence`);
+		assert.equal(shown, coral.COPY[locale].errorNotClaimed, `${locale}: the bubble's own table`);
+		assert.notEqual(shown, coral.COPY[locale].error, `${locale}: still the retry sentence`);
+		assert.notEqual(shown, coral.COPY[locale].rate, `${locale}: the rate-limit sentence`);
+	}
+});
+
+test('tile#187: 429 and 507 keep their sentences; not_claimed only counts with a 404', async () => {
+	const en = coral.COPY.en;
+	assert.equal(await failedCompose(429, { ok: false, reason: 'rate_limited' }), en.rate);
+	assert.equal(await failedCompose(429, { ok: false, reason: 'not_claimed' }), en.rate);
+	assert.equal(await failedCompose(507, { ok: false, reason: 'inbox_storage_full' }), en.errorInboxStorageFull);
+	assert.equal(await failedCompose(507, { ok: false, reason: 'not_claimed' }), en.error);
+	for (const status of [0, 400, 403, 500, 503]) {
+		assert.equal(await failedCompose(status, { ok: false, reason: 'not_claimed' }), en.error, String(status));
+	}
+});
+
+test('tile#187: a plain 404 without the not_claimed code keeps the existing retry sentence', async () => {
+	for (const body of [null, {}, { ok: false }, { ok: false, reason: 'other_reason' }, { ok: false, reason: 'inbox_storage_full' }]) {
+		assert.equal(await failedCompose(404, body), coral.COPY.en.error, JSON.stringify(body));
+	}
+});
+
+/** The grounded answer's "Ask a person instead" press (the `escalate` path) against one inbox answer. */
+async function failedEscalation(status, body) {
+	respond = (url, init) => {
+		if (url.endsWith('/api/kaito')) return { ok: true, status: 200, json: async () => ({
+			kind: 'grounded', text: 'An answer', source_url: 'https://example.test/source'
+		}) };
+		if (url.endsWith('/api/inbox') && init.method === 'POST') return { ok: false, status, json: async () => body };
+	};
+	let el;
+	try {
+		const mounted = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
+		el = mounted.el;
+		const { root } = mounted;
+		await openBubble(root);
+		composeBox(root).value = 'Please ask a person';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		const toHuman = root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman');
+		const before = removed.length;
+		await toHuman.emit('click');
+		await settle();
+		const errors = root.querySelector('.dc-inbox-panel').children.filter((n) => n.className === 'dc-inbox-error');
+		assert.equal(errors.length, 1, `${status}: one error`);
+		return { toHuman, error: errors[0].textContent, gone: removed.slice(before).includes(toHuman) };
+	} finally {
+		if (el) coral.unmount(el);
+		respond = null;
+	}
+}
+
+test('tile#187: after a terminal refusal the send-to-a-person button is removed, not relabelled for a retry', async () => {
+	for (const [status, reason, sentence] of [
+		[404, 'not_claimed', coral.COPY.en.errorNotClaimed],
+		[507, 'inbox_storage_full', coral.COPY.en.errorInboxStorageFull]
+	]) {
+		const r = await failedEscalation(status, { ok: false, reason });
+		assert.equal(r.error, sentence, `${status} ${reason}`);
+		assert.equal(r.gone, true, `${status} ${reason}: the button is still on screen`);
+	}
+});
+
+test('tile#187: a refusal a retry can fix keeps the send-to-a-person button, enabled and relabelled as before', async () => {
+	for (const [status, body, sentence] of [
+		[500, { ok: false }, coral.COPY.en.error],
+		[429, { ok: false, reason: 'rate_limited' }, coral.COPY.en.rate],
+		[404, { ok: false }, coral.COPY.en.error],
+		[0, null, coral.COPY.en.error]
+	]) {
+		const r = await failedEscalation(status, body);
+		assert.equal(r.error, sentence, String(status));
+		assert.equal(r.gone, false, `${status}: the button was removed`);
+		assert.equal(r.toHuman.disabled, false, `${status}: the button stayed disabled`);
+		assert.equal(r.toHuman.textContent, coral.COPY.en.toHumanAfterRefusal, String(status));
+	}
+});

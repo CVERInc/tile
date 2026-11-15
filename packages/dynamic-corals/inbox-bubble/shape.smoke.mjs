@@ -104,7 +104,7 @@ async function arm({ label, layered, hostCss }) {
 	const bb = m.bubble;
 	if (!bb) problems.push('no closed bubble rendered');
 	else {
-		if (bb.width !== 56 || bb.height !== 56) problems.push(`bubble box is ${bb.width}×${bb.height}, not 56×56`);
+		if (bb.width !== 52 || bb.height !== 52) problems.push(`bubble box is ${bb.width}×${bb.height}, not 52×52`);
 		if (!bb.radii.every((r) => r === '50%')) problems.push(`bubble radius is ${bb.radii.join(' ')}, not 50%`);
 		if (bb.background !== 'rgb(1, 2, 3)') problems.push(`--reef-inbox-accent did not reach the bubble: background ${bb.background}`);
 		if (bb.color !== 'rgb(250, 240, 230)') problems.push(`--reef-inbox-on-accent did not reach the bubble: color ${bb.color}`);
@@ -129,4 +129,4 @@ if (failures.length) {
 	console.error('✗ shape smoke:\n' + failures.map((f) => '    ' + f).join('\n'));
 	process.exit(1);
 }
-console.log('✓ shape smoke: the bubble is a 56×56 circle in the site\'s colours in every arm');
+console.log('✓ shape smoke: the bubble is a 52×52 circle in the site\'s colours in every arm');

@@ -68,25 +68,25 @@ const LINK_ICON = '<svg class="d" viewBox="0 0 24 24" aria-hidden="true" focusab
 
 const ITEM_CSS = `
 :host{font:inherit}
-.b{box-sizing:border-box;margin:0;border:0;padding:0;width:var(--dc-dock-w,3.5rem);height:var(--dc-dock-size,3.5rem);
+.b{box-sizing:border-box;margin:0;border:0;padding:0;width:var(--dc-dock-w,44px);height:var(--dc-dock-size,44px);
   min-width:0;min-height:0;max-width:none;max-height:none;flex:none;border-radius:var(--dc-dock-radius,50%);
   -webkit-appearance:none;appearance:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.75rem;
   background:var(--dc-dock-item-bg,var(--_bg,${DEFAULT_BG}));color:var(--dc-dock-item-ink,var(--_ink,#fff));
   box-shadow:var(--dc-dock-shadow,${DOCK_SHADOW});font:inherit;line-height:0;text-decoration:none}
 .b:focus-visible{outline:2px solid var(--_bg,${DEFAULT_BG});outline-offset:2px}
-.d,::slotted(svg){width:1.6rem!important;height:1.6rem!important;display:block!important;flex:none!important}
-.x{display:none;width:1.6rem;height:1.6rem;flex:none}
+.d,::slotted(svg){width:var(--dc-dock-icon,20px)!important;height:var(--dc-dock-icon,20px)!important;display:block!important;flex:none!important}
+.x{display:none;width:var(--dc-dock-icon,20px);height:var(--dc-dock-icon,20px);flex:none}
 .x svg{display:block;width:100%;height:100%}
 .b[aria-expanded="true"] slot[name="icon"]{display:none}
 .b[aria-expanded="true"] .x{display:block}
 :host([slot="more"]) .b{justify-content:flex-start;height:3rem;font-size:1rem;line-height:1.2}
 :host([slot="more"]) .b::after{content:attr(aria-label)}
 .p{box-sizing:border-box;width:var(--dc-dock-panel-w,min(22rem,calc(100vw - 2rem)));
-  max-height:calc(var(--dc-dock-room,calc(100vh - 2rem)) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,3.5rem) + var(--dc-dock-gap,.5rem)));
+  max-height:calc(var(--dc-dock-room,calc(100vh - 2rem)) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,44px) + var(--dc-dock-gap,.5rem)));
   overflow:auto;overscroll-behavior:contain;border-radius:.9rem;outline:none;visibility:visible;
   background:var(--dc-dock-panel-bg,#fff);color:var(--dc-dock-panel-fg,#111);box-shadow:var(--dc-dock-shadow,${DOCK_SHADOW})}
 .p[hidden]{display:none}
-.p.bar{position:fixed;left:0;right:0;bottom:calc(var(--dc-dock-size,3.5rem) + env(safe-area-inset-bottom,0px));width:auto;
+.p.bar{position:fixed;left:0;right:0;bottom:calc(var(--dc-dock-size,44px) + env(safe-area-inset-bottom,0px));width:auto;
   max-height:var(--dc-dock-room,calc(100vh - 4.5rem));border-radius:.9rem .9rem 0 0;
   box-shadow:0 -1px 3px rgba(0,0,0,.12),0 -4px 12px rgba(0,0,0,.14)}
 .px{display:none}
@@ -241,7 +241,8 @@ export function mountItem(el) {
   // announce, close what IS on screen (cold review of tile#233, N3; inbox-bubble's `retired()`).
   const offs = [];
   function retired() {
-    if (el.isConnected !== false) return false;
+    // A removed item still drawn for its 160ms exit (the dock's ghost) is retired too.
+    if (el.isConnected !== false && !el.dcDockGhost) return false;
     while (offs.length) offs.pop()();
     return true;
   }

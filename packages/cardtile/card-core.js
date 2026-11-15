@@ -65,7 +65,30 @@ const DEFAULT_LANE = 'grid';
 // `marker: 'cardtile'` so that writing it back does not change its line; a cell read from a
 // `card:` line carries nothing, so its shape is what it always was. Exactly these two words: the
 // colon follows the word directly, so `cardtiles:`, `card-page:` and `sitetile:` are not this.
-const RE_CARD_MARKER = /^%%\s*card(tile)?:\s*(.*?)\s*%%[ \t]*([^\n]*)\n?([\s\S]*)$/;
+//
+// 🩸 It was one regex, /^%%\s*card(tile)?:\s*(.*?)\s*%%[ \t]*([^\n]*)\n?([\s\S]*)$/. Its `(.*?)\s*%%` re-read a
+// run of whitespace once for every character in it, so a marker holding 40,000 spaces between two
+// words cost seconds on every parse. cardMarker() returns the same four groups, reading the text once:
+// the head is anchored; the inner ends at the whitespace before the FIRST `%%` after the head, and may
+// not hold a line break (`.` matched none); the rest of that line and the lines after it follow.
+const RE_CARD_MARKER = /^%%\s*card(tile)?:\s*/;
+const RE_WS = /\s/;
+const RE_LINE_BREAK = /[\n\r\u2028\u2029]/;
+function cardMarker(text) {
+  const head = RE_CARD_MARKER.exec(text);
+  if (!head) return null;
+  const from = head[0].length;
+  const close = text.indexOf('%%', from);
+  if (close === -1) return null;
+  let end = close;
+  while (end > from && RE_WS.test(text.charAt(end - 1))) end--;
+  const inner = text.slice(from, end);
+  if (RE_LINE_BREAK.test(inner)) return null;
+  let at = close + 2;
+  while (at < text.length && (text.charAt(at) === ' ' || text.charAt(at) === '\t')) at++;
+  const nl = text.indexOf('\n', at);
+  return [text, head[1], inner, nl === -1 ? text.slice(at) : text.slice(at, nl), nl === -1 ? '' : text.slice(nl + 1)];
+}
 
 const clampSpan = (v, max) => {
   const n = Number(v);
@@ -115,13 +138,15 @@ const legacySlides = (word, rawParams) => word === 'embed' && kindAssigned(rawPa
 
 // one tugtile card's text → a typed cell. No marker = a plain text widget (whole text is the body).
 function extractCell(text) {
-  const m = RE_CARD_MARKER.exec(text || '');
+  const m = cardMarker(text || '');
   if (!m) return { type: 'text', params: {}, rawParams: '', body: (text || '').trim() };
   const sp = /^(\S+)\s*([\s\S]*)$/.exec(m[2].trim());
   const word = sp ? sp[1] : 'text';
   const rawParams = sp ? sp[2].trim() : '';
   const params = parseParams(rawParams);
-  const body = (m[3] + (m[4] ? '\n' + m[4] : '')).replace(/\s+$/, '');
+  // trimEnd(), not .replace(/\s+$/, ''): the regex restarts at every character of a whitespace run that
+  // is not at the end. Both strip the same class — everything `\s` matches.
+  const body = (m[3] + (m[4] ? '\n' + m[4] : '')).trimEnd();
   // `marker` remembers a line written `%% cardtile:`, the same way `spelled` below remembers a word
   const cell = { type: word, params, rawParams, body: body.replace(/^\n+/, ''), ...(m[1] ? { marker: 'cardtile' } : {}) };
   // `spelled` remembers the word on disk, so writing the cell back does not rewrite the file
@@ -247,7 +272,9 @@ function parseCard(md) {
     if (RE_ASSET_LANE.test(laneTitle)) {
       for (const t of col.tiles) {
         const c = extractCell(t.text);
-        const id = (c.params.id || '').trim();
+        // an `id` with no value is a bare flag (true), and `id="a"→b` a link object: neither names an
+        // asset, so the line is passed over like one with no id at all (it used to throw on .trim())
+        const id = typeof c.params.id === 'string' ? c.params.id.trim() : '';
         // an asset is hoisted out of its line, so the line's marker spelling rides on the entry
         if (c.type === 'asset' && id) assets[id] = { mime: c.params.mime || 'image/webp', b64: (c.body || '').trim(), ...(c.marker ? { marker: c.marker } : {}) };
       }

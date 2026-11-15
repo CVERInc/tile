@@ -305,18 +305,21 @@ const DOCK_CSS = `
   box-sizing:border-box;margin:0!important;border:0!important;width:auto;height:auto;
   padding:0 0 var(--_dc-reserve,0px)!important;pointer-events:none;
   gap:var(--dc-dock-gap);bottom:calc(var(--dc-dock-margin) + env(safe-area-inset-bottom,0px));
-  --dc-dock-margin:max(1rem,16px);--dc-dock-size:3.5rem;--dc-dock-w:var(--dc-dock-size);--dc-dock-gap:.5rem;
+  --dc-dock-margin:max(1rem,16px);--dc-dock-size:44px;--dc-dock-icon:20px;--dc-dock-w:var(--dc-dock-size);--dc-dock-gap:.5rem;
   --dc-dock-radius:50%;--dc-dock-shadow:${DOCK_SHADOW};--dc-dock-vh:100vh;
   --dc-dock-room:calc(var(--dc-dock-vh) - 2 * var(--dc-dock-margin) - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - var(--_dc-reserve,0px));
   --dc-dock-panel-w:min(22rem,calc(100vw - 2 * var(--dc-dock-margin) - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)))}
 @supports (height:100dvh){:host{--dc-dock-vh:100dvh}}
+@media (min-width:700px){:host{--dc-dock-margin:max(1.25rem,20px);--dc-dock-size:52px;--dc-dock-icon:22px}}
 :host([hidden]){display:none!important}
 :host(:not([name="left"])){right:calc(var(--dc-dock-margin) + env(safe-area-inset-right,0px));align-items:flex-end}
 :host([name="left"]){left:calc(var(--dc-dock-margin) + env(safe-area-inset-left,0px));align-items:flex-start}
 ::slotted(*){display:flex!important;flex-direction:column!important;align-items:inherit!important;gap:var(--dc-dock-gap)!important;
   flex:none!important;position:static!important;margin:0!important;padding:0!important;pointer-events:auto}
 ::slotted([hidden]){display:none!important}
-:host([name="bar"]){left:0;right:0;bottom:0;flex-direction:row;align-items:stretch;gap:0;
+::slotted([data-dc-leaving]){pointer-events:none}
+::slotted([hidden][data-dc-leaving]){display:flex!important}
+:host([name="bar"]){--dc-dock-bar-size:3.5rem;--dc-dock-size:var(--dc-dock-bar-size);--dc-dock-icon:1.6rem;--dc-dock-margin:max(1rem,16px);left:0;right:0;bottom:0;flex-direction:row;align-items:stretch;gap:0;
   padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)!important;
   background:var(--dc-dock-bar-bg,#fff);color:var(--dc-dock-bar-fg,#111);box-shadow:0 -1px 0 rgba(0,0,0,.12);
   --dc-dock-w:100%;--dc-dock-radius:0;--dc-dock-shadow:none;--dc-dock-item-bg:transparent;--dc-dock-item-ink:currentColor;
@@ -441,9 +444,113 @@ function dockWatch(doc) {
   new MutationObserver((records) => {
     if (!records.some((r) => r.removedNodes.length)) return;
     for (const dock of doc.querySelectorAll(DOCK_TAG)) {
-      for (const item of [...dock.children]) if (item.dockAnchor && !item.dockAnchor.isConnected) item.remove();
+      for (const item of [...dock.children]) if (item.dockAnchor && !item.dockAnchor.isConnected && !item.dcDockGhost) item.remove();
     }
   }).observe(doc, { childList: true, subtree: true });
+}
+
+/** Motion: a bubble that really arrives pops in, one that really leaves shrinks out (see the header). */
+const DOCK_IN_MS = 320;
+const DOCK_IN_EASE = 'cubic-bezier(.34,1.3,.64,1)';
+const DOCK_OUT_MS = 160;
+const DOCK_LATE_MS = 180;
+const DOCK_FROM = { opacity: 0, transform: 'scale(.5)' };
+const DOCK_TO = { opacity: 1, transform: 'scale(1)' };
+
+/**
+ * Watches one corner dock and animates only a CHANGE of who is there: an item that becomes visible
+ * (inserted, or `hidden` removed) pops in; one that leaves (`hidden` set, or removed from the page)
+ * shrinks out first and is removed after. Re-ordering, re-rendering inside an item and attribute
+ * updates change nobody's presence, so they play nothing. An item's FIRST join of this document
+ * plays nothing either (`doc.dcDockSeen`): however late it comes — an inbox behind its claim gate, a
+ * route's new item — that is the page arriving, not a change. The one exception is a swap: a first
+ * join while another bubble of the same dock is leaving waits out that exit, then springs in.
+ * `prefers-reduced-motion: reduce` plays nothing at all. An item whose panel is open just goes: the
+ * panel vanishing is the feedback, and it is not shrunk with it. A returning item waits for any
+ * leaver; into an empty corner it waits a beat longer (DOCK_LATE_MS) so the page can settle first.
+ */
+function dockMotion(dock) {
+  if (typeof MutationObserver !== 'function') return;
+  const doc = dock.ownerDocument;
+  const seen = doc.dcDockSeen || (doc.dcDockSeen = new WeakSet());
+  const shown = new Set();
+  const on = (el) => el.parentNode === dock && !el.hidden && !el.dcDockGhost;
+  const quiet = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const panelOpen = (el) => !!(el.shadowRoot && el.shadowRoot.querySelector('[aria-expanded="true"]'));
+  // An item that retires closes its own panel in the same task it hides itself, before this observer
+  // runs; so each item's open state is also remembered as of the LAST finished change (`dcDockOpen`).
+  const watchOpen = (el) => {
+    if (el.dcDockOW || !el.shadowRoot) return;
+    el.dcDockOW = new MutationObserver(() => { el.dcDockOpen = panelOpen(el); });
+    el.dcDockOW.observe(el.shadowRoot, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-expanded'] });
+  };
+  let leaveEnd = 0;
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const stop = (el) => {
+    if (el.dcDockAnim) { el.dcDockAnim.cancel(); el.dcDockAnim = null; }
+    el.removeAttribute('data-dc-leaving');
+    el.removeAttribute('inert');
+    el.removeAttribute('aria-hidden');
+  };
+  new MutationObserver((records) => {
+    const cand = new Map();
+    const fresh = new Set();
+    for (const r of records) {
+      for (const n of r.addedNodes) {
+        if (n.nodeType !== 1) continue;
+        watchOpen(n);
+        if (!seen.has(n)) { seen.add(n); fresh.add(n); }
+        if (!cand.has(n)) cand.set(n, null);
+      }
+      for (const n of r.removedNodes) if (n.nodeType === 1) cand.set(n, r.nextSibling);
+      if (r.type === 'attributes' && r.target.parentNode === dock && !cand.has(r.target)) cand.set(r.target, null);
+    }
+    const before = shown.size;
+    const entering = [];
+    const firsts = [];
+    const leaving = [];
+    for (const [el, next] of cand) {
+      const was = shown.has(el);
+      const is = on(el);
+      if (was && !is) { shown.delete(el); leaving.push([el, next]); }
+      else if (!was && is) { shown.add(el); if (fresh.has(el)) firsts.push(el); else entering.push(el); }
+    }
+    if (quiet()) return;
+    const t = now();
+    for (const [el, next] of leaving) {
+      const ghost = !el.parentNode;
+      if (!ghost && el.parentNode !== dock) continue;
+      if (typeof el.animate !== 'function' || el.dcDockOpen || panelOpen(el)) continue;
+      el.setAttribute('data-dc-leaving', '');
+      el.setAttribute('inert', '');
+      el.setAttribute('aria-hidden', 'true');
+      if (ghost) {
+        el.dcDockGhost = true;
+        dock.insertBefore(el, next && next.parentNode === dock ? next : null);
+      }
+      const anim = el.animate([DOCK_TO, DOCK_FROM], { duration: DOCK_OUT_MS, easing: 'ease', fill: 'forwards' });
+      el.dcDockAnim = anim;
+      leaveEnd = Math.max(leaveEnd, t + DOCK_OUT_MS);
+      anim.addEventListener('finish', () => {
+        if (el.dcDockAnim !== anim) return;
+        stop(el);
+        if (ghost) { el.dcDockGhost = false; el.remove(); }
+      });
+    }
+    const wait = Math.max(0, leaveEnd - t);
+    // A first join while another bubble of this dock is leaving is a swap (the page was already
+    // there): the newcomer waits out the exit and then springs in. Any other first join is the page
+    // arriving and plays nothing.
+    if (wait > 0) entering.push(...firsts);
+    const delay = wait + (before === 0 && wait === 0 ? DOCK_LATE_MS : 0);
+    for (const el of entering) {
+      if (typeof el.animate !== 'function') continue;
+      stop(el);
+      el.animate([DOCK_FROM, DOCK_TO], { duration: DOCK_IN_MS, easing: DOCK_IN_EASE, delay, fill: 'backwards' });
+    }
+  }).observe(dock, { childList: true, attributes: true, attributeFilter: ['hidden'], subtree: true });
+  for (const el of dock.children) { watchOpen(el); if (on(el)) shown.add(el); }
 }
 
 /** Gives a dock its look, once: the first copy to arrive attaches the shadow root, later ones see it. */
@@ -458,7 +565,7 @@ function dockClaim(dock) {
   dockReserve(dock);
   if (typeof window !== 'undefined') window.addEventListener('resize', () => dockReserve(dock));
   if (dock.getAttribute('name') === 'bar') dockBar(dock, shadow);
-  else dock.hidden = false;
+  else { dock.hidden = false; dockMotion(dock); }
 }
 
 /** Contract ①. Returns the dock the item is now in, or null where there is no document to join. */
@@ -582,6 +689,14 @@ function dockInk(bg) {
 // the name may change, the reply is always marked AI.
 /** The en heading over KAITO's related-page links; the locales not yet translated show it as is. */
 const RELATED_HEADING_EN = 'Possibly related pages';
+/**
+ * tile#187: a 404 `not_claimed` (the owner never claimed Inbox) is terminal, so the bubble says the
+ * form coral's `errorNotClaimed` (packages/sitetile/inbox-form-copy.js), never a "try again". That
+ * table has en, ja, ko, zh-tw and zh-cn and shows its English sentence on every other page; the
+ * bubble's de, fr, es and pt-br do the same, so both corals say one thing on one page. The
+ * mount test holds every locale to `inboxFormCopy(locale).errorNotClaimed`.
+ */
+const NOT_CLAIMED_EN = "This site isn't taking messages right now.";
 
 export const COPY = {
 	en: {
@@ -609,6 +724,7 @@ export const COPY = {
 		them: 'Reply',
 		error: "That didn't go through. Please try again.",
 		errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
+		errorNotClaimed: NOT_CLAIMED_EN,
 		rate: "That's a lot of messages — please try again in a minute.",
 		closeNamed: (l) => `Close ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}answers first, a person reads what you send on`,
@@ -652,6 +768,7 @@ export const COPY = {
 		them: '回覆',
 		error: '沒有送出去，請再試一次。',
 		errorInboxStorageFull: "這個網站的收件匣已滿，目前無法接收新訊息。",
+		errorNotClaimed: '這個網站目前沒有開放留言。',
 		rate: '訊息有點多，請稍等一分鐘再試。',
 		closeNamed: (l) => `關閉「${l}」`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，轉出去真人會看`,
@@ -679,7 +796,7 @@ export const COPY = {
 		toHumanAfterRefusal: '人に取り次いでもらう',
 		kaitoUnavailable: 'AIは今お答えできません。',
 		kaitoUnavailableToHuman: 'AIは今お答えできません。人に取り次ぐこともできます。',
-		sentToHuman: '担当者に取り次ぎました。返信はここに表示されます。',
+		sentToHuman: '人に取り次ぎました。返信はここに表示されます。',
 		name: 'お名前（任意）',
 		email: 'メールアドレス（任意）',
 		emailNote: 'メールアドレスを残していただくと、返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。',
@@ -695,13 +812,14 @@ export const COPY = {
 		them: '返信',
 		error: '送信できませんでした。もう一度お試しください。',
 		errorInboxStorageFull: "このサイトの受信箱はいっぱいで、現在新しいメッセージを受け取れません。",
+		errorNotClaimed: 'このサイトは現在メッセージを受け付けていません。',
 		rate: '送信が多すぎます。1分ほどお待ちください。',
 		closeNamed: (l) => `「${l}」を閉じる`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
 		statusNoAi: '送った内容は人が読みます',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}がこのサイトの内容から回答します`,
-		statusHandedOffEmail: '担当者に取り次ぎました。返信はメールで届きます。',
-		statusHandedOffNoEmail: '担当者に取り次ぎました。返信はここに表示されます。',
+		statusHandedOffEmail: '人に取り次ぎました。返信はメールで届きます。',
+		statusHandedOffNoEmail: '人に取り次ぎました。返信はここに表示されます。',
 		askAgain: (a) => `もう一度${a}に聞く`,
 		newConversation: '新しい会話を始める',
 		backToHuman: 'やり取りに戻る',
@@ -709,7 +827,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '入力中はブラウザの中だけで探します。ボタンを押すまで何も送信されません。',
 		askAi: 'AI に聞く',
-		sendOwner: '担当者に送る',
+		sendOwner: '人に送る',
 		// Heading over the page links a KAITO refusal may carry. They are search results, not an answer.
 		relatedHeading: '関連する可能性のあるページ'
 	},
@@ -738,6 +856,7 @@ export const COPY = {
 		them: '回复',
 		error: '没有发送出去，请再试一次。',
 		errorInboxStorageFull: "这个网站的收件箱已满，目前无法接收新消息。",
+		errorNotClaimed: '这个网站目前没有开放留言。',
 		rate: '消息有点多，请稍等一分钟再试。',
 		closeNamed: (l) => `关闭「${l}」`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}先回，转出去真人会看`,
@@ -787,6 +906,7 @@ export const COPY = {
 		them: 'Antwort',
 		error: 'Das hat nicht geklappt. Bitte versuchen Sie es noch einmal.',
 		errorInboxStorageFull: "Das Postfach dieser Website ist voll und kann derzeit keine neuen Nachrichten empfangen.",
+		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a German page
 		rate: 'Das sind viele Nachrichten — bitte versuchen Sie es in einer Minute noch einmal.',
 		closeNamed: (l) => `${l} schließen`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
@@ -830,6 +950,7 @@ export const COPY = {
 		them: 'Réponse',
 		error: 'L’envoi a échoué. Veuillez réessayer.',
 		errorInboxStorageFull: "La boîte de réception de ce site est pleine et ne peut pas recevoir de nouveaux messages pour le moment.",
+		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a French page
 		rate: 'Cela fait beaucoup de messages — réessayez dans une minute.',
 		closeNamed: (l) => `Fermer ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
@@ -873,6 +994,7 @@ export const COPY = {
 		them: 'Respuesta',
 		error: 'No se ha podido enviar. Inténtalo de nuevo.',
 		errorInboxStorageFull: "La bandeja de entrada de este sitio está llena y no puede recibir mensajes nuevos en este momento.",
+		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a Spanish page
 		rate: 'Son muchos mensajes: vuelve a intentarlo en un minuto.',
 		closeNamed: (l) => `Cerrar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
@@ -916,6 +1038,7 @@ export const COPY = {
 		them: 'Resposta',
 		error: 'Não foi possível enviar. Tente de novo.',
 		errorInboxStorageFull: "A caixa de entrada deste site está cheia e não pode receber novas mensagens no momento.",
+		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a Portuguese page
 		rate: 'São muitas mensagens — tente de novo daqui a um minuto.',
 		closeNamed: (l) => `Fechar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,
@@ -959,6 +1082,7 @@ export const COPY = {
 		them: '답장',
 		error: '보내지 못했어요. 다시 시도해 주세요.',
 		errorInboxStorageFull: "이 사이트의 받은편지함이 가득 차서 현재 새 메시지를 받을 수 없습니다.",
+		errorNotClaimed: '이 사이트는 현재 메시지를 받지 않고 있습니다.',
 		rate: '메시지가 너무 많아요. 1분 뒤에 다시 시도해 주세요.',
 		closeNamed: (l) => `${l} 닫기`,
 		// No subject particle after the name: 이/가 depends on the name's last syllable, and the
@@ -3392,16 +3516,16 @@ function styleElement() {
   background:var(--reef-inbox-accent,#111);color:var(--reef-inbox-on-accent,#fff);
   box-shadow:${DOCK_SHADOW};line-height:0}
 /* The SHAPE is the dock's (reef#2790): size, radius and shadow arrive as --dc-dock-* from the dock this
-   bubble sits in — a round 3.5rem bubble in a corner, a square tab in an installed app's bar. The
-   fallbacks are the same round bubble, for a host outside any dock. The shadow is the dock's budget
-   (0 1px 3px + 0 4px 12px: 16px of reach, inside the 16px margin); 0 6px 24px was cut by the screen edge. */
-:host([data-docked]) .${PREFIX}-open{width:var(--dc-dock-w,3.5rem);height:var(--dc-dock-size,3.5rem);
+   bubble sits in — a round 52px (44px on a phone) bubble in a corner, a square 3.5rem tab in an installed app's bar. The
+   fallbacks are the phone's round bubble, for a host outside any dock. The shadow is the dock's budget
+   (0 1px 3px + 0 4px 12px: 16px of reach, inside the 16px margin (the smallest the dock has)); 0 6px 24px was cut by the screen edge. */
+:host([data-docked]) .${PREFIX}-open{width:var(--dc-dock-w,44px);height:var(--dc-dock-size,44px);
   border-radius:var(--dc-dock-radius,50%);box-shadow:var(--dc-dock-shadow,${DOCK_SHADOW});
   background:var(--dc-dock-item-bg,var(--reef-inbox-accent,#111));color:var(--dc-dock-item-ink,var(--reef-inbox-on-accent,#fff))}
 :host([slot="more"]) .${PREFIX}-open{justify-content:flex-start;gap:.75rem;height:3rem;font-size:1rem;line-height:1.2}
 :host([slot="more"]) .${PREFIX}-open::after{content:attr(aria-label)}
 .${PREFIX}-open:focus-visible{outline:2px solid var(--reef-inbox-accent,#111);outline-offset:2px}
-.${PREFIX}-icon{width:1.6rem;height:1.6rem;display:block;flex:none}
+.${PREFIX}-icon{width:var(--dc-dock-icon,1.6rem);height:var(--dc-dock-icon,1.6rem);display:block;flex:none}
 /* The open panel grows up and to the left from the same corner, so what keeps it on screen is the
    room left of and above that corner, less 1rem and the opposite inset. With no offset and no inset
    both reduce to the old calc(100vw - 2rem) and min(30rem,70vh). dvh after vh: a phone's toolbar. */
@@ -3416,11 +3540,11 @@ function styleElement() {
    item is the same size, so counting is exact — no measuring). The 30rem / 70vh caps are unchanged. */
 :host([data-docked]) .${PREFIX}-panel{
   width:min(22rem,calc(var(--dc-dock-panel-w,100vw) - clamp(0px,var(--_reef-inbox-ox,0px),50vw)));
-  max-height:min(30rem,70vh,calc(var(--dc-dock-room,100vh) - clamp(0px,var(--_reef-inbox-oy,0px),50vh) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,3.5rem) + var(--dc-dock-gap,.5rem))));
-  max-height:min(30rem,70dvh,calc(var(--dc-dock-room,100dvh) - clamp(0px,var(--_reef-inbox-oy,0px),50vh) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,3.5rem) + var(--dc-dock-gap,.5rem))));
+  max-height:min(30rem,70vh,calc(var(--dc-dock-room,100vh) - clamp(0px,var(--_reef-inbox-oy,0px),50vh) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,44px) + var(--dc-dock-gap,.5rem))));
+  max-height:min(30rem,70dvh,calc(var(--dc-dock-room,100dvh) - clamp(0px,var(--_reef-inbox-oy,0px),50vh) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,44px) + var(--dc-dock-gap,.5rem))));
   box-shadow:var(--dc-dock-shadow,${DOCK_SHADOW})}
 /* In an installed app's bar the panel is a sheet above the bar, as wide as the screen. */
-:host([data-docked="bar"]) .${PREFIX}-panel{position:fixed;left:0;right:0;bottom:calc(var(--dc-dock-size,3.5rem) + env(safe-area-inset-bottom,0px));
+:host([data-docked="bar"]) .${PREFIX}-panel{position:fixed;left:0;right:0;bottom:calc(var(--dc-dock-size,44px) + env(safe-area-inset-bottom,0px));
   width:auto;max-height:var(--dc-dock-room,calc(100vh - 4.5rem));border-radius:.9rem .9rem 0 0;
   box-shadow:0 -1px 3px rgba(0,0,0,.12),0 -4px 12px rgba(0,0,0,.14)}
 @media print{.${PREFIX}-root{display:none}}
@@ -3679,8 +3803,21 @@ async function askKaito(apiBase, kind, id, query, copy) {
 	return null;
 }
 
+/**
+ * A refusal no retry of the same send can turn into a success: the inbox is full (507) or the
+ * owner never claimed Inbox (404 `not_claimed`, tile#187). Each has its own sentence and neither
+ * may be answered with "try again" — in words or with a button.
+ */
+function terminalInboxReason(status, body) {
+	if (status === 507 && body?.reason === 'inbox_storage_full') return 'inbox_storage_full';
+	if (status === 404 && body?.reason === 'not_claimed') return 'not_claimed';
+	return null;
+}
+
 function inboxErrorText(status, body, copy) {
-	if (status === 507 && body?.reason === 'inbox_storage_full') return copy.errorInboxStorageFull;
+	const terminal = terminalInboxReason(status, body);
+	if (terminal === 'inbox_storage_full') return copy.errorInboxStorageFull;
+	if (terminal === 'not_claimed') return copy.errorNotClaimed;
 	return status === 429 ? copy.rate : copy.error;
 }
 
@@ -4393,8 +4530,14 @@ export async function mount(el, handoff = null) {
 			await refresh();
 			return;
 		}
-		button.disabled = false;
-		button.textContent = copyRef.toHumanAfterRefusal;
+		// tile#187: after a terminal refusal the button goes. Re-armed as "Send this to a person" it
+		// asked for the one press that cannot succeed, right under the sentence saying so.
+		if (terminalInboxReason(status, body)) {
+			button.remove();
+		} else {
+			button.disabled = false;
+			button.textContent = copyRef.toHumanAfterRefusal;
+		}
 		showError(status, copyRef, body);
 	}
 
