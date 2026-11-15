@@ -195,9 +195,9 @@ test('🔴 package CSS is layered WITH the theme, and emitted before it', () => 
   assert.match(blockOf(pkgLine) ?? pkgLine, /@layer reef\.theme/, 'package CSS belongs in reef.theme');
   assert.match(blockOf(bannerLine) ?? bannerLine, /@layer reef\.theme/, 'the locale banner belongs in reef.theme');
   // ORDER inside the layer is what decides ties, so it is asserted, not assumed.
-  assert.ok(lines.indexOf(pkgLine) < lines.findIndex((l) => l.includes('themeCss &&')),
+  assert.ok(lines.indexOf(pkgLine) < lines.findIndex((l) => l.includes('themeCssBlock &&')),
     'package CSS must be emitted BEFORE the site theme, so a tie goes to the theme');
-  assert.ok(lines.indexOf(bannerLine) < lines.findIndex((l) => l.includes('themeCss &&')),
+  assert.ok(lines.indexOf(bannerLine) < lines.findIndex((l) => l.includes('themeCssBlock &&')),
     'the locale banner too');
 });
 
