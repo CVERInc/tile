@@ -786,7 +786,7 @@ export const COPY = {
 		toHumanAfterRefusal: '人に取り次いでもらう',
 		kaitoUnavailable: 'AIは今お答えできません。',
 		kaitoUnavailableToHuman: 'AIは今お答えできません。人に取り次ぐこともできます。',
-		sentToHuman: '担当者に取り次ぎました。返信はここに表示されます。',
+		sentToHuman: '人に取り次ぎました。返信はここに表示されます。',
 		name: 'お名前（任意）',
 		email: 'メールアドレス（任意）',
 		emailNote: 'メールアドレスを残していただくと、返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。',
@@ -807,8 +807,8 @@ export const COPY = {
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}が先に回答・送れば人が読みます`,
 		statusNoAi: '送った内容は人が読みます',
 		statusAiOnly: (a) => `${a}${AI_CHIP_TOKEN}がこのサイトの内容から回答します`,
-		statusHandedOffEmail: '担当者に取り次ぎました。返信はメールで届きます。',
-		statusHandedOffNoEmail: '担当者に取り次ぎました。返信はここに表示されます。',
+		statusHandedOffEmail: '人に取り次ぎました。返信はメールで届きます。',
+		statusHandedOffNoEmail: '人に取り次ぎました。返信はここに表示されます。',
 		askAgain: (a) => `もう一度${a}に聞く`,
 		newConversation: '新しい会話を始める',
 		backToHuman: 'やり取りに戻る',
@@ -816,7 +816,7 @@ export const COPY = {
 		// reef#2160 in-site search (only rendered where the host names an index with rows)
 		searchNote: '入力中はブラウザの中だけで探します。ボタンを押すまで何も送信されません。',
 		askAi: 'AI に聞く',
-		sendOwner: '担当者に送る',
+		sendOwner: '人に送る',
 		// Heading over the page links a KAITO refusal may carry. They are search results, not an answer.
 		relatedHeading: '関連する可能性のあるページ'
 	},

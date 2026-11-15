@@ -85,7 +85,7 @@ test('handoff explains optional email in every locale', () => {
 	const expected = {
 		en: ["Leave your email to get a reply by email. Without it, you can only see replies by coming back to this page.", 'Passed to a person — the reply will come by email.', 'Passed to a person — the reply will show here.', 'Send to a person'],
 		'zh-tw': ['留下 email 才收得到回覆；不留的話，只有回到這個網頁才看得到。', '已轉給真人，回覆會寄到你填的信箱', '已轉給真人，回覆會顯示在這裡', '傳給真人'],
-		ja: ['メールアドレスを残していただくと、返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。', '担当者に取り次ぎました。返信はメールで届きます。', '担当者に取り次ぎました。返信はここに表示されます。', '担当者に送る'],
+		ja: ['メールアドレスを残していただくと、返信をメールで受け取れます。残さない場合は、このページに戻ったときだけ返信を確認できます。', '人に取り次ぎました。返信はメールで届きます。', '人に取り次ぎました。返信はここに表示されます。', '人に送る'],
 		'zh-cn': ['留下 email 才收得到回复；不留的话，只有回到这个网页才看得到。', '已转给真人，回复会发送到你填写的邮箱', '已转给真人，回复会显示在这里', '传给真人'],
 		de: ['Hinterlassen Sie Ihre E-Mail-Adresse, um eine Antwort per E-Mail zu erhalten. Ohne sie sehen Sie Antworten nur, wenn Sie auf diese Seite zurückkehren.', 'An eine Person weitergegeben — die Antwort kommt per E-Mail.', 'An eine Person weitergegeben — die Antwort erscheint hier.', 'An eine Person senden'],
 		fr: ['Laissez votre e-mail pour recevoir la réponse par e-mail. Sans lui, vous ne verrez les réponses qu’en revenant sur cette page.', 'Transmis à une personne — la réponse arrivera par e-mail.', 'Transmis à une personne — la réponse s’affichera ici.', 'Envoyer à une personne'],
@@ -99,6 +99,27 @@ test('handoff explains optional email in every locale', () => {
 		assert.equal(COPY[locale].statusHandedOffNoEmail, withoutEmail, `${locale}.statusHandedOffNoEmail`);
 		assert.equal(COPY[locale].sendOwner, sendLabel, `${locale}.sendOwner`);
 		assert.match(handoffFormHtml(COPY[locale], 'Question'), new RegExp(emailNote.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, '&#39;')));
+	}
+});
+
+// tile#293: before the hand-off the Japanese copy says 人 (a person), like every other locale. The
+// hand-off lines said 担当者 ("the person in charge"), which claims a staffed desk the bubble never
+// promises. One word for one party, in all four keys.
+test('ja hand-off copy names a person, never a person in charge', () => {
+	const ja = COPY.ja;
+	assert.equal(ja.sentToHuman, '人に取り次ぎました。返信はここに表示されます。');
+	assert.equal(ja.statusHandedOffEmail, '人に取り次ぎました。返信はメールで届きます。');
+	assert.equal(ja.statusHandedOffNoEmail, '人に取り次ぎました。返信はここに表示されます。');
+	assert.equal(ja.sendOwner, '人に送る');
+	// Every ja string, including the ones built by a function, so a new key cannot bring it back.
+	const entries = Object.entries(ja);
+	assert.ok(entries.length > 30, `expected the whole ja table, got ${entries.length} keys`);
+	for (const [key, value] of entries) {
+		const text = typeof value === 'function' ? value('X') : value;
+		assert.equal(typeof text, 'string', `ja.${key}`);
+		for (const word of ['担当者', 'オペレーター', 'スタッフ']) {
+			assert.ok(!text.includes(word), `ja.${key} says ${word}: ${text}`);
+		}
 	}
 });
 
