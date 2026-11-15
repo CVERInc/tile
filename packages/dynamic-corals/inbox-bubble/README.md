@@ -513,6 +513,19 @@ meaning. The draft and ordinary Send button remain, without a retry instruction.
 compose, the handoff form and the send-to-a-person action use the same mapping; all other
 statuses and reasons keep their existing messages.
 
+## Site not taking messages (tile#187)
+
+A send refused with HTTP 404 and `reason: "not_claimed"` (the owner never claimed Inbox) shows
+the site form's own `errorNotClaimed` sentence, “This site isn't taking messages right now.”,
+never a retry instruction. Each locale says exactly what the form says on a page in that
+language: en, ja, ko, zh-tw and zh-cn use the form's sentence for that locale; the form has no
+de, fr, es or pt table and shows its English sentence there, so the bubble does too. A 404
+without that reason keeps the ordinary error.
+
+After either terminal refusal (this one or a full inbox), the grounded answer's
+send-to-a-person button is removed instead of being re-armed as “Send this to a person”.
+Every other failure re-arms it as before.
+
 ## Publishing
 
 Registry pipeline, same as every coral — bump `package.json`, `node
