@@ -13,8 +13,11 @@
 // faces. The wall is the engine's own markup, whose rules are written against the engine's own
 // parents (grid sections, full-bleed text, runs of links). One tile cannot be a child of both, so
 // it has two homes and is moved between them — the same node, never out of the document, with
-// Element.moveBefore where the browser has it (a frame inside a tile keeps its document; without
-// it, a frame that is moved loads again). The pile is built ONCE, the first time a pile view is
+// Element.moveBefore where the browser has it (a frame inside a tile keeps its document). Without
+// it, a frame that is moved loads again, and so does one whose ancestor is moved: there, an embed
+// starts over on every switch to or from the wall, and nothing else changes a node's parent and
+// keeps its frame (verify/deck-views.mjs asks each engine: the `frames` step). Inside the pile no
+// card has to move, in any browser: see pileOrder. The pile is built ONCE, the first time a pile view is
 // entered, and kept; a tile's card is made when the pile first reaches that tile, and until then
 // the tile stays where the engine put it (in the page, not drawn).
 //
@@ -217,6 +220,27 @@
   // top card waits there (not drawn), instead of leaving the document. A tile is therefore in the document in every view,
   // however long the Card. Same stacking context as the footer (below), so z 5 really sits under the cards.
   const bench=mk('div','deck-bench'); table.appendChild(bench);
+  // ---- pileOrder: the order the stack draws its children in ----
+  // DOM order is drawing order (order(), below). Where the browser has Element.moveBefore, the stack's children are moved (mv) and
+  // a frame on a card keeps its document. Where it has not, every move is a remove + insert, and a frame that is removed loads
+  // again — an embed started over on every stack ⇄ list and on every card that passed over it (tile#317). So there the stack
+  // draws its children through slots of its own instead: a shadow root with one slot per child, assigned by hand. The order is
+  // the slots' order, and a slot is what moves; a card on the table stays where it is in the DOM, and a frame on it keeps its
+  // document (reassigning or moving a slot does not take a node out of the document; moving the node or any ancestor does).
+  // A slot draws no box of its own (display: contents), so the cards are laid out, stacked and styled exactly as children.
+  // Still moved, there: a card to and from the bench, which only a long Card has (WIN), and a tile to and from the wall.
+  // put(n, ref): draw n just under ref (ref null: on top). above(n): what is drawn just over n. onTable(n): n is drawn here.
+  const SLOTS=typeof stack.moveBefore!=='function'&&typeof stack.attachShadow==='function'&&typeof HTMLSlotElement==='function'&&'assign' in HTMLSlotElement.prototype;
+  const sr=SLOTS?stack.attachShadow({mode:'open',slotAssignment:'manual'}):null; const slotOf=new Map();
+  const unput=n=>{ const s=slotOf.get(n); if(s){ s.remove(); slotOf.delete(n); } };
+  const put=(n,ref,plain)=>{ if(!SLOTS){ if(plain) stack.insertBefore(n,ref); else mv(stack,n,ref); return; }
+    if(n.parentNode!==stack){ unput(n); stack.appendChild(n); }   // onto the table (from the bench, or new): the one move it makes
+    let s=slotOf.get(n); const r=ref&&slotOf.get(ref)||null; if(s&&s.parentNode===sr&&s.nextSibling===r)return;
+    if(!s){ s=document.createElement('slot'); s.__n=n; slotOf.set(n,s); } sr.insertBefore(s,r); if(s.assignedNodes()[0]!==n) s.assign(n); };
+  const above=n=>{ if(!SLOTS)return n.nextSibling; const s=slotOf.get(n), x=s&&s.nextSibling; return x?x.__n:null; };
+  const onTable=n=>SLOTS?slotOf.has(n):n.parentNode===stack;
+  const topFirst=()=>SLOTS?[...sr.children].map(s=>s.__n).filter(n=>n.classList.contains('deck-card')).reverse():[...stack.querySelectorAll('.deck-card')].reverse();
+  if(SLOTS) put(gshadow,null);
   const host=document.querySelector('main .st-card')||document.body; host.appendChild(veil); host.appendChild(table);
   // hover is tracked by hand (not :hover): after the pile reorders under a still mouse, Safari does not re-evaluate :hover until the
   // mouse moves, so the peek would vanish and a same-spot click would hit the new top card. We re-evaluate from the last pointer position.
@@ -257,7 +281,7 @@
   // a card that leaves the window: one built from the page (a tile, our own last card) goes to the bench and comes back as it
   // was; one built from a line of a card file is text and nothing else, so it is dropped and built again when it is needed
   // (a file can hold ~850,000 of them)
-  const away=c=>{ const i=idx(c); if(i>=P&&i<P+M){ c.remove(); lazy.delete(i); } else mv(bench,c,null); };
+  const away=c=>{ const i=idx(c); unput(c); if(i>=P&&i<P+M){ c.remove(); lazy.delete(i); } else mv(bench,c,null); };
   let pushed=false; addEventListener('popstate',()=>{ if(openCard){pushed=false; close();} });
   const docksInert=on=>document.querySelectorAll('dc-dock').forEach(d=>{ d.inert=on; });   /* the dice was tappable through the frosted glass */
   // 🔴 ONE TURN AT A TIME. A card that is put back shows its back for the first half of deck-put, and a back two tiles name is
@@ -272,9 +296,10 @@
   const close=()=>{wants=null;/* putting back is also taking back a card that was asked for and has not turned yet */if(!openCard)return;const c=openCard;if(pushed){pushed=false;try{history.back();}catch(_){}}c.classList.remove('is-open');c.classList.remove('flipping-open');void c.offsetWidth;c.classList.add('flipping-close');c.addEventListener('animationend',function h(e){if(e.animationName!=='deck-put')return;c.removeEventListener('animationend',h);c.classList.remove('flipped');putOver(c);});if(!matchMedia('(prefers-reduced-motion: reduce)').matches){clearTimeout(putT);putting=c;putT=setTimeout(()=>putOver(c),PUT_MS);}else c.classList.remove('flipped');/* no animation, so no animationend: the face goes back now, or the card would show its back for good *//* flipping-close stays: its fill IS the rest pose, so nothing re-animates after the end; the next open() removes it */openCard=null;document.documentElement.classList.remove('open');docksInert(false);if(lastFocus&&lastFocus.focus){lastFocus.focus();lastFocus=null;}};
   const addCard=(frontNode,backNode,opts={})=>register(buildCard(frontNode,backNode,{...opts,seated:true}));
   // seated: the card goes on the bench BEFORE its faces are filled, so a tile moves from the page into a card that is already
-  // in the page — it is never outside the document, not even while its card is being put together
+  // in the page — it is never outside the document, not even while its card is being put together. With slots (pileOrder) it
+  // goes straight into the stack instead, not drawn until it has a slot, so the tile's frame does not move a second time.
   function buildCard(frontNode,backNode,opts={}){
-    const card=mk('div','deck-card'); if(opts.seated) bench.appendChild(card); if(frontNode&&frontNode.dataset&&frontNode.dataset.theme) card.style.cssText=frontNode.dataset.theme; const front=mk('div','deck-face deck-front'); card.appendChild(front); if(opts.seated) mv(front,frontNode,null); else front.appendChild(frontNode);
+    const card=mk('div','deck-card'); if(opts.seated) (SLOTS?stack:bench).appendChild(card); if(frontNode&&frontNode.dataset&&frontNode.dataset.theme) card.style.cssText=frontNode.dataset.theme; const front=mk('div','deck-face deck-front'); card.appendChild(front); if(opts.seated) mv(front,frontNode,null); else front.appendChild(frontNode);
     if(opts.back) card.dataset.back=opts.back;   // the back is one a tile names (shared: see lend); its face is made even while another card has the node
     if(backNode||opts.back){card.classList.add('can-flip'); const back=mk('div','deck-face deck-back'); back.tabIndex=-1; const sc=mk('div','deck-back-scroll'); back.appendChild(sc); card.appendChild(back); if(backNode){ if(opts.seated) mv(sc,backNode,null); else sc.appendChild(backNode); }
       front.addEventListener('click',e=>{ if(e.target.closest('a,button,input,.cp-icon,#qr-holder'))return; if(String(getSelection()).length)return; if((LIST||card.classList.contains('is-top'))&&!openCard) open(card); });
@@ -373,10 +398,10 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // So paint() keeps DOM order = pile order: deepest first, top last. Only out-of-place nodes move; a card in flight keeps its spot
   // until its own apex (see flight()), because moving a node restarts whatever animates on it.
   function order(){
-    if(LIST){ /* move only what is out of place: moving a node restarts its animation, and a closed card's put-back animation is its rest pose (it replayed on every scroll step) */ let node=gshadow.nextSibling; for(const c of cards){ while(node&&node===shade)node=node.nextSibling; if(node!==c)mv(stack,c,node); else node=node.nextSibling; } return; }
+    if(LIST){ /* move only what is out of place: moving a node restarts its animation, and a closed card's put-back animation is its rest pose (it replayed on every scroll step) */ let node=above(gshadow); for(const c of cards){ while(node&&node===shade)node=above(node); if(node!==c)put(c,node); else node=above(node); } return; }
     const want=cards.filter(c=>!c.classList.contains('travel')).map(c=>[c,rel(idx(c))]).sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
-    let node=gshadow.nextSibling;
-    for(const c of want){ while(node&&(node===shade||node.classList.contains('travel')))node=node.nextSibling; if(node!==c)mv(stack,c,node); else node=node.nextSibling; }
+    let node=above(gshadow);
+    for(const c of want){ while(node&&(node===shade||node.classList.contains('travel')))node=above(node); if(node!==c)put(c,node); else node=above(node); }
   }
   function paint(){
     syncWin();
@@ -384,7 +409,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
       if(r!==0&&!LIST)c.classList.remove('flipping-open','flipping-close','flipped');   // in list any card may be open, not only the centred one
       c.classList.remove('is-prev1'); c.classList.remove('wrap'); if(r===0)c.classList.add('is-top'); else if(r===1){c.classList.add('is-next1'); if(j!==cur+1)c.classList.add('wrap');} else if(r===2&&j<cur){c.classList.add('is-deep');} else if(r===2&&j>cur)c.classList.add('is-next2'); else c.classList.add('is-deep'); if(j===cur-1)c.classList.add('is-prev1');});
     order();
-    const top=card(cur); if(shade.nextSibling!==top)stack.insertBefore(shade,top);
+    const top=card(cur); if(above(shade)!==top)put(shade,top,true);
     stack.toggleAttribute('data-first',cur===0); stack.toggleAttribute('data-last',cur===N-1);
   }
   const settleHidden=c=>{ if(c.classList.contains('is-deep')){ c.style.visibility='hidden'; c.style.transition='none'; void c.offsetWidth; c.style.visibility=''; c.style.transition=''; } };
@@ -394,7 +419,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const flight=(c,kind)=>{ c.classList.add('travel'); c.classList.remove(...FLIGHT); c.classList.toggle('side',flingDir!==0); c.style.setProperty('--fdir',String(flingDir||1)); flingDir=0; void c.offsetWidth; c.classList.add(kind+'-1');
     const onEnd1=e=>{ if(!new RegExp('^deck-'+kind+'(-side)?-1$').test(e.animationName))return; c.removeEventListener('animationend',onEnd1);
       c.classList.remove(kind+'-1');
-      if(kind==='to-back'){ mv(stack,c,gshadow.nextSibling); } else { mv(stack,c,null); if(card(cur)===c)stack.insertBefore(shade,c); }
+      if(kind==='to-back'){ put(c,above(gshadow)); } else { put(c,null); if(card(cur)===c)put(shade,c,true); }
       void c.offsetWidth; c.classList.add(kind+'-2');
       const onEnd2=e2=>{ if(!new RegExp('^deck-'+kind+'(-side)?-2$').test(e2.animationName))return; c.removeEventListener('animationend',onEnd2); c.classList.remove(kind+'-2','travel'); settleHidden(c); order(); if(!running&&!stack.querySelector('.travel')){stack.classList.remove('busy'); requestAnimationFrame(hovEval); setTimeout(hovEval,560);} };
       c.addEventListener('animationend',onEnd2); };
@@ -421,7 +446,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     cards.forEach(c=>{ c.classList.remove('flipping-close'); c.style.transition='none'; c.style.opacity='1'; c.style.visibility='visible'; c.style.pointerEvents='auto'; });
     // fan = table of contents: slots are the author's order (first card leftmost, reef's card rightmost), not the pile's rotated order.
     // Draw order left-over-right, so DOM becomes reverse author order for the fan's duration; paint() restores pile order on fold.
-    [...cards].reverse().forEach(c=>mv(stack,c,null)); { const t=card(cur); if(t.parentNode===stack) stack.insertBefore(shade,t); }
+    [...cards].reverse().forEach(c=>put(c,null)); { const t=card(cur); if(onTable(t)) put(shade,t,true); }
     void stack.offsetWidth;
     document.documentElement.classList.add('fan');
     cards.forEach((c,i)=>{ c.style.transition=''; c.style.transform=fanXform(i,false); });
@@ -445,7 +470,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   document.addEventListener('pointerdown',e=>{ if(!fanned||notTable(e))return; fanDown=true; if(e.pointerType==='mouse'){ const u=fanUnder(e.clientX,e.clientY); fanHover(u>=0?u:fanNearest(e.clientX,e.clientY)); } else fanHover(fanNearest(e.clientX,e.clientY)); },true);
   // hit test on unlifted footprints, topmost first; the hot card additionally answers for where it is NOW (lifted), so the
   // pointer can follow it up — a tall transparent column — without making it sticky over neighbours below
-  const fanUnder=(x,y)=>{ const order=[...stack.querySelectorAll('.deck-card')].reverse(); let n=-1; for(const c of order){ if(c._fanPoly&&inPoly(x,y,c._fanPoly)){ n=cards.indexOf(c); break; } }
+  const fanUnder=(x,y)=>{ const order=topFirst(); let n=-1; for(const c of order){ if(c._fanPoly&&inPoly(x,y,c._fanPoly)){ n=cards.indexOf(c); break; } }
     if(fanHot>=0&&n!==fanHot){ const b=slotCard(fanHot).getBoundingClientRect(); const a=slotCard(fanHot)._fanRect; if(a&&b&&x>=b.left&&x<=b.right&&y>=b.top&&y<a.top+4) return fanHot; } return n; };
   document.addEventListener('pointermove',e=>{ if(!fanned||notTable(e))return; if(e.pointerType==='mouse'){ const u=fanUnder(e.clientX,e.clientY); fanHover(u>=0?u:fanNearest(e.clientX,e.clientY)); } else if(fanDown) fanHover(fanNearest(e.clientX,e.clientY)); },true);
   document.addEventListener('pointerup',e=>{ if(!fanned||notTable(e))return; fanDown=false; e.preventDefault(); e.stopPropagation(); const u=e.pointerType==='mouse'?fanUnder(e.clientX,e.clientY):-1; fanPick(u>=0?u:fanNearest(e.clientX,e.clientY)); },true);
