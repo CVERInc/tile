@@ -14,11 +14,6 @@ import { inboxFormCopy, inboxFormLocaleKey, INBOX_FORM_LOCALES } from './inbox-f
 const { SANDBOX_LOCALES } = await import('../cardtile/w/sandbox-i18n.mjs');
 const PLATFORM_TAGS = Object.values(SANDBOX_LOCALES).map((l) => l.lang);
 
-// Rows that exist but still carry the English text, waiting for translation. When a translation
-// lands, its locale comes off this list; the last test fails until it does, so the list cannot
-// claim a row is untranslated after it has been translated (or the reverse).
-const AWAITING_TRANSLATION = ['de', 'fr', 'es', 'pt-br'];
-
 const EN = inboxFormCopy('en');
 const KEYS = Object.keys(EN);
 
@@ -65,15 +60,11 @@ test('every row carries every key the English row carries, as a non-empty string
   }
 });
 
-test('rows awaiting translation are exactly the English text; every other row has none of it', () => {
+test('every non-English row contains no English string', () => {
   for (const row of INBOX_FORM_LOCALES) {
     if (row === 'en') continue;
     const c = inboxFormCopy(row);
     const english = KEYS.filter((k) => c[k] === EN[k]);
-    if (AWAITING_TRANSLATION.includes(row)) {
-      assert.deepEqual(english, KEYS, `${row} is (partly) translated — take it off AWAITING_TRANSLATION`);
-    } else {
-      assert.deepEqual(english, [], `${row} shows English for these keys`);
-    }
+    assert.deepEqual(english, [], `${row} shows English for these keys`);
   }
 });

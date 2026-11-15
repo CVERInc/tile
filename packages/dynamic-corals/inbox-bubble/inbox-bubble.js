@@ -692,9 +692,9 @@ const RELATED_HEADING_EN = 'Possibly related pages';
 /**
  * tile#187: a 404 `not_claimed` (the owner never claimed Inbox) is terminal, so the bubble says the
  * form coral's `errorNotClaimed` (packages/sitetile/inbox-form-copy.js), never a "try again". That
- * table has en, ja, ko, zh-tw and zh-cn and shows its English sentence on every other page; the
- * bubble's de, fr, es and pt-br do the same, so both corals say one thing on one page. The
- * mount test holds every locale to `inboxFormCopy(locale).errorNotClaimed`.
+ * table has a row for each of the bubble's nine locales (tile#318), and each locale here carries its
+ * row's sentence verbatim, so both corals say one thing on one page. The mount test holds every
+ * locale to `inboxFormCopy(locale).errorNotClaimed`.
  */
 const NOT_CLAIMED_EN = "This site isn't taking messages right now.";
 
@@ -906,7 +906,7 @@ export const COPY = {
 		them: 'Antwort',
 		error: 'Das hat nicht geklappt. Bitte versuchen Sie es noch einmal.',
 		errorInboxStorageFull: "Das Postfach dieser Website ist voll und kann derzeit keine neuen Nachrichten empfangen.",
-		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a German page
+		errorNotClaimed: 'Diese Website nimmt derzeit keine Nachrichten entgegen.', // tile#187: the form's de sentence
 		rate: 'Das sind viele Nachrichten — bitte versuchen Sie es in einer Minute noch einmal.',
 		closeNamed: (l) => `${l} schließen`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}antwortet zuerst, was Sie weitergeben, liest ein Mensch`,
@@ -950,7 +950,7 @@ export const COPY = {
 		them: 'Réponse',
 		error: 'L’envoi a échoué. Veuillez réessayer.',
 		errorInboxStorageFull: "La boîte de réception de ce site est pleine et ne peut pas recevoir de nouveaux messages pour le moment.",
-		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a French page
+		errorNotClaimed: 'Ce site n’accepte pas de messages pour le moment.', // tile#187: the form's fr sentence
 		rate: 'Cela fait beaucoup de messages — réessayez dans une minute.',
 		closeNamed: (l) => `Fermer ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}répond d’abord, une personne lit ce que vous transmettez`,
@@ -994,7 +994,7 @@ export const COPY = {
 		them: 'Respuesta',
 		error: 'No se ha podido enviar. Inténtalo de nuevo.',
 		errorInboxStorageFull: "La bandeja de entrada de este sitio está llena y no puede recibir mensajes nuevos en este momento.",
-		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a Spanish page
+		errorNotClaimed: 'Este sitio no acepta mensajes en este momento.', // tile#187: the form's es sentence
 		rate: 'Son muchos mensajes: vuelve a intentarlo en un minuto.',
 		closeNamed: (l) => `Cerrar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primero; lo que envíes lo lee una persona`,
@@ -1038,7 +1038,7 @@ export const COPY = {
 		them: 'Resposta',
 		error: 'Não foi possível enviar. Tente de novo.',
 		errorInboxStorageFull: "A caixa de entrada deste site está cheia e não pode receber novas mensagens no momento.",
-		errorNotClaimed: NOT_CLAIMED_EN, // tile#187: the form coral's own sentence on a Portuguese page
+		errorNotClaimed: 'Este site não está recebendo mensagens no momento.', // tile#187: the form's pt-br sentence
 		rate: 'São muitas mensagens — tente de novo daqui a um minuto.',
 		closeNamed: (l) => `Fechar ${l}`,
 		statusDefault: (a) => `${a}${AI_CHIP_TOKEN}responde primeiro, uma pessoa lê o que você encaminhar`,

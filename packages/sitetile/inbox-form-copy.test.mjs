@@ -2,7 +2,7 @@
 // pattern" — a submitting state, a success CARD, and an inline retry error, replacing a same-size
 // paragraph under a form that STAYS). Form.astro's own rendering is covered end-to-end by
 // smoke-build.mjs (the ONE fixture locale, en-US, since forms.md declares `lang: en-US`); this file
-// is the locale TABLE's own unit coverage — every key, the five translated rows (ja/zh-tw/zh-cn/ko/en),
+// is the locale TABLE's own unit coverage — every key, the five original rows (ja/zh-tw/zh-cn/ko/en),
 // and the tag-matching rules that route a site's raw `lang:` frontmatter to one of them. The other
 // platform locales' rows are held by inbox-form-locales.test.mjs. A locale missing here breaks silently: a Korean
 // contact form falling back to `undefined.submitting` renders "undefined" as the button's own
