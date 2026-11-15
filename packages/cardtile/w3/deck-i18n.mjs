@@ -18,7 +18,7 @@ import { LOCALE_KEYS, primaryLocale } from '../w/sandbox-i18n.mjs';
 const WRITTEN = {
   en: {
     viewStack: 'Stack',
-    viewList: 'List',
+    viewList: 'Spread',
     viewWall: 'Wall',
     zoomQr: 'Enlarge the QR code',
     putBack: 'Put back',
