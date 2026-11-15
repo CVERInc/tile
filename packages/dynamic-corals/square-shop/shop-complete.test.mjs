@@ -382,8 +382,10 @@ async function runCompletion(lang, answer) {
 	const requested = [];
 	const fetchFn = async (url) => { requested.push(url); if (answer instanceof Error) throw answer; return { ok: true, json: async () => answer }; };
 	const win = { dispatchEvent() {} };
-	new Function('document', 'fetch', 'localStorage', 'window', 'CustomEvent', 'setTimeout', script)(doc, fetchFn, localStorage, win, class { }, () => {});
-	await new Promise((r) => setImmediate(r));
+	// Real timers for the paid settle's short waits (tile#84), none for the 3-second pending re-check.
+	const timer = (fn, ms) => (ms < 1000 ? setTimeout(fn, ms) : 0);
+	new Function('document', 'fetch', 'localStorage', 'window', 'CustomEvent', 'setTimeout', script)(doc, fetchFn, localStorage, win, class { }, timer);
+	await new Promise((r) => setTimeout(r, 150));
 	return { heading: nodes['dc-shop-heading'].textContent, title: doc.title, body: nodes['dc-shop-outcome'].innerHTML, store, requested };
 }
 

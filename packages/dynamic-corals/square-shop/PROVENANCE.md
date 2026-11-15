@@ -13,6 +13,38 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## Site worker only, unreleased — the paid settle retries for real and runs once per order (tile#84)
+
+**`square-shop.js` is unchanged; no coral version.** Both fixes are in the completion page that
+`shop-function-template.js` puts into each site's `_worker.js`, so they arrive with a site rebuild.
+
+| defect in 0.11.19 | effect |
+|---|---|
+| `settleCartAfterOrder` re-read the basket in the same task it read it in | a browser applies another tab's write only between tasks, so the "retry up to eight times" loop ran once, in every browser |
+| the sold record was consumed by the first render, and a render with no record removes the whole key | reloading the completion page, or opening it again, emptied a basket the visitor had filled since the order |
+
+What changed:
+
+- **the wait.** The settle now waits 50 ms between reads and writes only once the basket read the
+  same across a wait; if it moved, it reads again (up to eight times, then writes from the latest
+  value). `settle.smoke.mjs` shows it in Chromium: a stale shop tab writing during the settle keeps
+  its new line and the sold lines still come off; on 0.11.19's page the sold lines came back.
+- **the settled list.** `dc-square-shop-settled:<storeId>` holds the refs this browser has settled
+  (the last 50). It is written in the same synchronous step as the basket; a ref already on it
+  leaves the basket alone. Two tabs of one order are serialised with the Web Locks API where
+  present. It is not swept by the one-week sold-record sweep (different prefix).
+- **when the basket is touched**: only after the outcome endpoint answers `paid` for the ref, and
+  only the first time in this browser. pending / canceled / refunded / unknown never touch it.
+
+**Still open:** the stale-tab whole-basket write after the settle has finished (below, under
+0.11.19) — the wait narrows the window, only a `storage` listener in the coral closes it. A paid
+completion opened in a browser that holds no record and no settled entry for the ref (another
+browser, or more than 50 orders ago) still takes the pre-0.11.16 whole-key clear. The coral's
+`manifest.json` `stores` line does not mention the new key, because that manifest describes a
+published coral version this change does not touch.
+
+---
+
 ## 0.11.19 — 2026-09-29 — a paid order takes its lines off the basket as it is now (tile#40)
 
 0.11.16 made a paid completion remove only the rows the order carried. It still wrote its answer

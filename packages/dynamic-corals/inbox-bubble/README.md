@@ -440,6 +440,12 @@ removed and `data-dynamic-coral-mounted` is cleared so the element can be mounte
 `localStorage` alone — the visitor's handle and unsent questions outlive the panel exactly as they
 outlive a navigation. Without it, a page keeps one pair of listeners per element it ever mounted.
 
+A send, a hand-off or a question still in the air at `unmount(el)` is let finish on the network,
+but its answer is dropped when it lands (tile#84): no poller starts, the panel is not redrawn, and
+nothing is written to `localStorage` — including the conversation handle a successful send would
+otherwise have stored. Before this, a 200 that arrived after the unmount started a transcript
+poller on the detached panel that nothing ever stopped.
+
 ## Styling
 
 Every colour is a `--reef-inbox-*` custom property with a neutral fallback, so a

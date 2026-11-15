@@ -2502,3 +2502,132 @@ test('tile#187: a refusal a retry can fix keeps the send-to-a-person button, ena
 		assert.equal(r.toHuman.textContent, coral.COPY.en.toHumanAfterRefusal, String(status));
 	}
 });
+
+// ── tile#84: a send still in the air when the panel is unmounted ─────────────────────────────
+//
+// 🩸 THE ORPHAN POLLER. A visitor presses Send (or "to a person", or the hand-off form's Send),
+// `send()` is awaiting, the SPA navigates and calls `unmount(el)` — and THEN the 200 arrives. The
+// answer's continuation used to run in full against a panel nobody can see: it stored the handle,
+// re-rendered the detached root, and `renderMessages()` started `setInterval(refresh, POLL_MS)`,
+// which nothing was ever going to clear again. The B9 test above mounts and unmounts synchronously,
+// so no answer is ever in the air when it unmounts, and it could not see this.
+//
+// What is measured, per path: after the unmount, the late 200 changes NOTHING — no interval, no
+// request, no storage key, and not one byte of the panel's (detached) markup, attributes, labels
+// or text. The answer itself is held by the test and released only after the unmount returns.
+
+/** Everything a render could have changed under `node`: markup, attributes, labels, children. */
+function domDigest(node, seen = new Set()) {
+	if (!node || typeof node !== 'object' || seen.has(node)) return null;
+	seen.add(node);
+	return {
+		html: node.html, attrs: { ...node.attrs }, text: node.textContent, disabled: node.disabled, value: node.value,
+		children: (node.children || []).map((c) => domDigest(c, seen)),
+		shadow: domDigest(node.shadowRoot, seen),
+		nodes: [...(node.nodes ? node.nodes.entries() : [])].map(([k, v]) => [k, domDigest(v, seen)])
+	};
+}
+
+/**
+ * Mount a KAITO-less or KAITO site with an Inbox, drive `start(root)` up to the moment the POST to
+ * /api/inbox is in the air, unmount, then let a 200 land. Returns what changed after the unmount.
+ */
+async function lateAnswerAfterUnmount(attrs, start) {
+	let release;
+	const held = new Promise((r) => { release = r; });
+	let posted = false;
+	respond = (url, init) => {
+		if (url.endsWith('/api/kaito')) return { ok: true, status: 200, json: async () => ({ kind: 'refused', text: 'no record' }) };
+		if (url.endsWith('/api/inbox') && init.method === 'POST') {
+			posted = true;
+			return held.then(() => ({ ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'late-conv', reply_within_hours: 4 }) }));
+		}
+		if (url.includes('/api/inbox/conversation') || (init.headers && init.headers['x-inbox-conversation'])) {
+			return { ok: true, status: 200, json: async () => ({ ok: true, messages: [{ from: 'visitor', text: 'late' }], status: 'open' }) };
+		}
+		return undefined;
+	};
+	try {
+		const { el, root } = await mountFresh({ 'data-ai-log': '0', ...attrs });
+		await openBubble(root);
+		await start(root);
+		for (let i = 0; i < 5 && !posted; i++) await settle();
+		assert.ok(posted, 'the send never reached the network — this arm measures nothing');
+		const host = el.children[0];
+		assert.equal(coral.unmount(el), true);
+		const pollers = timers.size;
+		const reqs = requests.length;
+		const keys = JSON.stringify([...storage.entries()]);
+		const dom = JSON.stringify(domDigest(host));
+		release();
+		for (let i = 0; i < 10; i++) await settle();
+		return {
+			pollers: timers.size - pollers,
+			requests: requests.slice(reqs).map((r) => `${r.init.method || 'GET'} ${new URL(r.url).pathname}`),
+			storageChanged: JSON.stringify([...storage.entries()]) !== keys,
+			domChanged: JSON.stringify(domDigest(host)) !== dom
+		};
+	} finally {
+		respond = null;
+	}
+}
+
+for (const [name, attrs, start] of [
+	['the compose box (no KAITO)', {}, async (root) => {
+		composeBox(root).value = 'hello, is anyone there?';
+		// Not awaited: the submit handler awaits the very answer this test is holding.
+		void root.querySelector('.dc-inbox-form').emit('submit');
+	}],
+	['"to a person" after a refusal (the hand-off form)', { 'data-kaito': '1' }, async (root) => {
+		composeBox(root).value = 'do you ship abroad?';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		const form = root.querySelector('.dc-inbox-handoff');
+		form.querySelector('textarea').value = 'do you ship abroad?';
+		void form.emit('submit');
+	}]
+]) {
+	test(`tile#84: ${name} — a 200 that lands after unmount starts no poller and touches neither the DOM nor storage`, async () => {
+		const r = await lateAnswerAfterUnmount(attrs, start);
+		assert.equal(r.pollers, 0, `${r.pollers} interval(s) started on an unmounted panel`);
+		assert.deepEqual(r.requests, [], 'the unmounted panel kept talking to the network');
+		assert.equal(r.storageChanged, false, 'the late answer wrote to storage after unmount');
+		assert.equal(r.domChanged, false, 'the late answer rewrote the unmounted panel');
+	});
+}
+
+test('tile#84: the quiet "still want a person?" press (escalate) — a late 200 after unmount changes nothing', async () => {
+	let release;
+	const held = new Promise((r) => { release = r; });
+	let posted = false;
+	respond = (url, init) => {
+		if (url.endsWith('/api/kaito')) return { ok: true, status: 200, json: async () => ({ kind: 'grounded', text: 'An answer', source_url: 'https://example.test/source' }) };
+		if (url.endsWith('/api/inbox') && init.method === 'POST') {
+			posted = true;
+			return held.then(() => ({ ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'late-esc', reply_within_hours: 4 }) }));
+		}
+		return undefined;
+	};
+	try {
+		const { el, root } = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
+		await openBubble(root);
+		composeBox(root).value = 'Please ask a person';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		for (let i = 0; i < 5 && !posted; i++) await settle();
+		assert.ok(posted, 'the escalation never reached the network — this test measures nothing');
+		const host = el.children[0];
+		assert.equal(coral.unmount(el), true);
+		const pollers = timers.size, reqs = requests.length;
+		const keys = JSON.stringify([...storage.entries()]);
+		const dom = JSON.stringify(domDigest(host));
+		release();
+		for (let i = 0; i < 10; i++) await settle();
+		assert.equal(timers.size - pollers, 0, 'an interval started on an unmounted panel');
+		assert.deepEqual(requests.slice(reqs).map((r) => r.url), [], 'the unmounted panel kept talking to the network');
+		assert.equal(JSON.stringify([...storage.entries()]), keys, 'the late answer wrote to storage after unmount');
+		assert.equal(JSON.stringify(domDigest(host)), dom, 'the late answer rewrote the unmounted panel');
+	} finally {
+		respond = null;
+	}
+});

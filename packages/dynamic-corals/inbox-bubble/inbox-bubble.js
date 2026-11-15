@@ -3836,6 +3836,10 @@ async function send(apiBase, payload) {
 	return { status: res.status, body };
 }
 
+// What an `onSend` answers when its panel was unmounted while it awaited (tile#84): not a failure to
+// show and not a success to clear — the form belongs to nobody any more and is left untouched.
+const UNMOUNTED = Symbol('unmounted');
+
 /**
  * Wire the shared one-at-a-time, keyboard-safe compose behaviour. `onCleared` runs after a
  * successful send empties the draft: assigning `textarea.value` fires no `input` event, so
@@ -3854,20 +3858,26 @@ export function bindCompose(form, textarea, button, pendingLabel, idleLabel, onS
 		button.textContent = pendingLabel;
 		textarea.setAttribute('aria-busy', 'true');
 		let succeeded = false;
+		let gone = false;
 		try {
-			succeeded = (await onSend(text)) === true;
+			const result = await onSend(text);
+			// tile#84: the panel was unmounted while `onSend` awaited — leave its nodes as they are.
+			gone = result === UNMOUNTED;
+			succeeded = result === true;
 			if (succeeded) {
 				textarea.value = '';
 				if (onCleared) onCleared();
 			}
 		} finally {
 			sending = false;
-			button.disabled = false;
-			// reef#2160: a function, so a label that depends on state the search wiring learns after
-			// the first open (「問 AI」/「傳給真人」once the index has rows) survives a send.
-			button.textContent = typeof idleLabel === 'function' ? idleLabel() : idleLabel;
-			textarea.removeAttribute('aria-busy');
-			textarea.focus();
+			if (!gone) {
+				button.disabled = false;
+				// reef#2160: a function, so a label that depends on state the search wiring learns after
+				// the first open (「問 AI」/「傳給真人」once the index has rows) survives a send.
+				button.textContent = typeof idleLabel === 'function' ? idleLabel() : idleLabel;
+				textarea.removeAttribute('aria-busy');
+				textarea.focus();
+			}
 		}
 	});
 	textarea.addEventListener('keydown', (event) => {
@@ -4205,6 +4215,14 @@ export async function mount(el, handoff = null) {
 	let handoffEndedNote = false;
 	let open = false;
 	let poller = null;
+	/**
+	 * 🩸 SET BY `unmount(el)` AND READ AFTER EVERY AWAIT THAT CAN OUTLIVE IT (tile#84). A visitor
+	 * presses Send, `send()` is awaiting, the SPA navigates and unmounts — and THEN the 200 arrives.
+	 * Its continuation used to run in full: it stored the handle, re-rendered the detached panel, and
+	 * `renderMessages()` started an interval nothing would ever clear. `stopPolling()` at unmount
+	 * cannot reach a poller that does not exist yet; this flag is what stops it being created.
+	 */
+	let disposed = false;
 	/** Set from the server's answer. NEVER defaulted — see the file header. */
 	let replyWithinHours = null;
 
@@ -4374,7 +4392,7 @@ export async function mount(el, handoff = null) {
 	let pollFailures = 0;
 
 	async function refresh() {
-		if (!conv || retired()) return;
+		if (disposed || !conv || retired()) return;
 		const at = conv;
 		await generation.run(
 			() => fetchTranscript(apiBase, kind, id, conv),
@@ -4500,6 +4518,8 @@ export async function mount(el, handoff = null) {
 			text: question,
 			page_url: location.href
 		}).catch(() => ({ status: 0, body: null }));
+		// Unmounted while the send was in the air: see `disposed`.
+		if (disposed) return;
 
 		if (status === 200 && body && body.ok) {
 			conv = body.conversation_id;
@@ -4559,6 +4579,7 @@ export async function mount(el, handoff = null) {
 				form.querySelector('input[name="visitor_name"]').value,
 				form.querySelector('input[name="visitor_email"]').value);
 			const { status, body } = await send(apiBase, payload).catch(() => ({ status: 0, body: null }));
+			if (disposed) return UNMOUNTED;
 			if (status >= 200 && status < 300 && body && body.ok) {
 				conv = body.conversation_id;
 				handoffConv = conv;
@@ -4636,6 +4657,7 @@ export async function mount(el, handoff = null) {
 			// it is the press that counts — not whatever the engine then answers.
 			funnel.followedUp(...funnelHere());
 			const answer = await askKaito(apiBase, kind, id, question, copy);
+			if (disposed) return UNMOUNTED;
 
 			// 🔴 RECORDED HERE, WHERE THE OUTCOME IS KNOWN, AND NOWHERE ELSE. What goes in is the
 			// visitor's own sentence, the page they were on, the passage that was cited (or `null`
@@ -4710,7 +4732,7 @@ export async function mount(el, handoff = null) {
 					const box = log.querySelector(`.${PREFIX}-related`);
 					const pending = answer.related;
 					ensureSearchIndex().then((rows) => {
-						if (!box || !Array.isArray(rows) || !rows.length) return;
+						if (disposed || !box || !Array.isArray(rows) || !rows.length) return;
 						const inner = relatedListInnerHtml(relatedLinks(pending, rows, pageHref), copy.relatedHeading);
 						if (inner) box.innerHTML = inner;
 					}, () => {});
@@ -4729,6 +4751,8 @@ export async function mount(el, handoff = null) {
 	}
 
 	function renderMessages() {
+		// The one place a poller is started, so the one place an unmounted panel must not reach.
+		if (disposed) return;
 		root.innerHTML = `
 <div class="${PREFIX}-panel" id="${PREFIX}-panel" role="dialog" aria-label="${escHtml(copy.title)}">
   <div class="${PREFIX}-head">${headHtml()}</div>
@@ -4766,6 +4790,7 @@ export async function mount(el, handoff = null) {
 				page_url: location.href,
 				_hp: form.querySelector('input[name="_hp"]').value
 			}).catch(() => ({ status: 0, body: null }));
+			if (disposed) return UNMOUNTED;
 			if (status === 200 && body && body.ok) {
 				conv = body.conversation_id;
 				handoffConv = conv;
@@ -4780,6 +4805,7 @@ export async function mount(el, handoff = null) {
 				// to save is the exact lie this product cannot tell.
 				replyWithinHours = body.reply_within_hours ?? null;
 				await refresh();
+				if (disposed) return UNMOUNTED;
 				const hint = document.createElement('p');
 				hint.className = `${PREFIX}-hint`;
 				hint.textContent = copy.stored;
@@ -4898,6 +4924,7 @@ export async function mount(el, handoff = null) {
 	// races the first transcript read below still finds it.
 	// `stopPolling()` invalidates that read too, so it cannot paint into a detached root.
 	mounted.set(el, () => {
+		disposed = true;
 		window.removeEventListener('reef-inbox:open', openPanel);
 		window.removeEventListener('pagehide', onPagehide);
 		window.removeEventListener('pageshow', onPageshow);
