@@ -373,7 +373,13 @@ async function langPage(accept, words, size) {
 // every ordered pair, as one walk from each opening view
 const WALK = { stack: ['list', 'wall', 'stack', 'wall', 'list', 'stack'], list: ['stack', 'wall', 'list', 'wall', 'stack', 'list'], wall: ['stack', 'list', 'wall', 'list', 'stack', 'wall'] };
 const madePairs = new Set();
-const embedWord = async (page) => { for (const f of page.frames()) { if (f === page.mainFrame()) continue; try { const t = await f.evaluate(() => { const e = document.getElementById('t'); return e ? e.textContent : null; }); if (t && t.startsWith('embed ')) return t; } catch { /* a frame on its way */ } } return null; };
+// 🔴 Every question to a frame has a deadline. In WebKit (no moveBefore, so a moved frame loads again) Playwright can keep a
+// frame whose document never answers, and an evaluate with no deadline hung the whole run for good. A frame that does not
+// answer counts as "on its way" (no word), and every such silence is counted and reported, so it cannot pass for a result.
+let frameSilent = 0;
+const askFrame = (f) => { const q = f.evaluate(() => { const e = document.getElementById('t'); return e ? e.textContent : null; }); q.catch(() => {});
+  return Promise.race([q, new Promise((_, no) => setTimeout(() => no(new Error('silent')), 3000))]).catch((e) => { if (e && e.message === 'silent') frameSilent++; return null; }); };
+const embedWord = async (page) => { for (const f of page.frames()) { if (f === page.mainFrame()) continue; const t = await askFrame(f); if (t && t.startsWith('embed ')) return t; } return null; };
 const drawerShown = (page) => page.evaluate(() => {
   const p = document.querySelector('[data-drawer-panel="about"]'); if (!p) return { on: false, why: 'no panel' };
   const cs = getComputedStyle(p), r = p.getBoundingClientRect();
@@ -480,6 +486,7 @@ async function walk(handle, view, size, pics) {
     from = to;
   }
   ok(seen.errs.length === 0, `no console errors (${seen.errs.slice(0, 3).join(' | ') || 'none'})`, 'walk:no-errors');
+  if (frameSilent) { num('frame-silent', frameSilent); note(`${frameSilent} question(s) to a frame went unanswered for 3 s in this walk (read as "no word": an embed check after one is not evidence)`); frameSilent = 0; }
   await ctx.close();
 }
 
