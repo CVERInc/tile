@@ -141,6 +141,7 @@
   // o.glide: the visitor pressed the switcher — a switch to or from the wall is drawn as one motion (glide, below)
   // A switch asked for while a glide's update has not run yet (the page is still the view it is leaving) waits for it: any
   // switch, not only another glide — stack ⇄ list made at once there would be undone by the update a moment later.
+  // So does a press on the view still on screen (the switcher's buttons, below): it is a press back, the visitor's last pick.
   const setMode=(m,o)=>{ if(!VIEWS.includes(m))return false; if(gliding){ gliding.then(()=>setMode(m,o)); return true; } if(m===mode)return true;
     if(o&&o.glide&&(m==='spread')!==(mode==='spread')&&glide(m)) return true;
     return swap(m,o); };
@@ -195,7 +196,7 @@
   window.__deckSetMode=setMode;
   window.__deckView=v=>setMode(V2M[v],{quiet:true});   // by the name people see ('stack' | 'list' | 'wall'); true when the page now shows it
   seg.querySelectorAll('button').forEach(b=>{ if(!VIEWS.includes(b.dataset.m))b.remove(); }); if(VIEWS.length<2)seg.style.display='none';   // one view = nothing to switch
-  seg.querySelectorAll('button').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.m===mode)); b.onclick=()=>{ if(b.dataset.m!==mode){setMode(b.dataset.m,{glide:true});return;} if(b.dataset.m==='deck'&&window.__deckFanToggle) window.__deckFanToggle(); if(b.dataset.m==='list'&&window.__deckListHome) window.__deckListHome(); };});
+  seg.querySelectorAll('button').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.m===mode)); b.onclick=()=>{ if(gliding||b.dataset.m!==mode){setMode(b.dataset.m,{glide:true});return;} if(b.dataset.m==='deck'&&window.__deckFanToggle) window.__deckFanToggle(); if(b.dataset.m==='list'&&window.__deckListHome) window.__deckListHome(); };});
   // spread mode = an ordinary one-page site; the exchange shows as one footer line, same href as the deck's last card
   const GLYPH='<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 39.5 78.2 C 39.6 62 39.8 46 40 29.3"/><path d="M 40 29.3 C 37.7 29.2 33.4 28.1 30.7 22.5"/><path d="M 40 29.3 C 42.3 29.2 46.6 28.1 49.3 22.1"/><path d="M 39.5 62 C 33.3 61.6 28.8 59.8 26.5 56.5 C 24.8 54 23.8 50.8 23.7 47.5"/><path d="M 39.7 53.8 C 44.1 49.5 49.6 46.1 55.6 44.1 C 62 41.9 69.5 41.6 76.8 44.1"/><path d="M 62.6 42.2 C 64.1 40.7 66.4 37.3 64.8 31.8"/></svg>';
   // the footer is site chrome: identical in every view

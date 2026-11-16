@@ -387,6 +387,21 @@ test('a press that arrives before the transition\'s update has run waits for it,
   holds(p, 'list', 'stack → wall → list, pressed at once');
 });
 
+for (const [from, to] of [['stack', 'wall'], ['wall', 'stack']]) {
+  test(`${from} → ${to} → ${from}: a press back to the view on screen, before the transition's update has run, is the last pick and wins`, async () => {
+    let calls;
+    const p = open(card({ view: from }), { before: (win) => { calls = transitions(win); } });
+    p.press(to);
+    assert.equal(calls.length, 1, `the press ${from} → ${to} started no view transition`);
+    p.press(from);   // the first update has not run: the page still shows the view the visitor pressed
+    await turn(); await turn();
+    assert.equal(calls.length, 2, `the press back to ${from} was dropped (or taken for a press on the view on screen)`);
+    assert.equal(calls[1].view, to, `the second transition did not start from ${to}`);
+    calls[0].end(); calls[1].end(); await turn();
+    holds(p, from, `${from} → ${to} → ${from}, pressed at once`);
+  });
+}
+
 // ── a long Card ──────────────────────────────────────────────────────────────────────────────────
 test('200 tiles: only a window of cards is on the table, and every tile stays in the document', () => {
   const p = open(card({ view: 'stack', n: 200 }));
