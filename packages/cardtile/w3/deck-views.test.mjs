@@ -1088,3 +1088,39 @@ test("tile#336 reef.cards's own root page never reads or shows the exchange stat
   const other = await worker.fetch(new Request('https://reef.cards/specimen'), { PREVIEW: 'false', CARDS: kv, ...env });
   assert.match(await other.text(), /data-pool="card"/, 'CONTROL: another handle on reef.cards does carry it');
 });
+
+// ---- tile#343: a side is a window of a fixed size onto what it holds ----
+// 🔴 What this cannot say: whether anything is cut off. There is no layout here; verify/tile-sides.mjs asks a real
+// browser that, on a specimen with sides longer than the tile. This holds the script's half: every side carries its
+// two marks, after what it holds, and names the edge that has more beyond it from the side's own scroll numbers.
+test('tile#343 each side carries two marks after what it holds, and says which edge has more beyond it', () => {
+  for (const view of ['stack', 'list']) {
+    const p = open(card({ view }));
+    const tile = p.cells[0], front = tile.parentNode, held = front.closest('.deck-card'), back = held.querySelector('.deck-back');
+    assert.ok(front.classList.contains('deck-front') && back, `${view}: the first tile is on a front, and has a back`);
+    // (the stand-in has no layout: a side is as tall inside as this says, and the page's own answer stands for everything else)
+    const tall = new Map(), pageTall = p.doc.scrollHeightOf; p.doc.scrollHeightOf = (el) => (tall.has(el) ? tall.get(el) : pageTall(el));
+    for (const [name, side, first] of [['front', front, tile], ['back', back, back.querySelector('.deck-back-scroll')]]) {
+      same(side.firstElementChild, first, `${view} ${name}: what the side holds is no longer its first child`);
+      const marks = side.querySelectorAll('.tile-more').filter((m) => m.parentNode === side);
+      assert.deepEqual(marks.map((m) => m.dataset.to), ['up', 'down'], `${view} ${name}: the side's marks`);
+      for (const m of marks) assert.equal(m.getAttribute('aria-hidden'), 'true', `${view} ${name}: a mark is decoration, and says nothing to a reader`);
+      // the side's own numbers, as a browser would give them: a 480 px window onto 1400 px
+      const at = (top, h) => { side.scrollTop = top; side.clientHeight = 480; tall.set(side, h); side.dispatchEvent(new p.win.Event('scroll')); return side.getAttribute('data-more'); };
+      assert.equal(at(0, 1400), 'down', `${view} ${name}: at the start, more below`);
+      assert.equal(at(400, 1400), 'up down', `${view} ${name}: in the middle, more both ways`);
+      assert.equal(at(920, 1400), 'up', `${view} ${name}: at the end, more above`);
+      at(0, 480);
+      assert.ok(!side.hasAttribute('data-more'), `${view} ${name}: a side that shows everything carries no mark attribute at all`);
+    }
+    // a back is read from its top each time it is turned up
+    back.scrollTop = 300; back.clientHeight = 480; tall.set(back, 1400);
+    front.dispatchEvent(new p.win.Event('click', { bubbles: true, isTrusted: true })); p.win.tick(1000);
+    assert.ok(held.classList.contains('flipped'), `${view}: the tile did not turn over`);
+    assert.equal(back.scrollTop, 0, `${view}: a back turned up is at its top`);
+    assert.equal(back.getAttribute('data-more'), 'down', `${view}: …and says at once that it holds more`);
+    // …and the wall is still the engine's markup: the marks are the pile's, not the tile's
+    p.win.__deckView('wall'); p.win.tick(1000); holds(p, 'wall', `${view} (held) → wall`);
+    assert.equal(p.doc.querySelectorAll('main .tile-more').filter((m) => !m.closest('.deck-table')).length, 0, `${view} → wall: a mark was left on the wall`);
+  }
+});
