@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { latestFromFeed, resolveChannel, resolveHandle, channelIdFromPage, posterPath, CHANNEL_RE, VIDEO_RE, HANDLE_RE, isChannelRef } from './yt.mjs';
+import * as YC from './yt-channels.mjs';
 import { channelsIn, resolveChannels } from './yt-channels.mjs';
 import { renderCardHTML } from './serve/card-worker.mjs';
 import { parseParams } from '../sitetile/site-core.js';
@@ -387,4 +388,63 @@ test('🔴 tile#325 review: the review’s own Card, verbatim — a home token i
   // and the Card without the word is fetched the same
   assert.deepEqual(channelsIn(md), ['@a.b-c_d']);
   assert.deepEqual(await requested(md), ['@a.b-c_d']);
+});
+
+// ── tile#355: resolution within a share of the subrequest budget ──────────────────────────────────
+// The page-view numbers (30, 40, 60 channels against the 50 an invocation has) are in
+// serve/cardtile-picture-cache.test.mjs; these hold the rule itself.
+const UC = (i) => `UC${String(i).padStart(22, '0')}`;
+const LATEST_OF = (ref) => ref.replace(/\W/g, '').slice(-11).padStart(11, 'v');
+/** a fake YouTube that answers every handle and feed, counting */
+const answering = () => {
+  const urls = [];
+  const doFetch = async (u) => {
+    urls.push(u);
+    const h = /youtube\.com\/(@[\w.-]+)$/.exec(u);
+    if (h) return ok(`<meta itemprop="identifier" content="${UC(h[1].slice(1))}">`);
+    const f = /channel_id=(UC[\w-]{22})$/.exec(u);
+    return ok(FEED(LATEST_OF(f[1]), 't'));
+  };
+  return { urls, doFetch };
+};
+
+test('🔴 #355 resolveChannels — past the share, fetching stops at the first channel whose worst case does not fit', async () => {
+  // @h01 (2) + UC 1 (1) + @h02 (2) = 5 of a share of 6; the next handle needs 2 and only 1 is left
+  const refs = ['@h01', UC(1), '@h02', '@h03', UC(2)];
+  const md = CARD(refs.map((r) => `- [ ] %% card: video channel=${r} %%`).join('\n'));
+  const { urls, doFetch } = answering();
+  const got = await resolveChannels(md, doFetch, { subrequests: 6 });
+  assert.deepEqual(Object.keys(got), ['@h01', UC(1), '@h02'], 'not the first channels that fit');
+  assert.equal(urls.length, 5);
+  assert.ok(!urls.some((u) => u.endsWith(UC(2))), 'a later, cheaper channel was fetched past the first one that did not fit');
+  assert.equal(YC.channelFetches('@h01'), 2);
+  assert.equal(YC.channelFetches(UC(1)), 1);
+});
+
+test('🔴 #355 resolveChannels — within the share, every channel is fetched and memory is never read', async () => {
+  const md = CARD([UC(1), UC(2)].map((r) => `- [ ] %% card: video channel=${r} %%`).join('\n'));
+  const kept = YC.keptChannels();
+  kept.set(UC(1), { id: 'remembered1', title: 'old', channelId: UC(1) });
+  const { urls, doFetch } = answering();
+  const got = await resolveChannels(md, doFetch, { subrequests: 2, kept });
+  assert.equal(urls.length, 2);
+  assert.equal(got[UC(1)].id, LATEST_OF(UC(1)), 'a page within its share was answered from memory');
+});
+
+test('🔴 #355 keptChannels — an answer expires after CHANNEL_KEPT_SECONDS, failures are never kept, the oldest goes first', () => {
+  let now = 1_000_000;
+  const kept = YC.keptChannels({ most: 2, now: () => now });
+  kept.set('a', { id: 'x' });
+  kept.set('b', null);
+  assert.equal(kept.get('b'), null, 'a failure was remembered');
+  now += YC.CHANNEL_KEPT_SECONDS * 1000 - 1;
+  assert.deepEqual(kept.get('a'), { id: 'x' });
+  now += 1;
+  assert.equal(kept.get('a'), null, 'an answer outlived the feed TTL');
+  kept.set('c', { id: 'c' });
+  kept.set('d', { id: 'd' });
+  kept.set('e', { id: 'e' });
+  assert.equal(kept.size, 2);
+  assert.equal(kept.get('c'), null, 'the oldest was not the one evicted');
+  assert.equal(YC.CHANNEL_KEPT_SECONDS, 1800);
 });

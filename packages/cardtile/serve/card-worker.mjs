@@ -17,12 +17,12 @@ import { parseCard, serializeCard } from '../card-core.js';
 import { renderPage, poolOf, picturesInRenderOrder } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { VIDEO_RE } from '../yt.mjs';
-import { resolveChannels } from '../yt-channels.mjs';
+import { keptChannels, resolveChannels } from '../yt-channels.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
 import { picturePlan, pictureStrategy, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
-import { cachedPicture, keepPicture, keepPictures, prefillCalls } from './picture-cache.mjs';
+import { CHANNEL_SUBREQUESTS, cachedPicture, keepPicture, keepPictures, prefillCalls } from './picture-cache.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -30,6 +30,10 @@ import { cachedPicture, keepPicture, keepPictures, prefillCalls } from './pictur
 const ytFetch = (u) => fetch(u, {
   cf: { cacheTtl: /youtube\.com\/@/.test(u) ? 86400 : 1800, cacheEverything: true },
 });
+// tile#355 — the channels this isolate has resolved, in memory (no subrequest to read). Read only by a page
+// that names more channels than CHANNEL_SUBREQUESTS can fetch, for the ones past its share.
+const CHANNELS_KEPT = keptChannels();
+const channelShare = { subrequests: CHANNEL_SUBREQUESTS, kept: CHANNELS_KEPT };
 import { ICON_DOMAIN_RE, iconUpstreams } from '../marks.mjs';
 // Image types the /_icon/ and /_yt/ proxies will relay. SVG is deliberately absent (it can carry script).
 const PROXY_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon']);
@@ -1086,7 +1090,7 @@ const router = {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' },
         });
       }
-      const videos = await resolveChannels(draft, ytFetch);
+      const videos = await resolveChannels(draft, ytFetch, channelShare);
       return new Response(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
@@ -1338,9 +1342,10 @@ const router = {
     // unreachable, which lands the block on its designed degraded state (condition 3). A creator's
     // card must not go down because a video platform did.
     // tile#339: each fetch counted, because the picture cache's prefill below shares this invocation's
-    // subrequest budget with it (picture-cache.mjs prefillCalls)
+    // subrequest budget with it (picture-cache.mjs prefillCalls). tile#355: and capped at its own share of
+    // that budget (CHANNEL_SUBREQUESTS), so a page naming many channels never spends the rest by itself.
     let ytCalls = 0;
-    const videos = await resolveChannels(cardMd, (u) => { ytCalls += 1; return ytFetch(u); });
+    const videos = await resolveChannels(cardMd, (u) => { ytCalls += 1; return ytFetch(u); }, channelShare);
 
     // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
     // address under the switch (reef.cards' root card = the bare origin), whatever host answered.

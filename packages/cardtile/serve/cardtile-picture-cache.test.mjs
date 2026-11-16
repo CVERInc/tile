@@ -382,19 +382,142 @@ test('🔴 #339 cache — 40 pictures and 9 channels: the page view spends at mo
 });
 
 test('🔴 #339 cache — the prefill shrinks by what YouTube already spent, and stops when nothing is left', async (t) => {
-  for (const [channels, most] of [[30, 12], [36, 6], [40, 0], [45, 0]]) {
+  // the arithmetic, for any count of fetches spent before it
+  for (const [spent, most] of [[0, 12], [30, 12], [36, 6], [40, 0], [45, 0]]) assert.equal(PC.prefillCalls(spent), most, `${spent} spent`);
+  // tile#355: a page view spends at most CHANNEL_SUBREQUESTS on YouTube, so it always leaves a whole prefill
+  for (const channels of [30, 36, 40, 45]) {
     const cache = useCache(t, fakeCache());
     const fetched = countFetches(t);
     const { env } = await world({ md: richPage(channels) });
     const from = { calls: cacheCalls(cache), fetched: fetched.length };
     assert.equal((await get(`${CANON}/${HANDLE}`, env)).status, 200);
     const spentYt = fetched.length - from.fetched, spentCache = cacheCalls(cache) - from.calls;
-    assert.equal(spentYt, channels, `CONTROL ${channels}: one fetch per channel`);
-    assert.equal(spentCache, most, `${channels} channels: ${spentCache} Cache API calls, expected ${most}`);
-    assert.equal(PC.prefillCalls(channels), most);
-    // the YouTube resolution itself is uncapped (not this change); the prefill never adds past the line
-    if (most) assert.ok(spentYt + spentCache <= PC.PAGE_SUBREQUESTS - PC.PAGE_SUBREQUESTS_HELD);
+    assert.equal(spentYt, Math.min(channels, PC.CHANNEL_SUBREQUESTS), `${channels} channels: ${spentYt} fetches`);
+    assert.equal(spentCache, PC.PICTURE_PREFILL_CALLS, `${channels} channels: ${spentCache} Cache API calls`);
+    assert.ok(spentYt + spentCache <= PC.PAGE_SUBREQUESTS - PC.PAGE_SUBREQUESTS_HELD);
   }
+});
+
+// ── 2c. YouTube channel resolution has its own share of that budget (tile#355) ───────────────────────
+//
+// resolveChannels used to fetch every channel a page names, one fetch per UC id and two per @handle, with
+// no upper bound: a page naming 60 channels made 60–120 fetches on one page view, past the 50 the
+// invocation has, before the prefill or anything else. These tests count the same way as 2b: every
+// fetch and every Cache API call the page view makes. The fetch stand-in ANSWERS (a handle page that
+// names its channel, a feed with one video), so a resolved channel is visible in the markup as its
+// video (`data-yt="<id>"`) and an unresolved one as the degraded state the renderer already draws
+// (`data-yt-channel` for a UC id, `data-yt-handle` for a handle).
+// Each case uses its own channel names: the cardtile worker remembers resolved channels for the life
+// of the module (yt-channels.mjs keptChannels), and every case must start with nothing remembered.
+let SEED = 0;
+const channelsFor = (n, kind) => {
+  SEED += 1;
+  const seed = `s${SEED.toString(36)}`;
+  return Array.from({ length: n }, (_, i) => {
+    const tag = `${seed}x${i}`;
+    const id = `UC${tag.padStart(22, '0')}`;
+    return { ref: kind === 'handle' ? `@${tag}` : id, id, video: tag.padStart(11, 'v') };
+  });
+};
+const channelPage = (chans) => [
+  '---', `card-page: ${HANDLE}`, 'title: Tide Pool', '---', '', '## front', '',
+  ...MANY.map((p) => `- [ ] %% card: feature w=3 img=asset:${p.id} %%`),
+  ...chans.map((c) => `- [ ] %% card: video channel=${c.ref} %%`),
+  '', '## assets', '', ...MANY.map((p) => `- [ ] %% card: asset id=${p.id} mime=${p.mime} %% ${p.b.toString('base64')}`),
+].join('\n') + '\n';
+/** every fetch answered as YouTube would for these channels, counted */
+const answerFetches = (t, chans) => {
+  const before = globalThis.fetch;
+  const urls = [];
+  const byHandle = new Map(chans.map((c) => [`https://www.youtube.com/${c.ref}`, c]));
+  const byId = new Map(chans.map((c) => [c.id, c]));
+  globalThis.fetch = async (u) => {
+    const url = String(u && u.url ? u.url : u);
+    urls.push(url);
+    const h = byHandle.get(url);
+    if (h) return new Response(`<html><meta itemprop="identifier" content="${h.id}"></html>`);
+    const f = /channel_id=(UC[\w-]{22})$/.exec(url);
+    const c = f && byId.get(f[1]);
+    if (c) return new Response(`<feed><entry><yt:videoId>${c.video}</yt:videoId><title>Latest ${c.video}</title></entry></feed>`);
+    return new Response('', { status: 404 });
+  };
+  t.after(() => { globalThis.fetch = before; });
+  return urls;
+};
+const drawnResolved = (html, c) => html.includes(`data-yt="${c.video}"`);
+const drawnDegraded = (html, c) => html.includes(c.ref.startsWith('@') ? `data-yt-handle="${c.ref}"` : `data-yt-channel="${c.id}"`);
+/** one page view naming `chans`: its subrequests, and the page */
+const viewWith = async (t, chans) => {
+  const cache = useCache(t, fakeCache());
+  const fetched = answerFetches(t, chans);
+  const { env } = await world({ md: channelPage(chans) });
+  const from = { calls: cacheCalls(cache), fetched: fetched.length };
+  const page = await get(`${CANON}/${HANDLE}`, env);
+  const html = page.body.toString('utf8');
+  return { env, cache, fetched, page, html, spentYt: fetched.length - from.fetched, spentCache: cacheCalls(cache) - from.calls };
+};
+
+for (const kind of ['id', 'handle']) {
+  for (const n of [30, 40, 60]) {
+    test(`🔴 #355 channels — ${n} channels written as ${kind === 'id' ? 'UC ids' : '@handles'}: the page view stays within 50 subrequests, renders, and resolves the first N`, async (t) => {
+      const chans = channelsFor(n, kind);
+      const cost = kind === 'handle' ? 2 : 1;
+      const { page, html, spentYt, spentCache } = await viewWith(t, chans);
+      assert.equal(page.status, 200, 'the page view failed');
+      const N = Math.min(n, Math.floor(PC.CHANNEL_SUBREQUESTS / cost));
+      assert.ok(spentYt <= PC.CHANNEL_SUBREQUESTS, `${spentYt} YouTube fetches, the share is ${PC.CHANNEL_SUBREQUESTS}`);
+      assert.equal(spentYt, N * cost, 'CONTROL: each resolved channel cost what it costs');
+      assert.equal(spentCache, PC.PICTURE_PREFILL_CALLS, 'the prefill was starved by YouTube');
+      assert.ok(spentYt + spentCache <= 50, `${spentYt + spentCache} subrequests`);
+      assert.ok(spentYt + spentCache + PC.PAGE_SUBREQUESTS_HELD <= PC.PAGE_SUBREQUESTS, `${spentYt + spentCache} subrequests counted, plus ${PC.PAGE_SUBREQUESTS_HELD} held`);
+      assert.deepEqual(chans.map((c) => drawnResolved(html, c)), chans.map((_, i) => i < N), 'not exactly the first N channels were drawn resolved');
+      for (const c of chans.slice(N)) assert.ok(drawnDegraded(html, c), `${c.ref} past the share is not drawn in the degraded state`);
+    });
+  }
+}
+
+test('🔴 #355 channels — past the share, a channel this isolate already resolved is served from memory, with no fetch', async (t) => {
+  const chans = channelsFor(60, 'id');
+  const first = await viewWith(t, chans);
+  assert.equal(first.spentYt, PC.CHANNEL_SUBREQUESTS, 'CONTROL: the first view spent the whole share');
+  // a second view: the first 30 are remembered, so the share goes to the next 30, and all 60 are drawn
+  const from = first.fetched.length;
+  const again = await get(`${CANON}/${HANDLE}`, first.env);
+  const html = again.body.toString('utf8');
+  assert.equal(again.status, 200);
+  assert.deepEqual(first.fetched.slice(from).map((u) => u.slice(-24)), chans.slice(30).map((c) => c.id), 'the second view did not spend its share on the next channels');
+  assert.deepEqual(chans.filter((c) => !drawnResolved(html, c)).map((c) => c.ref), [], 'some channels are still unresolved after two views');
+});
+
+test('🔴 #355 channels — a page within the share fetches every channel on every view, as before (memory is not read)', async (t) => {
+  const chans = channelsFor(12, 'handle');
+  const first = await viewWith(t, chans);
+  assert.equal(first.spentYt, 24, 'CONTROL: two fetches per handle');
+  const from = first.fetched.length;
+  await get(`${CANON}/${HANDLE}`, first.env);
+  assert.equal(first.fetched.length - from, 24, 'a page within its share was served from memory');
+});
+
+test('🔴 #355 channels — YouTube down on a page past the share: the page still renders, every channel degraded', async (t) => {
+  const chans = channelsFor(60, 'handle');
+  const cache = useCache(t, fakeCache());
+  const before = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('unreachable'); };
+  t.after(() => { globalThis.fetch = before; });
+  const { env } = await world({ md: channelPage(chans) });
+  const page = await get(`${CANON}/${HANDLE}`, env);
+  assert.equal(page.status, 200);
+  assert.ok(calls <= PC.CHANNEL_SUBREQUESTS, `${calls} fetches`);
+  const html = page.body.toString('utf8');
+  for (const c of chans) assert.ok(drawnDegraded(html, c), c.ref);
+  assert.ok(cacheCalls(cache) <= PC.PICTURE_PREFILL_CALLS);
+});
+
+test('#355 channels — the share is what the budget leaves, not a second budget', () => {
+  assert.equal(PC.CHANNEL_SUBREQUESTS, PC.PAGE_SUBREQUESTS - PC.PAGE_SUBREQUESTS_HELD - PC.PICTURE_PREFILL_CALLS);
+  assert.equal(PC.CHANNEL_SUBREQUESTS, 30);
+  assert.equal(PC.prefillCalls(PC.CHANNEL_SUBREQUESTS), PC.PICTURE_PREFILL_CALLS, 'a page view that spends the whole share leaves a whole prefill');
 });
 
 // ── 3. the cache is never needed, and never trusted beyond its bytes ──────────────────────────────

@@ -31,7 +31,7 @@
 // `chan%%tg-home:grid%%nel=@x` is drawn as `channel=@x`, and a shortcut on the raw text skipped it
 // unless some unrelated line happened to hold the word. Any test on the raw text is a second reader.
 import { parseCard } from './card-core.js';
-import { isChannelRef, resolveChannel } from './yt.mjs';
+import { HANDLE_RE, isChannelRef, resolveChannel } from './yt.mjs';
 
 /**
  * Every channel reference (UC id or @handle) a Card's video cells ask for, de-duplicated, in the order
@@ -56,15 +56,75 @@ export function channelsIn(cardMd) {
 }
 
 /**
- * Resolve every channel a card's video cells name, concurrently. Returns { [ref]: {id, title,
- * channelId} } — keyed by what the card WROTE (UC id or @handle), because that is what the renderer
- * looks up.
+ * The most fetches resolveChannel makes for one reference: a UC id is its feed (1), an @handle is its
+ * handle page and then its feed (2). A handle that does not resolve stops after the first.
  */
-export async function resolveChannels(cardMd, doFetch) {
+export const channelFetches = (ref) => (HANDLE_RE.test(ref) ? 2 : 1);
+
+/** how long a resolved channel is remembered in this isolate, seconds: the feed's own edge TTL */
+export const CHANNEL_KEPT_SECONDS = 1800;
+/** the most channels one isolate remembers; the oldest goes first */
+export const CHANNEL_KEPT_MOST = 1000;
+
+/**
+ * keptChannels() → the answers this isolate already has: { get(ref), set(ref, answer) }. Memory only, so
+ * reading it is not a subrequest. Only a resolved answer is kept, never a failure (a channel YouTube did
+ * not answer for is asked again by the next view that has room for it).
+ */
+export function keptChannels({ seconds = CHANNEL_KEPT_SECONDS, most = CHANNEL_KEPT_MOST, now = Date.now } = {}) {
+  const m = new Map();
+  return {
+    get(ref) {
+      const e = m.get(ref);
+      if (!e) return null;
+      if (now() - e.at < seconds * 1000) return e.answer;
+      m.delete(ref);
+      return null;
+    },
+    set(ref, answer) {
+      if (!answer) return;
+      m.delete(ref);
+      m.set(ref, { at: now(), answer });
+      while (m.size > most) m.delete(m.keys().next().value);
+    },
+    get size() { return m.size; },
+  };
+}
+
+/**
+ * Resolve the channels a card's video cells name, concurrently. Returns { [ref]: {id, title,
+ * channelId} } — keyed by what the card WROTE (UC id or @handle), because that is what the renderer
+ * looks up. A ref missing from the answer is drawn in the renderer's degraded state (card-render.mjs,
+ * `case 'video'`): a poster-less play button that opens the channel.
+ *
+ * tile#355: `subrequests` is this call's share of the invocation's subrequest budget
+ * (serve/picture-cache.mjs CHANNEL_SUBREQUESTS). When every channel fits it at its worst case
+ * (channelFetches), every channel is fetched, as before. When they do not:
+ *   · a channel `kept` already answers for (memory, no subrequest) is served from there;
+ *   · the others are fetched in the order the page names them while their worst case still fits,
+ *     and fetching stops at the first one that does not;
+ *   · the rest are not asked for at all.
+ * `kept` remembers every answer this call resolves. Never throws.
+ */
+export async function resolveChannels(cardMd, doFetch, { subrequests = Infinity, kept = null } = {}) {
   const ids = channelsIn(cardMd);
   if (!ids.length) return {};
-  const got = await Promise.all(ids.map((c) => resolveChannel(c, doFetch)));
+  const over = ids.reduce((n, c) => n + channelFetches(c), 0) > subrequests;
   const out = {};
-  ids.forEach((c, i) => { if (got[i]) out[c] = got[i]; });
+  const ask = [];
+  let left = subrequests;
+  for (const c of ids) {
+    const known = over && kept ? kept.get(c) : null;
+    if (known) { out[c] = known; continue; }
+    if (left === null || channelFetches(c) > left) { left = null; continue; }
+    left -= channelFetches(c);
+    ask.push(c);
+  }
+  const got = await Promise.all(ask.map((c) => resolveChannel(c, doFetch)));
+  ask.forEach((c, i) => {
+    if (!got[i]) return;
+    out[c] = got[i];
+    if (kept) kept.set(c, got[i]);
+  });
   return out;
 }
