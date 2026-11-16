@@ -73,9 +73,7 @@ test('the emitted completion script runs cartAfterOrder, and carries the ref to 
 	assert.ok(html.includes('const cartAfterOrder=function cartAfterOrder(rawCart, rawSold)'),
 		'the decision must ship as the same function this file tested, not a re-typed copy');
 	assert.ok(html.includes('"ref":"r1"'), 'the sold-lines record is keyed by the ref');
-	// tile#84 r2: the key is built inside the shipped settle function from the ref the page passes.
-	assert.ok(html.includes("const soldKey = 'dc-square-shop-sold:' + ref;") &&
-		html.includes('settleCartAfterOrder(localStorage,C.storeId,C.ref,'), 'and read back under that key');
+	assert.ok(html.includes("'dc-square-shop-sold:'+C.ref"), 'and read back under that key');
 	assert.ok(!/removeItem\('dc-square-shop-cart:'\+C\.storeId\)/.test(html.replace(/else localStorage\.removeItem\(CK\)/, '')),
 		'the unconditional whole-key removal must be gone');
 });

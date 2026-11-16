@@ -13,113 +13,46 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
-## 0.11.21 — unreleased — the paid settle is on disk before it waits, comes off once, and never mistakes "settled long ago" for "never settled" (tile#84)
+## unreleased (completion page only; the coral stays 0.11.20) — a settled order stays settled (tile#84)
 
-Two halves on two deploys: the completion page that `shop-function-template.js` puts into each
-site's `_worker.js` (arrives with a site rebuild), and this coral, 0.11.21 (arrives when it is
-published). Either half without the other degrades to what was there before; see *Deploy order*.
+Only `shop-function-template.js` changes, so this arrives with a site rebuild. `square-shop.js` is
+byte for byte 0.11.20, so there is no new coral version.
 
 | defect | in | effect |
 |---|---|---|
-| `settleCartAfterOrder` re-read the basket in the same task it read it in | 0.11.19 | a browser applies another tab's write only between tasks, so the "retry up to eight times" loop ran once, in every browser |
-| the sold record was consumed by the first render, and a render with no record removes the whole key | 0.11.19 | reloading the completion page, or opening it again, emptied a basket the visitor had filled since the order |
-| nothing was written until the end of the first 50 ms wait | first fix (PR #327 r1) | a completion tab closed, navigated away from or frozen in that window left the basket, the record and the marker untouched; the shop then loaded the paid lines as unpaid, and a checkout could charge for them again |
-| a refused write of the settled-refs list was swallowed after the basket was written and the record consumed | r1 | a reload found neither, and cleared every line added since |
-| the list kept the last 50 refs; junk in it read as empty | r1 | an older order, or any order after junk was written over the list, looked never-settled, so reopening its receipt cleared the whole basket |
+| `settleCartAfterOrder` re-read the basket in the same task it read it in, "retrying" up to eight times | 0.11.19 | a browser applies another tab's write only between tasks, so the loop never ran a second time. It is removed: one read, one write |
+| the sold record is consumed by the first paid render, and a render with no record removes the whole basket key | 0.11.16 | reloading the receipt, or opening it again later, emptied a basket the visitor had filled since the order |
 
-### The protocol
+**The fix.** The paid render writes `dc-square-shop-settled:<storeId>:<client_request_ref>` (the
+time, read only for its presence) in the same synchronous step that takes the lines off. A render
+that finds it touches nothing. It is never removed: the coral's one-week sweep matches
+`dc-square-shop-sold:` only, and a receipt URL can be reopened at any time, so any expiry would
+bring the whole-basket clear back for that reopen.
 
-Three keys, all in the visitor's own `localStorage`:
+**Order of writes** (all in one task, after the `paid` answer, before the receipt is drawn):
+tombstone, basket, record removal. Tombstone after the basket would let a stop between the two
+subtract twice on reload; record removal before the tombstone would let a stop between them take
+the whole-key clear on reload. A stop between tombstone and basket leaves the paid lines in the
+basket, visible, and marked settled. `paid-settlement.test.mjs` stops the page after each write.
 
-| key | written by | holds | removed |
-|---|---|---|---|
-| `dc-square-shop-sold:<ref>` | the coral, as a checkout leaves (unchanged) | `{t, ids, lines}`: what that attempt sent | by the paid transition below, or by the coral's one-week sweep |
-| `dc-square-shop-paid:<ref>` | the completion page, on `paid` | the PAID INTENT: the sold record plus `s: <storeId>`, meaning "paid, and its lines have not come off yet" | by whoever applies it (completion page or coral), right after the basket write |
-| `dc-square-shop-settled:<storeId>` | the completion page, on the first `paid` for the store | the store's FLAG, the value `"1"` | never; it never grows either. Only its presence is read, so junk in it is still a flag |
+**Refused writes** keep the behaviour from before, with no new machinery:
 
-On a `paid` answer (and only then — pending, canceled, refunded, unknown and a failed request
-never reach any of this; that gate is unchanged), `settleCartAfterOrder` does, in order:
+- tombstone refused: the order settles as before, without one; a later render of its receipt
+  finds neither record nor tombstone and takes the whole-key clear (the old reload behaviour);
+- basket write refused: the tombstone is taken back, nothing comes off, the record stays, and the
+  next render of the receipt tries again (as before); the receipt still says paid;
+- the sold record refused at checkout (by the coral): that order's paid render takes the whole-key
+  clear, once (as before, but now only once per order);
+- storage unavailable altogether: nothing is read or written (as before).
 
-1. **The paid transition. Synchronous, before anything yields.** If an intent for the ref is
-   already there (a reload during the wait, or a page closed before its apply), go to 2. Otherwise
-   read the sold record:
-   - *readable, with ids:* write the flag if absent, then the intent, then remove the record. The
-     flag goes first, so an intent never exists without one. Once the intent is written, the order's
-     settlement no longer depends on this document surviving.
-   - *`{t, ids: []}`:* the order was already settled by the full-storage branch below. Nothing to do.
-   - *no readable record, flag present:* nothing to do. This browser has settled for this store,
-     so a missing record means this order's state has already run its course here (its intent
-     applied, its record swept). It does not mean an older coral, and the basket is not cleared.
-   - *no readable record, no flag:* the pre-0.11.16 whole-key clear, once (an older coral writes no
-     record, and its shopper must not keep a basket that never clears), and the flag is written with
-     it, so a reload of that page does not clear again.
-2. **The wait** (kept from the first fix): read the basket, wait 50 ms, read again; up to eight
-   times while it keeps moving. A write another tab has in flight lands in this tab's view during a
-   wait, so the answer is computed from it rather than overwritten by it.
-3. **The apply**, `applyPaidIntent`, one synchronous step: subtract the intent's quantities from the
-   basket as it is now, write the basket, remove the intent. Two completion tabs of one order are
-   serialised with the Web Locks API where present.
+**Not addressed:** a shop tab that loaded the basket before the order and writes its whole basket
+back after the settle (tile#328). Two renders of the same receipt in two tabs in the very same
+moment can both find no tombstone; that needs the same order opened twice at once.
 
-**The coral** (`reconcilePaidOrders`) runs the same `applyPaidIntent`, byte for byte (held equal by
-`paid-settlement.test.mjs`), on every intent naming its store: when it loads the basket, before
-the basket is loaded into the page; and when Checkout is pressed, before anything is sent. If that
-press changed the basket, it sends nothing. The panel is redrawn from disk, and the visitor sees the
-paid lines gone and presses again: what reaches the till is never something other than what the
-panel showed. No new string; the redraw is the whole signal.
-
-**Why it holds:**
-
-- *Durable.* The transition is written before the first `await`. A document destroyed after that
-  leaves the intent. The next shop load or checkout applies it, and so does a reload of the
-  receipt. `settle.smoke.mjs` closes a frozen completion tab in Chromium and shows the coral taking
-  the paid lines off.
-- *Applied at most once.* In `applyPaidIntent` the basket write is the only call storage can
-  refuse. Refused, the intent stays and nothing came off. Accepted, the next call is `removeItem`,
-  which no quota refuses. Every later reader (reload, second tab, coral) finds no intent and does
-  nothing.
-- *No false "never settled".* The flag is written before any intent and is never evicted, so
-  "evicted" and "corrupted" cannot look like "never settled". The whole-key clear is reachable
-  only for a store with no flag, i.e. the first paid page ever opened for that store in this browser
-  that also has no record.
-- *A refused write is not a completed settlement.* If storage refuses the flag or the intent, the
-  record is untouched and no state is claimed. The page then settles in the same task (nothing is
-  left to a later reader that would not get it) and marks the record settled by **shrinking** it to
-  `{t, ids: []}`: a write that frees space rather than taking it, and a record a reload reads as
-  settled. `paid-settlement.test.mjs` runs this under the review's model (only the marker refused)
-  and under a full origin (no write may grow storage).
-
-### Deploy order
-
-- *New completion page, coral not yet 0.11.21:* the page writes and applies intents itself. An
-  intent left by a closed tab is applied by the next reload of that receipt, or by the first page
-  load with 0.11.21. Older corals never touch the `paid:`/`settled:` prefixes (their sweep matches
-  `sold:` only).
-- *0.11.21 coral, site not rebuilt:* the old completion page writes no intents, so the reconcile
-  finds none; behaviour is 0.11.19's.
-
-**Still open:**
-
-- A stale shop tab that loaded the basket before the order and writes its whole in-memory basket
-  after the settle has finished (tile#328). The wait narrows the window. Only a `storage` listener
-  in the coral closes it.
-- The coral's apply is not inside the completion page's Web Lock. Two writers in different
-  processes reading the same intent in the same instant could both apply it, and a completion tab
-  of the same order in another process can read the record before this one removes it. Both need
-  two live documents racing in one moment. A single Node event loop cannot model it, and no
-  browser schedule was measured.
-- Storage that refuses even the one-character flag: the full-storage branch leaves `{t, ids: []}`,
-  which the coral's one-week sweep removes. After that, with still no flag, a reopened receipt for
-  that store takes the whole-key clear again.
-- A renderer crash between the basket write and the intent removal (two calls in one synchronous
-  task) would leave the intent to be applied a second time. Closing or navigating a tab does not
-  interrupt a running task.
-- A paid receipt opened in a browser that holds no record and no flag for the store (another
-  browser, or a first-ever order whose record write was refused) still takes the pre-0.11.16
-  whole-key clear.
-- The other side of that rule, chosen on purpose: once the store has a flag, a paid order whose
-  record the coral could not write at checkout (storage full then) clears nothing. Its lines stay
-  in the basket, visible, rather than the whole basket going with them. Before this change, that
-  order cleared the whole key.
+An earlier draft of this fix (PR #327, two review rounds, never released) moved the settle behind
+a wait and a paid-intent key the coral applied later. Review showed that this split could leave
+paid lines chargeable (a closed tab with an older coral, a refused reconcile, cross-tab overlap) and
+it was withdrawn in favour of the synchronous step above.
 
 ---
 

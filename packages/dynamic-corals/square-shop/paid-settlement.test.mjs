@@ -1,118 +1,103 @@
-// tile#84 r2: the paid settle has to be durable and idempotent, and must never fall back to
-// clearing the whole basket once this browser holds settlement state for the store.
+// tile#84: the paid settle runs in the task that received the `paid` answer, and leaves a
+// per-order tombstone so that every later render of the same receipt touches nothing.
 //
-// The review of r1 (PR #327) reproduced four ways a paid order cost the visitor either a basket or
-// a second payment. Each is a test below, driven through the REAL emitted completion page (the
-// `<script>` a site's _worker.js serves) and, where the shop's side matters, the REAL coral
-// (square-shop.js, run with the smallest DOM it accepts). Each fails on r1 (bdf9a84):
+// Two review rounds of PR #327 reproduced ways a paid order cost the visitor either a basket or a
+// second payment. Each input that still applies to this design is a test below, driven through the
+// REAL emitted completion page (the `<script>` a site's _worker.js serves) and, where the shop's
+// side matters, the REAL coral (square-shop.js, run with the smallest DOM it accepts):
 //
-//   finding 2  the page is closed during its first wait. Nothing was on disk; the paid lines stayed
-//              in the basket, and the shop loaded them and sent them to the till again.
-//   finding 3  storage refuses the settlement marker. The basket was already written and the record
-//              consumed, so a reload found neither and cleared everything added since.
-//   finding 4  an order pushed off the end of r1's 50-ref list, or junk written over that list,
-//              looked like an order never settled here, so the whole basket was cleared.
+//   · the receipt is drawn while the paid lines are still in the basket, and the page is closed
+//     before they come off (the shop, old or new, then charges for them again);
+//   · a settled order's marker is evicted, overwritten with junk, or swept with the week-old sold
+//     records, so reopening the receipt clears a basket filled since;
+//   · a later paid order whose sold record is missing must behave exactly as before tile#84;
+//   · a stop between any two of the settle's writes must never take the lines off twice, and never
+//     take the whole-key clear for an order that was settled;
+//   · storage that refuses a write keeps the behaviour from before tile#84 (pinned here so a change
+//     to it is a decision, not an accident).
 //
-// The protocol these hold is written down in ./PROVENANCE.md § tile#84 and in
-// shop-function-template.js above settleCartAfterOrder.
+// The design is written down above settleCartAfterOrder in shop-function-template.js.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as template from './shop-function-template.js';
-import { cartRowQty } from '../shared/cart-badge-count.mjs';
+import { completionBody, COMPLETE_COPY, settleCartAfterOrder } from './shop-function-template.js';
 
-const { completionBody, COMPLETE_COPY } = template;
 const here = dirname(fileURLToPath(import.meta.url));
 const CORAL = readFileSync(join(here, 'square-shop.js'), 'utf8').replace(/\nexport \{[\s\S]*?\n\};?\s*$/, '\n');
 
 const GUILD = 'g_paid';
 const CART_KEY = `dc-square-shop-cart:${GUILD}`;
-const FLAG_KEY = `dc-square-shop-settled:${GUILD}`;
 const soldKey = (ref) => 'dc-square-shop-sold:' + ref;
-const intentKey = (ref) => 'dc-square-shop-paid:' + ref;
+const settledKey = (ref, store = GUILD) => `dc-square-shop-settled:${store}:${ref}`;
 const SOLD = 'VSOLD';
 const HELD = 'VHELD';
 const NEW = 'VNEWUNPAID';
+const DAY = 86400000;
 
-const record = (lines) => JSON.stringify({ t: Date.now(), ids: lines.map((l) => l[0]), lines });
+const record = (lines, t = Date.now()) => JSON.stringify({ t, ids: lines.map((l) => l[0]), lines });
 
 /**
- * A localStorage double that can list its keys (as a browser's can) and can refuse a write the
- * way a full origin does. `refuse(key, value, map)` returning true throws QuotaExceededError.
+ * A localStorage double that can list its keys (as a browser's can), can refuse a write the way a
+ * full origin does, and can stop dead after a number of writes the way a crashed renderer does.
+ *
+ * `refuse(key, value, map)` returning true throws QuotaExceededError for that setItem.
+ * `crashAfter: n` lets n writes (setItem or removeItem) land, then throws on the next one and
+ * ignores every write after it: nothing the page runs after that point reaches the disk.
  */
-function makeStorage(initial, refuse = null) {
+function makeStorage(initial, { refuse = null, crashAfter = Infinity } = {}) {
 	const map = new Map(Object.entries(initial || {}));
+	let writes = 0, dead = false;
+	const write = (fn) => {
+		if (dead) return;
+		if (writes >= crashAfter) { dead = true; throw new Error('renderer crashed'); }
+		writes++;
+		fn();
+	};
 	const ls = {
 		get length() { return map.size; },
 		key: (i) => [...map.keys()][i] ?? null,
 		getItem: (k) => (map.has(k) ? map.get(k) : null),
-		setItem: (k, v) => {
+		setItem: (k, v) => write(() => {
 			if (refuse && refuse(k, String(v), map)) {
 				const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
 			}
 			map.set(k, String(v));
-		},
-		removeItem: (k) => { map.delete(k); }
+		}),
+		removeItem: (k) => write(() => { map.delete(k); })
 	};
 	return { map, ls, get cart() { return JSON.parse(map.get(CART_KEY) || 'null'); } };
 }
 
-/** A full origin: any write that would make the stored total larger is refused. */
-const noGrowth = (k, v, map) => {
-	const old = map.has(k) ? k.length + map.get(k).length : 0;
-	return k.length + v.length > old;
-};
-
 /**
- * Open the paid completion page for `ref` against `ls`.
+ * Open the completion page for `ref` against `ls`, answered `state`.
  *
- * `waits: 'run'`: the settle's short waits run (at 0 ms, so 51 orders take a moment, not seconds),
- * and `done` resolves once the page has answered and no short wait is pending.
- * `waits: 'hold'`: every short wait is held and never fires unless `release()` is called. This is a
- * page closed or frozen at its first wait. Its continuation never runs; `ready` resolves once the
- * page has answered (the receipt is on screen).
- *
- * `navigator` is given no `locks`: one Node event loop over one Map cannot model two browser tabs,
- * so the lock path is not what is measured here.
+ * `atReceipt` is the basket as it was on disk at the moment the page drew the paid receipt: the
+ * page cannot be closed any earlier than that, so whatever is not settled by then can be left
+ * unsettled by a visitor who closes the tab on seeing it.
  */
-function openPaidPage(ls, ref, { waits = 'run' } = {}) {
+async function openPage(ls, ref, state = 'paid') {
 	const html = completionBody(COMPLETE_COPY['en-US'], 'en-US', '/api/out?ref=' + ref, '/shop', GUILD, true, ref);
 	const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-	const el = () => ({ textContent: '', innerHTML: '' });
-	const nodes = { 'dc-shop-outcome': el(), 'dc-shop-heading': el() };
+	let atReceipt;
+	let body = '';
+	const outcome = {
+		textContent: '',
+		get innerHTML() { return body; },
+		set innerHTML(v) { body = String(v); if (atReceipt === undefined) atReceipt = ls.getItem(CART_KEY); }
+	};
+	const nodes = { 'dc-shop-outcome': outcome, 'dc-shop-heading': { textContent: '', innerHTML: '' } };
 	const document = { getElementById: (id) => nodes[id], createElement: () => ({ textContent: '', innerHTML: '' }), title: '' };
 	const events = [];
 	const window = { dispatchEvent: (e) => { events.push(e.type); return true; } };
-	const fetchImpl = async () => ({ ok: true, json: async () => ({ ok: true, state: 'paid', lines: [], total_minor: 0, currency: 'USD' }) });
-	let pending = 0;
-	const held = [];
-	const timer = (fn, ms) => {
-		if (!(ms < 1000)) return 0; // the 3 s pending re-check: never reached on a paid answer
-		if (waits === 'hold') { held.push(fn); return 0; }
-		pending++;
-		return setTimeout(() => { pending--; fn(); }, 0);
-	};
-	new Function('document', 'window', 'localStorage', 'fetch', 'CustomEvent', 'setTimeout', 'navigator', script)(
-		document, window, ls, fetchImpl, globalThis.CustomEvent, timer, {});
-	const answered = () => /\S/.test(nodes['dc-shop-heading'].textContent);
-	const until = async (cond) => {
-		let quiet = 0;
-		for (let i = 0; i < 2000 && quiet < 3; i++) {
-			await new Promise((r) => setImmediate(r));
-			quiet = cond() ? quiet + 1 : 0;
-		}
-		assert.ok(quiet >= 3, 'the completion page never finished');
-	};
-	return {
-		nodes, events,
-		ready: until(answered),
-		done: until(() => answered() && pending === 0),
-		release() { const fns = held.splice(0); waits = 'run'; for (const fn of fns) { pending++; setTimeout(() => { pending--; fn(); }, 0); } }
-	};
+	const fetchImpl = async () => ({ ok: true, json: async () => ({ ok: true, state, lines: [], total_minor: 0, currency: 'USD' }) });
+	new Function('document', 'window', 'localStorage', 'fetch', 'CustomEvent', 'setTimeout', script)(
+		document, window, ls, fetchImpl, globalThis.CustomEvent, () => 0);
+	for (let i = 0; i < 20 && !/\S/.test(nodes['dc-shop-heading'].textContent); i++) await new Promise((r) => setImmediate(r));
+	assert.match(nodes['dc-shop-heading'].textContent, /\S/, 'the completion page never answered');
+	return { nodes, events, atReceipt: JSON.parse(atReceipt || 'null') };
 }
-const settlePaid = async (store, ref) => { const p = openPaidPage(store.ls, ref); await p.done; return p; };
 
 // ── the coral, with the smallest DOM it accepts (same shim shape as cart-variant-collapse.test.mjs) ──
 function makeEl(tag) {
@@ -150,216 +135,222 @@ function makeEl(tag) {
 }
 const walk = (el, out = []) => { out.push(el); for (const c of el.children) walk(c, out); return out; };
 const byClass = (root, cls) => walk(root).filter((e) => String(e.className).split(/\s+/).includes(cls));
-const flush = () => new Promise((r) => setTimeout(r, 0));
 
 const CATALOG = [SOLD, HELD, NEW].map((vid, i) => ({
 	id: 'item-' + i, slug: 'item-' + i, title: 'Item ' + i, name: 'Item ' + i, variation_id: vid,
 	price_minor: 500, display_price: 5, currency: 'USD'
 }));
 
-/** Load the shop page in cart mode on `store`. Its checkout POST is recorded (and then refused). */
-function openShop(store) {
-	const posts = [];
-	const events = [];
+function coral(store) {
 	const document = { readyState: 'complete', head: makeEl('head'), body: makeEl('body'), createElement: (t) => makeEl(t), querySelectorAll: () => [], addEventListener() {} };
+	const posts = [];
 	const window = {
 		location: { href: 'https://shop.example/shop', origin: 'https://shop.example', pathname: '/shop' },
 		history: { replaceState() {} },
 		localStorage: store.ls,
-		dispatchEvent: (e) => { events.push(e.type); return true; }
+		dispatchEvent: () => true
 	};
 	const fetchImpl = async (url, init) => {
 		posts.push(JSON.parse(init.body));
 		return { ok: false, status: 500, json: async () => ({ error: 'not under test' }) };
 	};
-	const sb = new Function('document', 'window', 'crypto', 'fetch', 'CustomEvent', CORAL + '\nreturn { renderCart, readLabels, withVariantSummary };')(
+	const sb = new Function('document', 'window', 'crypto', 'fetch', 'CustomEvent', CORAL + '\nreturn { renderCart, readLabels, withVariantSummary, pruneSoldRecords };')(
 		document, window, globalThis.crypto, fetchImpl, globalThis.CustomEvent);
+	return { sb, posts };
+}
+
+/** Load the shop page in cart mode on `store` and press Checkout. Returns what the POST carried. */
+async function checkoutFromShop(store) {
+	const { sb, posts } = coral(store);
 	const root = makeEl('div');
 	sb.renderCart(root, CATALOG.map(sb.withVariantSummary), 'https://api.test', GUILD, sb.readLabels(root), false, '/shop', new Map());
-	const checkout = async () => {
-		const btns = byClass(root, 'dc-square-shop-checkout');
-		assert.equal(btns.length, 1, 'expected exactly one Checkout button');
-		for (const fn of btns[0]._listeners.click || []) await fn();
-		await flush();
-	};
-	const sent = () => posts.map((p) => p.items.map((l) => [l.variation_id, l.quantity]));
-	return { sb, root, posts, events, checkout, sent };
+	const btns = byClass(root, 'dc-square-shop-checkout');
+	assert.equal(btns.length, 1, 'expected exactly one Checkout button');
+	for (const fn of btns[0]._listeners.click || []) await fn();
+	await new Promise((r) => setTimeout(r, 0));
+	return posts.map((p) => p.items.map((l) => [l.variation_id, l.quantity]));
 }
 
-// ── finding 2: the page closed before its first wait ended ───────────────────────────────────
+// ── the receipt is never drawn over an unsettled basket ───────────────────────────────────────
 
-test('review finding 2: a completion page closed at its first wait — the shop does not load or charge the paid lines again', async () => {
+test('tile#84: the paid lines are off the basket before the receipt is drawn, so closing the tab on it loses nothing', async () => {
 	const ref = 'r-closed';
 	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 1]]) });
-	const page = openPaidPage(store.ls, ref, { waits: 'hold' });
-	await page.ready;
-	assert.match(page.nodes['dc-shop-heading'].textContent, /./, 'the receipt is on screen');
-	// The document is destroyed here: its held wait never fires and its continuation never runs.
-
-	const shop = openShop(store);
-	assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1]], 'the shop loaded the paid zine back into the basket');
-	await shop.checkout();
-	assert.deepEqual(shop.sent(), [[[SOLD, 1], [HELD, 1]]], 'the next checkout charged for the paid line again');
-	assert.equal(store.map.has(intentKey(ref)), false, 'the intent is applied once and gone');
-	assert.ok(shop.events.includes('dc-cart-changed'), 'the header badge is told the basket changed');
+	const page = await openPage(store.ls, ref);
+	assert.deepEqual(page.atReceipt, [[SOLD, 1], [HELD, 1]], 'the receipt was drawn over a basket that still held the paid zine');
+	assert.ok(page.events.includes('dc-cart-changed'));
+	// The tab is closed here. The shop (this coral is byte for byte the one from before tile#84, so
+	// this is also the "older coral on the same origin" case) checks out what is left.
+	assert.deepEqual(await checkoutFromShop(store), [[[SOLD, 1], [HELD, 1]]], 'the next checkout must not carry the paid zine');
 });
 
-test('tile#84 r2: the paid transition is on disk before the page yields for the first time', async () => {
-	const ref = 'r-transition';
+// ── the tombstone: a settled order stays settled ─────────────────────────────────────────────
+
+test('tile#84: reopening a settled receipt touches nothing, however much the visitor shopped since', async () => {
+	const ref = 'r-reopen';
 	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 1]]) });
-	const page = openPaidPage(store.ls, ref, { waits: 'hold' });
-	await page.ready;
-	const intent = JSON.parse(store.map.get(intentKey(ref)));
-	assert.equal(intent.s, GUILD, 'the intent names its store');
-	assert.deepEqual(intent.lines, [[SOLD, 1]], 'and carries the sold quantities');
-	assert.equal(store.map.get(FLAG_KEY), '1', 'the store flag is written with it');
-	assert.equal(store.map.has(soldKey(ref)), false, 'the record\'s content now lives in the intent');
-	assert.deepEqual(store.cart, [[SOLD, 2], [HELD, 1]], 'nothing comes off until the wait is over');
-	page.release();
-	await page.done;
-	assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1]]);
-	assert.equal(store.map.has(intentKey(ref)), false);
+	await openPage(store.ls, ref);
+	assert.ok(store.map.has(settledKey(ref)), 'the paid render leaves its tombstone');
+	assert.equal(store.map.has(soldKey(ref)), false, 'and consumes the record');
+	store.map.set(CART_KEY, JSON.stringify([[SOLD, 2], [HELD, 1], [NEW, 1]]));
+	const again = await openPage(store.ls, ref);
+	assert.deepEqual(store.cart, [[SOLD, 2], [HELD, 1], [NEW, 1]], 'nothing comes off a second time, and nothing else goes');
+	assert.equal(again.events.includes('dc-cart-changed'), false, 'a render that changed nothing announces nothing');
 });
 
-test('tile#84 r2: a shop tab already open checks nothing out until the paid lines are off, and the next press sends the rest', async () => {
-	const ref = 'r-open-tab';
-	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 2]]) });
-	const shop = openShop(store); // loaded while the order was still on the payment page
-	const page = openPaidPage(store.ls, ref, { waits: 'hold' });
-	await page.ready; // ... and then the completion page was closed mid-settle
-	await shop.checkout();
-	assert.deepEqual(shop.sent(), [], 'the first press must not send the paid zines to the till');
-	assert.deepEqual(store.cart, [[HELD, 1]]);
-	await shop.checkout();
-	assert.deepEqual(shop.sent(), [[[HELD, 1]]], 'the press after the redraw sends what the panel now shows');
-});
-
-test('tile#84 r2: the shop and a page still waiting in another tab take the paid lines off once', async () => {
-	const ref = 'r-race';
-	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 3], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 1]]) });
-	const page = openPaidPage(store.ls, ref, { waits: 'hold' });
-	await page.ready;
-	openShop(store); // applies the intent
-	assert.deepEqual(store.cart, [[SOLD, 2], [HELD, 1]]);
-	page.release(); // the waiting page wakes up and finds no intent
-	await page.done;
-	assert.deepEqual(store.cart, [[SOLD, 2], [HELD, 1]], 'one zine was paid for, so one comes off, not two');
-	assert.equal(page.events.includes('dc-cart-changed'), false);
-});
-
-// ── finding 3: storage refuses the settlement marker ─────────────────────────────────────────
-
-for (const [label, refuse] of [
-	['the review\'s model: only the settlement marker is refused', (k) => k === FLAG_KEY],
-	['a full origin: no write may grow storage', noGrowth]
-]) {
-	test(`review finding 3 (${label}): a reload neither clears what was added nor takes the paid line twice`, async () => {
-		const ref = 'r-quota';
-		const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 1]]) }, refuse);
-		await settlePaid(store, ref);
-		assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1]], 'the paid zine came off');
-
-		// The visitor shops on (written straight to the map: the space was freed elsewhere).
-		store.map.set(CART_KEY, JSON.stringify([[SOLD, 1], [HELD, 1], [NEW, 1]]));
-		await settlePaid(store, ref);
-		assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1], [NEW, 1]],
-			'a reload of the paid page must not clear the basket, nor take the paid zine a second time');
-	});
-}
-
-test('tile#84 r2: with storage full, the page settles in the same task and leaves a record that a reload reads as settled', async () => {
-	const ref = 'r-full';
-	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 1]]) }, noGrowth);
-	const page = openPaidPage(store.ls, ref, { waits: 'hold' }); // closed at once: nothing may be left for later
-	await page.ready;
-	assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1]], 'with no durable state possible, the page settles before it yields');
-	assert.deepEqual(JSON.parse(store.map.get(soldKey(ref))).ids, [], 'the record is shrunk to a settled marker');
-	assert.equal(store.map.has(intentKey(ref)), false);
-	assert.equal(store.map.has(FLAG_KEY), false);
-});
-
-test('tile#84 r2: an apply whose basket write is refused keeps the intent, and the next reader takes the line off once', () => {
-	const ref = 'r-refused-apply';
-	let refuseCart = true;
-	const store = makeStorage({
-		[CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]),
-		[intentKey(ref)]: JSON.stringify({ s: GUILD, t: 1, ids: [SOLD], lines: [[SOLD, 1]] })
-	}, (k) => refuseCart && k === CART_KEY);
-	assert.throws(() => template.applyPaidIntent(store.ls, CART_KEY, intentKey(ref)), /quota/);
-	assert.ok(store.map.has(intentKey(ref)), 'a refused basket write must not consume the intent');
-	assert.deepEqual(store.cart, [[SOLD, 2], [HELD, 1]]);
-	refuseCart = false;
-	assert.equal(template.applyPaidIntent(store.ls, CART_KEY, intentKey(ref)), true);
-	assert.equal(template.applyPaidIntent(store.ls, CART_KEY, intentKey(ref)), false, 'a second apply finds nothing');
-	assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1]]);
-});
-
-// ── finding 4: eviction and junk ─────────────────────────────────────────────────────────────
-
-test('review finding 4: an order settled 50 orders ago, reopened, does not clear the basket', async () => {
+test('review r1 finding 4: an order settled 50 orders ago, reopened, does not clear the basket', async () => {
 	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey('old')]: record([[SOLD, 1]]) });
-	await settlePaid(store, 'old');
+	await openPage(store.ls, 'old');
 	for (let i = 0; i < 50; i++) {
 		store.map.set(CART_KEY, JSON.stringify([[SOLD, 1], [HELD, 1]]));
 		store.map.set(soldKey('later-' + i), record([[SOLD, 1]]));
-		await settlePaid(store, 'later-' + i);
+		await openPage(store.ls, 'later-' + i);
 	}
 	store.map.set(CART_KEY, JSON.stringify([[NEW, 1]]));
-	await settlePaid(store, 'old');
+	await openPage(store.ls, 'old');
 	assert.deepEqual(store.cart, [[NEW, 1]], 'the old receipt cleared a basket it never had anything to do with');
 });
 
-test('review finding 4: junk written over the settlement marker after settling does not make an old receipt destructive', async () => {
+test('review r1 finding 4: junk written over a tombstone still marks the order settled', async () => {
 	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey('corrupt')]: record([[SOLD, 1]]) });
-	await settlePaid(store, 'corrupt');
-	store.map.set(FLAG_KEY, 'not JSON');
+	await openPage(store.ls, 'corrupt');
+	store.map.set(settledKey('corrupt'), 'not a time');
 	store.map.set(CART_KEY, JSON.stringify([[NEW, 1]]));
-	await settlePaid(store, 'corrupt');
-	assert.deepEqual(store.cart, [[NEW, 1]], 'a damaged marker read as "never settled" and cleared the basket');
+	await openPage(store.ls, 'corrupt');
+	assert.deepEqual(store.cart, [[NEW, 1]]);
 });
 
-test('tile#84 r2: with no record and no flag, the first paid page still clears the whole key once (an older coral), and writes the flag', async () => {
-	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 1], [HELD, 2]]) });
-	await settlePaid(store, 'r-legacy');
-	assert.equal(store.map.has(CART_KEY), false, 'the pre-0.11.16 fallback is kept for a shopper whose coral wrote no record');
-	assert.equal(store.map.get(FLAG_KEY), '1');
+test('review r2 finding 5: the tombstone outlives the coral\'s week-old sweep; the receipt reopened later touches nothing', async () => {
+	const ref = 'r-swept';
+	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 1]]) });
+	await openPage(store.ls, ref);
+	// An unfinished attempt from the same week, so the sweep has something it must remove.
+	store.map.set(soldKey('r-abandoned'), record([[HELD, 1]]));
+	coral(store).sb.pruneSoldRecords(Date.now() + 8 * DAY);
+	assert.equal(store.map.has(soldKey('r-abandoned')), false, 'control: the sweep ran and removed a week-old record');
+	assert.ok(store.map.has(settledKey(ref)), 'the sweep must not touch a tombstone');
 	store.map.set(CART_KEY, JSON.stringify([[NEW, 1]]));
-	await settlePaid(store, 'r-legacy');
-	await settlePaid(store, 'r-another-legacy');
-	assert.deepEqual(store.cart, [[NEW, 1]], 'once the store has a flag, no paid page clears the whole key again');
+	await openPage(store.ls, ref);
+	assert.deepEqual(store.cart, [[NEW, 1]], 'the reopened receipt cleared a basket filled after its order');
 });
 
-// ── the coral's side ─────────────────────────────────────────────────────────────────────────
-
-test('tile#84 r2: the shop applies only its own store\'s intents, and leaves one it cannot read', () => {
+test('tile#84: a tombstone names its store and its order; another store, or another order, is not settled by it', async () => {
 	const store = makeStorage({
 		[CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]),
-		[intentKey('other-store')]: JSON.stringify({ s: 'g_other', t: 1, ids: [SOLD], lines: [[SOLD, 1]] }),
-		[intentKey('damaged')]: '{not json',
-		[intentKey('mine')]: JSON.stringify({ s: GUILD, t: 1, ids: [HELD], lines: [[HELD, 1]] })
+		[settledKey('r-here', 'g_other')]: '1',
+		[settledKey('r-there')]: '1',
+		[soldKey('r-here')]: record([[SOLD, 1]])
 	});
-	openShop(store);
-	assert.deepEqual(store.cart, [[SOLD, 2]], 'only this store\'s intent applies');
-	assert.ok(store.map.has(intentKey('other-store')), 'another store\'s intent is that store\'s to apply');
-	assert.ok(store.map.has(intentKey('damaged')), 'an intent naming no store is left for its own page');
-	assert.equal(store.map.has(intentKey('mine')), false);
+	await openPage(store.ls, 'r-here');
+	assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1]], 'only this store\'s tombstone for this order counts');
 });
 
-test('tile#84 r2: the shop\'s copies of cartAfterOrder and applyPaidIntent are the completion page\'s, byte for byte', () => {
-	assert.ok(CORAL.includes('\n' + template.applyPaidIntent.toString() + '\n'),
-		'square-shop.js must carry applyPaidIntent exactly as shop-function-template.js ships it');
+test('tile#84: pending, canceled, refused and unknown answers write no tombstone; the paid one after them settles once', async () => {
+	const ref = 'r-pending-then-paid';
+	const cart = JSON.stringify([[SOLD, 1], [HELD, 1]]);
+	const store = makeStorage({ [CART_KEY]: cart, [soldKey(ref)]: record([[SOLD, 1]]) });
+	for (const state of ['pending', 'canceled', 'unknown', 'refunded']) {
+		await openPage(store.ls, ref, state);
+		assert.equal(store.map.get(CART_KEY), cart, `${state}: an order that has not gone through must not cost a row`);
+		assert.ok(store.map.has(soldKey(ref)), `${state}: the record must survive until the order is paid`);
+		assert.equal(store.map.has(settledKey(ref)), false, `${state}: nothing may be marked settled`);
+	}
+	await openPage(store.ls, ref);
+	assert.deepEqual(store.cart, [[HELD, 1]]);
+	assert.ok(store.map.has(settledKey(ref)));
+});
 
-	// cartAfterOrder: byte for byte except its one quantity-read line. The template inlines the read
-	// (its function ships as text into the completion page and may name nothing outside itself); the
-	// coral uses its own pinned cartRowQty mirror, because cart-badge-count.test.mjs allows one copy
-	// of that read per file. The inline read must be cartRowQty's own expression, so for an array row
-	// (the only kind cartAfterOrder passes it) the two lines are the same function.
-	const src = template.cartAfterOrder.toString();
-	const inline = /\tconst rowQty = function \(e\) \{ (.*) \};\n/.exec(src);
-	assert.ok(inline, 'the template\'s cartAfterOrder has no inline rowQty line to compare');
-	assert.ok(String(cartRowQty).includes('if (!Array.isArray(e)) return 0; ' + inline[1] + ' }'),
-		'the template\'s inline row quantity is not cartRowQty\'s expression');
-	const coralCopy = src.replace(inline[0], '\tconst rowQty = cartRowQty;\n');
-	assert.ok(CORAL.includes('\n' + coralCopy + '\n'),
-		'square-shop.js must carry cartAfterOrder as shop-function-template.js ships it, with only its rowQty line changed');
+// ── an order with no sold record: exactly as before tile#84, once ─────────────────────────────
+
+test('review r2 finding 4: a later paid order with no sold record clears the basket as before tile#84, after an earlier order settled', async () => {
+	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey('first')]: record([[SOLD, 1]]) });
+	await openPage(store.ls, 'first');
+	// The next checkout's record was refused (or an older coral wrote none); that order is paid.
+	store.map.set(CART_KEY, JSON.stringify([[SOLD, 1]]));
+	await openPage(store.ls, 'second-no-record');
+	assert.equal(store.map.has(CART_KEY), false, 'the pre-0.11.16 whole-key clear: the paid line must not stay behind to be charged again');
+	assert.deepEqual(await checkoutFromShop(store), [], 'nothing is left to send to the till');
+	// ... and only once: what the visitor adds next survives a reload of that receipt.
+	store.map.set(CART_KEY, JSON.stringify([[NEW, 1]]));
+	await openPage(store.ls, 'second-no-record');
+	assert.deepEqual(store.cart, [[NEW, 1]]);
+});
+
+// ── a stop between any two writes ───────────────────────────────────────────────────────────
+
+for (const [label, initial, writes, expected] of [
+	// writes: 1 tombstone, 2 basket, 3 record. `expected` is the basket after a reload with NEW added.
+	['with a sold record', { [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey('r-crash')]: record([[SOLD, 1]]) }, 3,
+		{ 0: [[SOLD, 1], [HELD, 1], [NEW, 1]], 1: [[SOLD, 2], [HELD, 1], [NEW, 1]], 2: [[SOLD, 1], [HELD, 1], [NEW, 1]], 3: [[SOLD, 1], [HELD, 1], [NEW, 1]] }],
+	// writes: 1 tombstone, 2 whole-key clear. (No record to remove.)
+	['with no sold record', { [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]) }, 2,
+		// 0: nothing was written, so the reload is the order's first render and takes the whole-key
+		// clear, exactly as it would have the first time (the order was never settled).
+		{ 0: null, 1: [[SOLD, 2], [HELD, 1], [NEW, 1]], 2: [[NEW, 1]] }]
+]) {
+	for (let n = 0; n <= writes; n++) {
+		test(`tile#84 (${label}): a renderer that stops after ${n} of the settle's ${writes} writes never takes lines twice and never clears a settled order's later basket`, async () => {
+			const ref = 'r-crash';
+			const store = makeStorage(initial, { crashAfter: n });
+			await openPage(store.ls, ref);
+			// The visitor comes back and adds a line, then reopens the receipt (a fresh document).
+			const after = store.cart;
+			store.map.set(CART_KEY, JSON.stringify([...(after || []), [NEW, 1]]));
+			const fresh = makeStorage(Object.fromEntries(store.map));
+			await openPage(fresh.ls, ref);
+			assert.deepEqual(fresh.cart, expected[n]);
+			assert.ok(fresh.map.has(settledKey(ref)), 'after the reload the order is marked settled');
+		});
+	}
+}
+
+// ── refused writes: the behaviour from before tile#84, pinned ─────────────────────────────────
+
+test('refused write: the tombstone is refused — the order settles as before tile#84, once; a reload takes the old whole-key clear', async () => {
+	const ref = 'r-no-room-for-tombstone';
+	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 1]]) },
+		{ refuse: (k) => k === settledKey(ref) });
+	const page = await openPage(store.ls, ref);
+	assert.deepEqual(page.atReceipt, [[SOLD, 1], [HELD, 1]], 'the paid zine comes off, in the same task');
+	assert.equal(store.map.has(soldKey(ref)), false, 'the record is consumed, as before');
+	// The listed follow-up case: with neither record nor tombstone, a reload is the pre-tile#84 one.
+	store.map.set(CART_KEY, JSON.stringify([[SOLD, 1], [HELD, 1], [NEW, 1]]));
+	await openPage(store.ls, ref);
+	assert.equal(store.map.has(CART_KEY), false, 'pinned: storage with no room for the tombstone keeps the pre-tile#84 reload');
+});
+
+test('refused write: the basket write is refused — nothing comes off, the record and no tombstone stay, and the next render settles once', async () => {
+	const ref = 'r-no-room-for-basket';
+	let refuseBasket = true;
+	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey(ref)]: record([[SOLD, 1]]) },
+		{ refuse: (k) => refuseBasket && k === CART_KEY });
+	const page = await openPage(store.ls, ref);
+	assert.match(page.nodes['dc-shop-heading'].textContent, /\S/, 'the receipt is still shown');
+	assert.deepEqual(store.cart, [[SOLD, 2], [HELD, 1]], 'nothing came off');
+	assert.ok(store.map.has(soldKey(ref)), 'the record is kept for the next render');
+	assert.equal(store.map.has(settledKey(ref)), false, 'the tombstone is taken back: a refused basket write is not a settlement');
+	assert.equal(page.events.includes('dc-cart-changed'), false);
+	refuseBasket = false;
+	await openPage(store.ls, ref);
+	await openPage(store.ls, ref);
+	assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1]], 'one zine was paid for, so one comes off, not two');
+});
+
+// ── the loop that never retried ─────────────────────────────────────────────────────────────
+
+test('tile#84: the settle reads the basket once and writes it once (0.11.19\'s re-read loop could never see another tab\'s write)', () => {
+	// A browser applies another tab's localStorage write to this tab only between tasks, and the
+	// 0.11.19 loop's reads all ran in one task: its second read always equalled its first. The loop
+	// is gone rather than kept as dead code that looks like protection. This counts the reads, so a
+	// re-read put back in the same task fails here.
+	const store = makeStorage({ [CART_KEY]: JSON.stringify([[SOLD, 2], [HELD, 1]]), [soldKey('r-once')]: record([[SOLD, 1]]) });
+	const get = store.ls.getItem;
+	let reads = 0, writes = 0;
+	store.ls.getItem = (k) => { if (k === CART_KEY) reads++; return get(k); };
+	const set = store.ls.setItem;
+	store.ls.setItem = (k, v) => { if (k === CART_KEY) writes++; return set(k, v); };
+	settleCartAfterOrder(store.ls, CART_KEY, soldKey('r-once'), settledKey('r-once'));
+	assert.equal(reads, 1, 'the basket is read once');
+	assert.equal(writes, 1, 'and written once');
+	assert.deepEqual(store.cart, [[SOLD, 1], [HELD, 1]]);
 });
