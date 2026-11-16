@@ -383,6 +383,12 @@ export function makeWindow(html, opts = {}) {
       setItem: (k, v) => { if (opts.storageThrows) throw new Error('SecurityError'); store.set(k, String(v)); },
       removeItem: (k) => { store.delete(k); },
     },
+    // only a page given one has a sessionStorage (`opts.session`, a Map the test keeps: it outlives the window, as a tab's does a load)
+    ...(opts.session ? { sessionStorage: {
+      getItem: (k) => (opts.session.has(k) ? opts.session.get(k) : null),
+      setItem: (k, v) => { opts.session.set(k, String(v)); },
+      removeItem: (k) => { opts.session.delete(k); },
+    } } : {}),
     history: { scrollRestoration: 'auto', pushed: 0, pushState() { this.pushed++; }, back() { this.pushed--; } },
     performance: { now: () => now },
     matchMedia: (q) => ({ matches: /reduced-motion/.test(q) ? !!opts.reducedMotion : false, addEventListener() {}, removeEventListener() {} }),

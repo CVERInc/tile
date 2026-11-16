@@ -21,7 +21,7 @@ import { resolveChannels, resolveChannelsOf } from '../yt-channels.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
-import { ON_DEMAND_TILES, scanCard, headModel, blankAbove, allAssets, deckFront, windowsOf, windowOf, revisionOf } from './size-tier.mjs';
+import { ON_DEMAND_TILES, scanCard, headModel, blankAbove, allAssets, deckFront, windowsOf, windowOf, windowPicturesText, revisionOf } from './size-tier.mjs';
 import { picturePlan, pictureStrategy, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
 import { cachedPicture, keepPicture, keepPictures, prefillCalls } from './picture-cache.mjs';
 
@@ -455,6 +455,13 @@ function renderSource(src, ctx) {
   return withDeck(flat, src.deckMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: src.fm('lang') || ctx.chromeLang || '' });
 }
 
+// a window's share tags: the Cards' own, with the canonical moved to the window's address (none where the page has no canonical at all)
+const windowCanonical = (share, windowUrl) => (windowUrl && share.canonical ? { ...share, canonical: windowUrl } : share);
+/** window n's own address under the Cards' canonical one: `…?w=<n>`, no revision ('' when that address is no URL) */
+const windowAddress = (cardUrl, n) => {
+  try { const u = new URL(cardUrl); u.search = `?w=${n}`; u.hash = ''; return u.href; } catch { return ''; }
+};
+
 function renderFlat(src, ctx) {
   const { model, fm, name } = src;
   const head = src.head || model;
@@ -479,7 +486,9 @@ function renderFlat(src, ctx) {
     // og:* / twitter:* / description / canonical — see card-share.mjs. Same rule: none without cardUrl.
     // reef#2725 r3 — the address a preview claims is the CANONICAL one (ctx.canonicalUrl, which the
     // Worker sets from cardUrlFor and the switch), not whichever host answered. Absent = cardUrl.
-    shareTags: shareTags(head, { name, cardUrl: ctx.canonicalUrl || ctx.cardUrl || '' }),
+    // …and for one window of Cards served in windows (the page exit's `ctx.windowUrl`, CALLER-supplied,
+    // windows after the first only), the canonical is that window's own address; everything else is the Cards'.
+    shareTags: windowCanonical(shareTags(head, { name, cardUrl: ctx.canonicalUrl || ctx.cardUrl || '' }), ctx.windowUrl),
     since: fm('since'),
     accent: fm('accent'),
     theme: fm('theme'),                    // `theme: light|dark` pins it; absent follows the reader
@@ -1447,6 +1456,7 @@ const router = {
         src: { model: windowOf(cardMd, idx, plan, n - 1, { front }), fm: (k) => frontmatter(cardMd, k), name: cardName(cardMd, resolved.handle), deckMd: front, head: head() },
         pager: { rev, prev: n > 1 ? at(n - 1) : null, next: n < plan.count ? at(n + 1) : null },
         last: n === plan.count,
+        n,
       };
     }
     let ytCalls = 0;
@@ -1456,6 +1466,13 @@ const router = {
     // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
     // address under the switch (reef.cards' root card = the bare origin), whatever host answered.
     const canonicalUrl = vanityHandle ? resolved.cardUrl : cardUrlFor(resolved.handle, {}, env);
+    // Cards served in windows: every window after the first holds tiles no other page holds, so its
+    // canonical is its own address — the Cards' canonical address with `?w=<n>` and no revision. That
+    // address always answers with window n of the current revision (above), so it is the one a search
+    // engine keeps; the revisioned address (`&r=…`, what the pager links to so one visit reads one
+    // revision) names it as canonical. The first window is the Cards' own address, bare. og:url stays
+    // the Cards' address in every window: a shared window previews as the Cards it belongs to.
+    const windowUrl = win && win.n > 1 ? windowAddress(canonicalUrl, win.n) : '';
     // tile#298 — a card that names its language speaks it, chrome and all, to everyone (unchanged). One
     // that names none gets its CHROME in the visitor's language, and the response varies by it.
     const chromeLang = frontmatter(cardMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
@@ -1466,11 +1483,13 @@ const router = {
     // tile#339 — how the pictures travel, by the local switch (asset-urls.mjs; 'inline' unless set): hashed
     // here, from the body already read (no store read), because the render is synchronous. 'inline' hashes
     // nothing and hands the renderer nothing, which is the page as it was.
-    // (a window's plan is made from the pictures the whole file holds, by the same rule: the switch is off everywhere)
+    // A window's plan is made from the text of that window alone (size-tier.mjs windowPicturesText: its tiles,
+    // its backs, the frontmatter's backdrop) and the pictures on demand, so only the pictures this window
+    // names are looked up, decoded and hashed: the cost is the window's, whatever the rest of the file holds.
     const plan = pictures === 'inline' ? {}
-      : win ? await picturePlan(cardMd, allAssets(cardMd, index()), assetBase(resolved.handle, !!vanityHandle), pictures)
+      : win ? await picturePlan(windowPicturesText(win.src.model, frontmatter(cardMd, 'backdrop')), win.src.model.assets, assetBase(resolved.handle, !!vanityHandle), pictures)
         : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
-    const pageCtx = { ...resolved, canonicalUrl, videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) };
+    const pageCtx = { ...resolved, canonicalUrl, ...(windowUrl ? { windowUrl } : {}), videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) };
     const page = win ? renderSource(win.src, { ...pageCtx, pager: win.pager, ...(win.last ? {} : { poolTile: false }) }) : renderCardHTML(cardMd, pageCtx);
     // tile#339 step 1: what this render decoded and hashed for the plan is kept for the picture requests
     // the page is about to cause (picture-cache.mjs keepPictures; one cache read when all are kept already):

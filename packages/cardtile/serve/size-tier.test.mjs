@@ -29,6 +29,7 @@ import { createHash } from 'node:crypto';
 
 const LINE = 5000;   // ON_DEMAND_TILES, written out: the r1 module exported it too, and this file must load against it
 const DECK_JS = readFileSync(new URL('../w3/deck.js', import.meta.url), 'utf8');
+const DECK_CSS = readFileSync(new URL('../w3/deck.css', import.meta.url), 'utf8');
 const OWN = 'links.creator-example.test';   // a made-up vanity host: the one host a Card is indexable on in every switch position
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
 const PNG2 = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR42mP8z8Dwn4GBgYEJAA0EAf/2t0VtAAAAAElFTkSuQmCC';
@@ -92,8 +93,8 @@ const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const nextOf = (html) => { const m = /<a rel="next" href="([^"]+)"/.exec(html); return m ? unAmp(m[1]) : null; };
 const prevOf = (html) => { const m = /<a rel="prev" href="([^"]+)"/.exec(html); return m ? unAmp(m[1]) : null; };
 const revOf = (html) => /<html[^>]* data-cardtile-rev="([^"]*)"/.exec(html)?.[1] ?? null;
-/** a page without what only a window has: the revision on its root, the two <link>s in its head, the pager after its card */
-const unwindowed = (html) => html.replace(/ data-cardtile-rev="[^"]*"/, '').replace(/<link rel="(prev|next)" href="[^"]*">/g, '').replace(/<nav class="st-pager">[\s\S]*?<\/nav>/, '');
+/** a page without what only a window has: the revision on its root, its own canonical address (`?w=<n>`), the two <link>s in its head, the pager after its card */
+const unwindowed = (html) => html.replace(/ data-cardtile-rev="[^"]*"/, '').replace(/(<link rel="canonical" href="[^"?]*?)\/?\?w=\d+"/, '$1"').replace(/<link rel="(prev|next)" href="[^"]*">/g, '').replace(/<nav class="st-pager">[\s\S]*?<\/nav>/, '');
 
 /** the face tiles of a rendered page, in order, as markup; the backs' panels by id */
 function partsOf(html) {
@@ -384,22 +385,24 @@ test('the platform\'s closing reef.cards tile is drawn once, in the last window;
 const flush = async (k = 60) => { for (let i = 0; i < k; i++) await new Promise((r) => setImmediate(r)); };
 const until = async (cond, ms = 10000) => { const end = Date.now() + ms; while (!cond() && Date.now() < end) await new Promise((r) => setTimeout(r, 5)); };
 /** the page the worker serves, then deck.js over it, with the browser's fetch answered by the same worker (redirects followed) */
-async function openDeck(env, { url = `https://${OWN}/`, storage, rectOf } = {}) {
+async function openDeck(env, { url = `https://${OWN}/`, storage, rectOf, session, via } = {}) {
   const html = await (await ask(env, url)).text();
-  const win = makeWindow(html, { scripts: true, url, storage });
+  const win = makeWindow(html, { scripts: true, url, storage, session });
   const doc = win.document;
   const errors = [], warned = [];
   win.console = { ...console, error: (...a) => errors.push(a.map(String).join(' ')), warn: (...a) => warned.push(a.map(String).join(' ')) };
   doc.scrollHeightOf = () => win.innerHeight * 10;
   doc.rectOf = rectOf || (() => ({ top: 0, left: 0, width: 342, height: 480, bottom: 480, right: 342 }));
   const asked = [];
-  win.fetch = async (u) => {
+  // `via(u, real)`: a test's own network between the page and the worker (a failure, an answer that never comes)
+  const real = async (u) => {
     let to = new URL(u, url);
     asked.push(to.pathname + to.search);
     let r = await ask(env, to.href);
     for (let k = 0; k < 5 && (r.status === 301 || r.status === 302); k++) { to = new URL(r.headers.get('location'), to); r = await ask(env, to.href); }
     return { ok: r.ok, status: r.status, text: () => r.text() };
   };
+  win.fetch = via ? (u) => via(u, real) : real;
   win.run(DECK_JS, 'deck.js');
   win.tick(3000);
   return { win, doc, errors, warned, asked, html };
@@ -467,7 +470,211 @@ test('deck.js takes no window of another revision: the Cards changed after the p
   assert.ok(warned.some((w) => /changed since this page was served/.test(w)), warned.join('\n'));
   win.__deckJump(999); win.tick(100); await flush();
   assert.equal(asked.length, 1, 'it asked again');
+  // this page has no sessionStorage, so it is not loaded again: the pager is drawn in the pile, and its link is a plain one
+  assert.deepEqual(win.nav.assigns, [], 'the page navigated with nowhere to keep the visitor\'s place');
+  assert.ok(doc.documentElement.hasAttribute('data-deck-pager'), 'the visitor in a pile has no visible way on');
+  assert.match(DECK_CSS, /html\.deck\[data-deck-pager\] main > \.st-pager\{display:flex;position:fixed/, 'deck.css does not draw the pager in a pile');
+  const link = doc.querySelector('main > .st-pager a[rel="next"]');
+  assert.equal(link.dispatchEvent(new win.Event('click', { bubbles: true, cancelable: true })), true, 'the link was taken over: after a changed revision it must navigate');
+  assert.equal((await ask(env, `https://${OWN}${next}`)).status, 302, 'CONTROL: the link is sent on to the current revision');
   assert.deepEqual(errors, []);
+});
+
+const LONG = (suffix = '') => ['---', 'title: Long', 'views: stack list wall', '---', '', '## grid', '', ...Array.from({ length: 6000 }, (_, i) => T(`n${i}${suffix}`)), ''].join('\n');
+const topText = (doc) => doc.querySelector('.deck-stack > .deck-card.is-top .deck-front')?.textContent.trim();
+
+test('deck.js, stack: the Cards change mid-read — the page loads again at the window being read, on the tile that was up, and reads on', async () => {
+  for (const [name, readTo, want] of [['in the first window', 990, { w: 1, i: 990 }], ['in the second window', 1985, { w: 2, i: 985 }]]) {
+    const env = envOf(LONG());
+    const session = new Map();
+    const { win, doc, errors, asked } = await openDeck(env, { storage: { 'reef-card-layout': 'deck' }, session });
+    const old = doc.documentElement.getAttribute('data-cardtile-rev');
+    if (readTo > 1000) { win.__deckJump(990); win.tick(100); await until(() => win.__deckCount() > 1000); win.tick(100); assert.equal(win.__deckCount(), 2000, `CONTROL ${name}: the second window joined`); }
+    env._kv.set(cardKey('maple', '0'), LONG('!'));
+    const now = revOf(await (await ask(env, `https://${OWN}/`)).text());
+    assert.ok(now && now !== old, 'CONTROL: the edit is another revision');
+    const before = asked.length;
+    win.__deckJump(readTo); win.tick(100); await until(() => win.nav.assigns.length > 0); win.tick(100);
+    assert.equal(asked.length, before + 1, `CONTROL ${name}: the next window was asked for`);
+    assert.deepEqual(win.nav.assigns, [`/?w=${want.w}&r=${now}`], `${name}: the page did not load again at the window being read, in the current revision`);
+    assert.equal(win.__deckCount(), readTo > 1000 ? 2000 : 1000, `${name}: a window of another revision joined the pile`);
+    assert.deepEqual(JSON.parse(session.get('reef-card-window')), { p: '/', rev: now, w: want.w, i: want.i });
+    // the load it asked for: the same tab (its sessionStorage), the address it navigated to
+    const again = await openDeck(env, { url: `https://${OWN}${win.nav.assigns[0]}`, storage: { 'reef-card-layout': 'deck' }, session });
+    assert.equal(again.doc.documentElement.getAttribute('data-cardtile-rev'), now);
+    assert.equal(topText(again.doc), `n${readTo}!`, `${name}: the pile did not open on the tile the visitor was reading`);
+    assert.equal(session.size, 0, 'the place was kept after it was used');
+    assert.ok(!again.doc.documentElement.hasAttribute('data-deck-pager'));
+    // …and reading on fetches the next window of the new revision
+    const n = again.win.__deckCount();
+    again.win.__deckJump(n - 5); again.win.tick(100); await until(() => again.win.__deckCount() > n); again.win.tick(100);
+    assert.equal(again.win.__deckCount(), n + 1000, `${name}: after the reload the next window did not join`);
+    assert.deepEqual(again.asked, [`/?w=${want.w + 1}&r=${now}`]);
+    assert.deepEqual([...errors, ...again.errors], []);
+  }
+});
+
+test('deck.js: a reload that comes back in another revision is not repeated — the pager is drawn in the pile instead', async () => {
+  const env = envOf(LONG());
+  // the tab was just sent to a revision this page is not (a cached page, a store that has not caught up)
+  const session = new Map([['reef-card-window', JSON.stringify({ p: '/', rev: 'ffffffffffffffff', w: 1, i: 990 })]]);
+  const { win, doc, errors, asked } = await openDeck(env, { storage: { 'reef-card-layout': 'deck' }, session });
+  assert.equal(session.size, 0);
+  assert.equal(topText(doc), 'n0', 'a place kept for another revision was used');
+  env._kv.set(cardKey('maple', '0'), LONG('!'));
+  win.__deckJump(990); win.tick(100); await until(() => doc.documentElement.hasAttribute('data-deck-pager')); win.tick(100);
+  assert.equal(asked.length, 1, 'CONTROL: the next window was asked for');
+  assert.deepEqual(win.nav.assigns, [], 'the page loaded itself again a second time');
+  assert.ok(doc.documentElement.hasAttribute('data-deck-pager'), 'no visible way on');
+  assert.equal(session.size, 0);
+  assert.deepEqual(errors, []);
+});
+
+test('deck.js: a window that fails to arrive is asked for again, and meanwhile the pager is drawn in the pile', async () => {
+  const env = envOf(LONG());
+  let mode = 'down';
+  const hung = [];
+  const calls = [];
+  const via = (u, real) => { calls.push(u);
+    return mode === 'down' ? Promise.reject(new TypeError('Failed to fetch')) : mode === 'hang' ? new Promise((r) => hung.push(r)) : mode === '503' ? Promise.resolve({ ok: false, status: 503, text: async () => '' }) : real(u); };
+  const { win, doc, errors, warned } = await openDeck(env, { storage: { 'reef-card-layout': 'deck' }, via });
+  const pagerOn = () => doc.documentElement.hasAttribute('data-deck-pager');
+  assert.ok(!pagerOn(), 'CONTROL: the pager is not drawn in a pile that has asked for nothing');
+  // the network is down
+  win.__deckJump(990); win.tick(100); await until(() => pagerOn());
+  assert.equal(calls.length, 1);
+  assert.ok(pagerOn(), 'the fetch failed and the visitor in a pile has no visible way on');
+  assert.ok(warned.some((w) => /did not arrive/.test(w)));
+  // moving on inside the wait does not ask again; the wait over (1 s), it asks by itself
+  win.__deckJump(992); win.tick(100); await flush();
+  assert.equal(calls.length, 1, 'it asked again at once: a failing network would be asked on every card');
+  mode = '503';
+  win.tick(1000); await until(() => warned.length >= 2);
+  assert.equal(calls.length, 2, 'the failed window was not asked for again');
+  assert.ok(pagerOn());
+  // the pager's link, pressed: asked for now, on this page (the press is not a navigation)
+  mode = 'hang';
+  const link = doc.querySelector('main > .st-pager a[rel="next"]');
+  assert.equal(link.dispatchEvent(new win.Event('click', { bubbles: true, cancelable: true })), false, 'the press navigated away from what the visitor has read');
+  await flush();
+  assert.equal(calls.length, 3, 'the press did not ask for the window');
+  // …an answer that never comes is a failure after 20 s, not a request left open for ever
+  win.tick(19000); await flush();
+  assert.equal(warned.length, 2, 'CONTROL: 19 s in, still waiting');
+  win.tick(1000); await flush();
+  assert.equal(warned.length, 3, 'a request with no answer was never given up');
+  // the network is back: the next ask (by itself, 4 s after the third failure) brings the window, and the pager goes
+  mode = 'up';
+  win.tick(4000); await until(() => win.__deckCount() > 1000); win.tick(100);
+  assert.equal(calls.length, 4);
+  assert.equal(win.__deckCount(), 2000, 'the window did not join once the network was back');
+  assert.ok(!pagerOn(), 'the pager stayed drawn in the pile after the window joined');
+  assert.equal(topText(doc), 'n992', 'the visitor was moved');
+  // the answer that came too late is not a second copy of the window
+  const late = await (await ask(env, `https://${OWN}/?w=2`)).text();
+  for (const r of hung) r({ ok: true, status: 200, text: async () => late });
+  await flush(); win.tick(100);
+  assert.equal(win.__deckCount(), 2000, 'a late answer joined the pile');
+  assert.deepEqual(errors, []);
+});
+
+test('deck.js, wall: Cards that changed mid-read are not loaded again under the reader — the pager, already drawn there, is the way on', async () => {
+  const wall = (suffix) => LONG(suffix).replace('views: stack list wall', 'view: wall');
+  const env = envOf(wall(''));
+  let pagerTop = 10000;
+  const rectOf = (el) => (el.classList && el.classList.contains('st-pager') ? { top: pagerTop, bottom: pagerTop + 20, left: 0, right: 0, width: 0, height: 20 } : { top: 0, left: 0, width: 342, height: 480 });
+  const { win, doc, errors, asked } = await openDeck(env, { rectOf, session: new Map() });
+  env._kv.set(cardKey('maple', '0'), wall('!'));
+  pagerTop = win.innerHeight;
+  win.dispatchEvent(new win.Event('scroll')); await until(() => doc.documentElement.hasAttribute('data-deck-pager'));
+  assert.equal(asked.length, 1);
+  assert.ok(doc.documentElement.hasAttribute('data-deck-pager'), 'a reader who goes from this wall to a pile has no visible way on');
+  assert.deepEqual(win.nav.assigns, []);
+  win.dispatchEvent(new win.Event('scroll')); await flush();
+  win.__deckView('stack'); win.tick(100); await flush();
+  assert.deepEqual(win.nav.assigns, [], 'entering a pile loaded the page again');
+  assert.equal(asked.length, 1, 'it asked again for a revision it cannot take');
+  assert.ok(doc.querySelector('main > .st-pager a[rel="next"]'));
+  assert.deepEqual(errors, []);
+});
+
+// ── a window's own address, and its own pictures ─────────────────────────────────────────────────
+const canonicalOf = (html) => /<link rel="canonical" href="([^"]*)">/.exec(html)?.[1] ?? null;
+const ogUrlOf = (html) => /<meta property="og:url" content="([^"]*)">/.exec(html)?.[1] ?? null;
+
+test('each window is canonical at its own address: the first at the bare one, the n-th at ?w=<n> with no revision', async () => {
+  const md = LONG();
+  const env = envOf(md);
+  const windows = await walk(env, `https://${OWN}/`);
+  assert.equal(windows.length, 6, 'CONTROL: six windows');
+  const rev = revOf(windows[0].html);
+  assert.deepEqual(windows.map((w) => unAmp(canonicalOf(w.html))), [`https://${OWN}`, ...[2, 3, 4, 5, 6].map((n) => `https://${OWN}/?w=${n}`)]);
+  // the canonical address answers 200 with that window of the current revision, and names itself
+  for (const n of [2, 6]) {
+    const r = await ask(env, `https://${OWN}/?w=${n}`);
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.equal(unAmp(canonicalOf(html)), `https://${OWN}/?w=${n}`);
+    assert.equal(revOf(html), rev);
+    assert.ok(html.includes(`<p>n${(n - 1) * 1000}</p>`), `?w=${n} does not hold its own tiles`);
+  }
+  // prev/next stay, revisioned; og:url is the Cards' address in every window
+  assert.ok(headOf(windows[1].html).includes(`<link rel="prev" href="/"><link rel="next" href="/?w=3&amp;r=${rev}">`), 'the second window\'s prev/next');
+  for (const w of windows) assert.equal(ogUrlOf(w.html), `https://${OWN}`);
+  // the first window under its other names is still the bare address
+  for (const q of ['?w=1', `?w=1&r=${rev}`]) assert.equal(canonicalOf(await (await ask(env, `https://${OWN}/${q}`)).text()), `https://${OWN}`, q);
+  // on the shared host: the handle's canonical address, plus ?w=<n>
+  const sharedFirst = await (await fetchOf(md, { url: 'https://card.feelreef.com/maple' })).text();
+  const shared = await (await fetchOf(md, { url: 'https://card.feelreef.com/maple?w=3' })).text();
+  assert.ok(canonicalOf(sharedFirst) && !/[?&]w=/.test(canonicalOf(sharedFirst)));
+  assert.equal(unAmp(canonicalOf(shared)), `${canonicalOf(sharedFirst)}?w=3`);
+  // below the tier a query names nothing
+  const small = ['---', 'title: Small', '---', '', '## grid', '', T('one'), ''].join('\n');
+  assert.equal(canonicalOf(await (await fetchOf(small, { url: `https://${OWN}/?w=2` })).text()), `https://${OWN}`);
+});
+
+test('CARDTILE_PICTURES=url: a window decodes and hashes only the pictures its own tiles name', async () => {
+  // 6,000 tiles; one stored picture named only by the last tile, one by tile 1,500, one by a back tile 2,500 turns over to,
+  // one that is the backdrop, one nothing names
+  const b64 = (fill, n = 2048) => Buffer.from(new Uint8Array(n).fill(fill)).toString('base64');
+  const pic = { late: b64(1), mid: b64(2), back: b64(3), drop: b64(4), unused: b64(5) };
+  const tile = (i) => (i === 5999 ? '- [ ] %% card: feature img=asset:late %% last' : i === 1500 ? '- [ ] %% card: feature img=asset:mid %% mid' : i === 2500 ? '- [ ] %% card: text back=#more %% turn' : T(`n${i}`));
+  const file = (backdrop) => ['---', 'title: Long', ...(backdrop ? ['backdrop: asset:drop'] : []), '---', '', '## grid', '', ...Array.from({ length: 6000 }, (_, i) => tile(i)),
+    '', '## back: more | More', '', '- [ ] %% card: feature img=asset:back %% behind',
+    '', '## assets', '', ...Object.entries(pic).map(([id, v]) => `- [ ] %% card: asset id=${id} mime=image/png %% ${v}`), ''].join('\n');
+  const decoded = [];
+  const realAtob = globalThis.atob;
+  const idOf = (v) => Object.entries(pic).find(([, x]) => x === String(v).trim())?.[0] ?? null;
+  globalThis.atob = (v) => { const k = idOf(v); if (k) decoded.push(k); return realAtob(v); };
+  const ADDR = /\/a\/[0-9a-f]{64}\.png/g;
+  // the back counts toward the window that carries it, so the last tile is in a seventh window
+  const LAST = (() => { const md = file(false), idx = tier.scanCard(md); return tier.windowsOf(md, idx).count; })();
+  assert.equal(LAST, 7, 'CONTROL: seven windows');
+  try {
+    for (const [name, backdrop, want] of [
+      ['no backdrop', false, { 1: [], 2: ['mid'], 3: ['back'], 4: [], [LAST]: ['late'] }],
+      ['a backdrop', true, { 1: ['drop'], 2: ['drop', 'mid'], [LAST]: ['drop', 'late'] }],
+    ]) {
+      const env = envOf(file(backdrop), { extra: { CARDTILE_PICTURES: 'url' } });
+      for (const [n, ids] of Object.entries(want)) {
+        decoded.length = 0;
+        const r = await ask(env, `https://${OWN}/?w=${n}`);
+        assert.equal(r.status, 200);
+        const html = await r.text();
+        assert.deepEqual([...decoded].sort(), [...ids].sort(), `${name}, window ${n}: the pictures decoded`);
+        // each picture the window names is drawn by its own address, and none of the stored ones is inline
+        assert.equal(new Set(html.match(ADDR) || []).size, ids.length, `${name}, window ${n}: the picture addresses on the page`);
+        assert.ok(!/data:image\/png;base64,(AQEB|AgIC|AwMD|BAQE|BQUF)/.test(html), `${name}, window ${n}: a stored picture went inline`);
+      }
+    }
+    // the text the plan reads, as the reviewer measured it: window 1 names no picture
+    const md = file(false), idx = tier.scanCard(md), plan = tier.windowsOf(md, idx);
+    const first = tier.windowOf(md, idx, plan, 0), last = tier.windowOf(md, idx, plan, plan.count - 1);
+    assert.ok(!/asset:/.test(tier.windowPicturesText(first)), 'window 1\'s text names a picture');
+    assert.ok(/asset:late/.test(tier.windowPicturesText(last)) && !/asset:mid/.test(tier.windowPicturesText(last)));
+    assert.ok(tier.windowPicturesText(first).length < 64 * 1024, 'the text a window\'s plan reads grows with the file');
+    assert.deepEqual(Object.keys(first), ['pre', 'post', 'cols', 'lane', 'blocks', 'cells', 'drawers', 'assets'], '`drawn` shows in the model the renderer reads');
+  } finally { globalThis.atob = realAtob; }
 });
 
 test('deck.js: a window\'s backs and its video script join the page; a back already there is not drawn twice', async () => {

@@ -387,6 +387,9 @@ export function windowsOf(md, idx, { front = '', tiles: T = WINDOW_TILES, units:
  * it), the backs those tiles may turn over to plus the frontmatter's default back, and the file's
  * pictures on demand. Each piece is parsed by card-core's parseCard alone — a run of whole tiles of one
  * lane, a whole back lane — so every cell is the cell the whole file's parse holds.
+ * `drawn` (not enumerable: no part of the model the renderer reads) is the text of those pieces, in the
+ * order they were read: everything this window's tiles and backs can name. What a window does to its
+ * pictures is decided from it and never from the whole file (windowPicturesText).
  */
 export function windowOf(md, idx, plan, n, { front = '' } = {}) {
   const s = String(md);
@@ -395,7 +398,7 @@ export function windowOf(md, idx, plan, n, { front = '' } = {}) {
   const ids = [...backs.keys()];
   const named = backIds(ids);
   const carried = new Set(ids.filter((id) => front.includes(id)));
-  const cells = [], blocks = [];
+  const cells = [], blocks = [], drawn = [];
   let k = 0, firstFace = true;
   for (const lane of idx.lanes) {
     if (lane.kind !== 'face') continue;
@@ -405,6 +408,7 @@ export function windowOf(md, idx, plan, n, { front = '' } = {}) {
       const i0 = lane.t0 + (from - k), i1 = lane.t0 + (to - k);
       const a = idx.starts[i0], b = spanOf(idx, lane, i1 - 1)[1];
       const text = s.slice(a, b);
+      drawn.push(text);
       for (const id of backsNamed(text, named)) carried.add(id);
       const got = parseCard(`## grid\n${text}`).cells;
       if (got.length !== i1 - i0) throw new Error(`size tier: ${i1 - i0} tiles read as ${got.length}`);
@@ -418,12 +422,23 @@ export function windowOf(md, idx, plan, n, { front = '' } = {}) {
   const drawers = [];
   for (const lane of idx.lanes) {
     if (lane.kind !== 'back' || !carried.has(lane.id)) continue;
-    const d = parseCard(s.slice(lane.head, lane.end)).drawers[0];
-    if (d) drawers.push(d);
+    const text = s.slice(lane.head, lane.end);
+    const d = parseCard(text).drawers[0];
+    if (d) { drawers.push(d); drawn.push(text); }
   }
   if (!blocks.length) blocks.push({ label: '', start: 0, count: 0 });
-  return { pre: '', post: '', cols: 6, lane: 'grid', blocks, cells, drawers, assets: assetsOnDemand(s, idx) };
+  const model = { pre: '', post: '', cols: 6, lane: 'grid', blocks, cells, drawers, assets: assetsOnDemand(s, idx) };
+  Object.defineProperty(model, 'drawn', { value: drawn, enumerable: false });
+  return model;
 }
+
+/**
+ * windowPicturesText(model, backdrop) → the text one window's picture plan is read from
+ * (serve/asset-urls.mjs picturePlan): the frontmatter's backdrop, the one picture a page draws that
+ * no tile names, then the window's own tiles and backs (windowOf's `drawn`). It grows with the window,
+ * never with the file: a picture only another window names is not looked up, decoded or hashed here.
+ */
+export const windowPicturesText = (model, backdrop = '') => [String(backdrop || ''), ...(model.drawn || [])].join('\n');
 
 /**
  * The revision a window belongs to: the first 16 hex digits of a SHA-256 over the file, taken in
