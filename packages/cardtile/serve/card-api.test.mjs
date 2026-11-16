@@ -3797,7 +3797,7 @@ test('🔴 both prefixes — an answer that names a path names the one it was ca
 });
 
 // ── the exchange state (tile#336) ────────────────────────────────────────────────────────────────
-// The platform writes `in` / `out` with the Card API bearer, under the current lifetime, and the page
+// The platform writes `in` / `out` with the cardtile API bearer, under the current lifetime, and the page
 // reads it beside the body. Every write here is paired with the refusal beside it.
 
 test('tile#336 pool: PUT {in:true|false} stores in/out under the current generation; DELETE clears it; nothing else moves', async () => {
@@ -3834,7 +3834,7 @@ test('tile#336 pool: anything but a boolean `in` is refused and writes nothing (
   assert.equal((await call(env, 'PUT', '/_api/card/t/pool', { in: true })).status, 200, 'CONTROL');
 });
 
-test('tile#336 pool: the Card API bearer guards it both ways; bad handles and other methods are refused', async () => {
+test('tile#336 pool: the cardtile API bearer guards it both ways; bad handles and other methods are refused', async () => {
   for (const method of ['PUT', 'DELETE']) {
     const env = envWith({ t: CARD, [poolKey('t', '0')]: 'out' });
     const before = [...env.CARDS._m];
@@ -3901,7 +3901,7 @@ const heldBodyPut = (env, path, value) => {
   return { pending: handleApi(req, env, url), started: started.promise, release: () => release.resolve() };
 };
 
-test('🔴 tile#336 pool: a PUT still reading its body when the card is deleted and reused is refused (409); the next owner is untouched', async () => {
+test('🔴 tile#336 pool: a PUT still reading its body when the handle is deleted and reused is refused (409); the next owner is untouched', async () => {
   // review r1 on #337: the generation was read AFTER the body, so a body held across delete + reuse
   // was written under the NEW owner's generation and answered 200. `in: false` would have overwritten
   // a next owner's `in`, so both values are run, each against a next owner whose state differs from it.

@@ -1162,8 +1162,8 @@ const router = {
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
     // tile#336: the exchange state rides in the same parallel round (one more read beside body and stop,
-    // no serial trip). Not on the platform's own root card (ROOT_HANDLE, under any name or host it answers
-    // to): that page IS reef.cards, and a closing card and footer segment linking to itself would be
+    // no serial trip). Not on the platform's own root page (ROOT_HANDLE, under any name or host it answers
+    // to): that page IS reef.cards, and a closing tile and footer segment linking to itself would be
     // noise, so it is never read there.
     const { md: liveMd, stopped, gen, pooled } = await liveCard(store, resolved.handle,
       { stop: true, pool: resolved.handle !== ROOT_HANDLE, gen: vanityHandle ? boundGen : null });

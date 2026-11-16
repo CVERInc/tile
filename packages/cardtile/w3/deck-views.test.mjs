@@ -947,7 +947,7 @@ for (const ending of Object.keys(ENDINGS)) for (const [view, other] of [['list',
 // The platform writes `pool:<handle>:<gen>` = `in` / `out` into the Worker's store; the Worker reads it
 // beside the body and hands the renderer true / false; absent is the page as it was. Here the page is
 // fetched from the REAL Worker over a stand-in KV, and then the REAL deck.js runs over it in all three
-// views: `in` → the closing reef.cards card is the last card of the pile (its back pill and the footer
+// views: `in` → the closing reef.cards tile is the last of the pile (its back pill and the footer
 // segment both go to reef.cards/?ref=<handle>), `out` → neither, and the one-DOM rule (#302) holds.
 const REEF = 'https://reef.cards/?ref=specimen';
 const kvOf = (seed, reads = []) => ({
@@ -967,23 +967,23 @@ const exchangeOf = (p) => {
   const footerLinks = fd.querySelectorAll('a').filter((a) => /reef\.cards|feelreef\.com\/signup/.test(a.getAttribute('href') || ''))
     .map((a) => `${a.getAttribute('href')} ${a.textContent}`);
   const tiles = doc.querySelectorAll('.st-pool-card');
-  const deckCards = doc.querySelectorAll('.deck-card').sort((a, b) => +a.dataset.i - +b.dataset.i);
-  const last = deckCards.at(-1);
+  const pile = doc.querySelectorAll('.deck-card').sort((a, b) => +a.dataset.i - +b.dataset.i);
+  const last = pile.at(-1);
   const lastBack = last && last.querySelector('.deck-go a.btn');
   // the wall: the engine's blocks in page order, outside drawers and the deck's table
   const blocks = doc.querySelectorAll('main .st-grid, main .st-bleed').filter((e) => !e.closest('.dc-drawer') && !e.closest('.deck-table'));
   return {
     footerLinks, tiles: tiles.length,
-    lastCardIsPool: !!(last && last.querySelector('.st-pool-card')),
+    pileLastIsPool: !!(last && last.querySelector('.st-pool-card')),
     lastBack: lastBack ? `${lastBack.getAttribute('href')} ${lastBack.textContent.trim()}` : null,
-    deckReefCards: doc.querySelectorAll('.deck-reef').length,
+    deckReefs: doc.querySelectorAll('.deck-reef').length,
     wallLastIsPool: blocks.length > 0 && blocks.at(-1).classList.contains('st-pool'),
   };
 };
 
 for (const md of [card({ view: 'stack' }), powered(card({ view: 'stack' }))]) {
   const label = md.includes('powered-by') ? ' (powered-by: on, ignored)' : '';
-  test(`🔴 tile#336 served with pool:in${label}: the reef card is the last card and the footer names reef.cards, in all three views`, async () => {
+  test(`🔴 tile#336 served with pool:in${label}: the closing reef.cards tile is the last of the pile and the footer names reef.cards, in all three views`, async () => {
     const { status, html } = await served(md, 'in');
     assert.equal(status, 200);
     const p = open(md, { page: () => html });
@@ -992,33 +992,33 @@ for (const md of [card({ view: 'stack' }), powered(card({ view: 'stack' }))]) {
       holds(p, view, `pool:in, ${view}`);
       const x = exchangeOf(p);
       assert.deepEqual(x.footerLinks, [`${REEF} reef.cards`], `${view}: the footer's right segment`);
-      assert.equal(x.tiles, 1, `${view}: one closing card on the page`);
-      assert.equal(x.deckReefCards, 0, `${view}: the deck drew a reef.cards card of its own as well`);
-      if (view === 'wall') assert.ok(x.wallLastIsPool, 'wall: the closing card is the last block');
+      assert.equal(x.tiles, 1, `${view}: one closing tile on the page`);
+      assert.equal(x.deckReefs, 0, `${view}: deck.js drew a reef.cards tile of its own as well`);
+      if (view === 'wall') assert.ok(x.wallLastIsPool, 'wall: the closing tile is the last block');
       else {
-        assert.ok(x.lastCardIsPool, `${view}: the last card of the pile is not the reef card`);
-        assert.equal(x.lastBack, `${REEF} reef.cards ↗`, `${view}: the reef card's back pill`);
+        assert.ok(x.pileLastIsPool, `${view}: the last of the pile is not the closing tile`);
+        assert.equal(x.lastBack, `${REEF} reef.cards ↗`, `${view}: the closing tile's back pill`);
       }
     }
     // the closing tile is one of the engine's cells, so the #302 rule above covered it as well
     assert.ok(p.cells.some((c) => c.classList.contains('st-pool-card')));
   });
 
-  test(`🔴 tile#336 served with pool:out${label}: no reef card and no reef.cards footer segment, in all three views`, async () => {
+  test(`🔴 tile#336 served with pool:out${label}: no closing reef.cards tile and no reef.cards footer segment, in all three views`, async () => {
     const { status, html } = await served(md, 'out');
     assert.equal(status, 200);
     assert.ok(!/Powered by/.test(html), 'out: powered-by does not bring the old footer back');
-    // what tells out from absent on the wire: the deck is told the Card is out, so it draws nothing of its own
-    assert.ok(html.includes('window.__pool=false;') && !html.includes('window.__pool=true'), 'out: the deck is not told the Card is out');
+    // what tells out from absent on the wire: deck.js is told the handle is out, so it draws nothing of its own
+    assert.ok(html.includes('window.__pool=false;') && !html.includes('window.__pool=true'), 'out: deck.js is not told the handle is out');
     const p = open(md, { page: () => html });
     for (const view of ['stack', 'list', 'wall']) {
       if (view !== p.root.dataset.view) p.press(view);
       holds(p, view, `pool:out, ${view}`);
       const x = exchangeOf(p);
       assert.deepEqual(x.footerLinks, [], `${view}: footer`);
-      assert.equal(x.tiles, 0, `${view}: closing card`);
-      assert.equal(x.deckReefCards, 0, `${view}: the deck's own reef card`);
-      assert.ok(!x.lastCardIsPool && !x.wallLastIsPool);
+      assert.equal(x.tiles, 0, `${view}: closing tile`);
+      assert.equal(x.deckReefs, 0, `${view}: deck.js's own reef.cards tile`);
+      assert.ok(!x.pileLastIsPool && !x.wallLastIsPool);
     }
   });
 }
@@ -1055,11 +1055,11 @@ test('tile#336 the Worker reads the exchange state once, in the same round as bo
   assert.ok(started.includes('pool:specimen:0'), 'the pool read waited for the body');
   assert.equal(reads.filter((k) => k === 'pool:specimen:0').length, 1, 'read once');
   const stopped = await served(card(), 'in', { seed: { 'stop:specimen:0': '{}' } });
-  assert.equal(stopped.status, 404, 'a stopped Card in the exchange is still not served');
+  assert.equal(stopped.status, 404, 'a stopped handle in the exchange is still not served');
   assert.ok(!/data-pool|reef\.cards\/\?ref/.test(stopped.html));
 });
 
-test('tile#336 a Card on its own domain carries the same exchange state (the key is per handle, not per host)', async () => {
+test('tile#336 an own-domain address carries the same exchange state (the key is per handle, not per host)', async () => {
   const seed = { 'vanity:card.example': 'specimen' };
   for (const [pool, tiles] of [['in', 1], ['out', 0], [undefined, 0]]) {
     const { status, html } = await served(card(), pool, { host: 'card.example', path: '/', seed });
@@ -1069,7 +1069,7 @@ test('tile#336 a Card on its own domain carries the same exchange state (the key
   }
 });
 
-test("tile#336 reef.cards's own root card never reads or shows the exchange state (control: another Card on reef.cards does)", async () => {
+test("tile#336 reef.cards's own root page never reads or shows the exchange state (control: another handle on reef.cards does)", async () => {
   const env = { CARD_CANONICAL_HOST: 'reef.cards' };
   const root = card().replace('title: Specimen', 'title: feelreef');
   const reads = [];
@@ -1078,13 +1078,13 @@ test("tile#336 reef.cards's own root card never reads or shows the exchange stat
   assert.equal(home.status, 200);
   const homeHtml = await home.text();
   assert.match(homeHtml, /<title>feelreef/);
-  assert.ok(!/data-pool|reef\.cards\/\?ref/.test(homeHtml), 'the root card linked to itself');
-  assert.ok(!reads.some((k) => k.startsWith('pool:')), 'the root card read a pool key');
-  // the same Card under its handle on a host that routes by path but has no root (the SaaS fallback origin)
+  assert.ok(!/data-pool|reef\.cards\/\?ref/.test(homeHtml), 'the root page linked to itself');
+  assert.ok(!reads.some((k) => k.startsWith('pool:')), 'the root page read a pool key');
+  // the same root page under its handle on a host that routes by path but has no root (the SaaS fallback origin)
   const fallback = await worker.fetch(new Request('https://saas.feelreef.com/feelreef'), { PREVIEW: 'false', CARDS: kv, ...env });
   assert.equal(fallback.status, 200);
-  assert.ok(!/data-pool|reef\.cards\/\?ref/.test(await fallback.text()), 'the root card showed the exchange under its handle');
-  assert.ok(!reads.some((k) => k.startsWith('pool:')), 'the root card read a pool key under its handle');
+  assert.ok(!/data-pool|reef\.cards\/\?ref/.test(await fallback.text()), 'the root page showed the exchange under its handle');
+  assert.ok(!reads.some((k) => k.startsWith('pool:')), 'the root page read a pool key under its handle');
   const other = await worker.fetch(new Request('https://reef.cards/specimen'), { PREVIEW: 'false', CARDS: kv, ...env });
-  assert.match(await other.text(), /data-pool="card"/, 'CONTROL: a guest Card on reef.cards does carry it');
+  assert.match(await other.text(), /data-pool="card"/, 'CONTROL: another handle on reef.cards does carry it');
 });

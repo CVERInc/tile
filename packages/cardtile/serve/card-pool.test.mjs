@@ -23,7 +23,7 @@ const CTX = { handle: 'inkbrush', cardUrl: 'https://card.feelreef.com/inkbrush' 
 
 const footerOf = (html) => /<footer class="st-footer">[\s\S]*?<\/footer>/.exec(html)?.[0] ?? '';
 const has = {
-  // tile#336 ruling: the footer segment and the closing card both go to reef.cards with the Card's handle as ?ref=
+  // tile#336 ruling: the footer segment and the closing reef.cards tile both go to reef.cards with the handle as ?ref=
   poolFooter: (h) => footerOf(h).includes(`<a href="${POOL_URL}?ref=inkbrush" target="_blank" rel="noopener noreferrer">reef.cards</a>`),
   poweredFooter: (h) => /Powered by <a href="https:\/\/feelreef\.com\/signup\?ref=inkbrush">feelreef<\/a>/.test(footerOf(h)),
   closingCard: (h) => (h.match(/data-pool="card"/g) || []).length,
@@ -52,7 +52,7 @@ for (const pool of [true, false, undefined]) {
       assert.equal(has.poweredFooter(html), wantPowered, 'Powered by feelreef footer');
       assert.equal(has.closingCard(html), wantCard, 'closing reef.cards tile count');
       assert.ok(has.owner(html), "the owner's copyright line always stays");
-      // tile#336 ruling: every reef.cards link on the page carries the Card's handle, and only that one
+      // tile#336 ruling: every reef.cards link on the page carries the page's handle, and only that one
       const refs = [...html.matchAll(/https:\/\/reef\.cards\/[^"']*/g)].map((m) => m[0]);
       assert.ok(refs.every((u) => u === 'https://reef.cards/?ref=inkbrush'), `reef.cards links: ${refs.join(' ')}`);
     });

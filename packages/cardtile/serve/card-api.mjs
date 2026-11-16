@@ -78,10 +78,10 @@ export const genKey = (handle) => `gen:${handle}`;
 export const cardKey = (handle, gen) => `card:${handle}:${gen}`;
 export const stopKey = (handle, gen) => `stop:${handle}:${gen}`;
 /**
- * The Card's exchange state (tile#336): `in` or `out`, written by the PLATFORM through
+ * A handle's exchange state (tile#336): `in` or `out`, written by the PLATFORM through
  * `PUT /_api/cards/<handle>/pool` and by nothing else. It is the platform's one draw rule, already
- * decided (in = the Card can be dealt in the draw); this store and the Worker never interpret it
- * further. `in` puts the closing reef.cards card and the footer's `reef.cards` segment on the page,
+ * decided (in = the handle can be dealt in the draw); this store and the Worker never interpret it
+ * further. `in` puts the closing reef.cards tile and the footer's `reef.cards` segment on the page,
  * `out` keeps both off, and an absent key is the page as it was before this key existed.
  * Generation-scoped like the stop, so a handle deleted and created again starts absent. It has no
  * pre-generation (legacy) form: it was born after generations.
@@ -1268,7 +1268,7 @@ export async function boundHostOf(store, handle, gen) {
 }
 
 /**
- * liveCard: the current lifetime's card body (and stop, and exchange state) under a handle. The ONE
+ * liveCard: the current lifetime's body (and stop, and exchange state) under a handle. The ONE
  * read every exit uses — renderer and API alike — so a body cannot be absent on one door and present
  * on another. A body from a dead lifetime is under a key this never computes.
  *
@@ -1422,7 +1422,7 @@ async function readCard(store, handle) {
  * delete_card: everything this store holds under a handle goes, and one content-free fact stays.
  *
  * The product owner ruled on reef#2618: the owner downloads first, types the handle, and NOTHING is kept — the
- * handle is free at once. So this removes the card, its serving stop, its exchange state (tile#336),
+ * handle is free at once. So this removes the handle's body, its serving stop, its exchange state (tile#336),
  * every parked preview of it, and
  * its own-domain binding; then leaves `gone:<handle>` = `{ deleted_at }` (see goneKey — not served:
  * the public address answers the ordinary no-card 404, tile-lab#51 r2). The tombstone does not reserve
@@ -1748,7 +1748,7 @@ export async function handleApi(request, env, url) {
 
   // ── the exchange state (tile#336) ─────────────────────────────────────────────────────────────
   //
-  // The platform's word on whether this Card is in the exchange: `{ in: true }` or `{ in: false }`,
+  // The platform's word on whether this handle is in the exchange: `{ in: true }` or `{ in: false }`,
   // the value its one draw rule settled on. Stored as `in` / `out` under the current lifetime, the way
   // a stop is (see poolKey): one admitted before a delete lands on the ended generation's key, which
   // nothing reads, and is answered 409 `stale_generation`. Anything but a boolean is refused and
