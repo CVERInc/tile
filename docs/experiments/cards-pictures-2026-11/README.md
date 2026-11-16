@@ -94,9 +94,62 @@ the browser cannot put the first screen's bytes ahead of the rest.
    once the head script has set the class), and `deck.js` runs after the document is parsed. Any byte in
    the HTML is a byte the pile waits for.
 
+## Step 1: the picture route's own cache
+
+The product owner adopted `hybrid-preload-lazy` in two steps: first the picture route stops re-reading
+the whole file, measured; only then is the switch set. This is step 1. **The switch is still unset
+everywhere**: nothing below runs in any deployment.
+
+What it is (`packages/cardtile/serve/picture-cache.mjs`): the decoded bytes of a picture are kept in the
+Workers Cache API under (handle, generation, hash, extension). A page view keeps the pictures it names
+(it has already decoded and hashed them); a picture found in the file is kept for the next request. A
+request that finds its picture reads the handle's generation and its stop, never the body.
+
+Host CPU of the cardtile worker, medians, `hybrid-preload-lazy`, measured by
+[`picture-cost.mjs`](picture-cost.mjs) on the commit before the cache and on this one, in one sitting
+([`results/picture-cost-before.json`](results/picture-cost-before.json),
+[`results/picture-cost-after.json`](results/picture-cost-after.json), 15 runs each):
+
+| | before | after, picture asked for with no page view first (miss) | after, cold visit (page view, then its pictures) | after, warm |
+|---|---|---|---|---|
+| heavy, per picture | 36.5 ms | 26.5 ms | **0.24 ms** | 0.24 ms |
+| heavy, the 36 pictures of one visit | 1,403 ms | 969 ms | **16 ms** | 18 ms |
+| heavy wall, per picture | 48.5 ms | 37.7 ms | **0.21 ms** | 0.21 ms |
+| heavy wall, the 36 pictures | 1,748 ms | 1,445 ms | **12 ms** | 12 ms |
+| medium, per picture | 8.2 ms | 5.6 ms | **0.14 ms** | 0.13 ms |
+| medium, the 8 pictures | 75 ms | 46 ms | **1.4 ms** | 1.3 ms |
+| whole-file reads from the store for the pictures of one heavy visit | 36 (354 million characters) | 36 | **0** | 0 |
+| small store keys read per picture | 6 | 8 | 3 | 3 |
+
+- **A miss costs what the route cost before**; the cache does not make the whole-file path faster. The
+  "before" and "miss" columns differ only because this shared machine was busier during the "before" run
+  (load 21 against 16). Two interleaved pairs of 5 runs (`results/picture-cost-interleaved-*.json`) put
+  the two within 2–10 % of each other: 36.1 and 35.1 ms after, 37.3 and 38.7 ms before, per heavy picture.
+  Across all sittings the uncached path measured 26–51 ms per heavy picture and the cached one 0.2–0.4 ms.
+- **The page view pays for keeping the pictures once**: about 10 ms more on the heavy page's first view
+  (129.8 against 120.4 ms in the same run), one cache read on later views.
+- What is not in these numbers: the store and the cache are in-memory stand-ins that answer at once. The
+  time a real store takes to hand over a ~10 MB body 36 times is the larger saving and is not measured
+  here; neither is a real cache's lookup time, eviction, or the fact that each data center has its own
+  cache (a visitor's page view and picture requests normally reach the same one; when they do not, a
+  picture request is a miss and costs the "miss" column).
+
+How it stops when the page does:
+
+- **Delete, and the next owner of the handle:** the key names the generation. A delete starts a new one,
+  so every kept picture of the old lifetime is unreachable at once, everywhere, with nothing to purge.
+- **Stop:** read on every picture request, cached or not. A stopped page's pictures answer the same 404
+  as a handle that never existed while their entries are still in the cache; after a resume they are
+  served from it again.
+- **A picture taken off the page inside one lifetime:** a kept copy lives one hour
+  (`PICTURE_CACHE_SECONDS`), so its URL can go on answering for up to that long in a data center that
+  kept it. The visitor is still told `public, max-age=31536000, immutable`: the hour bounds what the
+  cardtile worker serves, not what a browser that already has the picture keeps.
+
 ## Before anything ships (not done here)
 
-- **The picture route is expensive per request.** It reads and parses the whole Cards file and hashes
+- **Done in step 1 (above):** the picture route no longer costs the whole file once a picture is kept.
+  What this bullet said before: It reads and parses the whole Cards file and hashes
   candidates for every picture: 27–46 ms of worker time per picture on the heavy file on this machine,
   1.0–1.6 s per cold heavy visit, plus a full store read of the ~10 MB file per picture
   ([`results/server-cost.json`](results/server-cost.json); the store stub here answers instantly).
@@ -176,6 +229,9 @@ node measure.mjs --pw "$PW" --fixtures /tmp/t339/fixtures --cert /tmp/t339/cert.
 node summarize.mjs runs.json > summary.md
 node record.mjs --pw "$PW" --fixtures /tmp/t339/fixtures --cert /tmp/t339/cert.pem --key /tmp/t339/key.pem --out rec/
 node server-cost.mjs /tmp/t339/fixtures 15 server-cost.json
+# step 1: this checkout, then the same harness against a checkout of the commit before the cache
+node picture-cost.mjs /tmp/t339/fixtures 15 picture-cost-after.json
+node picture-cost.mjs /tmp/t339/fixtures 15 picture-cost-before.json <path to that checkout>
 ```
 
 The full matrix took 70 minutes here.

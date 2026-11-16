@@ -22,6 +22,7 @@ import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
 import { picturePlan, pictureStrategy, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
+import { cachedPicture, keepPicture, keepPictures } from './picture-cache.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -126,7 +127,7 @@ async function relayAvatar(ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, POOL_IN, POOL_OUT, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE } from './card-api.mjs';
+import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, liveStop, POOL_IN, POOL_OUT, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE } from './card-api.mjs';
 import { vanityHost } from './card-vanity.mjs';
 import { EDIT3_BODY_HTML, EDIT3_BASE_CSS, EDIT3_CSS, EDIT3_JS, BORROWED, FONT_FILES } from './edit3-assets.mjs';
 import { DECK_CSS, DECK_JS } from './deck-assets.mjs';
@@ -338,6 +339,20 @@ export function cardPath(pathname, handle, isVanity) {
   if (ASSET_TAIL_RE.test(m[2] || '')) return 'asset';   // the unstripped tail: a file has no trailing `/`
   return rest ? iconKind(rest) : 'page';
 }
+/**
+ * One picture's answer (tile#339), the same from the cache and from the file. A page with a picture on
+ * it is never the blank template (card-blank isTemplateOnly: any asset means an author wrote it), so the
+ * robots rule needs no body.
+ */
+const pictureResponse = (picture, env, handle, at) => new Response(picture.bytes, {
+  headers: {
+    'Content-Type': picture.type,
+    'Cache-Control': ASSET_CACHE,
+    // the type is the store's own `mime=`, from a raster allowlist; never let a client second-guess it
+    'X-Content-Type-Options': 'nosniff',
+    ...ROBOTS_HEADERS(env, handle, at, false),
+  },
+});
 /** the `<hex>` and `<ext>` of an asset path cardPath routed to 'asset' */
 const assetRef = (pathname) => {
   const m = /\/a\/([0-9a-f]{64})\.([a-z]+)$/.exec(pathname);
@@ -609,7 +624,8 @@ const visitorLocale = (params, request) => primaryLocale(params.get('lang') || p
 // 🔴 …and the cache rule that comes with it. A card page whose words follow the visitor differs by
 // Accept-Language, so it says so — beside Accept, never instead of it (see CARD_HEADERS). Nothing else
 // keys this page: the Worker keeps no copy of rendered HTML (caches.default holds the /_icon/, /_yt/
-// and avatar relays only, under their own image URLs), and `?lang=` is in the URL, which is every
+// and avatar relays under their own image URLs and, while the local picture switch is set, a page's own
+// pictures under their lifetime and hash — picture-cache.mjs — never a page), and `?lang=` is in the URL, which is every
 // cache's key already. A card that declares `lang:` does not vary, and its headers stay exactly as they were.
 const VARY_VISITOR_LANG = { Vary: 'Accept, Accept-Language' };
 
@@ -1188,8 +1204,24 @@ const router = {
     // no serial trip). Not on the platform's own root page (ROOT_HANDLE, under any name or host it answers
     // to): that page IS reef.cards, and a closing tile and footer segment linking to itself would be
     // noise, so it is never read there.
+    //
+    // tile#339 step 1 — a picture this lifetime has kept (picture-cache.mjs) is answered here, from the
+    // generation and its stop alone: no body read, no parse. 🔴 The stop is read on EVERY picture
+    // request and wins over a warm cache; the cache is asked in the same round, so a stopped page and a
+    // page that never was make the same calls. Anything but a hit on a page that is not stopped falls
+    // through to the whole-file path below, unchanged — which is also where every 404 is decided.
+    let pictureGen = null;
+    if (want === 'asset') {
+      const ref = assetRef(url.pathname);
+      pictureGen = vanityHandle ? boundGen : await generationOf(store, resolved.handle);
+      const [live, kept] = await Promise.all([
+        liveStop(store, resolved.handle, { gen: pictureGen }),
+        ref ? cachedPicture(resolved.handle, pictureGen, ref.hex, ref.ext) : null,
+      ]);
+      if (kept && live.stopped == null) return pictureResponse(kept, env, resolved.handle, at);
+    }
     const { md: liveMd, stopped, gen, pooled } = await liveCard(store, resolved.handle,
-      { stop: true, pool: resolved.handle !== ROOT_HANDLE, gen: vanityHandle ? boundGen : null });
+      { stop: true, pool: resolved.handle !== ROOT_HANDLE, gen: vanityHandle ? boundGen : pictureGen });
     // 🔴 A stopped Card IS a missing one from here on, on every exit — page, markdown, avatar, icons,
     // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
     // never-existed must be indistinguishable; see notFound. The stop still wins over everything.
@@ -1207,24 +1239,19 @@ const router = {
     if (want === 'alias' && cardMd != null) return Response.redirect(`https://${host}/${url.search}`, 301);
 
     // tile#339 — one picture, by its bytes' SHA-256 (asset-urls.mjs). An image exit like the avatar, so it
-    // answers on both hosts, before the page's canonical→vanity 301. Read from the body this lifetime
-    // already returned (no key of its own, nothing in caches.default): a stop, a delete or a new lifetime
-    // takes it down on the next request. Every miss — no card, stopped, a hash not on this card, a type
+    // answers on both hosts, before the page's canonical→vanity 301. This is the whole-file path: the
+    // picture was not in this lifetime's cache (above), so it is found in the body this lifetime just
+    // returned and then kept for the next request. A stop, a delete or a new lifetime takes it down on
+    // the next request either way. Every miss — no card, stopped, a hash not on this card, a type
     // the route does not serve — is the answer this host gives a card that is not there: the no-card
     // page on ours (one page for every "no card", tile-lab#51), the small 404 on a creator's domain.
     if (want === 'asset') {
       const ref = assetRef(url.pathname);
       const found = cardMd && ref ? await findAsset(parseCard(cardMd).assets, ref.hex, ref.ext) : null;
       if (!found) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
-      return new Response(found.bytes, {
-        headers: {
-          'Content-Type': found.type,
-          'Cache-Control': ASSET_CACHE,
-          // the type is the store's own `mime=`, from a raster allowlist; never let a client second-guess it
-          'X-Content-Type-Options': 'nosniff',
-          ...ROBOTS_HEADERS(env, resolved.handle, at, blank),
-        },
-      });
+      const keeping = keepPicture(resolved.handle, gen, ref.hex, ref.ext, found.bytes);
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
+      return pictureResponse(found, env, resolved.handle, at);
     }
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
@@ -1327,6 +1354,12 @@ const router = {
     // nothing and hands the renderer nothing, which is the page as it was.
     const plan = pictures === 'inline' ? {}
       : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
+    // tile#339 step 1: what this render decoded and hashed for the plan is kept for the picture requests
+    // the page is about to cause (picture-cache.mjs keepPictures; one cache read when all are kept already)
+    if (plan.served && plan.served.length) {
+      const keeping = keepPictures(resolved.handle, gen, plan.served);
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
+    }
     return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) }),
       200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
   },

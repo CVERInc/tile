@@ -71,7 +71,7 @@ export async function assetUrls(cardMd, assets, base) {
 }
 
 /**
- * servedPictures(cardMd, assets, base) → Map id → { url, bytes }, in the order the card text first names
+ * servedPictures(cardMd, assets, base) → Map id → { url, bytes, hex, ext }, in the order the card text first names
  * each picture (the frontmatter's backdrop first, then the cells as written), for every picture assetUrls
  * would serve by URL.
  */
@@ -83,7 +83,9 @@ async function servedPictures(cardMd, assets, base) {
     if (!a || decodedLengthAtMost(a) <= INLINE_MAX_BYTES) return null;
     const bytes = rasterBytes(a);
     if (!bytes || bytes.length <= INLINE_MAX_BYTES) return null;
-    return [id, { url: `${base}a/${await hexOf(bytes)}.${RASTER_EXT[typeOf(a)]}`, bytes }];
+    const hex = await hexOf(bytes);
+    const ext = RASTER_EXT[typeOf(a)];
+    return [id, { url: `${base}a/${hex}.${ext}`, bytes, hex, ext }];
   }));
   return new Map(found.filter(Boolean));
 }
@@ -166,13 +168,20 @@ const PLAIN_PATH = /^\/[A-Za-z0-9._\-/]*$/;
 
 /**
  * picturePlan(cardMd, assets, base, strategy) → what the renderer is handed for one page:
- *   { assetUrls: { [id]: url }, pictures: { preload: [url], reserve: [[url, w, h]], afterPaint: prefix } | undefined }
+ *   { assetUrls: { [id]: url }, pictures: { preload: [url], reserve: [[url, w, h]], afterPaint: prefix } | undefined,
+ *     served: [{ hex, ext, bytes }] }
  * 'inline' → { assetUrls: undefined, pictures: undefined }: the renderer's own default, untouched.
+ * `served` is every picture this page names by URL, decoded and hashed already (the plan needed both):
+ * what the cardtile worker hands its picture cache, so the visitor's picture requests find them there.
  */
 export async function picturePlan(cardMd, assets, base, strategy) {
   if (!PICTURE_STRATEGIES.includes(strategy) || strategy === 'inline') return { assetUrls: undefined, pictures: undefined };
   const served = await servedPictures(cardMd, assets, base);
-  if (strategy === 'url') return { assetUrls: Object.fromEntries([...served].map(([id, p]) => [id, p.url])), pictures: undefined };
+  const kept = (urls) => [...served].filter(([id]) => urls[id]).map(([, p]) => ({ hex: p.hex, ext: p.ext, bytes: p.bytes }));
+  if (strategy === 'url') {
+    const all = Object.fromEntries([...served].map(([id, p]) => [id, p.url]));
+    return { assetUrls: all, pictures: undefined, served: kept(all) };
+  }
   const [, first, rest] = /^hybrid-(inline|preload)-(lazy|after-paint)$/.exec(strategy);
   const firstIds = new Set([...served.keys()].slice(0, FIRST_SCREEN_PICTURES));
   const urls = {};
@@ -188,7 +197,7 @@ export async function picturePlan(cardMd, assets, base, strategy) {
     const size = pictureSize(p.bytes);
     if (size) reserve.push([p.url, size[0], size[1]]);
   }
-  return { assetUrls: urls, pictures: { preload, reserve, afterPaint: rest === 'after-paint' && PLAIN_PATH.test(base) ? `${base}a/` : '' } };
+  return { assetUrls: urls, pictures: { preload, reserve, afterPaint: rest === 'after-paint' && PLAIN_PATH.test(base) ? `${base}a/` : '' }, served: kept(urls) };
 }
 
 /**
