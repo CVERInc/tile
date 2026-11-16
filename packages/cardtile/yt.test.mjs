@@ -424,7 +424,7 @@ test('🔴 #355 resolveChannels — past the share, fetching stops at the first 
 test('🔴 #355 resolveChannels — within the share, every channel is fetched and memory is never read', async () => {
   const md = CARD([UC(1), UC(2)].map((r) => `- [ ] %% card: video channel=${r} %%`).join('\n'));
   const kept = YC.keptChannels();
-  kept.set(UC(1), { id: 'remembered1', title: 'old', channelId: UC(1) });
+  kept.set(UC(1), { id: 'remembered1', title: 'old', channelId: UC(1) }, new Headers({ age: '0' }));
   const { urls, doFetch } = answering();
   const got = await resolveChannels(md, doFetch, { subrequests: 2, kept });
   assert.equal(urls.length, 2);
@@ -434,17 +434,95 @@ test('🔴 #355 resolveChannels — within the share, every channel is fetched a
 test('🔴 #355 keptChannels — an answer expires after CHANNEL_KEPT_SECONDS, failures are never kept, the oldest goes first', () => {
   let now = 1_000_000;
   const kept = YC.keptChannels({ most: 2, now: () => now });
-  kept.set('a', { id: 'x' });
-  kept.set('b', null);
+  const fresh = new Headers({ age: '0' });
+  kept.set('a', { id: 'x' }, fresh);
+  kept.set('b', null, fresh);
   assert.equal(kept.get('b'), null, 'a failure was remembered');
   now += YC.CHANNEL_KEPT_SECONDS * 1000 - 1;
   assert.deepEqual(kept.get('a'), { id: 'x' });
   now += 1;
   assert.equal(kept.get('a'), null, 'an answer outlived the feed TTL');
-  kept.set('c', { id: 'c' });
-  kept.set('d', { id: 'd' });
-  kept.set('e', { id: 'e' });
+  kept.set('c', { id: 'c' }, fresh);
+  kept.set('d', { id: 'd' }, fresh);
+  kept.set('e', { id: 'e' }, fresh);
   assert.equal(kept.size, 2);
   assert.equal(kept.get('c'), null, 'the oldest was not the one evicted');
   assert.equal(YC.CHANNEL_KEPT_SECONDS, 1800);
+});
+
+// ── tile#357 review: memory never outlives the edge copy an answer came from ─────────────────────────
+// The feed is fetched through the edge cache with an 1800 s TTL (serve/card-worker.mjs ytFetch). An
+// answer that arrives already 1799 s old has 1 s of freshness left; remembering it for a fresh 1800 s
+// showed a visitor the previous "latest video" for up to 3599 s after an upload.
+const feedWith = (headers, id) => ({ ok: true, headers: new Headers(headers), text: async () => FEED(id, 't') });
+const agedFeed = (headers) => async (u) => {
+  const f = /channel_id=(UC[\w-]{22})$/.exec(u);
+  return f ? feedWith(headers, LATEST_OF(f[1])) : ok(`<meta itemprop="identifier" content="${UC(9)}">`);
+};
+
+test('🔴 #357 resolveChannels — an answer that arrives 1799 s old is remembered for 1 s, not 1800', async () => {
+  let now = 1_799_000;
+  const kept = YC.keptChannels({ now: () => now });
+  const md = CARD(`- [ ] %% card: video channel=${UC(1)} %%`);
+  await resolveChannels(md, agedFeed({ age: '1799' }), { kept });
+  assert.equal(kept.get(UC(1))?.id, LATEST_OF(UC(1)), 'CONTROL: the answer was remembered');
+  now += 1000;   // 1800 s of the edge copy's age: the edge asks YouTube again now, so must memory
+  assert.equal(kept.get(UC(1)), null, 'memory outlived the edge copy the answer came from');
+});
+
+test('🔴 #357 resolveChannels — a handle is remembered for its feed’s age, not its handle page’s', async () => {
+  let now = 0;
+  const kept = YC.keptChannels({ now: () => now });
+  const md = CARD('- [ ] %% card: video channel=@aged %%');
+  const doFetch = async (u) => (/channel_id=/.test(u)
+    ? feedWith({ age: '1700' }, 'aaaaaaaaaaa')
+    : { ok: true, headers: new Headers({ age: '0' }), text: async () => `<meta itemprop="identifier" content="${UC(9)}">` });
+  await resolveChannels(md, doFetch, { kept });
+  now = 99_000;
+  assert.equal(kept.get('@aged')?.id, 'aaaaaaaaaaa', 'CONTROL: remembered');
+  now = 100_000;
+  assert.equal(kept.get('@aged'), null, 'the handle page’s age was used, not the feed’s');
+});
+
+test('🔴 #357 keptChannels — Date counts as well as Age; the older reading wins', () => {
+  const now = Date.parse('2026-01-01T00:30:00Z');
+  const old = 'Thu, 01 Jan 2026 00:00:01 GMT';   // 1799 s before `now`
+  assert.equal(YC.upstreamAge(new Headers({ date: old, age: '5' }), now), 1799);
+  assert.equal(YC.upstreamAge(new Headers({ date: 'Thu, 01 Jan 2026 00:29:59 GMT', age: '600' }), now), 600);
+  assert.equal(YC.upstreamAge(new Headers({ date: 'Thu, 01 Jan 2026 01:00:00 GMT' }), now), 0, 'a Date ahead of this clock is not a negative age');
+  let t = now;
+  const kept = YC.keptChannels({ now: () => t });
+  kept.set('d', { id: 'd' }, new Headers({ date: old }));
+  assert.equal(kept.get('d')?.id, 'd', 'CONTROL: 1 s left, remembered');
+  t += 1000;
+  assert.equal(kept.get('d'), null, 'a Date-aged answer outlived its edge copy');
+  kept.set('d', { id: 'd' }, new Headers({ date: old }));   // now 1800 s old: nothing left
+  assert.equal(kept.size, 0, 'an answer with no freshness left was remembered');
+});
+
+test('🔴 #357 keptChannels — an answer whose age nothing states is not remembered', async () => {
+  const kept = YC.keptChannels();
+  kept.set('a', { id: 'a' });
+  kept.set('b', { id: 'b' }, new Headers());
+  kept.set('c', { id: 'c' }, new Headers({ age: 'soon', date: 'not a date' }));
+  assert.equal(kept.size, 0);
+  const md = CARD(`- [ ] %% card: video channel=${UC(1)} %%`);
+  const got = await resolveChannels(md, async () => ok(FEED('bbbbbbbbbbb', 't')), { kept });
+  assert.equal(got[UC(1)].id, 'bbbbbbbbbbb', 'CONTROL: the page still got its answer');
+  assert.equal(kept.size, 0, 'an answer with no age was remembered');
+});
+
+test('🔴 #357 keptChannels — a later view of the same old edge copy cannot move the expiry later', async () => {
+  // the edge cached its copy at 0 s. A view at 100 s (age 100) and a smaller page at 1700 s (age 1700)
+  // both remember it; either way it is gone from memory at 1800 s.
+  let now = 100_000;
+  const kept = YC.keptChannels({ now: () => now });
+  const md = CARD(`- [ ] %% card: video channel=${UC(1)} %%`);
+  await resolveChannels(md, agedFeed({ age: '100' }), { kept });
+  now = 1_700_000;
+  await resolveChannels(md, agedFeed({ age: '1700' }), { kept });
+  now = 1_799_999;
+  assert.ok(kept.get(UC(1)), 'CONTROL: still within the edge copy’s TTL');
+  now = 1_800_000;
+  assert.equal(kept.get(UC(1)), null, 'a refresh from the same edge copy pushed the expiry past it');
 });

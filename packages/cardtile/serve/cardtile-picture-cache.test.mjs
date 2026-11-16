@@ -425,8 +425,9 @@ const channelPage = (chans) => [
   ...chans.map((c) => `- [ ] %% card: video channel=${c.ref} %%`),
   '', '## assets', '', ...MANY.map((p) => `- [ ] %% card: asset id=${p.id} mime=${p.mime} %% ${p.b.toString('base64')}`),
 ].join('\n') + '\n';
-/** every fetch answered as YouTube would for these channels, counted */
-const answerFetches = (t, chans) => {
+/** every fetch answered as YouTube would for these channels, counted. A feed carries a `date` (as
+ * YouTube's does) and, when `age` is given, the `age` an edge copy that old would carry. */
+const answerFetches = (t, chans, { age = null } = {}) => {
   const before = globalThis.fetch;
   const urls = [];
   const byHandle = new Map(chans.map((c) => [`https://www.youtube.com/${c.ref}`, c]));
@@ -438,7 +439,8 @@ const answerFetches = (t, chans) => {
     if (h) return new Response(`<html><meta itemprop="identifier" content="${h.id}"></html>`);
     const f = /channel_id=(UC[\w-]{22})$/.exec(url);
     const c = f && byId.get(f[1]);
-    if (c) return new Response(`<feed><entry><yt:videoId>${c.video}</yt:videoId><title>Latest ${c.video}</title></entry></feed>`);
+    const headers = { date: new Date().toUTCString(), ...(age === null ? {} : { age: String(age) }) };
+    if (c) return new Response(`<feed><entry><yt:videoId>${c.video}</yt:videoId><title>Latest ${c.video}</title></entry></feed>`, { headers });
     return new Response('', { status: 404 });
   };
   t.after(() => { globalThis.fetch = before; });
@@ -447,9 +449,9 @@ const answerFetches = (t, chans) => {
 const drawnResolved = (html, c) => html.includes(`data-yt="${c.video}"`);
 const drawnDegraded = (html, c) => html.includes(c.ref.startsWith('@') ? `data-yt-handle="${c.ref}"` : `data-yt-channel="${c.id}"`);
 /** one page view naming `chans`: its subrequests, and the page */
-const viewWith = async (t, chans) => {
+const viewWith = async (t, chans, feed = {}) => {
   const cache = useCache(t, fakeCache());
-  const fetched = answerFetches(t, chans);
+  const fetched = answerFetches(t, chans, feed);
   const { env } = await world({ md: channelPage(chans) });
   const from = { calls: cacheCalls(cache), fetched: fetched.length };
   const page = await get(`${CANON}/${HANDLE}`, env);
@@ -487,6 +489,15 @@ test('🔴 #355 channels — past the share, a channel this isolate already reso
   assert.equal(again.status, 200);
   assert.deepEqual(first.fetched.slice(from).map((u) => u.slice(-24)), chans.slice(30).map((c) => c.id), 'the second view did not spend its share on the next channels');
   assert.deepEqual(chans.filter((c) => !drawnResolved(html, c)).map((c) => c.ref), [], 'some channels are still unresolved after two views');
+});
+
+test('🔴 #357 channels — a feed the edge has held for its whole TTL is not remembered: the next view asks again', async (t) => {
+  const chans = channelsFor(60, 'id');
+  const first = await viewWith(t, chans, { age: 1800 });
+  assert.equal(first.spentYt, PC.CHANNEL_SUBREQUESTS, 'CONTROL: the first view spent the whole share');
+  const from = first.fetched.length;
+  await get(`${CANON}/${HANDLE}`, first.env);
+  assert.deepEqual(first.fetched.slice(from).map((u) => u.slice(-24)), chans.slice(0, 30).map((c) => c.id), 'an expired edge copy was served from memory instead of asked for again');
 });
 
 test('🔴 #355 channels — a page within the share fetches every channel on every view, as before (memory is not read)', async (t) => {

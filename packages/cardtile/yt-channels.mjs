@@ -61,15 +61,38 @@ export function channelsIn(cardMd) {
  */
 export const channelFetches = (ref) => (HANDLE_RE.test(ref) ? 2 : 1);
 
-/** how long a resolved channel is remembered in this isolate, seconds: the feed's own edge TTL */
+/** the feed's edge TTL (serve/card-worker.mjs ytFetch, seconds): no remembered answer outlives it */
 export const CHANNEL_KEPT_SECONDS = 1800;
 /** the most channels one isolate remembers; the oldest goes first */
 export const CHANNEL_KEPT_MOST = 1000;
 
 /**
- * keptChannels() → the answers this isolate already has: { get(ref), set(ref, answer) }. Memory only, so
- * reading it is not a subrequest. Only a resolved answer is kept, never a failure (a channel YouTube did
- * not answer for is asked again by the next view that has room for it).
+ * How old a feed answer already was when it arrived, in whole seconds, from its headers — or null when
+ * nothing says. The edge copy may have been cached long before this request: `Age` is how long the edge
+ * has held it, `Date` is when YouTube produced it. The larger wins (`Date` from a clock that is ahead
+ * reads younger, so it is floored at 0 and `Age` still counts).
+ */
+export function upstreamAge(headers, nowMs) {
+  if (!headers || typeof headers.get !== 'function') return null;
+  const ages = [];
+  const age = String(headers.get('age') ?? '').trim();
+  if (/^\d+$/.test(age)) ages.push(Number(age));
+  const date = Date.parse(String(headers.get('date') ?? ''));
+  if (Number.isFinite(date)) ages.push(Math.max(0, Math.floor((nowMs - date) / 1000)));
+  return ages.length ? Math.max(...ages) : null;
+}
+
+/**
+ * keptChannels() → the answers this isolate already has: { get(ref), set(ref, answer, headers) }. Memory
+ * only, so reading it is not a subrequest. Only a resolved answer is kept, never a failure (a channel
+ * YouTube did not answer for is asked again by the next view that has room for it).
+ *
+ * 🔴 tile#357 review: an answer is remembered for what is LEFT of the feed's TTL, not for a fresh TTL
+ * from the moment it arrived. `headers` are the feed response's; the edge may already have held that
+ * copy for most of its 1800 s, and restarting the clock here kept an old "latest video" up to twice as
+ * long as the edge would. So the entry expires when the edge copy it came from does, an answer whose
+ * age nothing states is not remembered at all, and setting a ref again from the same old edge copy
+ * cannot move its expiry later.
  */
 export function keptChannels({ seconds = CHANNEL_KEPT_SECONDS, most = CHANNEL_KEPT_MOST, now = Date.now } = {}) {
   const m = new Map();
@@ -77,14 +100,19 @@ export function keptChannels({ seconds = CHANNEL_KEPT_SECONDS, most = CHANNEL_KE
     get(ref) {
       const e = m.get(ref);
       if (!e) return null;
-      if (now() - e.at < seconds * 1000) return e.answer;
+      if (now() < e.until) return e.answer;
       m.delete(ref);
       return null;
     },
-    set(ref, answer) {
+    set(ref, answer, headers) {
       if (!answer) return;
+      const t = now();
+      const age = upstreamAge(headers, t);
+      if (age === null) return;
+      const until = t + (seconds - age) * 1000;
+      if (until <= t) return;
       m.delete(ref);
-      m.set(ref, { at: now(), answer });
+      m.set(ref, { until, answer });
       while (m.size > most) m.delete(m.keys().next().value);
     },
     get size() { return m.size; },
@@ -104,7 +132,7 @@ export function keptChannels({ seconds = CHANNEL_KEPT_SECONDS, most = CHANNEL_KE
  *   · the others are fetched in the order the page names them while their worst case still fits,
  *     and fetching stops at the first one that does not;
  *   · the rest are not asked for at all.
- * `kept` remembers every answer this call resolves. Never throws.
+ * `kept` remembers every answer this call resolves, for what is left of its feed's TTL. Never throws.
  */
 export async function resolveChannels(cardMd, doFetch, { subrequests = Infinity, kept = null } = {}) {
   const ids = channelsIn(cardMd);
@@ -120,11 +148,20 @@ export async function resolveChannels(cardMd, doFetch, { subrequests = Infinity,
     left -= channelFetches(c);
     ask.push(c);
   }
-  const got = await Promise.all(ask.map((c) => resolveChannel(c, doFetch)));
+  // each channel's feed response headers, for keptChannels' expiry (a handle page's are not the feed's)
+  const feedHeaders = ask.map(() => null);
+  const got = await Promise.all(ask.map((c, i) => resolveChannel(c, (u) => {
+    const r = doFetch(u);
+    if (!u.includes('/feeds/videos.xml?')) return r;
+    return Promise.resolve(r).then((res) => {
+      feedHeaders[i] = (res && res.headers) || null;
+      return res;
+    });
+  })));
   ask.forEach((c, i) => {
     if (!got[i]) return;
     out[c] = got[i];
-    if (kept) kept.set(c, got[i]);
+    if (kept) kept.set(c, got[i], feedHeaders[i]);
   });
   return out;
 }
