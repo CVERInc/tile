@@ -385,9 +385,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // draw it in a pile. The footer has two homes as well: under the cards in a pile, where the engine put it on the wall.
   { const ft=document.querySelector('footer.st-footer'); if(ft){ lodge(ft); host.insertBefore(ft,table); settled(ft); } }   // same stacking context as the table, so z 5 really sits under the cards
   let homing=0, wasAt=0; window.__deckListHome=()=>{ if(!ON||!LIST)return; const ph=pageH(); if(scrollY<=ph/2&&wasAt>0){ homing=Date.now(); scrollTo({top:wasAt*ph,behavior:'smooth'}); wasAt=0; return; } wasAt=cur; document.documentElement.classList.remove('list-away'); homing=Date.now(); scrollTo({top:0,behavior:'smooth'}); };
-  window.__deckFanToggle=()=>{ if(!ON||LIST)return; if(fanned)fanIn(); else fanOut(); };
+  window.__deckFanToggle=()=>{ if(!ON||LIST)return; settleWrap(); if(fanned)fanIn(); else fanOut(); };
   // stack ⇄ list without a reload: the same cards glide from one arrangement to the other (FLIP), then the other arrangement's scrolling takes over
-  window.__deckLayout=(m)=>{ const toList=m==='list'; if(!ON||toList===LIST)return; if(fanned)fanIn(); close(); if(!toList)document.documentElement.classList.remove('list-away');     const before=new Map(cards.map(c=>[c,c.getBoundingClientRect()]));   // cards that join the window during the switch have no before: they just appear
+  window.__deckLayout=(m)=>{ const toList=m==='list'; if(!ON||toList===LIST)return; settleWrap(); if(fanned)fanIn(); close(); if(!toList)document.documentElement.classList.remove('list-away');     const before=new Map(cards.map(c=>[c,c.getBoundingClientRect()]));   // cards that join the window during the switch have no before: they just appear
     cards.forEach(c=>{ c.style.transition='none'; c.style.opacity='1'; c.style.visibility='visible'; c.style.transform=''; });
     LIST=toList; document.documentElement.classList.toggle('list',LIST); paint();
     fit(); goTo(cur); listTx();
@@ -424,14 +424,16 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // flight: over the top of the pile in two halves. Half 1 plays where the card is; at the apex the node moves to its new place in the pile
   // (front of DOM for to-back, end of DOM for from-back) and half 2 plays there. Both halves share the apex pose, so the swap is invisible.
   const FLIGHT=['to-back-1','to-back-2','from-back-1','from-back-2'];
+  const flown=new Map();   // a card in flight → its animationend listeners (land() takes them off when a run is settled)
   const flight=(c,kind)=>{ c.classList.add('travel'); c.classList.remove(...FLIGHT); c.classList.toggle('side',flingDir!==0); c.style.setProperty('--fdir',String(flingDir||1)); flingDir=0; void c.offsetWidth; c.classList.add(kind+'-1');
     const onEnd1=e=>{ if(!new RegExp('^deck-'+kind+'(-side)?-1$').test(e.animationName))return; c.removeEventListener('animationend',onEnd1);
       c.classList.remove(kind+'-1');
       if(kind==='to-back'){ put(c,above(gshadow)); } else { put(c,null); if(card(cur)===c)put(shade,c,true); }
       void c.offsetWidth; c.classList.add(kind+'-2');
-      const onEnd2=e2=>{ if(!new RegExp('^deck-'+kind+'(-side)?-2$').test(e2.animationName))return; c.removeEventListener('animationend',onEnd2); c.classList.remove(kind+'-2','travel'); settleHidden(c); order(); if(!running&&!stack.querySelector('.travel')){stack.classList.remove('busy'); requestAnimationFrame(hovEval); setTimeout(hovEval,560);} };
-      c.addEventListener('animationend',onEnd2); };
-    c.addEventListener('animationend',onEnd1); };
+      const onEnd2=e2=>{ if(!new RegExp('^deck-'+kind+'(-side)?-2$').test(e2.animationName))return; c.removeEventListener('animationend',onEnd2); flown.delete(c); c.classList.remove(kind+'-2','travel'); settleHidden(c); order(); if(!running&&!stack.querySelector('.travel')){stack.classList.remove('busy'); requestAnimationFrame(hovEval); setTimeout(hovEval,560);} };
+      flown.set(c,[onEnd2]); c.addEventListener('animationend',onEnd2); };
+    flown.set(c,[onEnd1]); c.addEventListener('animationend',onEnd1); };
+  const land=c=>{ for(const f of flown.get(c)||[]) c.removeEventListener('animationend',f); flown.delete(c); c.classList.remove('travel','side',...FLIGHT); settleHidden(c); };   // a flight cut short: the card is where paint() puts it, now
   // the deal: the pile lands on the table — when the page opens on it, and each time the wall is left for it
   const dealIn=()=>{ if(!LIST){ stack.classList.add('dealing'); } paint(); if(!LIST) cards.forEach(c=>{c.style.transform='translateY(60vh)';c.style.opacity='0';});
   requestAnimationFrame(()=>requestAnimationFrame(()=>{stack.classList.remove('dealing'); stack.classList.add('dealt'); const vis=cards.filter(c=>!c.classList.contains('is-deep')); cards.forEach(c=>{if(!vis.includes(c)){c.style.transform='';c.style.opacity='';}}); vis.slice().reverse().forEach((c,i)=>setTimeout(()=>{c.style.transform='';c.style.opacity='';},i*110)); setTimeout(()=>stack.classList.remove('dealt'),vis.length*110+700);})); };
@@ -485,7 +487,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   document.addEventListener('pointercancel',()=>{ fanDown=false; fanHover(-1); },true);
   stack.addEventListener('click',e=>{ if(document.documentElement.classList.contains('fan-closing')){e.preventDefault();e.stopPropagation();} },true);
   document.addEventListener('click',e=>{ if(!ON||openCard||fanned||document.documentElement.classList.contains('fan-closing'))return; if(e.target.closest('.deck-card,.deck-bar,.deck-seg,.deck-player,a,button,input,label,.cp-icon,#qr-holder,#qr-overlay,#qr-group,dc-dock,[data-dynamic-coral]'))return; fanOut(); });   // dock items retarget shadow clicks to the host: not the table
-  let queue=0, running=false;
+  let queue=0, running=false, runT=0, wrapping=false;   // wrapping: the run queued by wrapBack() is under way
   const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
   let movedOnce=false, moveTimer=null;
   function moving(){ if(!movedOnce){movedOnce=true;return;} document.documentElement.classList.add('moving'); clearTimeout(moveTimer); moveTimer=setTimeout(()=>document.documentElement.classList.remove('moving'),600); }
@@ -494,12 +496,12 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   function run(){
     running=true; stack.classList.add('busy');
     const tick=()=>{
-      if(queue===0){running=false; if(!stack.querySelector('.travel'))stack.classList.remove('busy'); return;}
+      if(queue===0){running=false; wrapping=false; if(!stack.querySelector('.travel'))stack.classList.remove('busy'); return;}
       const dir=Math.sign(queue); const n=N; queue-=dir;
       if(dir>0){ const leaving=card(cur); if(!reduced)leaving.classList.add('travel'); cur=(cur+1)%n; unask(); paint(); if(!reduced)flight(leaving,'to-back'); }
       else { cur=(cur-1+n)%n; unask(); const rising=card(cur); if(!reduced)rising.classList.add('travel'); paint(); if(!reduced)flight(rising,'from-back'); }
       let wait=120; if(riffle){ const k=riffle-Math.abs(queue); wait=Math.round(28+92*Math.pow(k/riffle,2)); if(!queue) riffle=0; }   /* a riffle starts fast and settles into the normal pace */
-      setTimeout(tick, reduced?0:wait);
+      runT=setTimeout(tick, reduced?0:wait);
     };
     tick();
   }
@@ -511,7 +513,21 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // settling into 120 ms: 21 cards rise over ~1.2 s), and sync() then finds cur+queue already at the top and adds nothing.
   // Past the whole pile (2·WIN+3 cards: beyond it cards are made as the window moves) it stays the jump; with reduced motion,
   // as before.
-  const wrapBack=()=>{ const K=cur; if(!reduced&&!running&&queue===0&&K>JUMP&&N<=2*WIN+3){ riffle=K; step(-K); } scrollTo({top:0,behavior:'instant'}); };
+  const wrapBack=()=>{ const K=cur; if(!reduced&&!running&&queue===0&&K>JUMP&&N<=2*WIN+3){ riffle=K; step(-K); wrapping=running; } scrollTo({top:0,behavior:'instant'}); };
+  // That run is ~1.2 s in which the page is already at the top while cur still walks down to it. Whatever the visitor does
+  // in it — opens a card, taps, scrolls, presses a key, switches to the list or the wall, resizes — first SETTLES the run:
+  // the queue is dropped, the cards in flight land, and the deck is where the run was going (the first card up, the page
+  // at its top), painted once; only then is the action applied, to that deck. Left running, the run kept paint()ing under
+  // the action: a card opened on the way (Enter) lost its turn while the page stayed open on the first card's front, and
+  // a switch to the list scrolled to the card on the way while the run went on to set cur=0 under it.
+  const settleWrap=()=>{ if(!wrapping)return; wrapping=false; clearTimeout(runT); queue=0; riffle=0; running=false; flingDir=0;
+    cur=0; unask(); for(const c of [...flown.keys()]) land(c); paint(); stack.classList.remove('busy'); };
+  // A press on the pile itself while it runs was aimed at a card in flight, which the settle has just moved: that tap is
+  // spent on the settle, and its click (on whatever is under the finger now — the table, so the fan opened) is dropped.
+  // A press anywhere else (the switcher, a dock) keeps its click: the settle does not move it.
+  { const s=()=>{ if(ON) settleWrap(); }; const kill=ev=>{ ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('pointerdown',e=>{ if(!ON||!wrapping)return; const onPile=!!(e.target&&e.target.closest&&e.target.closest('.deck-stack')); settleWrap(); if(onPile){ document.addEventListener('click',kill,{capture:true,once:true}); const up=()=>{ removeEventListener('pointerup',up,true); removeEventListener('pointercancel',up,true); setTimeout(()=>document.removeEventListener('click',kill,true),0); }; addEventListener('pointerup',up,true); addEventListener('pointercancel',up,true); } },true);   /* the click comes in the same task as its pointerup: gone after it, however long the press */
+    addEventListener('keydown',s,true); addEventListener('wheel',s,{capture:true,passive:true}); addEventListener('resize',s); }
   // scroll: the browser owns it. The document is n pages tall with one snap point per card, so the scrollbar reads "card i of n",
   // thumb-drag / space / PageDown / Home / End all work natively, and iOS swipes are real scrolls. The pile only changes when the
   // snap index changes (never scrubbed by scroll offset): sync() queues exactly the steps that bring cur to the snapped page.
@@ -522,10 +538,10 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const pageH=()=>Math.max(1e-6,(document.scrollingElement.scrollHeight-innerHeight)/Math.max(1,N-1));
   const goTo=i=>scrollTo({top:i*pageH(),left:0,behavior:'instant'});
   // a jump, not a walk: step() animates one card per 120ms, so a dice landing 400,000 cards away must set cur directly
-  window.__deckJump=(i,o)=>{ i=Math.max(0,Math.min(N-1,i|0)); if(openCard)close(); if(fanned)fanIn(); queue=0; cur=i; unask(); paint(); goTo(i); if(LIST)listTx(); if(o&&o.open)requestAnimationFrame(()=>requestAnimationFrame(()=>{ const c=card(i); if(c.querySelector('.deck-back')) open(c); })); };
+  window.__deckJump=(i,o)=>{ i=Math.max(0,Math.min(N-1,i|0)); settleWrap(); if(openCard)close(); if(fanned)fanIn(); queue=0; cur=i; unask(); paint(); goTo(i); if(LIST)listTx(); if(o&&o.open)requestAnimationFrame(()=>requestAnimationFrame(()=>{ const c=card(i); if(c.querySelector('.deck-back')) open(c); })); };
   // the dice: riffle through the real cards before the target and land on it face up, not opened.
   // Scroll goes to the target first and the riffle is queued, so sync() sees cur+queue === the scrolled index and stays quiet.
-  window.__deckRiffle=(t)=>{ t=Math.max(0,Math.min(N-1,t|0)); if(openCard)close(); if(fanned)fanIn(); const K=Math.min(18,t);
+  window.__deckRiffle=(t)=>{ t=Math.max(0,Math.min(N-1,t|0)); settleWrap(); if(openCard)close(); if(fanned)fanIn(); const K=Math.min(18,t);
     if(reduced||K===0){ window.__deckJump(t); return; } queue=0; riffle=0;
     if(LIST){ cur=t-K; unask(); paint(); goTo(t-K); listTx(); requestAnimationFrame(()=>scrollTo({top:t*pageH(),behavior:'smooth'})); return; }
     const go=()=>{ cur=t-K; unask(); paint(); goTo(t); riffle=K; step(K); };
@@ -533,7 +549,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   window.__deckCount=()=>N; window.__deckCur=()=>cur;   // the editor asks which card is up, to open its row there
   let syncQueued=false;
   const sync=()=>{ syncQueued=false; if(openCard||fanned)return;
-    { const ph=pageH(); const off=scrollY/ph-cur; const f=ph>=innerHeight*0.5?Math.max(-1,Math.min(1,off)):0; const top=card(cur); cards.forEach(c=>{ if(c!==top&&c.style.getPropertyValue('--peek')) c.style.removeProperty('--peek'); }); if(top&&!running&&!top.classList.contains('travel')){ const lift=Math.abs(f)<0.5?f*-180:0; top.classList.toggle('peeking',Math.abs(lift)>0.5); top.style.setProperty('--peek',lift.toFixed(1)+'px'); } } const want=Math.max(0,Math.min(N-1,Math.round(scrollY/pageH()))); const d=want-(cur+queue); if(Math.abs(d)>JUMP&&!openCard){ queue=0; cur=want; unask(); paint(); } else if(d)step(d); };   // far = a jump (thumb-drag across a long deck), near = the walk   // one swipe = one card is the browser's job (scroll-snap-stop: always); clamping here broke thumb-drag and End
+    { const ph=pageH(); const off=scrollY/ph-cur; const f=ph>=innerHeight*0.5?Math.max(-1,Math.min(1,off)):0; const top=card(cur); cards.forEach(c=>{ if(c!==top&&c.style.getPropertyValue('--peek')) c.style.removeProperty('--peek'); }); if(top&&!running&&!top.classList.contains('travel')){ const lift=Math.abs(f)<0.5?f*-180:0; top.classList.toggle('peeking',Math.abs(lift)>0.5); top.style.setProperty('--peek',lift.toFixed(1)+'px'); } } const want=Math.max(0,Math.min(N-1,Math.round(scrollY/pageH()))); if(want!==0) settleWrap(); const d=want-(cur+queue); if(Math.abs(d)>JUMP&&!openCard){ queue=0; cur=want; unask(); paint(); } else if(d)step(d); };   // far = a jump (thumb-drag across a long deck), near = the walk   // one swipe = one card is the browser's job (scroll-snap-stop: always); clamping here broke thumb-drag and End
   // list: the vertical scroll position IS the horizontal position — one rail, one scrollbar, one snap per card
   const listTx=()=>{ if(!ON||!LIST)return; const ph=pageH(); const k=scrollY/ph; const want=Math.max(0,Math.min(N-1,Math.round(k))); if(want!==cur){ cur=want; unask(); if(openCard&&openCard!==card(cur)) close(); paint(); }
     const w=cards[0]?cards[0].getBoundingClientRect().width:400; const s0=cards[0]?idx(cards[0]):0; const kk=N>SNAPMAX&&Math.abs(k-Math.round(k))<0.06?Math.round(k):k; stack.style.setProperty('--tx',(-(kk-s0)*(w+18)).toFixed(1)+'px');   /* a long deck's card is ~17px of scroll and scrollY is whole pixels: at rest, sit exactly on the card */   /* the row starts at the window's first card */ if(Date.now()-homing>=800) document.documentElement.classList.toggle('list-away',scrollY>ph/2); };
@@ -609,7 +625,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const seatOf=c=>typeof c==='number'?Math.max(0,Math.min(N-1,P+c)):Math.max(0,cells.indexOf(c));   // a tile's card has the tile's own place in the dealt order as its number; a number is an item of the card file (the file wall's vb.at)
   // leave: put a held card back, fold the fan, stop answering, and send every tile home. Returns the tile of the card that was up
   // (over a card file: the number of the item that was up).
-  const leave=()=>{ if(fanned)fanIn(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
+  const leave=()=>{ settleWrap(); if(fanned)fanIn(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
     queue=0; drag=null; LD=null; hx=-1; ON=false; stack.classList.remove('hov'); root.classList.remove('list-away','fan','fan-closing','moving','open');
     cards.forEach(c=>c.style.removeProperty('--peek')); rehome(true); for(const k in API) delete window[k]; return up; };
   // enter: the tiles take their seats again and the pile is dealt, open on the card whose tile was in the middle of the wall

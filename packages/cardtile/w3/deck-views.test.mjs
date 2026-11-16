@@ -1232,3 +1232,90 @@ test('tile#345 stack, a pile of 22 with reduced motion, and a pile past the whol
     assert.equal(flew, 0, `${cards} cards${reducedMotion ? ', reduced motion' : ''}: a card travelled`);
   }
 });
+
+// The run back on a long pile takes ~1.2 s, the page already at the top while the current card walks down to it. Whatever
+// the visitor does in that time first settles the run — the first card up, nothing in flight, the page at the top — and
+// is then applied to that deck (review of PR #347, round two). Left running, the run went on painting under the action:
+// Enter opened the card on the way and the run then took its turn away while the page stayed open on the first card's
+// front; the list scrolled to the card on the way and the run then set the first card current under it.
+const midRun = (moveBefore = true) => {
+  const p = open(longPile(22), { ctx: { deck: { pool: true } }, moveBefore });
+  const N = p.win.__deckCount();
+  p.win.__deckJump(N - 1); p.win.tick(1000);
+  tap(p, p.cells[0]); p.win.tick(200);
+  const on = p.win.__deckCur();
+  assert.ok(on > 0 && on < N - 2 && travelling(p).length, `CONTROL: 200 ms after the tap the run is under way (card ${on} up, ${travelling(p).length} travelling)`);
+  return { p, N, on };
+};
+const pageAt = (p) => Math.round(p.win.scrollY / p.win.innerHeight);   // the stand-in's page is one window tall a card
+const settled = (p, what) => {
+  assert.equal(p.win.__deckCur(), 0, `${what}: card ${p.win.__deckCur()} is current, not the first`);
+  assert.equal(travelling(p).length, 0, `${what}: ${travelling(p).length} card(s) still marked travel`);
+  assert.ok(!p.doc.querySelector('.deck-stack').classList.contains('busy'), `${what}: the pile is still busy`);
+};
+const pressKey = (p, key) => p.doc.body.dispatchEvent(new p.win.Event('keydown', { key, bubbles: true }));
+const openNow = (p) => flagged(p).map((c) => +c.dataset.i);
+for (const moveBefore of [true, false]) {
+  const mb = moveBefore ? '' : ' (no moveBefore)';
+  test(`tile#345 stack, a pile of 22${mb}: Enter during the run back opens the first card, and it stays open`, () => {
+    const { p } = midRun(moveBefore);
+    const first = firstCard(p);
+    pressKey(p, 'Enter');
+    settled(p, 'right after Enter');
+    assert.deepEqual(openNow(p), [0], `Enter opened card(s) [${openNow(p)}], not the first card`);
+    p.win.tick(3000);
+    settled(p, 'three seconds after Enter');
+    assert.deepEqual(openNow(p), [0], `three seconds on, the open card(s): [${openNow(p)}]`);
+    assert.ok(first.classList.contains('is-top') && first.classList.contains('flipped'), `the first card is not up and turned over: "${first.className}"`);
+    assert.ok(p.root.classList.contains('open'), 'the page is not in its open-card state');
+    assert.equal(p.win.scrollY, 0, 'the page left the top');
+    escKey(p); p.win.tick(1000);
+    assert.equal(flagged(p).length, 0, 'Escape did not put the card back');
+    p.win.scrollTo({ top: p.win.innerHeight }); p.win.tick(1000);
+    assert.equal(p.win.__deckCur(), 1, 'after putting it back a scroll of one card does not go to the second card');
+  });
+
+  test(`tile#345 stack, a pile of 22${mb}: switching to the list during the run back keeps the list and the current card together`, () => {
+    const { p } = midRun(moveBefore);
+    p.press('list');
+    settled(p, 'in the list');
+    assert.equal(p.root.dataset.view, 'list', 'CONTROL: the list is up');
+    assert.equal(pageAt(p), 0, `the list is scrolled to card ${pageAt(p)} while the first card is current`);
+    p.win.tick(3000);
+    assert.equal(p.win.__deckCur(), 0, `three seconds on, card ${p.win.__deckCur()} is current`);
+    assert.equal(pageAt(p), 0, `three seconds on, the list is scrolled to card ${pageAt(p)}`);
+    p.press('stack');
+    settled(p, 'back in the stack');
+    assert.equal(pageAt(p), 0, `back in the stack the page is at card ${pageAt(p)}`);
+    holds(p, 'stack', 'back in the stack after the list');
+  });
+}
+
+test('tile#345 stack, a pile of 22: a tap, a key, a wheel, a resize, a scroll, the dice or the wall during the run back first lands it on the first card', () => {
+  // [what the visitor does, the card it leaves current, whether the run is settled the moment it happens]
+  const cases = [
+    // the press lands on a card in flight; after the settle its click comes on what is under the finger now (the pile, not
+    // a card): that click is the settle's, not a tap on the table (which would fan the pile out)
+    ['a second tap on the pile', (p) => { const t = p.doc.querySelector('.deck-card.is-top'); t.dispatchEvent(new p.win.Event('pointerdown', { bubbles: true })); t.dispatchEvent(new p.win.Event('pointerup', { bubbles: true }));
+      p.doc.querySelector('.deck-stack').dispatchEvent(new p.win.Event('click', { bubbles: true, isTrusted: true }));
+      assert.ok(!p.root.classList.contains('fan'), 'a second tap on the pile while it runs fanned it out'); }, 0, true],
+    ['End', (p) => pressKey(p, 'End'), 0, true],
+    ['ArrowRight', (p) => pressKey(p, 'ArrowRight'), 1, false],
+    ['a wheel', (p) => p.root.dispatchEvent(new p.win.Event('wheel', { bubbles: true, deltaX: 0, deltaY: 40, deltaMode: 0, timeStamp: 9000 })), 0, true],
+    ['a resize', (p) => p.win.dispatchEvent(new p.win.Event('resize')), 0, true],
+    ['a scroll of one card', (p) => p.win.scrollTo({ top: p.win.innerHeight }), 1, false],
+    ['the dice to card 5', (p) => p.win.__deckJump(5), 5, false],
+  ];
+  for (const [what, act, then, now] of cases) {
+    const { p } = midRun();
+    act(p);
+    if (now) settled(p, `right after ${what}`);
+    p.win.tick(3000);
+    assert.equal(p.win.__deckCur(), then, `${what}: three seconds on, card ${p.win.__deckCur()} is current, not ${then}`);
+    assert.equal(pageAt(p), then, `${what}: three seconds on, the page is at card ${pageAt(p)} while card ${p.win.__deckCur()} is current`);
+  }
+  const { p } = midRun();
+  p.press('wall'); p.press('stack');
+  settled(p, 'the wall and back');
+  assert.equal(pageAt(p), 0, `the wall and back: the page is at card ${pageAt(p)}`);
+});

@@ -28,6 +28,8 @@
 //             round.
 //   whole     a pile past the whole pile (61 cards; deck.js 2·WIN+3 = 51): ⚠ NOTED, not judged — the tap there is
 //             still the jump.
+//   interrupt a pile of 22: Enter (`open`) or the list button (`list`) while the run back is under way — the run
+//             settles on the first card before the action applies (interrupted(), below).
 //
 // 🔴 NO FIXED SLEEPS. Every wait is a condition the page is asked for (the deal over, the deck at rest, the run
 // landed), so an arm takes as long as the deck does and no longer: the seven Chromium arms used to sleep 105.5 s
@@ -64,6 +66,42 @@ const AT_REST = () => { const st = document.querySelector('.deck-stack'); if (!s
   for (const c of document.querySelectorAll('.deck-card')) if (c.style.transform || c.style.opacity) return false;
   return !document.getAnimations().some((a) => a.playState === 'running' && a.effect && a.effect.target && a.effect.target.closest && a.effect.target.closest('.deck-stack')); };
 
+// interrupted: the tap on the first card, and while the run back is under way (a few cards in, the page already at the
+// top) the visitor acts — `open` presses Enter, `list` clicks the switcher's list button. The run must settle first
+// (the first card up, nothing in flight) and the action then apply to that deck. Before, the run went on under it:
+// Enter opened the card on the way and the run took its turn away while the page stayed open on the first card's front;
+// the list scrolled to the card on the way and the run then set the first card current under it (review of PR #347).
+async function interrupted(pg, N, hit, kind, name, ok, errors, shots) {
+  const state = () => pg.evaluate(() => { const ph = (document.scrollingElement.scrollHeight - innerHeight) / Math.max(1, window.__deckCount() - 1);
+    return { cur: window.__deckCur(), y: scrollY, at: Math.round(scrollY / ph), view: document.documentElement.dataset.view, open: [...document.querySelectorAll('.deck-card.is-open')].map((c) => +c.dataset.i),
+      htmlOpen: document.documentElement.classList.contains('open'), flipped: [...document.querySelectorAll('.deck-card.flipped')].map((c) => +c.dataset.i) }; });
+  await pg.mouse.click(hit[0], hit[1]);
+  // under way: a few cards have risen (cur at most N−6) — a condition, not a sleep; a run already over fails the CONTROL
+  await pg.waitForFunction((n) => window.__deckCur() <= n - 6, N, { timeout: 4000, polling: 'raf' });
+  const mid = await pg.evaluate(() => ({ cur: window.__deckCur(), travel: document.querySelectorAll('.deck-card.travel').length, y: scrollY }));
+  ok(mid.cur > 0 && mid.travel > 0 && mid.y === 0, `CONTROL: the run back is under way when the visitor acts (card ${mid.cur} up, ${mid.travel} travelling, scrollY ${mid.y})`);
+  const rest = () => pg.waitForFunction(() => window.__atRest(), null, { timeout: 8000, polling: 'raf' });
+  if (kind === 'open') {
+    await pg.keyboard.press('Enter'); await rest();
+    const s = await state();
+    await pg.screenshot({ path: join(shots, `${name}.png`) });
+    ok(s.cur === 0 && s.y === 0, `Enter during the run: the first card is current (card ${s.cur}) and the page at its top (scrollY ${s.y})`);
+    ok(s.open.join() === '0' && s.flipped.join() === '0' && s.htmlOpen, `the card open is the first one, turned over (open [${s.open}], turned over [${s.flipped}], page open: ${s.htmlOpen})`);
+    await pg.keyboard.press('Escape'); await rest();
+    const e = await state();
+    ok(e.open.length === 0 && !e.htmlOpen && e.cur === 0, `Escape puts it back (open [${e.open}], page open: ${e.htmlOpen}, card ${e.cur})`);
+  } else {
+    await pg.locator('.deck-seg button[data-m="list"]').click(); await rest();
+    const s = await state();
+    await pg.screenshot({ path: join(shots, `${name}.png`) });
+    ok(s.view === 'list' && s.cur === 0 && s.at === 0, `the list during the run: the first card is current (card ${s.cur}) and the list is at it (scrolled to card ${s.at}, scrollY ${s.y})`);
+    await pg.locator('.deck-seg button[data-m="deck"]').click(); await rest();
+    const b = await state();
+    ok(b.view === 'stack' && b.cur === 0 && b.y === 0, `back to the stack: the first card is up (card ${b.cur}, scrollY ${b.y})`);
+  }
+  ok(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
+}
+
 /** run the arms in one engine. engine: 'chromium' | 'webkit'; devices: { name: context options }; arms: [name, opts]. */
 export async function runStackWrap({ engine, devices, arms, label }) {
   const t0 = Date.now();
@@ -91,7 +129,7 @@ export async function runStackWrap({ engine, devices, arms, label }) {
   const ok = (cond, msg) => { console.log((cond ? '   ✓ ' : '   🔴 ') + msg); if (!cond) bad++; return !!cond; };
   const note = (msg) => console.log('   ⚠ ' + msg);
 
-  async function arm(name, { page, device = 'desktop', reduced = false }) {
+  async function arm(name, { page, device = 'desktop', reduced = false, interrupt = null }) {
     const a0 = Date.now();
     console.log(`\n── ${name}  (/${page}, ${device}${reduced ? ', reduced motion' : ''})`);
     const ctx = await browser.newContext({ ...devices[device], ...(reduced ? { reducedMotion: 'reduce' } : {}) });
@@ -129,6 +167,7 @@ export async function runStackWrap({ engine, devices, arms, label }) {
       ok(edge && /\bis-next1\b/.test(edge.cls) && /\bwrap\b/.test(edge.cls), `the first card is under it: "${edge && edge.cls}"`);
       ok(edge && edge.hit, `the first card shows past the top card: ~${edge && edge.px} px² of it answers elementFromPoint (left/right/bottom past the top card: ${edge && edge.past.join('/')} px); tapped ${edge && edge.hit ? Math.round(edge.hit[2]) : '—'} px outside the top card`);
       if (!edge || !edge.hit) return;
+      if (interrupt) { await interrupted(pg, N, edge.hit, interrupt, name, ok, errors, SHOTS); return; }
       let at = edge.hit;
       // ⚠ NOTED, not judged: on a phone the peek is the next card's resting pose — a sliver a few px past the top card, the
       // same pose as the prototype's. The browser may hand a tap there to the TOP card (Chromium's touch adjustment moves the

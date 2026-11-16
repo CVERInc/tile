@@ -9,6 +9,9 @@
 //   desktop-deck-pool   a pile of 6 at 1280×800: the walk back at 120 ms a card, through the slots
 //   desktop-long        a pile of 22 at 1280×800: a run through every card at the riffle's pace, not a jump
 //   phone-long          the same on a 390×844 phone, with touch (⚠ which card a tap on the sliver reaches is noted)
+//   desktop-long-enter  a pile of 22, Enter while the run back is under way: the first card opens, and stays open
+//   desktop-long-list   a pile of 22, the list button while the run back is under way: the list and the current card
+//                       stay together (both went red on b13e032)
 //
 // CONTROL: every arm first asks that the pile has the cards it was made with; desktop-long and phone-long went red
 // (10 problems: 5 each) on deck.js before wrapBack, while desktop-deck-pool stayed green.
@@ -28,5 +31,7 @@ await runStackWrap({
     ['desktop-deck-pool', { page: 'deck' }],
     ['desktop-long', { page: 'long' }],
     ['phone-long', { page: 'long', device: 'phone' }],
+    ['desktop-long-enter', { page: 'long', interrupt: 'open' }],
+    ['desktop-long-list', { page: 'long', interrupt: 'list' }],
   ],
 });

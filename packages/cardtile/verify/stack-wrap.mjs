@@ -9,6 +9,9 @@
 //   long                                         a pile of 22: a run through every card at the riffle's pace — it
 //                                                used to be a jump with no motion (the shape it was seen on)
 //   whole                                        a pile of 61, past the whole pile: ⚠ noted, the tap is still a jump
+//   long-enter / long-list                       a pile of 22, Enter / the list button while the run back is under
+//                                                way: the run settles on the first card first (stack-wrap-arms.mjs
+//                                                interrupted); on b13e032 both went red
 //
 // CONTROL: every arm first asks that the pile has the cards it was made with; `long` went red (5 problems: 0 cards
 // rose, no side flight, 0 flights, no pace, no span) on deck.js before wrapBack, when the tap there was a jump; every
@@ -34,5 +37,7 @@ await runStackWrap({
     ['reduced-phone', { page: 'deck', device: 'phone', reduced: true }],
     ['long', { page: 'long' }],
     ['whole', { page: 'whole' }],
+    ['long-enter', { page: 'long', interrupt: 'open' }],
+    ['long-list', { page: 'long', interrupt: 'list' }],
   ],
 });
