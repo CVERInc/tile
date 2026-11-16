@@ -151,7 +151,8 @@ SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs
              # the emitter's markup driven by the built grid-filter and grid-masonry corals.
              packages/dynamic-corals/grid-filter/*.smoke.mjs
              # tile#84: the paid completion page settling the basket once, before a tab closed on the
-             # receipt can stop it, and a reload of the receipt leaving the basket alone.
+             # receipt can stop it, and a reload of the receipt leaving the basket alone; tile#328: a
+             # shop tab that loaded the basket before the order does not write the paid lines back.
              packages/dynamic-corals/square-shop/*.smoke.mjs)
 # 🔴 A SECOND browser list, because the two are invoked differently and merging them would break
 # one of them silently. Every SMOKE_GLOBS entry is called `node <smoke> <base URL>` against the
