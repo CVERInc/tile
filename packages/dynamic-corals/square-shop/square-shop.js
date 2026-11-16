@@ -335,6 +335,119 @@ function recordSoldLines(ref, items) {
 	pruneSoldRecords(Date.now());
 }
 
+// ── a paid order whose completion page closed before it settled (tile#84) ──────────────────
+//
+// The paid completion page lives in the SITE's `_worker.js` (shop-function-template.js). The moment
+// it learns an order is paid it writes, before it waits for anything, a PAID INTENT under
+// `dc-square-shop-paid:<ref>` (`{s: storeId, ids, lines, t}`), and then takes the lines off the
+// basket. A page closed, navigated away from or frozen in between leaves the intent behind with the
+// paid lines still in the basket. Left there, they would be loaded below and could be paid for a
+// second time. So this file applies every intent for its store when it loads the basket and again
+// right before a checkout leaves. See ./PROVENANCE.md § tile#84 for the whole protocol.
+//
+// 🔴 The two functions below are MIRRORED BYTE FOR BYTE from shop-function-template.js, which ships
+// on a different deploy, with ONE line different: here `rowQty` is this file's own `cartRowQty`,
+// not the template's inline copy of it. The badge count's guard (../shared/cart-badge-count.test.mjs)
+// allows exactly one quantity read in this file. paid-settlement.test.mjs holds the rest equal and
+// checks that the template's inline read is cartRowQty's own expression.
+// `applyPaidIntent` applies an intent at most once: the basket write is the only call in it that
+// can throw, and the intent is removed right after it. A completion page still waiting in another
+// tab, and this file, therefore cannot both take the same lines off.
+const PAID_STORE_PREFIX = 'dc-square-shop-paid:';
+
+function cartAfterOrder(rawCart, rawSold) {
+	let sold;
+	try { sold = JSON.parse(rawSold || 'null'); } catch (e) { sold = null; }
+	if (!sold || !Array.isArray(sold.ids)) return null;
+	let rows;
+	try { rows = JSON.parse(rawCart || 'null'); } catch (e) { return null; }
+	if (!Array.isArray(rows)) return null;
+	// 0.11.19 (tile#40): a record that says HOW MANY of each line went to the till takes that many
+	// off the row as it stands NOW, instead of deleting the row. The row may have grown since the
+	// checkout left — another tab added one more of the same variation while the shopper was on the
+	// hosted payment page — and deleting the row deleted that later add with it. `lines` is
+	// [[variationId, qty], ...], written by square-shop.js#recordSoldLines beside `ids`.
+	// Quantity is read exactly as square-shop.js#cartRowQty reads it (mirrored inline: this
+	// function ships as its own source text inside the completion page).
+	const rowQty = cartRowQty;
+	let owed = null;
+	if (Array.isArray(sold.lines)) {
+		owed = {};
+		for (const l of sold.lines) {
+			if (!Array.isArray(l) || !String(l[0] || '')) { owed = null; break; }
+			const n = parseInt(l[1], 10);
+			if (!(n >= 1)) { owed = null; break; }
+			owed[String(l[0])] = (owed[String(l[0])] || 0) + n;
+		}
+	}
+	if (owed) {
+		const out = [];
+		for (const e of rows) {
+			const vid = Array.isArray(e) ? String(e[0] || '') : '';
+			if (!vid || !owed[vid]) { out.push(e); continue; }
+			const q = rowQty(e), take = q < owed[vid] ? q : owed[vid];
+			owed[vid] -= take;
+			if (q - take >= 1) out.push([e[0], q - take]);
+		}
+		return out;
+	}
+	// A record from 0.11.16–0.11.18 carries ids only: the row goes, as it did then.
+	const ids = sold.ids.map(String);
+	return rows.filter(function (e) { return !(Array.isArray(e) && ids.indexOf(String(e[0] || '')) >= 0); });
+}
+
+function applyPaidIntent(ls, cartKey, intentKey) {
+	const raw = ls.getItem(intentKey);
+	if (raw === null) return false;
+	let intent = null;
+	try { intent = JSON.parse(raw); } catch (e) { intent = null; }
+	if (!intent || typeof intent !== 'object' || !Array.isArray(intent.ids)) {
+		ls.removeItem(intentKey);
+		return false;
+	}
+	const before = ls.getItem(cartKey);
+	const kept = cartAfterOrder(before, raw);
+	const after = kept && kept.length ? JSON.stringify(kept) : null;
+	if (after !== before) {
+		if (after === null) ls.removeItem(cartKey);
+		else ls.setItem(cartKey, after);
+	}
+	ls.removeItem(intentKey);
+	return after !== before;
+}
+
+// Apply every paid intent this store has outstanding. Returns whether the basket changed, and when
+// it did, says so to the header badge the same way persistCart does.
+//
+// Only intents naming THIS store (`s`) are applied. Another store's intent belongs to that
+// store's basket, and an intent too damaged to name its store is left for its own completion page,
+// which removes it on a reload. Guarded on `length`/`key` like pruneSoldRecords: a storage double
+// that cannot list its keys has no intents to find.
+function reconcilePaidOrders(storeId) {
+	let changed = false;
+	try {
+		const ls = window.localStorage;
+		if (!ls || typeof ls.length !== 'number' || typeof ls.key !== 'function') return false;
+		const mine = [];
+		for (let i = 0; i < ls.length; i++) {
+			const k = ls.key(i);
+			if (!k || k.indexOf(PAID_STORE_PREFIX) !== 0) continue;
+			let s = null;
+			try { s = (JSON.parse(ls.getItem(k) || 'null') || {}).s; } catch { s = null; }
+			if (s === storeId) mine.push(k);
+		}
+		// Applied after the scan, so removing a key cannot shift the index the scan is walking.
+		for (const k of mine) if (applyPaidIntent(ls, cartStore(storeId), k)) changed = true;
+	} catch {
+		// Storage disabled, or the basket write refused: every intent not yet applied is still on
+		// disk, and the next load or checkout tries again.
+	}
+	if (changed) {
+		try { window.dispatchEvent(new CustomEvent('dc-cart-changed')); } catch {}
+	}
+	return changed;
+}
+
 function clearPersistedCart(storeId) {
 	try {
 		window.localStorage.removeItem(cartStore(storeId));
@@ -1293,6 +1406,9 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 	const siteId = root.getAttribute('data-site-id') || '';
 	const storeId = guildId || siteId;
 	consumeCheckoutReturn();
+	// tile#84: a paid order whose completion page closed before it settled comes off FIRST, so its
+	// lines are never loaded as if they were still to be bought.
+	reconcilePaidOrders(storeId);
 	const cart = loadPersistedCart(storeId, cartItemsById);
 
 	// products on the left, sticky cart on the right (feelreef picker layout). With data-cart="header"
@@ -1324,6 +1440,21 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 	function removeUnavailable(vid) {
 		cart.unavailable.delete(vid);
 		persistCart(storeId, cart);
+		render();
+	}
+
+	// tile#84: the basket on disk changed under this page (a paid order's lines came off it, see the
+	// Checkout click below). Take the disk's version into the one `cart` object this page holds. It
+	// is mutated in place because every closure here holds that object. A line state for a row that
+	// is gone goes with it.
+	function reloadFromStorage() {
+		const fresh = loadPersistedCart(storeId, cartItemsById);
+		cart.clear();
+		for (const [vid, qty] of fresh) cart.set(vid, qty);
+		cart.unavailable = fresh.unavailable;
+		cart.foreign = fresh.foreign;
+		cart.storageAvailable = fresh.storageAvailable;
+		for (const vid of [...lineStates.keys()]) if (!cart.has(vid)) lineStates.delete(vid);
 		render();
 	}
 
@@ -1524,6 +1655,12 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		checkout.textContent = confirmsPrice ? labels.confirmPrice : labels.checkout;
 		checkout.disabled = cart.size === 0 || hasSoldOut || cart.size > MAX_CART_LINES;
 		checkout.addEventListener('click', () => {
+			// tile#84: an order paid since this page loaded (its completion page closed before it
+			// settled) takes its lines off the basket here, before anything is sent. If that changed
+			// the basket, this click does not check out. The panel is redrawn from what is now on
+			// disk, so the visitor sees the paid lines gone and presses again. What reaches the till
+			// is never something other than what the panel showed.
+			if (reconcilePaidOrders(storeId)) { reloadFromStorage(); return; }
 			if (confirmsPrice) lineStates.clear();
 			return startCartCheckout(apiBase, guildId, cart, collectShipping, checkout, labels, checkoutRefs, siteId, handleConflict);
 		});
@@ -1838,6 +1975,9 @@ export {
 	storageAvailabilityNotice,
 	startCheckout,
 	startCartCheckout,
+	// tile#84: what a load and a checkout run first. Exported so settle.smoke.mjs can run it in a
+	// real browser after a completion tab is closed mid-settle.
+	reconcilePaidOrders,
 	// Exported for the ONE assertion the real paths cannot make: settle()'s optional
 	// failure-label override, which neither call site here uses (this file answers a
 	// refusal in the -msg node instead). Kept identical to the feelreef fork's copy so

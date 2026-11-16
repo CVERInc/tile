@@ -4136,6 +4136,38 @@ export async function mount(el, handoff = null) {
 		saveHandle(tenant, convId, email, mode);
 	}
 	/**
+	 * The handle key's raw bytes as they are now — taken by each send as it leaves, so that an answer
+	 * landing after `unmount(el)` can tell whether anything has written the key since. `undefined`
+	 * when storage cannot be read at all.
+	 */
+	function handleBytes() {
+		try {
+			return window.localStorage.getItem(storeKey(tenant));
+		} catch {
+			return undefined;
+		}
+	}
+	/**
+	 * 🩸 A MESSAGE THE SERVER ACCEPTED KEEPS ITS HANDLE, EVEN WHEN THE PANEL IS GONE (tile#84 r2).
+	 * The send left, the SPA unmounted the bubble, then the 200 arrived. r1 dropped that answer
+	 * whole — and with it the conversation id, which is this browser's ONLY way back to the message
+	 * and to the owner's reply. A first-time visitor's thread was then unreachable from every later
+	 * mount, and pressing Send again opened a second conversation. Only the handle is written; the
+	 * panel's DOM, the transcript read and the poller stay behind `disposed` as before.
+	 *
+	 * 🔴 "NEWER" IS DECIDED BY THE KEY ITSELF, NOT BY A CLOCK. `sentFrom` is what the key held when
+	 * this send left (`handleBytes()`). If the key no longer holds exactly that, something wrote it
+	 * in between — a newer mount of this bubble on the next route, another tab, the visitor pressing
+	 * "ask again" — and that writer knows more about the visitor's current thread than an answer to
+	 * a request it never saw. That write wins and this one is dropped. Unchanged bytes mean nobody
+	 * has spoken since, so the accepted conversation becomes the handle, as it would have on a
+	 * mounted panel. Storage that could not be read when the send left is never written to here.
+	 */
+	function storeAcceptedHandle(sentFrom, convId, email, mode) {
+		if (sentFrom === undefined || handleBytes() !== sentFrom) return;
+		storeHandle(convId, email, mode);
+	}
+	/**
 	 * The active conversation — `handoffConv` while showing the human thread,
 	 * `null` while asking KAITO or composing fresh. Every existing `conv` read
 	 * in this file (the send payloads, `refresh()`'s guard, `headHtml()`'s
@@ -4511,6 +4543,7 @@ export async function mount(el, handoff = null) {
 	async function escalate(question, button, copyRef) {
 		button.disabled = true;
 		button.textContent = copyRef.sending;
+		const sentFrom = handleBytes();
 		const { status, body } = await send(apiBase, {
 			kind,
 			id,
@@ -4518,10 +4551,15 @@ export async function mount(el, handoff = null) {
 			text: question,
 			page_url: location.href
 		}).catch(() => ({ status: 0, body: null }));
-		// Unmounted while the send was in the air: see `disposed`.
-		if (disposed) return;
+		const accepted = status === 200 && body && body.ok;
+		// Unmounted while the send was in the air: see `disposed` — and `storeAcceptedHandle`, the
+		// one thing an accepted answer still does.
+		if (disposed) {
+			if (accepted) storeAcceptedHandle(sentFrom, body.conversation_id, false, 'human');
+			return;
+		}
 
-		if (status === 200 && body && body.ok) {
+		if (accepted) {
 			conv = body.conversation_id;
 			handoffConv = conv;
 			storedMode = 'human';
@@ -4578,9 +4616,14 @@ export async function mount(el, handoff = null) {
 				form.querySelector('input[name="_hp"]').value,
 				form.querySelector('input[name="visitor_name"]').value,
 				form.querySelector('input[name="visitor_email"]').value);
+			const sentFrom = handleBytes();
 			const { status, body } = await send(apiBase, payload).catch(() => ({ status: 0, body: null }));
-			if (disposed) return UNMOUNTED;
-			if (status >= 200 && status < 300 && body && body.ok) {
+			const accepted = status >= 200 && status < 300 && body && body.ok;
+			if (disposed) {
+				if (accepted) storeAcceptedHandle(sentFrom, body.conversation_id, emailGiven, 'human');
+				return UNMOUNTED;
+			}
+			if (accepted) {
 				conv = body.conversation_id;
 				handoffConv = conv;
 				storedMode = 'human';
@@ -4606,6 +4649,9 @@ export async function mount(el, handoff = null) {
 					log.appendChild(hint);
 				}
 				await refresh();
+				// Unmounted during that transcript read: the form is detached — `bindCompose` must not
+				// clear and focus it (tile#84 r2).
+				if (disposed) return UNMOUNTED;
 				return true;
 			}
 			showError(status, copyRef, body);
@@ -4782,6 +4828,7 @@ export async function mount(el, handoff = null) {
 		const idle = () => (searchLive && !ownSendLabel ? copy.sendOwner : copy.send);
 		const syncSearch = wireSearch(form, textarea, button, idle);
 		bindCompose(form, textarea, button, copy.sending, idle, async (text) => {
+			const sentFrom = handleBytes();
 			const { status, body } = await send(apiBase, {
 				kind,
 				id,
@@ -4790,8 +4837,12 @@ export async function mount(el, handoff = null) {
 				page_url: location.href,
 				_hp: form.querySelector('input[name="_hp"]').value
 			}).catch(() => ({ status: 0, body: null }));
-			if (disposed) return UNMOUNTED;
-			if (status === 200 && body && body.ok) {
+			const accepted = status === 200 && body && body.ok;
+			if (disposed) {
+				if (accepted) storeAcceptedHandle(sentFrom, body.conversation_id, hasEmail, 'human');
+				return UNMOUNTED;
+			}
+			if (accepted) {
 				conv = body.conversation_id;
 				handoffConv = conv;
 				storedMode = 'human';

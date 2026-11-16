@@ -224,18 +224,30 @@ test('tile#84: a page that is still pending touches nothing; the paid render aft
 	}
 	await runCompletionPage(store.ls, ref);
 	assert.deepEqual(JSON.parse(store.map.get(CART_KEY)), [[PA, 1]]);
-	assert.deepEqual(JSON.parse(store.map.get(SETTLED_KEY)), [ref], 'the paid render names the order as settled');
+	// r2: the store's flag replaces r1's list of refs; the order's own state is gone once applied.
+	assert.equal(store.map.get(SETTLED_KEY), '1', 'the paid render marks the store as having settlement state');
+	assert.equal(store.map.has('dc-square-shop-paid:' + ref), false, 'the applied intent is removed');
+	assert.equal(store.map.has('dc-square-shop-sold:' + ref), false, 'the record is consumed');
 });
 
-test('tile#84: the settled list is per store, keeps the last 50 refs, and ignores junk', async () => {
-	const old = Array.from({ length: 50 }, (_, i) => `r-old-${i}`);
-	const store = makeStorage({ [CART_KEY]: JSON.stringify([[ZINE, 1]]), [SETTLED_KEY]: JSON.stringify([...old, 7, null]) });
-	await runCompletionPage(store.ls, 'r-newest');
-	const list = JSON.parse(store.map.get(SETTLED_KEY));
-	assert.equal(list.length, 50);
-	assert.equal(list[49], 'r-newest');
-	assert.equal(list.includes('r-old-0'), false, 'the oldest ref makes room');
-	const junk = makeStorage({ [CART_KEY]: JSON.stringify([[ZINE, 1]]), [SETTLED_KEY]: 'not json' });
+test('tile#84 r2: the store flag is one key that never grows, and junk in it still settles a recorded order', async () => {
+	// r1 kept a list of the last 50 refs here. The review showed what that bound cost (an order
+	// pushed off the end looks unsettled; see paid-settlement.test.mjs). The flag replaces it: one
+	// key per store, written once, read only for its presence.
+	const store = makeStorage({ [CART_KEY]: JSON.stringify([[ZINE, 3], [PA, 1]]) });
+	for (const ref of ['r-f1', 'r-f2', 'r-f3']) {
+		store.map.set('dc-square-shop-sold:' + ref, JSON.stringify({ t: Date.now(), ids: [ZINE], lines: [[ZINE, 1]] }));
+		await runCompletionPage(store.ls, ref);
+	}
+	assert.deepEqual(JSON.parse(store.map.get(CART_KEY)), [[PA, 1]], 'three paid orders took one zine each');
+	assert.equal(store.map.get(SETTLED_KEY), '1', 'the flag did not grow with the orders');
+
+	// Junk in the flag is still a flag. A recorded paid order still settles: its own record and
+	// intent, not the flag, decide what comes off.
+	const junk = makeStorage({
+		[CART_KEY]: JSON.stringify([[ZINE, 1], [PA, 1]]), [SETTLED_KEY]: 'not json',
+		['dc-square-shop-sold:r-junk']: JSON.stringify({ t: Date.now(), ids: [ZINE], lines: [[ZINE, 1]] })
+	});
 	await runCompletionPage(junk.ls, 'r-junk');
-	assert.equal(junk.map.has(CART_KEY), false, 'an unreadable list is an empty one, not a reason to skip a paid order');
+	assert.deepEqual(JSON.parse(junk.map.get(CART_KEY)), [[PA, 1]]);
 });

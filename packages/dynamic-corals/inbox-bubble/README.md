@@ -441,10 +441,18 @@ removed and `data-dynamic-coral-mounted` is cleared so the element can be mounte
 outlive a navigation. Without it, a page keeps one pair of listeners per element it ever mounted.
 
 A send, a hand-off or a question still in the air at `unmount(el)` is let finish on the network,
-but its answer is dropped when it lands (tile#84): no poller starts, the panel is not redrawn, and
-nothing is written to `localStorage` — including the conversation handle a successful send would
-otherwise have stored. Before this, a 200 that arrived after the unmount started a transcript
-poller on the detached panel that nothing ever stopped.
+and when its answer lands the unmounted panel is left alone (tile#84): no poller starts, no
+transcript is read, the detached panel is not redrawn and its form is neither cleared nor focused.
+Before this, a 200 that arrived after the unmount started a transcript poller on the detached panel
+that nothing ever stopped.
+
+One thing an answer still does after unmount: if the server **accepted** the message, its
+conversation id is stored as this tenant's handle, exactly as a mounted panel would store it. That
+handle is the browser's only way back to the message and to the owner's reply, so without it the
+next mount could not show the thread, and the visitor's next Send would open a second
+conversation. The write is skipped when the handle key no longer holds the bytes it held when the
+send left. A different value there means something wrote it in the meantime (a newer mount on the
+next route, another tab, "ask again"), and that newer write is kept.
 
 ## Styling
 

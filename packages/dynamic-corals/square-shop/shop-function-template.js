@@ -425,56 +425,139 @@ function cartAfterOrder(rawCart, rawSold) {
 	return rows.filter(function (e) { return !(Array.isArray(e) && ids.indexOf(String(e[0] || '')) >= 0); });
 }
 
-// Apply cartAfterOrder to the basket ONCE per order, and to the basket as it is at the moment of
-// writing, not as it was when the page first read it. Resolves `true` when it changed the basket,
-// `false` when this browser had already settled this order.
+// ─── THE PAID SETTLE (tile#84) ────────────────────────────────────────────────
 //
-// WHEN THE BASKET IS TOUCHED AT ALL: only after the outcome endpoint answered `paid` for this ref
-// (shouldClearCartForOutcome — pending, canceled, refunded, unknown and a failed request never get
-// here), and only if `settledKey` does not already name the ref. The ref goes into `settledKey` in
-// the same synchronous step that writes the basket. So:
-//   · an order that did not go through never costs the visitor a row;
-//   · the sold lines come off exactly once, so a reload or a second open of the page cannot take
-//     anything the visitor added after the order — and the sold lines are not left in the basket to
-//     be paid for a second time by accident.
+// What a confirmed-paid order does to this browser's basket. ./PROVENANCE.md § tile#84 holds the
+// protocol in full, with the reason for every ordering below; this is the short form. Three keys:
 //
-// 🩸 tile#84, two defects in what this replaced (0.11.19):
+//   dc-square-shop-sold:<ref>         written by the coral as the checkout leaves (unchanged)
+//   dc-square-shop-paid:<ref>         the PAID INTENT, `{s: storeId, ids, lines, t}`: "this order is
+//                                     paid and its lines have not come off the basket yet"
+//   dc-square-shop-settled:<storeId>  the store's FLAG. Present = this browser holds settlement state
+//                                     for the store, so a paid page with no record can no longer
+//                                     mean "an older coral" and never again clears the whole key.
+//                                     Only its presence is read; it is never removed and never grows.
 //
-// 1. Its "re-read before writing" loop ran exactly once in a browser. It read the key, computed,
-//    read it again and compared — three synchronous calls in one task. A browser applies another
-//    tab's write to this tab's view of localStorage between tasks, never inside one, so the second
-//    read always equalled the first and the eight tries were one. Only a test double that changes
-//    the value inside `getItem` ever saw a retry. Now each read is followed by a real wait (a
-//    timer: other tabs' writes land in this tab's view while it waits) and the basket is written
-//    only after it read the same twice across one — retried up to eight times if it keeps moving,
-//    and then written anyway from the latest value, so a key that never goes quiet still ends.
-//    What this still cannot see: a write another tab issues inside the instant between the final
-//    read and the write. Closing that would need a lock every writer of the key takes, and the
-//    writers of this key ship on three different deploys.
+// 1. THE PAID TRANSITION, synchronous, before anything yields: the flag, then the intent, then the
+//    sold record goes. From that moment the order's settlement is on disk: a document closed or
+//    destroyed one instant later leaves the intent behind, and the coral applies it on its next
+//    load and before its next checkout (square-shop.js#reconcilePaidOrders). The flag is written
+//    first, so an intent never exists without one.
+// 2. THE WAIT (r1, kept): read the basket, wait 50 ms, read again; up to eight times while it keeps
+//    moving. A write another tab has in flight lands in this tab's view during a wait, so the
+//    answer is computed from it rather than overwritten by it.
+// 3. THE APPLY, `applyPaidIntent` below: one synchronous step.
 //
-// 2. The sold record was consumed by the first settle, and a second render — a reload, the same
-//    page opened again — found no record and took the "no record" path below: remove the WHOLE
-//    key, including everything added since. The ref list in `settledKey` is what a second render
-//    now finds instead. It is per store, holds the last 50 refs, and is not swept by the coral's
-//    one-week sold-record sweep (a different prefix).
+// The pending/canceled/refunded/unknown gate is unchanged: none of this runs unless the outcome
+// endpoint answered `paid` (shouldClearCartForOutcome).
+
+// Apply ONE paid intent to the basket as it is now, then remove the intent. Returns whether the
+// basket's bytes changed.
 //
-// Two completion pages of the same order in two tabs are serialised with the Web Locks API where
-// the browser has it, and the ref list is re-read inside the final synchronous step either way.
+// 🔴 AT MOST ONCE, BY ORDER OF CALLS. The basket write is the only call here that storage can
+// refuse. If it throws, the intent is still there for the next reader and nothing has come off. If it
+// succeeds, the next call is `removeItem`, which no quota refuses. So an intent's lines come off the
+// basket at most once. A second reader (a reload, a second tab, the coral) finds no intent and does
+// nothing. An intent this code cannot read is removed without touching the basket.
 //
-// No record (an older coral, or storage that refused the write) still removes the whole key on the
-// FIRST settle of a paid order — the pre-0.11.16 behaviour, kept so that shopper is never left with
-// a basket that never clears.
+// ⚠️ MIRRORED BYTE FOR BYTE in square-shop.js, which applies the intents a closed page left
+// behind. paid-settlement.test.mjs holds the two copies equal. Ships as its own source text inside
+// the completion page, so it names nothing outside itself except `cartAfterOrder`.
+function applyPaidIntent(ls, cartKey, intentKey) {
+	const raw = ls.getItem(intentKey);
+	if (raw === null) return false;
+	let intent = null;
+	try { intent = JSON.parse(raw); } catch (e) { intent = null; }
+	if (!intent || typeof intent !== 'object' || !Array.isArray(intent.ids)) {
+		ls.removeItem(intentKey);
+		return false;
+	}
+	const before = ls.getItem(cartKey);
+	const kept = cartAfterOrder(before, raw);
+	const after = kept && kept.length ? JSON.stringify(kept) : null;
+	if (after !== before) {
+		if (after === null) ls.removeItem(cartKey);
+		else ls.setItem(cartKey, after);
+	}
+	ls.removeItem(intentKey);
+	return after !== before;
+}
+
+// Settle the paid order `ref` of store `storeId`. Resolves whether the basket changed.
+//
+// 🩸 tile#84 r2. r1 (the version this replaced) kept every piece of settlement state in the page's
+// memory until its final synchronous step, AFTER the first wait, and marked an order settled by
+// appending it to a list of the last 50 refs:
+//   · a page closed during the first 50 ms kept nothing. The receipt said paid, the basket still
+//     held the paid lines, and the next checkout could charge for them again;
+//   · a list write refused for space was swallowed after the basket was written and the record
+//     consumed, so a reload found neither and cleared the visitor's whole new basket;
+//   · an order pushed off the end of the list, or a list overwritten with junk, looked like an
+//     order this browser never settled, with the same result.
+// The transition below is on disk before the first await. The apply is idempotent. The flag cannot
+// be evicted, and junk in it still counts as present.
+//
+// WHEN THE TRANSITION CANNOT BE WRITTEN (storage refuses even the flag or the intent), there is no
+// durable state to hand a later reader. So the page settles NOW, in this task, and marks the record
+// settled by SHRINKING it to `{t, ids: []}`: a write that frees space instead of taking it, and a
+// record that a reload reads as settled.
+//
+// No readable record and no flag: the pre-0.11.16 whole-key clear, once, because an older coral
+// writes no record and its shopper must not keep a basket that never clears. The flag is written
+// with it, so a reload of that page does not clear again.
 //
 // ⚠️ Ships as its own source text inside the completion page (`.toString()`), so it may not name
-// anything outside itself except `cartAfterOrder`, which ships beside it, and `navigator`.
-async function settleCartAfterOrder(ls, cartKey, soldKey, settledKey, ref, wait) {
-	const settledRefs = function () {
-		let a;
-		try { a = JSON.parse(ls.getItem(settledKey) || '[]'); } catch (e) { a = []; }
-		return Array.isArray(a) ? a.filter(function (x) { return typeof x === 'string'; }) : [];
-	};
+// anything outside itself except `cartAfterOrder` and `applyPaidIntent`, which ship beside it, and
+// `navigator`.
+async function settleCartAfterOrder(ls, storeId, ref, wait) {
+	if (!ref) return false;
+	const cartKey = 'dc-square-shop-cart:' + storeId;
+	const flagKey = 'dc-square-shop-settled:' + storeId;
+	const soldKey = 'dc-square-shop-sold:' + ref;
+	const intentKey = 'dc-square-shop-paid:' + ref;
+
+	// ── 1. the paid transition: no await anywhere in this block ──
+	if (ls.getItem(intentKey) !== null) {
+		// Already paid and pending: a reload during the wait, or a page closed before its apply. Its
+		// record went when its intent was written; one left beside it can only be a duplicate.
+		ls.removeItem(soldKey);
+	} else {
+		const raw = ls.getItem(soldKey);
+		let sold = null;
+		try { sold = JSON.parse(raw || 'null'); } catch (e) { sold = null; }
+		if (!sold || typeof sold !== 'object' || !Array.isArray(sold.ids)) {
+			if (ls.getItem(flagKey) !== null) return false;
+			try { ls.setItem(flagKey, '1'); } catch (e) { /* not even the flag fits: see PROVENANCE */ }
+			const had = ls.getItem(cartKey) !== null;
+			ls.removeItem(cartKey);
+			if (raw !== null) ls.removeItem(soldKey);
+			return had;
+		}
+		// `{t, ids: []}` is what the full-storage branch below leaves: this order is settled.
+		if (!sold.ids.length) return false;
+		let durable = false;
+		try {
+			if (ls.getItem(flagKey) === null) ls.setItem(flagKey, '1');
+			ls.setItem(intentKey, JSON.stringify(Object.assign({}, sold, { s: storeId })));
+			durable = true;
+		} catch (e) { durable = false; }
+		if (!durable) {
+			const before = ls.getItem(cartKey);
+			const kept = cartAfterOrder(before, raw);
+			const after = kept && kept.length ? JSON.stringify(kept) : null;
+			if (after !== before) {
+				if (after === null) ls.removeItem(cartKey);
+				else ls.setItem(cartKey, after);
+			}
+			ls.setItem(soldKey, JSON.stringify({ t: sold.t, ids: [] }));
+			return after !== before;
+		}
+		ls.removeItem(soldKey);
+	}
+
+	// ── 2 and 3: the wait, then the apply ──
 	const run = async function () {
-		if (!ref || settledRefs().indexOf(ref) >= 0) return false;
+		if (ls.getItem(intentKey) === null) return false;
 		let seen = ls.getItem(cartKey);
 		for (let i = 0; i < 8; i++) {
 			await wait(50);
@@ -482,19 +565,10 @@ async function settleCartAfterOrder(ls, cartKey, soldKey, settledKey, ref, wait)
 			if (now === seen) break;
 			seen = now;
 		}
-		// From here to the end is one synchronous step: nothing another tab writes can land inside it.
-		const done = settledRefs();
-		if (done.indexOf(ref) >= 0) return false;
-		const kept = cartAfterOrder(ls.getItem(cartKey), soldKey ? ls.getItem(soldKey) : null);
-		if (kept && kept.length) ls.setItem(cartKey, JSON.stringify(kept));
-		else ls.removeItem(cartKey);
-		done.push(ref);
-		try { ls.setItem(settledKey, JSON.stringify(done.slice(-50))); } catch (e) { /* storage full: the basket is settled; a reload falls back as it did before tile#84 */ }
-		if (soldKey) ls.removeItem(soldKey);
-		return true;
+		return applyPaidIntent(ls, cartKey, intentKey);
 	};
 	const locks = typeof navigator !== 'undefined' && navigator ? navigator.locks : null;
-	return locks && typeof locks.request === 'function' ? locks.request(settledKey, run) : run();
+	return locks && typeof locks.request === 'function' ? locks.request(flagKey, run) : run();
 }
 
 // ─── ECPAY ORDER RESULT ───────────────────────────────────────────────────────
@@ -638,7 +712,7 @@ function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref
 <h1 id="dc-shop-heading">${initial.heading}</h1>
 <section class="dc-shop-complete" aria-live="polite"><div id="dc-shop-outcome"><p>${initial.body}</p>${backLink}</div></section>
 </div>
-${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const settleCartAfterOrder=${settleCartAfterOrder.toString()};const settle=()=>{try{settleCartAfterOrder(localStorage,'dc-square-shop-cart:'+C.storeId,C.ref?'dc-square-shop-sold:'+C.ref:'','dc-square-shop-settled:'+C.storeId,C.ref,ms=>new Promise(r=>setTimeout(r,ms))).then(changed=>{if(changed)window.dispatchEvent(new CustomEvent('dc-cart-changed'))},()=>{})}catch(e){}};const ecpayResultView=${ecpayResultView.toString()};let B=null;try{const ss=window.sessionStorage;B=ss&&C.ref?JSON.parse(ss.getItem('dc-native-ecpay:'+C.ref)||'null'):null}catch(e){B=null}if(!B||typeof B!=='object'||typeof B.order_id!=='string'||!B.order_id)B=null;const outcomeUrl=B?C.outcomeUrl.replace(/([?&]ref=)[^&]*/,'$1'+encodeURIComponent(B.order_id)):C.outcomeUrl;const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const formatMoney=${completionFormatMoneySource()};const money=(n,c)=>formatMoney({minor:Number(n)||0,currency:c,locale:C.locale});const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(ecpayResultView(C,d,B,esc,money,setHeading,root)){if(shouldClearCartForOutcome(d.state)){settle()}return}const summary=()=>{const all=Array.isArray(d.lines)?d.lines:[];const lines=all.filter(x=>!(x&&(x.kind==='fee'||x.kind==='discount')));const off=all.filter(x=>x&&x.kind==='discount');const fee=all.filter(x=>x&&x.kind==='fee');return(lines.length||off.length||fee.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+off.map(x=>'<li class="dc-shop-discount">'+esc(x.name||(C.e&&C.e.discount)||'')+' — −'+esc(money(Math.abs(Number(x.amount_minor)||0),d.currency))+'</li>').join('')+fee.map(x=>'<li class="dc-shop-fee">'+esc(x.name||(C.e&&C.e.fee)||'')+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')};if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);settle();root.innerHTML=summary()+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='refunded'){setHeading(C.copy.refunded);root.innerHTML='<p>'+esc(C.copy.refundedBody)+'</p>'+summary()+'<p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
+${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const applyPaidIntent=${applyPaidIntent.toString()};const settleCartAfterOrder=${settleCartAfterOrder.toString()};const settle=()=>{try{settleCartAfterOrder(localStorage,C.storeId,C.ref,ms=>new Promise(r=>setTimeout(r,ms))).then(changed=>{if(changed)window.dispatchEvent(new CustomEvent('dc-cart-changed'))},()=>{})}catch(e){}};const ecpayResultView=${ecpayResultView.toString()};let B=null;try{const ss=window.sessionStorage;B=ss&&C.ref?JSON.parse(ss.getItem('dc-native-ecpay:'+C.ref)||'null'):null}catch(e){B=null}if(!B||typeof B!=='object'||typeof B.order_id!=='string'||!B.order_id)B=null;const outcomeUrl=B?C.outcomeUrl.replace(/([?&]ref=)[^&]*/,'$1'+encodeURIComponent(B.order_id)):C.outcomeUrl;const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const formatMoney=${completionFormatMoneySource()};const money=(n,c)=>formatMoney({minor:Number(n)||0,currency:c,locale:C.locale});const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(ecpayResultView(C,d,B,esc,money,setHeading,root)){if(shouldClearCartForOutcome(d.state)){settle()}return}const summary=()=>{const all=Array.isArray(d.lines)?d.lines:[];const lines=all.filter(x=>!(x&&(x.kind==='fee'||x.kind==='discount')));const off=all.filter(x=>x&&x.kind==='discount');const fee=all.filter(x=>x&&x.kind==='fee');return(lines.length||off.length||fee.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+off.map(x=>'<li class="dc-shop-discount">'+esc(x.name||(C.e&&C.e.discount)||'')+' — −'+esc(money(Math.abs(Number(x.amount_minor)||0),d.currency))+'</li>').join('')+fee.map(x=>'<li class="dc-shop-fee">'+esc(x.name||(C.e&&C.e.fee)||'')+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')};if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);settle();root.innerHTML=summary()+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='refunded'){setHeading(C.copy.refunded);root.innerHTML='<p>'+esc(C.copy.refundedBody)+'</p>'+summary()+'<p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
 }
 
 async function renderCompletion(request, env, cfg, shop, checkoutResult) {
@@ -3006,7 +3080,7 @@ export default {
 
 // Exported for Node unit tests (the deployed bundle just uses the default).
 export {
-	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchCheckoutResultFallback, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
+	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchCheckoutResultFallback, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, applyPaidIntent, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	matchSubscribeResult, renderSubscribeResult,
 	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
