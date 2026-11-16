@@ -269,6 +269,140 @@ test('deck.css declares what deck.js leaves to it: what is not drawn in a pile, 
   ]) assert.ok(hidden(sel), `deck.css no longer declares \`${sel}{display:none}\` — deck.js leaves those nodes in the page and counts on it`);
 });
 
+// ── the switcher's one place, and the wall's transition (tile#342) ─────────────────────────────────────
+// 🔴 What this cannot say: where anything is drawn. The switcher's box in every view and frame, and a transition that starts
+// and ends where the page was, are asked of a real browser by w3/deck-switcher.smoke.mjs. Here: which rules the stylesheet
+// declares, and what deck.js asks of a browser's document.startViewTransition, and when.
+test('one switcher, one place: only the bar places it, by one rule that names no view', () => {
+  const css = readFileSync(new URL('./deck.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sels: m[1].split(',').map((x) => x.trim()), body: m[2] }));
+  const places = (body) => /(^|;)\s*(position|top|right|bottom|left|inset|display\s*:\s*contents)\b/.test(body);
+  assert.ok(rules.some((r) => r.sels.includes('html.deck .deck-close') && places(r.body)), 'CONTROL: the reader sees a rule that places something');
+  // the switcher itself: no rule gives it a place of its own (its buttons and icons are another matter)
+  const own = rules.filter((r) => r.sels.some((s) => /\.deck-seg$/.test(s)) && places(r.body));
+  assert.deepEqual(own.map((r) => r.sels.join(',')), [], 'a rule places the switcher by itself — it is then in two places, the bar\'s and its own');
+  // the bar: placed by rules that do not name a view (a deck that is off draws no bar at all, which is not a place)
+  const bar = rules.filter((r) => r.sels.some((s) => /\.deck-bar$/.test(s)) && (places(r.body) || /(^|;)\s*padding\b/.test(r.body)));
+  assert.ok(bar.length > 0, 'CONTROL: the bar is placed somewhere');
+  for (const r of bar) for (const s of r.sels.filter((x) => /\.deck-bar$/.test(x))) assert.ok(!/html(\.deck|:not\(\.deck\))/.test(s), `\`${s}\` places the bar in one view only: the switcher moves when the view changes`);
+});
+
+/**
+ * A stand-in for document.startViewTransition, set on the document before the deck runs: like a browser's, it calls the
+ * update a turn later (after its picture of the page as it was), and its transition is over when the test says so.
+ * Each call notes what carried the name (data-deck-up) when it was made and after its update ran.
+ */
+function transitions(win) {
+  const doc = win.document, calls = [];
+  const named = () => doc.querySelectorAll('[data-deck-up]');
+  doc.startViewTransition = (update) => {
+    const call = { from: named(), glide: doc.documentElement.classList.contains('deck-glide'), view: doc.documentElement.dataset.view };
+    let over; const finished = new Promise((ok) => { over = ok; });
+    const updateCallbackDone = Promise.resolve().then(() => { update(); call.to = named(); call.after = doc.documentElement.dataset.view; });
+    call.end = () => over(); calls.push(call);
+    return { updateCallbackDone, ready: updateCallbackDone, finished, skipTransition() {} };
+  };
+  return calls;
+}
+const turn = () => new Promise((ok) => setImmediate(ok));
+
+test('a press to or from the wall is one view transition: the card you are on and its tile are the one thing that flies', async () => {
+  let calls;
+  const p = open(card({ view: 'stack' }), { before: (win) => { calls = transitions(win); } });
+  p.win.__deckJump(2); p.win.tick(1000);
+  const top = p.cells[2].closest('.deck-card');
+  // stack → wall
+  const w = p.press('wall');
+  assert.equal(calls.length, 1, 'the press to the wall started no view transition');
+  assert.ok(calls[0].from.length === 1 && calls[0].from[0] === top, 'as it starts, the card that is up does not carry the name (alone)');
+  assert.ok(calls[0].glide, 'html.deck-glide is not on the root as it starts');
+  assert.equal(p.root.dataset.view, 'stack', 'the page changed before the browser\'s picture of it as it was');
+  await turn();
+  assert.equal(calls[0].after, 'wall', 'the update did not switch to the wall');
+  assert.ok(calls[0].to.length === 1 && calls[0].to[0] === p.cells[2], 'after the update, the tile of that card (on the wall) does not carry the name (alone)');
+  same(p.doc.activeElement, w, 'focus left the switcher');
+  calls[0].end(); await turn();
+  assert.equal(p.doc.querySelectorAll('[data-deck-up]').length, 0, 'a name is left on the page after the transition');
+  assert.ok(!p.root.classList.contains('deck-glide'), 'html.deck-glide is left on the root after the transition');
+  holds(p, 'wall', 'stack → wall, in a transition');   // (the wall's markup is the engine's again only once the name is gone)
+  assert.equal(p.win.localStorage.getItem(LS), 'spread', 'the visitor\'s pick is not remembered');
+  // wall → stack, from a tile read in the middle of the window: it flies to the top of the pile, which is not dealt again
+  p.win.scrollTo({ top: 200 + 4 * 300 + 140 - p.win.innerHeight / 2 });
+  p.press('stack');
+  assert.equal(calls.length, 2, 'the press back to stack started no view transition');
+  assert.ok(calls[1].from.length === 1 && calls[1].from[0] === p.cells[4], 'as it starts, the tile in the middle of the wall does not carry the name (alone)');
+  await turn();
+  assert.equal(calls[1].after, 'stack', 'the update did not switch to stack');
+  assert.equal(p.win.__deckCur(), 4, 'the pile did not open on the tile in the middle of the wall');
+  const up = p.cells[4].closest('.deck-card');
+  assert.ok(calls[1].to.length === 1 && calls[1].to[0] === up && up.classList.contains('is-top'), 'after the update, the card that is up does not carry the name (alone)');
+  assert.ok(!p.doc.querySelector('.deck-stack').classList.contains('dealing'), 'the pile is dealt as well: two motions for one arrival');
+  calls[1].end(); await turn();
+  assert.equal(p.doc.querySelectorAll('[data-deck-up]').length, 0);
+  holds(p, 'stack', 'wall → stack, in a transition');
+});
+
+test('list ⇄ wall is a transition too; stack ⇄ list, the editor\'s switch and a visitor who asks for less motion are not', async () => {
+  let calls;
+  const p = open(card({ view: 'list' }), { before: (win) => { calls = transitions(win); } });
+  p.press('wall'); await turn();
+  assert.equal(calls.length, 1, 'list → wall started no view transition');
+  calls[0].end(); await turn(); holds(p, 'wall', 'list → wall');
+  p.press('list'); await turn();
+  assert.equal(calls.length, 2, 'wall → list started no view transition');
+  calls[1].end(); await turn(); holds(p, 'list', 'wall → list');
+  p.press('stack'); holds(p, 'stack', 'list → stack, at once'); p.press('list'); holds(p, 'list', 'stack → list, at once');
+  assert.equal(calls.length, 2, 'stack ⇄ list started a view transition (it has its own glide)');
+  assert.equal(p.win.__deckView('wall'), true); holds(p, 'wall', 'the editor\'s switch, at once');
+  assert.equal(calls.length, 2, 'a view the editor names started a view transition');
+  let less;
+  const q = open(card({ view: 'stack' }), { reducedMotion: true, before: (win) => { less = transitions(win); } });
+  q.press('wall'); holds(q, 'wall', 'stack → wall with less motion, at once');
+  q.press('stack'); holds(q, 'stack', 'wall → stack with less motion, at once');
+  assert.equal(less.length, 0, 'a visitor who asks for less motion got a view transition');
+});
+
+test('a browser without Element.moveBefore keeps the instant swap, view transitions or not', () => {
+  let calls;
+  const p = open(card({ view: 'stack' }), { before: (win) => { calls = transitions(win); win.document.documentElement.moveBefore = undefined; } });
+  p.press('wall'); holds(p, 'wall', 'stack → wall, at once');
+  p.press('list'); holds(p, 'list', 'wall → list, at once');
+  assert.equal(calls.length, 0, 'a transition started where the deck does not glide (deck.js glide says why)');
+});
+
+test('a press that arrives before the transition\'s update has run waits for it, and only the last transition tidies up', async () => {
+  let calls;
+  const p = open(card({ view: 'stack' }), { before: (win) => { calls = transitions(win); } });
+  p.press('wall');
+  assert.equal(calls.length, 1, 'the press to the wall started no view transition');
+  p.press('list');   // the first update has not run: the page is still stack
+  assert.equal(calls.length, 1, 'the second press started a transition of its own before the first had changed the page');
+  await turn(); await turn();
+  assert.equal(calls.length, 2, 'the second press was dropped');
+  assert.equal(calls[1].view, 'wall', 'the second transition did not start from the wall');
+  assert.equal(calls[1].after, 'list', 'the second transition did not end on list');
+  calls[0].end(); await turn();
+  assert.ok(p.root.classList.contains('deck-glide') && p.doc.querySelectorAll('[data-deck-up]').length === 1, 'the first transition, ended by the second, took the second one\'s name and class away');
+  calls[1].end(); await turn();
+  assert.ok(!p.root.classList.contains('deck-glide') && p.doc.querySelectorAll('[data-deck-up]').length === 0, 'the last transition did not tidy up');
+  holds(p, 'list', 'stack → wall → list, pressed at once');
+});
+
+for (const [from, to] of [['stack', 'wall'], ['wall', 'stack']]) {
+  test(`${from} → ${to} → ${from}: a press back to the view on screen, before the transition's update has run, is the last pick and wins`, async () => {
+    let calls;
+    const p = open(card({ view: from }), { before: (win) => { calls = transitions(win); } });
+    p.press(to);
+    assert.equal(calls.length, 1, `the press ${from} → ${to} started no view transition`);
+    p.press(from);   // the first update has not run: the page still shows the view the visitor pressed
+    await turn(); await turn();
+    assert.equal(calls.length, 2, `the press back to ${from} was dropped (or taken for a press on the view on screen)`);
+    assert.equal(calls[1].view, to, `the second transition did not start from ${to}`);
+    calls[0].end(); calls[1].end(); await turn();
+    holds(p, from, `${from} → ${to} → ${from}, pressed at once`);
+  });
+}
+
 // ── a long Card ──────────────────────────────────────────────────────────────────────────────────
 test('200 tiles: only a window of cards is on the table, and every tile stays in the document', () => {
   const p = open(card({ view: 'stack', n: 200 }));
