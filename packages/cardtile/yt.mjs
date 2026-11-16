@@ -113,6 +113,54 @@ export const uploadsOf = (channelId) => (CHANNEL_RE.test(channelId) ? `UU${chann
 export const oembedUrl = (pageUrl) =>
   `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(pageUrl)}`;
 
+/**
+ * The most an oEmbed answer may be, in bytes, before it is parsed. Recorded answers are 716–830
+ * bytes. A title is at most 100 characters and appears twice (`title`, and the `html` iframe's
+ * title); even written as \u-escaped surrogate pairs (12 bytes a character) that is 2.4 KB, and a
+ * long `author_name` about 1.2 KB more — under 5 KB in all. 8 KiB leaves room above that.
+ */
+export const OEMBED_MAX_BYTES = 8 * 1024;
+
+/**
+ * An oEmbed body as text, or null when it is over `max` bytes. 🔴 Counted while READING, and the
+ * stream is cancelled the moment the count passes the ceiling: a body that is chunked, or whose
+ * content-length is missing or wrong, is still never held whole, and no oversized JSON ever reaches
+ * JSON.parse (tile#346 review P2: a 4 MB answer parsed synchronously cost ~17 MB and ~75 ms of the
+ * shared cardtile worker). A content-length already over the ceiling is refused without reading.
+ * A response with no stream (the injected fakes in the tests) is measured after text().
+ */
+export async function oembedText(r, max = OEMBED_MAX_BYTES) {
+  const body = r && r.body;
+  const declared = r && r.headers && typeof r.headers.get === 'function' ? Number(r.headers.get('content-length')) : 0;
+  if (declared > max) {
+    if (body && typeof body.cancel === 'function') await body.cancel().catch(() => {});
+    return null;
+  }
+  if (!body || typeof body.getReader !== 'function') {
+    const t = String(await r.text());
+    return new TextEncoder().encode(t).byteLength <= max ? t : null;
+  }
+  const reader = body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) { await reader.cancel().catch(() => {}); return null; }
+      chunks.push(value);
+    }
+  } catch {
+    await reader.cancel().catch(() => {});
+    return null;
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { bytes.set(c, at); at += c.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
+
 const parseJson = (text) => {
   try { const v = JSON.parse(String(text || '')); return v && typeof v === 'object' ? v : null; } catch { return null; }
 };
@@ -201,14 +249,14 @@ export async function resolveChannel(ref, doFetch, timeoutMs = TIMEOUT_MS) {
   try {
     const latest = (async () => {
       const r = await doFetch(oembedUrl(`https://www.youtube.com/playlist?list=${uploads}`));
-      const id = r && r.ok ? latestFromUploadsOEmbed(await r.text()) : null;
+      const id = r && r.ok ? latestFromUploadsOEmbed(await oembedText(r)) : null;
       if (!id) return null;
       found = { id, title: '', channelId };
       // The title is the label's last resort (an author's own label wins in the renderer). Losing it
       // costs a word, never the poster: any failure here keeps the video with an empty title.
       try {
         const v = await doFetch(oembedUrl(`https://www.youtube.com/watch?v=${id}`));
-        if (v && v.ok) found = { ...found, title: titleFromOEmbed(await v.text()) };
+        if (v && v.ok) found = { ...found, title: titleFromOEmbed(await oembedText(v)) };
       } catch { /* the video stands without a title */ }
       return found;
     })().catch(() => null);   // a rejection after the deadline won must not surface as unhandled

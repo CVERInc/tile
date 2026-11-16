@@ -126,6 +126,95 @@ test('tile#341: a title that fails or hangs costs the label, never the poster', 
   assert.equal((await resolveChannel(CH, amp.doFetch)).title, 'Q&A: "live" <3');
 });
 
+// ── tile#346 review P2: an oEmbed answer is bounded before it is parsed ────────────────────────────
+// Written out rather than read from yt.OEMBED_MAX_BYTES, so these tests stay meaningful against code
+// that has no ceiling at all.
+const OEMBED_MAX = 8 * 1024;
+/**
+ * A real Response over a stream that serves `text` in `chunk`-byte pieces, and logs how many bytes
+ * were pulled and whether it was cancelled. `length` sets a content-length header (none by default:
+ * the body is chunked).
+ */
+const streamed = (text, { chunk = 1024, length } = {}) => {
+  const bytes = new TextEncoder().encode(text);
+  const log = { pulled: 0, cancelled: false };
+  let at = 0;
+  const body = new ReadableStream({
+    pull(c) {
+      if (at >= bytes.length) { c.close(); return; }
+      const piece = bytes.slice(at, at + chunk);
+      at += piece.length; log.pulled += piece.length;
+      c.enqueue(piece);
+    },
+    cancel() { log.cancelled = true; },
+  }, { highWaterMark: 0 });
+  const headers = length == null ? {} : { 'content-length': String(length) };
+  return { res: new Response(body, { status: 200, headers }), log };
+};
+/** `json` with an unused field padding it to exactly `size` bytes */
+const padTo = (json, size) => {
+  const bare = Buffer.byteLength(JSON.stringify({ ...JSON.parse(json), unused: '' }));
+  return JSON.stringify({ ...JSON.parse(json), unused: '0'.repeat(size - bare) });
+};
+
+test('🔴 tile#346: an oversized chunked uploads answer is cancelled while reading — null, the noposter state', async () => {
+  const id = 'dQw4w9WgXcQ';
+  // the review's input: the right thumbnail, plus an unused field of 4 MB, no content-length
+  const big = streamed(padTo(UPLOADS_OF(id), 4 * 1024 * 1024));
+  const { doFetch } = recorded({ [UPLOADS_OE(CH)]: big.res, [VIDEO_OE(id)]: ok(VIDEO_OF('x')) });
+  assert.equal(await resolveChannel(CH, doFetch), null);
+  assert.ok(big.log.cancelled, 'the oversized stream was not cancelled');
+  assert.ok(big.log.pulled <= OEMBED_MAX + 1024, `read ${big.log.pulled} bytes of an oversized answer`);
+});
+
+test('🔴 tile#346: an oversized chunked title answer costs the title, never the poster', async () => {
+  const id = 'dQw4w9WgXcQ';
+  const big = streamed(padTo(VIDEO_OF('Too big'), 4 * 1024 * 1024));
+  const { doFetch } = recorded({ [UPLOADS_OE(CH)]: ok(UPLOADS_OF(id)), [VIDEO_OE(id)]: big.res });
+  assert.deepEqual(await resolveChannel(CH, doFetch), { id, title: '', channelId: CH });
+  assert.ok(big.log.cancelled, 'the oversized stream was not cancelled');
+  assert.ok(big.log.pulled <= OEMBED_MAX + 1024, `read ${big.log.pulled} bytes of an oversized answer`);
+});
+
+test('🔴 tile#346: an honest content-length over the ceiling is refused without reading the body', async () => {
+  const id = 'dQw4w9WgXcQ';
+  const text = padTo(UPLOADS_OF(id), 64 * 1024);
+  const big = streamed(text, { length: Buffer.byteLength(text) });
+  const { doFetch } = recorded({ [UPLOADS_OE(CH)]: big.res, [VIDEO_OE(id)]: ok(VIDEO_OF('x')) });
+  assert.equal(await resolveChannel(CH, doFetch), null);
+  assert.equal(big.log.pulled, 0, 'the body was read although its length was already over the ceiling');
+  // and the same for the title: the poster stays, the title is empty
+  const title = padTo(VIDEO_OF('Too big'), 64 * 1024);
+  const bigTitle = streamed(title, { length: Buffer.byteLength(title) });
+  const t = recorded({ [UPLOADS_OE(CH)]: ok(UPLOADS_OF(id)), [VIDEO_OE(id)]: bigTitle.res });
+  assert.deepEqual(await resolveChannel(CH, t.doFetch), { id, title: '', channelId: CH });
+  assert.equal(bigTitle.log.pulled, 0);
+});
+
+test('🔴 tile#346: exactly at the ceiling resolves; one byte over does not — streamed, unstreamed, and lying about its length', async () => {
+  const id = 'dQw4w9WgXcQ';
+  // a title with multi-byte characters, so the ceiling is counted in bytes, not characters
+  const title = 'Ünïcödé — 🎬';
+  const run = async (uploads, video) => resolveChannel(CH, recorded({ [UPLOADS_OE(CH)]: uploads, [VIDEO_OE(id)]: video }).doFetch);
+  const atU = padTo(UPLOADS_OF(id), OEMBED_MAX), overU = padTo(UPLOADS_OF(id), OEMBED_MAX + 1);
+  const atV = padTo(VIDEO_OF(title), OEMBED_MAX), overV = padTo(VIDEO_OF(title), OEMBED_MAX + 1);
+  assert.equal(Buffer.byteLength(atV), OEMBED_MAX);
+  assert.equal(Buffer.byteLength(overV), OEMBED_MAX + 1);
+  const want = { id, title, channelId: CH };
+  // at the ceiling: chunked, with an honest length, and as a plain text() answer
+  assert.deepEqual(await run(streamed(atU, { chunk: 777 }).res, streamed(atV, { chunk: 777 }).res), want);
+  assert.deepEqual(await run(streamed(atU, { length: OEMBED_MAX }).res, streamed(atV, { length: OEMBED_MAX }).res), want);
+  assert.deepEqual(await run(ok(atU), ok(atV)), want);
+  // one byte over: chunked, with a content-length that claims it fits, and as a plain text() answer
+  assert.equal(await run(streamed(overU, { chunk: 777 }).res, ok(atV)), null);
+  assert.equal(await run(streamed(overU, { length: 100 }).res, ok(atV)), null);
+  assert.equal(await run(ok(overU), ok(atV)), null);
+  for (const v of [streamed(overV, { chunk: 777 }).res, streamed(overV, { length: 100 }).res, ok(overV)]) {
+    assert.deepEqual(await run(ok(atU), v), { id, title: '', channelId: CH });
+  }
+  assert.equal(yt.OEMBED_MAX_BYTES, OEMBED_MAX);
+});
+
 test('tile#341: the cardtile worker caches "latest" for 30 minutes, a video’s title and a handle page for a day', () => {
   assert.equal(typeof worker.ytCacheTtl, 'function');
   assert.equal(worker.ytCacheTtl(UPLOADS_OE(GD)), 1800);
