@@ -83,43 +83,56 @@ export function upstreamAge(headers, nowMs) {
 }
 
 /**
- * keptChannels() → the answers this isolate already has: { get(ref), set(ref, answer, responses) }.
- * Memory only, so reading it is not a subrequest. Only a resolved answer is kept, never a failure (a
- * channel YouTube did not answer for is asked again by the next view that has room for it).
+ * keptChannels() → the answers this isolate already has: { get(ref), deadline(url, headers),
+ * set(ref, answer, deadlines) }. Memory only, so reading it is not a subrequest. Only a resolved answer
+ * is kept, never a failure (a channel YouTube did not answer for is asked again by the next view that
+ * has room for it).
  *
  * 🔴 tile#357 review: an answer is remembered for what is LEFT of the edge's freshness, not for a fresh
  * TTL from the moment it arrived; restarting the clock here kept an old "latest video" up to twice as
  * long as the edge would. Since tile#341 one answer is built from up to three YouTube responses — the
  * handle page, the uploads-playlist oEmbed, the video's own oEmbed — each held at the edge for its own
  * `ttl` (yt.mjs ytCacheTtl: 1800 s for the uploads oEmbed, a day for the other two), and any of them may
- * already have been held there for most of it. `responses` is every one this answer was built from,
- * `[{ url, headers }]`, and the entry expires when the first of those edge copies does (in practice the
- * uploads oEmbed, which bounds how old "latest" can be). An answer with no response, or with one whose
- * age nothing states, is not remembered at all, and setting a ref again from the same old edge copies
- * cannot move its expiry later.
+ * already have been held there for most of it. The entry expires when the first of those edge copies
+ * does (in practice the uploads oEmbed, which bounds how old "latest" can be).
+ *
+ * 🔴 tile#357 review r3: that expiry is fixed the moment each response ARRIVES, not when the answer is
+ * stored. `deadline(url, headers)` is called on receipt and returns the absolute time (this clock, ms)
+ * that edge copy expires: receipt + ttl(url) − its age; null when nothing states its age. `set` takes
+ * the deadlines of every response the answer was built from and remembers it until the earliest. Reading
+ * the old age again at store time restarted the clock by however long came between: reading a body,
+ * fetching the title, waiting for the other channels of the same page. An answer with no deadline, or
+ * one whose age nothing states, or whose earliest deadline has already passed, is not remembered at all.
+ * Setting a ref again while its entry is still live never moves that entry's expiry later: the same
+ * edge copy seen again reads the same expiry, give or take the whole-second rounding of `Age`.
  */
 export function keptChannels({ ttl = ytCacheTtl, most = CHANNEL_KEPT_MOST, now = Date.now } = {}) {
   const m = new Map();
+  const live = (ref) => {
+    const e = m.get(ref);
+    if (!e) return null;
+    if (now() < e.until) return e;
+    m.delete(ref);
+    return null;
+  };
   return {
     get(ref) {
-      const e = m.get(ref);
-      if (!e) return null;
-      if (now() < e.until) return e.answer;
-      m.delete(ref);
-      return null;
+      const e = live(ref);
+      return e ? e.answer : null;
     },
-    set(ref, answer, responses) {
-      if (!answer || !Array.isArray(responses) || !responses.length) return;
+    deadline(url, headers) {
       const t = now();
-      let left = Infinity;
-      for (const r of responses) {
-        const age = upstreamAge(r && r.headers, t);
-        if (age === null) return;
-        left = Math.min(left, ttl(String(r.url)) - age);
-      }
-      if (!(left > 0)) return;
+      const age = upstreamAge(headers, t);
+      return age === null ? null : t + (ttl(String(url)) - age) * 1000;
+    },
+    set(ref, answer, deadlines) {
+      if (!answer || !Array.isArray(deadlines) || !deadlines.length) return;
+      if (!deadlines.every((d) => typeof d === 'number' && Number.isFinite(d))) return;
+      const before = live(ref);
+      const until = Math.min(...deadlines, before ? before.until : Infinity);
+      if (!(until > now())) return;
       m.delete(ref);
-      m.set(ref, { until: t + left * 1000, answer });
+      m.set(ref, { until, answer });
       while (m.size > most) m.delete(m.keys().next().value);
     },
     get size() { return m.size; },
@@ -156,21 +169,24 @@ export async function resolveChannels(cardMd, doFetch, { subrequests = Infinity,
     left -= channelFetches(c);
     ask.push(c);
   }
-  // Every response each channel's answer is built from, for keptChannels' expiry. Copied the moment
-  // resolveChannel answers: a title oEmbed still in flight when the deadline won is not part of it.
+  // The deadline of every response each channel's answer is built from, for keptChannels' expiry, taken
+  // the moment that response arrives (tile#357 review r3): time spent after that — reading the body,
+  // fetching the title, waiting here for the other channels — uses up its freshness rather than
+  // restarting it. Copied the moment resolveChannel answers: a title oEmbed still in flight when the
+  // deadline won is not part of it.
   const got = await Promise.all(ask.map((c) => {
-    const seen = [];
+    const due = [];
     const recording = (u) => Promise.resolve(doFetch(u)).then((res) => {
-      if (res) seen.push({ url: u, headers: res.headers || null });
+      if (res && kept) due.push(kept.deadline(u, res.headers || null));
       return res;
     });
-    return resolveChannel(c, recording).then((answer) => ({ answer, seen: seen.slice() }));
+    return resolveChannel(c, recording).then((answer) => ({ answer, due: due.slice() }));
   }));
   ask.forEach((c, i) => {
-    const { answer, seen } = got[i];
+    const { answer, due } = got[i];
     if (!answer) return;
     out[c] = answer;
-    if (kept) kept.set(c, answer, seen);
+    if (kept) kept.set(c, answer, due);
   });
   return out;
 }

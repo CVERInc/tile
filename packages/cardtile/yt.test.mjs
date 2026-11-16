@@ -617,8 +617,8 @@ const answering = (ages = {}) => {
   };
   return { urls, doFetch };
 };
-/** the responses keptChannels.set reads: one answer address and its headers */
-const from = (url, headers) => [{ url, headers: new Headers(headers) }];
+/** the deadlines keptChannels.set reads: one answer address and its headers, received now */
+const from = (kept, url, headers) => [kept.deadline(url, new Headers(headers))];
 
 test('🔴 #355 resolveChannels — past the share, fetching stops at the first channel whose worst case does not fit', async () => {
   // @h01 (3) + UC 1 (2) + @h02 (3) = 8 of a share of 9; the next handle needs 3 and only 1 is left
@@ -636,7 +636,7 @@ test('🔴 #355 resolveChannels — past the share, fetching stops at the first 
 test('🔴 #355 resolveChannels — within the share, every channel is fetched and memory is never read', async () => {
   const md = CARD([UC(1), UC(2)].map((r) => `- [ ] %% card: video channel=${r} %%`).join('\n'));
   const kept = YC.keptChannels();
-  kept.set(UC(1), { id: 'remembered1', title: 'old', channelId: UC(1) }, from(UPLOADS_OE(UC(1)), { age: '0' }));
+  kept.set(UC(1), { id: 'remembered1', title: 'old', channelId: UC(1) }, from(kept, UPLOADS_OE(UC(1)), { age: '0' }));
   assert.equal(kept.size, 1, 'CONTROL: the stale answer is in memory');
   const { urls, doFetch } = answering();
   const got = await resolveChannels(md, doFetch, { subrequests: 4, kept });
@@ -647,17 +647,17 @@ test('🔴 #355 resolveChannels — within the share, every channel is fetched a
 test('🔴 #355 keptChannels — an answer lives for its edge TTL (yt.mjs ytCacheTtl), failures are never kept, the oldest goes first', () => {
   let now = 1_000_000;
   const kept = YC.keptChannels({ most: 2, now: () => now });
-  const fresh = from(UPLOADS_OE(UC(1)), { age: '0' });
-  kept.set('a', { id: 'x' }, fresh);
-  kept.set('b', null, fresh);
+  const fresh = () => from(kept, UPLOADS_OE(UC(1)), { age: '0' });
+  kept.set('a', { id: 'x' }, fresh());
+  kept.set('b', null, fresh());
   assert.equal(kept.get('b'), null, 'a failure was remembered');
   now += yt.ytCacheTtl(UPLOADS_OE(UC(1))) * 1000 - 1;
   assert.deepEqual(kept.get('a'), { id: 'x' });
   now += 1;
   assert.equal(kept.get('a'), null, 'an answer outlived the uploads oEmbed’s TTL');
-  kept.set('c', { id: 'c' }, fresh);
-  kept.set('d', { id: 'd' }, fresh);
-  kept.set('e', { id: 'e' }, fresh);
+  kept.set('c', { id: 'c' }, fresh());
+  kept.set('d', { id: 'd' }, fresh());
+  kept.set('e', { id: 'e' }, fresh());
   assert.equal(kept.size, 2);
   assert.equal(kept.get('c'), null, 'the oldest was not the one evicted');
   assert.equal(yt.ytCacheTtl(UPLOADS_OE(UC(1))), 1800);
@@ -709,11 +709,11 @@ test('🔴 #357 keptChannels — Date counts as well as Age; the older reading w
   assert.equal(YC.upstreamAge(new Headers({ date: 'Thu, 01 Jan 2026 01:00:00 GMT' }), now), 0, 'a Date ahead of this clock is not a negative age');
   let t = now;
   const kept = YC.keptChannels({ now: () => t });
-  kept.set('d', { id: 'd' }, from(UPLOADS_OE(UC(1)), { date: old }));
+  kept.set('d', { id: 'd' }, from(kept, UPLOADS_OE(UC(1)), { date: old }));
   assert.equal(kept.get('d')?.id, 'd', 'CONTROL: 1 s left, remembered');
   t += 1000;
   assert.equal(kept.get('d'), null, 'a Date-aged answer outlived its edge copy');
-  kept.set('d', { id: 'd' }, from(UPLOADS_OE(UC(1)), { date: old }));   // now 1800 s old: nothing left
+  kept.set('d', { id: 'd' }, from(kept, UPLOADS_OE(UC(1)), { date: old }));   // now 1800 s old: nothing left
   assert.equal(kept.size, 0, 'an answer with no freshness left was remembered');
 });
 
@@ -721,8 +721,8 @@ test('🔴 #357 keptChannels — an answer whose age nothing states, for any res
   const kept = YC.keptChannels();
   kept.set('a', { id: 'a' });
   kept.set('b', { id: 'b' }, []);
-  kept.set('c', { id: 'c' }, from(UPLOADS_OE(UC(1)), {}));
-  kept.set('d', { id: 'd' }, from(UPLOADS_OE(UC(1)), { age: 'soon', date: 'not a date' }));
+  kept.set('c', { id: 'c' }, from(kept, UPLOADS_OE(UC(1)), {}));
+  kept.set('d', { id: 'd' }, from(kept, UPLOADS_OE(UC(1)), { age: 'soon', date: 'not a date' }));
   assert.equal(kept.size, 0);
   const md = CARD(`- [ ] %% card: video channel=${UC(1)} %%`);
   for (const ages of [{ uploads: null }, { video: null }]) {
@@ -747,4 +747,56 @@ test('🔴 #357 keptChannels — a later view of the same old edge copy cannot m
   assert.ok(kept.get(UC(1)), 'CONTROL: still within the edge copy’s TTL');
   now = 1_800_000;
   assert.equal(kept.get(UC(1)), null, 'a refresh from the same edge copy pushed the expiry past it');
+});
+
+// ── tile#357 review r3: an edge copy's expiry is fixed when it arrives ──────────────────────────────
+// Time spent after a response arrives — reading its body, fetching the title, waiting for the other
+// channels of the page — uses up that copy's freshness; it does not restart it.
+
+test('🔴 #357 resolveChannels — a title that arrives late does not extend the uploads answer’s expiry', async () => {
+  const md = CARD(`- [ ] %% card: video channel=${UC(1)} %%`);
+  // the uploads copy arrives at 1799 s already 1799 s old: it expires at 1800 s whenever the title lands
+  for (const [lateMs, rememberedUntil] of [[400, 1_800_000], [1200, null]]) {
+    let now = 1_799_000;
+    const kept = YC.keptChannels({ now: () => now });
+    const { doFetch } = answering({ uploads: 1799 });
+    const slowTitle = async (u) => {
+      if (u.includes('watch%3Fv%3D')) now += lateMs;
+      return doFetch(u);
+    };
+    const got = await resolveChannels(md, slowTitle, { kept });
+    assert.equal(got[UC(1)].id, LATEST_OF(UC(1)), 'CONTROL: the page got its answer');
+    if (rememberedUntil === null) {
+      assert.equal(kept.get(UC(1)), null, `an answer whose uploads copy expired ${lateMs - 1000} ms before it was stored was remembered`);
+      assert.equal(kept.size, 0);
+      continue;
+    }
+    now = rememberedUntil - 1;
+    assert.equal(kept.get(UC(1))?.id, LATEST_OF(UC(1)), 'CONTROL: remembered while the uploads copy is fresh');
+    now = rememberedUntil;
+    assert.equal(kept.get(UC(1)), null, `the title’s ${lateMs} ms latency was added to the uploads copy’s expiry`);
+  }
+});
+
+test('🔴 #357 resolveChannels — waiting for the page’s other channels uses up an answer’s freshness', async () => {
+  const md = CARD([UC(1), UC(2)].map((r) => `- [ ] %% card: video channel=${r} %%`).join('\n'));
+  let now = 1_799_000;
+  const kept = YC.keptChannels({ now: () => now });
+  const quick = answering({ uploads: 1799 }).doFetch;   // UC 1: 1 s of freshness left, answers at once
+  const slow = answering({ uploads: 0 }).doFetch;       // UC 2: fresh, but its uploads answer takes 1.2 s
+  const ofSlow = (u) => uploadsChannel(u) === UC(2) || u.includes(`v%3D${LATEST_OF(UC(2))}`);
+  const doFetch = async (u) => {
+    if (!ofSlow(u)) return quick(u);
+    if (uploadsChannel(u) === UC(2)) {
+      await new Promise((r) => setTimeout(r, 5));   // UC 1 resolves completely while this waits
+      now += 1200;
+    }
+    return slow(u);
+  };
+  const got = await resolveChannels(md, doFetch, { kept });
+  assert.equal(got[UC(1)]?.id, LATEST_OF(UC(1)), 'CONTROL: the page got the quick answer');
+  assert.equal(got[UC(2)]?.id, LATEST_OF(UC(2)), 'CONTROL: the page got the slow answer');
+  assert.equal(now, 1_800_200, 'CONTROL: the page waited 1.2 s');
+  assert.equal(kept.get(UC(2))?.id, LATEST_OF(UC(2)), 'CONTROL: the fresh channel was remembered');
+  assert.equal(kept.get(UC(1)), null, 'an answer that expired while the page waited for another channel was remembered');
 });
