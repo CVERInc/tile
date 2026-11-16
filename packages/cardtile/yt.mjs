@@ -91,26 +91,8 @@ export function youtubeVideoOf(href) {
   return { id, start: Number.isFinite(start) && start <= MAX_START ? start : 0 };
 }
 
-/**
- * Every channel id a card asks about. Reads the raw markdown rather than the parsed model so the
- * Worker can resolve BEFORE rendering — renderCardHTML is pure and synchronous, and stays that way.
- */
-export function channelsIn(cardMd) {
-  const out = new Set();
-  // 🔴 #1929: `channel` must be a param NAME read whole, as parseParams reads it (`\w[\w-]*`; a hyphen
-  // run BEFORE the first word character is not part of the name, so `--channel=` is `channel`). The
-  // lookbehind refuses a word character, with or without hyphens after it, directly before `channel`:
-  // `yt-channel=`, `a--channel=`, `x_channel=` are other names, and a plain \b would have read them.
-  //
-  // An ASSIGNMENT is the name, `=`, the value, with nothing between them — parseParams' one form, and
-  // the form every other Card parameter is read and written in. `channel = x` leaves `channel`
-  // without a value there, so the card draws no channel video; this used to allow spaces on both
-  // sides of the `=` and the Worker made an upstream request for a reference the card never uses.
-  for (const m of String(cardMd || '').matchAll(/(?<!\w-*)channel="?(@?[A-Za-z0-9_.-]+)"?/g)) {
-    if (isChannelRef(m[1])) out.add(m[1]);
-  }
-  return [...out];
-}
+// Which channels a CARD names — `channelsIn` / `resolveChannels` — is yt-channels.mjs (tile#325): the
+// answer is read off the Card parse, and this file may import nothing.
 
 /**
  * The newest video on a channel, or null.
@@ -205,17 +187,4 @@ export async function resolveChannel(ref, doFetch, timeoutMs = TIMEOUT_MS) {
   } finally {
     clearTimeout(timer);   // or a pending timer keeps a test runner alive after the assertions pass
   }
-}
-
-/**
- * Resolve every channel a card mentions, concurrently. Returns { [ref]: {id, title, channelId} } —
- * keyed by what the card WROTE (UC id or @handle), because that is what the renderer looks up.
- */
-export async function resolveChannels(cardMd, doFetch) {
-  const ids = channelsIn(cardMd);
-  if (!ids.length) return {};
-  const got = await Promise.all(ids.map((c) => resolveChannel(c, doFetch)));
-  const out = {};
-  ids.forEach((c, i) => { if (got[i]) out[c] = got[i]; });
-  return out;
 }

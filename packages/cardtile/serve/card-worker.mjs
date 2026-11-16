@@ -16,7 +16,8 @@
 import { parseCard, serializeCard } from '../card-core.js';
 import { renderPage, poolOf } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
-import { resolveChannels, VIDEO_RE } from '../yt.mjs';
+import { VIDEO_RE } from '../yt.mjs';
+import { resolveChannels } from '../yt-channels.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';

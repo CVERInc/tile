@@ -3,11 +3,15 @@
 //   node --test packages/cardtile/yt.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { channelsIn, latestFromFeed, resolveChannel, resolveChannels, resolveHandle, channelIdFromPage, posterPath, CHANNEL_RE, VIDEO_RE, HANDLE_RE } from './yt.mjs';
+import { latestFromFeed, resolveChannel, resolveHandle, channelIdFromPage, posterPath, CHANNEL_RE, VIDEO_RE, HANDLE_RE, isChannelRef } from './yt.mjs';
+import { channelsIn, resolveChannels } from './yt-channels.mjs';
 import { renderCardHTML } from './serve/card-worker.mjs';
 import { parseParams } from '../sitetile/site-core.js';
 
 const CH = 'UCabcdefghijklmnopqrstuv';          // UC + 22
+// A whole Card around some lines. channelsIn reads the Card as the renderer does (parseCard), and a
+// line outside any `## lane` is not a cell, so every channelsIn input below is a real Card.
+const CARD = (block) => `---\ncard-page: t\ntitle: T\naccent: #0556ff\n---\n\n## grid\n\n${block}\n`;
 const FEED = (id, title) => `<?xml version="1.0"?>
 <feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
   <title>The Channel Itself</title>
@@ -43,10 +47,10 @@ test('a feed with no entries, or a junk id, resolves to null rather than a broke
   assert.equal(latestFromFeed(FEED('tooshort', 'x')), null);
 });
 
-test('channelsIn reads the raw markdown, quoted or bare, and de-duplicates', () => {
-  const md = `- [ ] %% card: video channel="${CH}" %% A
+test('channelsIn reads the video cells, quoted or bare, and de-duplicates', () => {
+  const md = CARD(`- [ ] %% card: video channel="${CH}" %% A
 - [ ] %% card: video channel=${CH} %% B
-- [ ] %% card: video yt=dQw4w9WgXcQ %% C`;
+- [ ] %% card: video yt=dQw4w9WgXcQ %% C`);
   assert.deepEqual(channelsIn(md), [CH]);
 });
 
@@ -58,12 +62,12 @@ test('🔴 a channel id that is not a channel id never reaches a URL', async () 
     assert.equal(await resolveChannel(bad, async () => { called = true; return ok(''); }), null);
     assert.equal(called, false, `fetched for ${bad}`);
   }
-  assert.deepEqual(channelsIn(`channel="../../etc"`), []);
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video channel="../../etc" %%`)), []);
 });
 
 test('🔴 condition 2: the cache key is the CHANNEL, so one channel is fetched once for N cards', async () => {
   const urls = [];
-  const md = `channel="${CH}"\nchannel="${CH}"\nchannel="${CH}"`;
+  const md = CARD(Array(3).fill(`- [ ] %% card: video channel="${CH}" %%`).join('\n'));
   await resolveChannels(md, async (u) => { urls.push(u); return ok(FEED('dQw4w9WgXcQ', 'x')); });
   assert.equal(urls.length, 1, 'the same channel was fetched more than once');
   assert.ok(urls[0].includes(`channel_id=${CH}`));
@@ -75,7 +79,7 @@ test('🔴 condition 2: the cache key is the CHANNEL, so one channel is fetched 
 test('🔴 condition 3: YouTube being down or slow never throws, it just resolves to nothing', async () => {
   assert.equal(await resolveChannel(CH, async () => { throw new Error('network'); }), null);
   assert.equal(await resolveChannel(CH, async () => ({ ok: false, text: async () => '' })), null);
-  assert.deepEqual(await resolveChannels(`channel="${CH}"`, async () => { throw new Error('down'); }), {});
+  assert.deepEqual(await resolveChannels(CARD(`- [ ] %% card: video channel="${CH}" %%`), async () => { throw new Error('down'); }), {});
 });
 
 test('🔴 a hanging YouTube gives up the poster, not the card', async () => {
@@ -95,7 +99,6 @@ test('🔴 a hanging YouTube gives up the poster, not the card', async () => {
 });
 
 // ── and the same four conditions, seen from the rendered card ────────────────────────────────────
-const CARD = (block) => `---\ncard-page: t\ntitle: T\naccent: #0556ff\n---\n\n## grid\n\n${block}\n`;
 // 🔴 Strip the stylesheet before asserting on any class name. The bundled CSS *mentions* every class
 // it styles — `st-embed-video-noposter` included — so `html.includes('…noposter')` is true whether or
 // not the element wears it, and an assertion that a class is ABSENT can never fail. This is not
@@ -155,8 +158,10 @@ const PAGE = (id) => `<!doctype html><html><head>
 </head><body><script>var ytInitialData = {"channelId":"UCdecoy00000000000000001","x":{"channelId":"UCdecoy00000000000000002"}}</script></body></html>`;
 
 test('channelsIn reads a handle as well as a UC id, quoted or bare, and nothing else', () => {
-  assert.deepEqual(channelsIn(`- [ ] %% card: video channel=${HANDLE} %% x\n- [ ] %% card: video channel="${CH}" %%`), [HANDLE, CH]);
-  assert.deepEqual(channelsIn('channel=@ab channel=@ channel=@!bang'), []);   // too short, empty, not a handle
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video channel=${HANDLE} %% x\n- [ ] %% card: video channel="${CH}" %%`)), [HANDLE, CH]);
+  for (const bad of ['@ab', '@', '@!bang']) {   // too short, empty, not a handle
+    assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video channel=${bad} %%`)), [], bad);
+  }
   assert.ok(HANDLE_RE.test('@somebody') && HANDLE_RE.test('@a.b-c_d') && !HANDLE_RE.test('somebody'));
 });
 
@@ -194,7 +199,7 @@ test('resolveChannel with a handle: page then feed, keyed by the handle the card
   const asked = [];
   assert.equal(await resolveChannel(HANDLE, async (u) => { asked.push(u); return { ok: false, text: async () => '' }; }), null);
   assert.equal(asked.length, 1);
-  const all = await resolveChannels(`channel=${HANDLE} channel=${CH}`, doFetch);
+  const all = await resolveChannels(CARD(`- [ ] %% card: video channel=${HANDLE} %%\n- [ ] %% card: video channel=${CH} %%`), doFetch);
   assert.deepEqual(Object.keys(all).sort(), [HANDLE, CH].sort());
 });
 
@@ -215,20 +220,21 @@ test('🔴 #1929: channelsIn reads a NAME whole — `yt-channel=` is not `channe
   // `p.channel` is unset and the card draws no channel video. channelsIn used to run \bchannel=
   // over the raw text, where `-` is a word boundary: the Worker made an upstream request for a
   // reference the card never uses.
-  assert.deepEqual(channelsIn(`- [ ] %% card: video yt-channel="${CH}" %% x`), [], 'hyphenated prefix');
-  assert.deepEqual(channelsIn(`- [ ] %% card: video my-yt-channel=${HANDLE} %% x`), [], 'two hyphens deep');
-  assert.deepEqual(channelsIn(`- [ ] %% card: video x_channel=${CH} %% x`), [], 'underscore prefix');
-  assert.deepEqual(channelsIn(`- [ ] %% card: video a--channel=${CH} %% x`), [], 'word, then a run of hyphens');
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video yt-channel="${CH}" %% x`)), [], 'hyphenated prefix');
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video my-yt-channel=${HANDLE} %% x`)), [], 'two hyphens deep');
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video x_channel=${CH} %% x`)), [], 'underscore prefix');
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video a--channel=${CH} %% x`)), [], 'word, then a run of hyphens');
   // CONTROLS: the plain spellings still resolve, and so does a leading `--` (parseParams drops a
   // hyphen run BEFORE the first word character: `--wide=1` is `wide`).
-  assert.deepEqual(channelsIn(`- [ ] %% card: video channel="${CH}" %% x`), [CH]);
-  assert.deepEqual(channelsIn(`%% card: video --channel=${HANDLE} %%`), [HANDLE]);
-  assert.deepEqual(channelsIn(`%% card: video yt-channel="${CH}" channel=${HANDLE} %%`), [HANDLE], 'the real one beside the decoy');
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video channel="${CH}" %% x`)), [CH]);
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video --channel=${HANDLE} %%`)), [HANDLE]);
+  assert.deepEqual(channelsIn(CARD(`- [ ] %% card: video yt-channel="${CH}" channel=${HANDLE} %%`)), [HANDLE], 'the real one beside the decoy');
 });
 
 // ── the two readers of a `channel=` token ───────────────────────────────────────────────────────
 // A Card line is read twice: channelsIn (the Worker, BEFORE rendering, to decide what to fetch) and
-// parseParams (the renderer, to decide what to draw). The param grammar has one assignment form —
+// the renderer (to decide what to draw). Since tile#325 both take the params from parseCard, i.e.
+// parseParams, so these hold by construction; they stay as the spacing case's own record. The param grammar has one assignment form —
 // the name, `=`, the value, nothing between them — and that is how every other Card parameter is
 // read and written (parseParams' token scan; card-core's setToken/removeToken). A space on either
 // side of the `=` is not an assignment: parseParams leaves the name without a value.
@@ -248,17 +254,17 @@ const LINE = (params) => `- [ ] %% card: video ${params} %% x`;
 test('🔴 channelsIn: `channel = x` is not an assignment — no upstream request for a channel the card does not draw', async () => {
   for (const ref of [CH, HANDLE]) {
     for (const [name, write] of SPACED) {
-      assert.deepEqual(channelsIn(LINE(write(ref))), [], `${name}: ${write(ref)}`);
+      assert.deepEqual(channelsIn(CARD(LINE(write(ref)))), [], `${name}: ${write(ref)}`);
     }
     // CONTROLS: the one assignment form still resolves.
     for (const [name, write] of TIGHT) {
-      assert.deepEqual(channelsIn(LINE(write(ref))), [ref], `${name}: ${write(ref)}`);
+      assert.deepEqual(channelsIn(CARD(LINE(write(ref)))), [ref], `${name}: ${write(ref)}`);
     }
   }
-  assert.deepEqual(channelsIn(LINE(`channel = ${CH} channel=${HANDLE}`)), [HANDLE], 'the real one beside the spaced one');
+  assert.deepEqual(channelsIn(CARD(LINE(`channel = ${CH} channel=${HANDLE}`))), [HANDLE], 'the real one beside the spaced one');
   // and nothing is fetched for it
   let calls = 0;
-  const got = await resolveChannels(LINE(`channel = ${CH}`), async () => { calls++; return ok(FEED('dQw4w9WgXcQ', 't')); });
+  const got = await resolveChannels(CARD(LINE(`channel = ${CH}`)), async () => { calls++; return ok(FEED('dQw4w9WgXcQ', 't')); });
   assert.deepEqual(got, {});
   assert.equal(calls, 0, 'no request');
 });
@@ -277,7 +283,82 @@ test('parseParams: `channel = x` sets no channel, so the card draws no channel v
     // The agreement itself, form by form: a reference is fetched exactly when it is drawn.
     for (const [name, write] of [...SPACED, ...TIGHT]) {
       const drawn = parseParams(`video ${write(ref)}`).channel === ref;
-      assert.equal(channelsIn(LINE(write(ref))).includes(ref), drawn, `${name}: fetched if and only if drawn`);
+      assert.equal(channelsIn(CARD(LINE(write(ref)))).includes(ref), drawn, `${name}: fetched if and only if drawn`);
     }
   }
+});
+
+// ── tile#325: fetched ⇔ drawn, read off the rendered markup ─────────────────────────────────────
+// channelsIn used to pattern-match `channel=` over the raw markdown; the renderer reads the `channel`
+// param of a video cell off parseParams' token stream. Every line below is rendered, and what the
+// Worker REQUESTS (the URLs resolveChannels hands the fetch) must be exactly the references the
+// rendered markup carries — `data-yt-channel` / `data-yt-handle`, which is what an unresolved video
+// cell plays from. Not a second reading of the params: the markup is the renderer's own answer.
+const requested = async (md) => {
+  const urls = [];
+  // not ok: nothing resolves, so a handle is asked for once (its page) and the markup keeps the
+  // reference exactly as the card wrote it
+  await resolveChannels(md, async (u) => { urls.push(u); return { ok: false, text: async () => '' }; });
+  return urls.map((u) => {
+    const feed = /[?&]channel_id=([^&]+)$/.exec(u);
+    if (feed) return feed[1];
+    const page = /^https:\/\/www\.youtube\.com\/(@[^/?#]+)$/.exec(u);
+    assert.ok(page, `an upstream request that is neither a feed nor a handle page: ${u}`);
+    return page[1];
+  }).sort();
+};
+const drawnRefs = (md) => {
+  const html = renderCardHTML(md, { handle: 't', videos: {} })
+    .replace(/<style[\s\S]*?<\/style>/g, '').replace(/<script[\s\S]*?<\/script>/g, '');
+  const refs = [...html.matchAll(/\sdata-yt-(?:channel|handle)="([^"]*)"/g)].map((m) => m[1]);
+  // a value the renderer draws but no fetch could ever be made for (`data-yt-handle="&quot;UC…"`) is
+  // not a reference; isChannelRef is resolveChannel's own gate
+  return [...new Set(refs.filter(isChannelRef))].sort();
+};
+const VID = (params, body = 'x') => `- [ ] %% card: video ${params} %% ${body}`;
+const FETCH_CASES = (ref) => [
+  // the issue's cases — each was an over-fetch: requested, never drawn
+  ['unbalanced opening quote', CARD(VID(`channel="${ref}`)), []],
+  ['unbalanced closing quote', CARD(VID(`channel=${ref}"`)), []],
+  ['trailing comma', CARD(VID(`channel=${ref},`)), []],
+  ['trailing !x', CARD(VID(`channel=${ref}!x`)), []],
+  ['trailing /videos', CARD(VID(`channel=${ref}/videos`)), []],
+  ['inside a quoted value', CARD(VID(`note="see channel=${ref} here"`)), []],
+  ['inside a URL value', CARD(VID(`note=https://x/?channel=${ref}`)), []],
+  ['in the body text after the marker', CARD(VID('title=x', `watch channel=${ref}`)), []],
+  // the same class, found on the way: a `channel=` that is not a video cell's param at all
+  ['a link cell', CARD(`- [ ] %% card: link channel=${ref} %% [a](https://example.com)`), []],
+  ['the frontmatter', CARD('').replace('title: T', `title: T\nnote: channel=${ref}`), []],
+  ['outside any lane', CARD('').replace('\n## grid', `\n- [ ] %% card: video channel=${ref} %% x\n\n## grid`), []],
+  ['the assets lane', CARD('') + `\n## assets\n\n- [ ] %% card: asset id=a channel=${ref} %% x\n`, []],
+  ['a bare channel flag', CARD(VID(`channel ${ref}`)), []],
+  // and the one under-fetch: padded inside its quotes, the renderer trims it and draws it
+  ['padded inside its quotes', CARD(VID(`channel=" ${ref} "`)), [ref]],
+  // CONTROLS — the tight forms, which must be fetched, or this test would pass against a channelsIn
+  // that fetches nothing
+  ['bare', CARD(VID(`channel=${ref}`)), [ref]],
+  ['quoted', CARD(VID(`channel="${ref}"`)), [ref]],
+  ['on a back (drawer)', CARD(VID('yt=dQw4w9WgXcQ')) + `\n## back: more\n\n${VID(`channel=${ref}`)}\n`, [ref]],
+  ['the real one beside a decoy', CARD(VID(`note="channel=${CH}x" channel=${ref}`)), [ref]],
+];
+
+test('🔴 tile#325: resolveChannels requests exactly the channels the rendered markup carries', async () => {
+  let walked = 0;
+  const wrong = [];
+  for (const ref of [CH, HANDLE]) {
+    for (const [name, md, want] of FETCH_CASES(ref)) {
+      const drawn = drawnRefs(md);
+      // the expectation is the renderer's, checked first, so a case that stopped meaning what it
+      // says fails here rather than agreeing with a wrong channelsIn
+      assert.deepEqual(drawn, want, `${name} (${ref}): the card draws ${JSON.stringify(drawn)}`);
+      const got = await requested(md);
+      const listed = channelsIn(md).sort();
+      if (JSON.stringify(got) !== JSON.stringify(drawn) || JSON.stringify(listed) !== JSON.stringify(drawn)) {
+        wrong.push(`${name} (${ref}): requested ${JSON.stringify(got)}, channelsIn ${JSON.stringify(listed)}, drawn ${JSON.stringify(drawn)}`);
+      }
+      walked++;
+    }
+  }
+  assert.equal(walked, 2 * FETCH_CASES(CH).length);
+  assert.deepEqual(wrong, [], `${wrong.length} of ${walked} lines are fetched ≠ drawn:\n  ${wrong.join('\n  ')}`);
 });
