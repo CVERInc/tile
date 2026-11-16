@@ -125,7 +125,7 @@ async function relayAvatar(ctx, upstreamUrl) {
   }
   return resp;
 }
-import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE } from './card-api.mjs';
+import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, POOL_IN, POOL_OUT, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE } from './card-api.mjs';
 import { vanityHost } from './card-vanity.mjs';
 import { EDIT3_BODY_HTML, EDIT3_BASE_CSS, EDIT3_CSS, EDIT3_JS, BORROWED, FONT_FILES } from './edit3-assets.mjs';
 import { DECK_CSS, DECK_JS } from './deck-assets.mjs';
@@ -386,7 +386,8 @@ const cardName = (cardMd, handle) => /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim(
  * always flat — the deck would rearrange the very boxes it maps back to cells.
  *
  * The card pool (reef#2913) has two writers, and exactly one of them draws per page:
- *   - `ctx.pool` true/false (the PLATFORM's switch, from this Worker's own call site; poolOf): the
+ *   - `ctx.pool` true/false (the PLATFORM's switch, from this Worker's own call site, which reads it
+ *     from `pool:<handle>:<gen>` = `in` / `out` beside the body — tile#336, card-api poolKey; poolOf): the
  *     renderer draws it — the closing reef.cards tile after the author's grid and the footer link
  *     (true), or neither (false). The deck is then told `pool: false`, which to deck.js means "draw
  *     no reef.cards card and no footer link of your own", so nothing is drawn twice. In stack and
@@ -1160,7 +1161,12 @@ const router = {
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
-    const { md: liveMd, stopped, gen } = await liveCard(store, resolved.handle, { stop: true, gen: vanityHandle ? boundGen : null });
+    // tile#336: the exchange state rides in the same parallel round (one more read beside body and stop,
+    // no serial trip). Not on the platform's own root page (ROOT_HANDLE, under any name or host it answers
+    // to): that page IS reef.cards, and a closing tile and footer segment linking to itself would be
+    // noise, so it is never read there.
+    const { md: liveMd, stopped, gen, pooled } = await liveCard(store, resolved.handle,
+      { stop: true, pool: resolved.handle !== ROOT_HANDLE, gen: vanityHandle ? boundGen : null });
     // 🔴 A stopped Card IS a missing one from here on, on every exit — page, markdown, avatar, icons,
     // and no redirect to its own domain (that would name the binding). tile-lab#51: retired and
     // never-existed must be indistinguishable; see notFound. The stop still wins over everything.
@@ -1268,7 +1274,11 @@ const router = {
     // tile#298 — a card that names its language speaks it, chrome and all, to everyone (unchanged). One
     // that names none gets its CHROME in the visitor's language, and the response varies by it.
     const chromeLang = frontmatter(cardMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
-    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(chromeLang ? { chromeLang } : {}) }),
+    // tile#336 — the platform's exchange state, exactly as it wrote it: `in` → in, `out` → out, anything
+    // else (absent, a hand-written value) → undefined, which is the page as it was before the state existed.
+    // The Worker does not interpret it further: the platform's one draw rule already did.
+    const pool = pooled === POOL_IN ? true : pooled === POOL_OUT ? false : undefined;
+    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) }),
       200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
   },
 };

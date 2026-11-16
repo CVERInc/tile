@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker, { renderCardHTML } from './card-worker.mjs';
-import { renderPage, POOL_URL, poolOf } from '../card-render.mjs';
+import { renderPage, POOL_URL, poolUrl, poolOf } from '../card-render.mjs';
 import { parseCard } from '../card-core.js';
 
 const CARD = [
@@ -23,7 +23,8 @@ const CTX = { handle: 'inkbrush', cardUrl: 'https://card.feelreef.com/inkbrush' 
 
 const footerOf = (html) => /<footer class="st-footer">[\s\S]*?<\/footer>/.exec(html)?.[0] ?? '';
 const has = {
-  poolFooter: (h) => footerOf(h).includes(`<a href="${POOL_URL}" target="_blank" rel="noopener noreferrer">reef.cards</a>`),
+  // tile#336 ruling: the footer segment and the closing reef.cards tile both go to reef.cards with the handle as ?ref=
+  poolFooter: (h) => footerOf(h).includes(`<a href="${POOL_URL}?ref=inkbrush" target="_blank" rel="noopener noreferrer">reef.cards</a>`),
   poweredFooter: (h) => /Powered by <a href="https:\/\/feelreef\.com\/signup\?ref=inkbrush">feelreef<\/a>/.test(footerOf(h)),
   closingCard: (h) => (h.match(/data-pool="card"/g) || []).length,
   owner: (h) => footerOf(h).includes(`<span>INKB &copy; ${new Date().getFullYear()}</span>`),
@@ -51,8 +52,9 @@ for (const pool of [true, false, undefined]) {
       assert.equal(has.poweredFooter(html), wantPowered, 'Powered by feelreef footer');
       assert.equal(has.closingCard(html), wantCard, 'closing reef.cards tile count');
       assert.ok(has.owner(html), "the owner's copyright line always stays");
-      // the pool's link never carries a referral, anywhere on the page
-      assert.ok(!/reef\.cards\/?\?ref=/.test(html), 'no ?ref= on reef.cards');
+      // tile#336 ruling: every reef.cards link on the page carries the page's handle, and only that one
+      const refs = [...html.matchAll(/https:\/\/reef\.cards\/[^"']*/g)].map((m) => m[0]);
+      assert.ok(refs.every((u) => u === 'https://reef.cards/?ref=inkbrush'), `reef.cards links: ${refs.join(' ')}`);
     });
   }
 }
@@ -101,7 +103,7 @@ test('closing card: last block inside the card, a reef.cards link tile, self-con
   assert.ok(card, 'closing card present');
   // last thing in .st-card: right after it the card closes and <main> ends (no drawers on this card)
   assert.ok(html.includes(`${card}</div></main>`), 'appended after everything the author wrote');
-  assert.match(card, /<a class="st-cell-link" href="https:\/\/reef\.cards\/" target="_blank" rel="noopener noreferrer">/);
+  assert.match(card, /<a class="st-cell-link" href="https:\/\/reef\.cards\/\?ref=inkbrush" target="_blank" rel="noopener noreferrer">/);
   assert.match(card, /<div class="st-cell-title">reef\.cards<\/div>/);
   // the card's own tile classes, so it wears the card's surface, line, radius and hover
   assert.match(card, /class="st-cell st-cell-tile st-pool-card" data-span="6x1" data-w="6"/);
@@ -110,7 +112,7 @@ test('closing card: last block inside the card, a reef.cards link tile, self-con
   // no fetch: no src=, no url(), no script, no external host other than the link itself
   assert.ok(!/src=|url\(|<script|<img|<style/.test(card));
   assert.deepEqual([...card.matchAll(/https?:\/\/[^"' )]+/g)].map((m) => m[0]).filter((u) => u !== 'http://www.w3.org/2000/svg'),
-    ['https://reef.cards/']);
+    ['https://reef.cards/?ref=inkbrush']);
 });
 
 test('closing card: once per page — not repeated inside drawers, and absent from renderPage without pool', () => {
@@ -126,6 +128,10 @@ test('closing card: once per page — not repeated inside drawers, and absent fr
   // pool:true ignores powered-by on the direct path too
   const direct = renderPage(model, { name: 'INKB', handle: 'inkbrush', poweredBy: true, pool: true });
   assert.ok(!/Powered by/.test(direct) && has.poolFooter(direct));
+  // a render that names no handle links the bare origin (nothing to credit), never `?ref=` with nothing after it
+  assert.ok(renderPage(model, { name: 'INKB', pool: true }).includes(`href="${POOL_URL}" target="_blank"`));
+  assert.equal(poolUrl(''), POOL_URL);
+  assert.equal(poolUrl('a&b'), `${POOL_URL}?ref=a%26b`);
   assert.ok(!/Powered by/.test(renderPage(model, { name: 'INKB', handle: 'inkbrush', poweredBy: true, pool: false })));
 });
 
