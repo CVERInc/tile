@@ -21,6 +21,7 @@ import { resolveChannels } from '../yt-channels.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
+import { tilesAbove, shellSource, withCardSrc } from './size-tier.mjs';
 import { picturePlan, pictureStrategy, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
 import { cachedPicture, keepPicture, keepPictures, prefillCalls } from './picture-cache.mjs';
 
@@ -1292,8 +1293,18 @@ const router = {
     // the legacy deletion marker. Its value never changes the public absence response.
     if (cardMd == null) await store.get(`gone:${resolved.handle}`);
 
+    // reef#3361 — the size tier (size-tier.mjs): a file with more tiles than the page view renders on the
+    // server is served as a shell, and the page, the icons and the avatar read the shell's source (the
+    // file's frontmatter, its first profile tile and that tile's avatar) instead of the file. Counted
+    // once, and the count stops at the threshold: no exit pays for the tiles past it.
+    const onDemand = cardMd != null && tilesAbove(cardMd);
+    let shellMd = null;
+    const shell = () => (shellMd ??= shellSource(cardMd));
     // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
-    const blank = cardMd != null && isTemplateOnly(cardMd);
+    // Above the tier it is not asked: judging it parses the whole file, on every exit, the markdown
+    // download's included. The answer there is "not blank", the side card-blank.mjs names as harmless
+    // (a wrong "not blank" is the page as it was before the rule; only a wrong "blank" hides an author).
+    const blank = cardMd != null && !onDemand && isTemplateOnly(cardMd);
 
     if (want === 'alias' && cardMd != null) return Response.redirect(`https://${host}/${url.search}`, 301);
 
@@ -1316,7 +1327,7 @@ const router = {
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
     // cardAvatar validates stored raster assets; remote pictures pass the proxy's type allowlist.
     if (want === 'avatar') {
-      const avatar = cardMd ? cardAvatar(parseCard(cardMd)) : null;
+      const avatar = cardMd ? cardAvatar(parseCard(onDemand ? shell() : cardMd)) : null;
       const image = !avatar ? NOT_RELAYED()
         : avatar.url ? await relayAvatar(ctx, avatar.url)
           : new Response(Uint8Array.from(atob(avatar.b64.replace(/\s+/g, '')), (c) => c.charCodeAt(0)), {
@@ -1339,7 +1350,7 @@ const router = {
       const originMark = !cardMd && !!resolved.root && face === CARDS_HOST;
       if (!cardMd && !originMark) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60', ...ROBOTS_HEADERS(env, resolved.handle, at) } });
       const file = originMark ? await iconFile(want, NO_TILES, ORIGIN_MARK)
-        : await iconFile(want, parseCard(cardMd), { name: cardName(cardMd, resolved.handle), accent: frontmatter(cardMd, 'accent') });
+        : await iconFile(want, parseCard(onDemand ? shell() : cardMd), { name: cardName(onDemand ? shell() : cardMd, resolved.handle), accent: frontmatter(onDemand ? shell() : cardMd, 'accent') });
       return new Response(file.body, {
         headers: {
           'Content-Type': file.type,
@@ -1400,15 +1411,19 @@ const router = {
     // card must not go down because a video platform did.
     // tile#339: each fetch counted, because the picture cache's prefill below shares this invocation's
     // subrequest budget with it (picture-cache.mjs prefillCalls)
+    // reef#3361 — above the size tier everything below is made from the shell's source, not the file
+    // (size-tier.mjs shellSource): the same calls, on a file of at most one tile. At or below it pageMd
+    // IS the file, and the page is today's, byte for byte.
+    const pageMd = onDemand ? shell() : cardMd;
     let ytCalls = 0;
-    const videos = await resolveChannels(cardMd, (u) => { ytCalls += 1; return ytFetch(u); });
+    const videos = await resolveChannels(pageMd, (u) => { ytCalls += 1; return ytFetch(u); });
 
     // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
     // address under the switch (reef.cards' root card = the bare origin), whatever host answered.
     const canonicalUrl = vanityHandle ? resolved.cardUrl : cardUrlFor(resolved.handle, {}, env);
     // tile#298 — a card that names its language speaks it, chrome and all, to everyone (unchanged). One
     // that names none gets its CHROME in the visitor's language, and the response varies by it.
-    const chromeLang = frontmatter(cardMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
+    const chromeLang = frontmatter(pageMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
     // tile#336 — the platform's exchange state, exactly as it wrote it: `in` → in, `out` → out, anything
     // else (absent, a hand-written value) → undefined, which is the page as it was before the state existed.
     // The Worker does not interpret it further: the platform's one draw rule already did.
@@ -1417,8 +1432,11 @@ const router = {
     // here, from the body already read (no store read), because the render is synchronous. 'inline' hashes
     // nothing and hands the renderer nothing, which is the page as it was.
     const plan = pictures === 'inline' ? {}
-      : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
-    const page = renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) });
+      : await picturePlan(pageMd, parseCard(pageMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
+    const rendered = renderCardHTML(pageMd, { ...resolved, canonicalUrl, videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) });
+    // …and the shell names the file itself, at the address its download already has (fatUrl, same
+    // origin as the page), for w3/deck.js to read and deal (its file mode)
+    const page = onDemand ? withCardSrc(rendered, new URL(fatUrl).pathname) : rendered;
     // tile#339 step 1: what this render decoded and hashed for the plan is kept for the picture requests
     // the page is about to cause (picture-cache.mjs keepPictures; one cache read when all are kept already):
     // only the pictures the rendered page names, in the order it draws them (a reference the page never

@@ -85,11 +85,14 @@
   // ---- items from a card file: one per `- [ ] %% card: … %% text` line. Kept as text; a card is built only when it is near view ----
   // The marker has two spellings, `%% card:` and `%% cardtile:` (card-core.js RE_CARD_MARKER); k is the length of the one this line uses.
   // `## back: id` lanes are the backs: an item names one with `back=#id`. Items are only read from the first lane.
+  // The `## assets` lane holds the file's pictures (card-core.js RE_ASSET_LANE): its lines are never items. A file the cardtile
+  // worker names in data-card-src is the whole file, pictures included (serve/size-tier.mjs).
   const mdTexts=[], backAt=new Map(), backs=new Map(); { const MD=window.__cardMd; if(MD){ let a=0; const L=MD.length; if(MD.startsWith('---\n')){ const e=MD.indexOf('\n---\n',4); a=e<0?0:e+5; }
       // one id rule for both ends (`back=#x%y` and `## back: a|b` used to be cut differently and never matched)
-      let cur=null, k=0; const ID=/^[^\s%|]+/, BK=/(?:^|\s)back=#([^\s%|]+)/;
+      let cur=null, pics=false, k=0; const ID=/^[^\s%|]+/, BK=/(?:^|\s)back=#([^\s%|]+)/;
       while(a<L){ let b=MD.indexOf('\n',a); if(b<0)b=L; const e=MD.charCodeAt(b-1)===13?b-1:b;   // CRLF: drop the \r
-        if(MD.startsWith('## ',a)){ const m=/^back:\s*(.*)$/.exec(MD.slice(a+3,e)); const id=m&&ID.exec(m[1]); cur=id?[]:null; if(id)backs.set(id[0],cur); }
+        if(MD.startsWith('## ',a)){ const h=MD.slice(a+3,e); pics=/^assets$/i.test(h.trim()); const m=/^back:\s*(.*)$/.exec(h); const id=m&&ID.exec(m[1]); cur=id?[]:null; if(id)backs.set(id[0],cur); }
+        else if(pics){}
         else if(MD.startsWith('- [ ] %% card',a)&&(k=MD.charCodeAt(a+13)===58?14:MD.startsWith('tile:',a+13)?18:0)){ const t=MD.indexOf('%% ',a+k); const txt=t>=0&&t<e?MD.slice(t+3,e):'';
           if(cur){ if(txt)cur.push(txt); } else { const m=BK.exec(MD.slice(a+k,t>=0&&t<e?t:e)); if(m)backAt.set(mdTexts.length,m[1]); mdTexts.push(txt); } }   // items from every lane that is not a back
         else if(cur&&MD.charCodeAt(a)===9){ cur.push(MD.slice(a+1,e)); }
@@ -222,7 +225,11 @@
   // Set up once; the tiles it stands in for stay in the page (the stylesheet hides them under .vb), so a pile can still deal them.
   function virtualBrick(){
     if(vb){ vb.api(); vb.layout(); return; }
-    const box=document.querySelector('main .st-cells'); if(!box)return; box.classList.add('vb');
+    // the rows go in the page's own grid, never in the closing reef.cards section (.st-pool). A page made from the head of a file
+    // (the cardtile worker's shell, serve/size-tier.mjs) may have no grid of its own at all: one empty grid is made, before that section.
+    let box=[...document.querySelectorAll('main .st-cells')].find(b=>!b.closest('.st-pool'));
+    if(!box){ const sc=document.querySelector('main .st-card'); if(!sc)return; const g=mk('section','st-grid'), w=mk('div','st-cells-wrap'); box=mk('div','st-cells'); w.appendChild(box); g.appendChild(w); sc.insertBefore(g,sc.querySelector('.st-pool')); }
+    box.classList.add('vb');
     const tpl=document.getElementById('md-cover'); if(tpl){ const c=tpl.content.firstElementChild.cloneNode(true); const r=c.querySelector('[data-range]'); if(r) r.textContent=numFmt(mdTexts[0])+' – '+numFmt(mdTexts[mdTexts.length-1]); c.classList.add('vb-cover'); box.appendChild(c); }
     const COLS=6, GAP=12, M=mdTexts.length, rows=Math.ceil(M/COLS); const space=mk('div','vb-space'), win=mk('div','vb-win'); space.appendChild(win); box.appendChild(space);
     let rowH=100, scale=1, hit=-1, hitY=-1, FULL=0, SH=0, VIEW=0; const pool=[];
@@ -414,6 +421,10 @@
   const seatNamed=(c,id)=>{ const b=drawers[id], first=!usedBack.has(id); usedBack.add(id); lodge(c); if(first)lodge(b); const k=buildCard(c,first?b:null,{seated:true,back:id}); settled(c); if(first)settled(b); return k; };
   const lend=k=>{ const b=drawers[k.dataset.back], sc=k.querySelector('.deck-back-scroll'); if(!b||!sc||b.parentNode===sc)return; mv(sc,b,null); settled(b); };
   const dealt=i=>{ const k=tileCard(cells[i]); k.dataset.i=String(i); pre[i]=k; mat(k); return k; };
+  // The renderer's closing reef.cards tile (.st-pool-card, drawn when the platform says the Card is in the pool) is the last
+  // card of the pile. On a page whose items are a card file it would be dealt before every item, so there it is held back
+  // and dealt after them (below, with our own last cards).
+  const poolTail=mdTexts.length?cells.find(c=>c.classList.contains('st-pool-card')):null; if(poolTail) cells.splice(cells.indexOf(poolTail),1);
   for(let i=0;i<cells.length;i++) pre.push(null);
   function tileCard(c){
     if(c.classList.contains('st-embed-video')){
@@ -429,6 +440,7 @@
   }
   if(mdTexts.length){ const tpl=document.getElementById('md-cover'); if(tpl){ const c=tpl.content.firstElementChild.cloneNode(true); const r=c.querySelector('[data-range]'); if(r) r.textContent=numFmt(mdTexts[0])+' – '+numFmt(mdTexts[mdTexts.length-1]); addCard(c,null); } }
   P=pre.length; M=mdTexts.length; addingPost=true; window.__mdFirst=P; window.__mdCount=M;
+  if(poolTail) register(tileCard(poolTail));
   // reef's own card at the end of the pile: a plain link card like any other. front = glyph, back = one button.
   const reefFront=mk('div','deck-reef','<div class="mark" aria-hidden="true"><svg width="48" height="48" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M 39.5 78.2 C 39.6 62 39.8 46 40 29.3"/><path d="M 40 29.3 C 37.7 29.2 33.4 28.1 30.7 22.5"/><path d="M 40 29.3 C 42.3 29.2 46.6 28.1 49.3 22.1"/><path d="M 39.5 62 C 33.3 61.6 28.8 59.8 26.5 56.5 C 24.8 54 23.8 50.8 23.7 47.5"/><path d="M 39.7 53.8 C 44.1 49.5 49.6 46.1 55.6 44.1 C 62 41.9 69.5 41.6 76.8 44.1"/><path d="M 62.6 42.2 C 64.1 40.7 66.4 37.3 64.8 31.8"/></svg></div>');
 const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the capacity demo: its own ending, in the page's words like the rest */
