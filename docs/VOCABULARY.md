@@ -95,6 +95,10 @@ Moving:
 
   `POST /_api/cards`, with no handle, is the list, and is unchanged. A handle is never empty, so the list and one handle's route cannot be confused. `/_api/preview`, `/_api/try/<id>` and `/_api/vanity/<handle>` are unchanged.
 
+Born in the final form:
+
+- **`X-Cards-Serving`**, the response header of `GET /_api/cards/<handle>/full` (and `/_api/card/<handle>/full`): `serving` or `stopped`, whether the public door serves the body that read answered. A caller reads it, so it says Cards. The JSON reads (`GET /_api/cards/<handle>` and each summary of `POST /_api/cards`) carry the same fact as `serving: { stopped: true|false }`. The older header `X-Card-Handle` keeps its spelling until this file names a new one.
+
 Planned, not moved:
 
 - **Refusal codes.** The pattern is `cards_<thing>_<state>`. No code has moved: each keeps its current spelling until this file names its new one.
