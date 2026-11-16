@@ -138,13 +138,16 @@ function loadSquareShop() {
 		querySelectorAll: () => [],
 		addEventListener: () => {}
 	};
+	// An empty storage that keeps what it is given, as a browser's does. A double that dropped every
+	// write would read back like another tab clearing the basket, which the coral now honours (tile#328).
+	const stored = new Map();
 	const window = {
 		location: { href: 'https://shop.example/shop', origin: 'https://shop.example', pathname: '/shop' },
 		history: { replaceState() {} },
 		localStorage: {
-			getItem: () => null,
-			setItem: () => {},
-			removeItem: () => {}
+			getItem: (k) => (stored.has(k) ? stored.get(k) : null),
+			setItem: (k, v) => { stored.set(k, String(v)); },
+			removeItem: (k) => { stored.delete(k); }
 		},
 		dispatchEvent: () => true
 	};
