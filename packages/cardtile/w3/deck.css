@@ -185,7 +185,7 @@ html.deck .deck-reef{flex:1;display:grid;place-items:center;color:var(--cp-accen
 html.deck .deck-reef .mark{padding:6px;line-height:0}
 html.deck .deck-reef .wm{font:600 15px/1 -apple-system,"PingFang TC",system-ui,sans-serif;letter-spacing:.08em;color:var(--cp-muted)}
 
-html.deck .deck-back:focus{outline:none}
+html.deck .deck-back:not([tabindex="0"]):focus{outline:none}   /* the turn sends focus to a back; a back that scrolls is a Tab stop and keeps the page's ring (card.css [tabindex]:focus-visible) */
 html.deck.fan .deck-card{transition:transform .32s cubic-bezier(.2,.8,.3,1),opacity .25s,visibility 0s 0s;cursor:pointer}
 html.deck.fan .deck-card.fan-hot{transition-duration:.14s}
 html.deck.fan .deck-gshadow{opacity:0;transition:opacity .2s 0s}

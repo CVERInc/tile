@@ -309,8 +309,14 @@
   // everything shows). It is told again when the side scrolls and when the side, or the box it holds, changes size — a
   // picture that arrives, a back that is lent to this tile, the window. Decoration only: the marks say nothing to a reader
   // (aria-hidden) and take no tap; the side is what scrolls, by finger, wheel or keys.
+  // Keys need a way in: a side that holds more than it shows is in the Tab order (tabindex 0), a region named for the side
+  // ("Front", "Back": the editor's words for it, in the page's language), and shows the page's own focus ring (card.css,
+  // [tabindex]:focus-visible). A side that shows everything is not a stop: a front has no tabindex, a back keeps -1, the
+  // place its turn sends focus to (open). Safari does not put a scrolling box in the Tab order of its own accord.
   const CHEV='<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>';
-  const tellMore=side=>{ const up=side.scrollTop>1, down=side.scrollTop+side.clientHeight<side.scrollHeight-1; const v=up&&down?'up down':up?'up':down?'down':''; if(v){ if(side.getAttribute('data-more')!==v) side.setAttribute('data-more',v); } else if(side.hasAttribute('data-more')) side.removeAttribute('data-more'); };
+  const tellMore=side=>{ const up=side.scrollTop>1, down=side.scrollTop+side.clientHeight<side.scrollHeight-1; const v=up&&down?'up down':up?'up':down?'down':''; if(v){ if(side.getAttribute('data-more')!==v) side.setAttribute('data-more',v); } else if(side.hasAttribute('data-more')) side.removeAttribute('data-more');
+    const isBack=side.classList.contains('deck-back'), set=(k,val)=>{ if(val==null){ if(side.hasAttribute(k)) side.removeAttribute(k); } else if(side.getAttribute(k)!==val) side.setAttribute(k,val); };
+    if(up||down){ set('tabindex','0'); set('role','region'); set('aria-label',isBack?say('back'):say('front')); } else { set('tabindex',isBack?'-1':null); set('role',null); set('aria-label',null); } };
   const sized=typeof ResizeObserver==='function'?new ResizeObserver(es=>{ const seen=new Set(); for(const e of es){ const f=e.target.closest&&e.target.closest('.deck-face'); if(f&&!seen.has(f)){ seen.add(f); tellMore(f); } } }):null;
   const marks=(side,held)=>{ for(const to of ['up','down']){ const m=mk('span','tile-more',CHEV); m.dataset.to=to; m.setAttribute('aria-hidden','true'); side.appendChild(m); }
     side.addEventListener('scroll',()=>tellMore(side),{passive:true}); if(sized){ sized.observe(side); if(held&&held.nodeType===1) sized.observe(held); } };
@@ -567,6 +573,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   function endFlip(via){ const c=card(N-1); if(cur!==N-1||!c||openCard)return; if(!c.querySelector('.deck-back')){bump(1);return;} open(c); }
   const GAP=180, HOLD=400, STEP=26, html=document.documentElement; let lastAct=0;
   const canScrollX=(el,dx)=>{ for(;el&&el!==document.body&&el!==html;el=el.parentElement){ const cs=getComputedStyle(el); if(/(auto|scroll)/.test(cs.overflowX)&&el.scrollWidth>el.clientWidth+1){ if(dx>0?el.scrollLeft+el.clientWidth<el.scrollWidth-1:el.scrollLeft>0)return true; } } return false; };
+  // the same question up and down: a side of a tile is a scroller (deck.css: "a side is a window"), and so is anything a tile
+  // scrolls inside it. While one under the wheel still has more in the wheel's direction, the wheel is its, not the pile's.
+  const canScrollY=(el,dy)=>{ for(;el&&el!==document.body&&el!==html;el=el.parentElement){ if(!(el.scrollHeight>el.clientHeight+1))continue; if(!(el.classList&&el.classList.contains('deck-face'))&&!/(auto|scroll)/.test(getComputedStyle(el).overflowY||''))continue; if(dy>0?el.scrollTop+el.clientHeight<el.scrollHeight-1:el.scrollTop>1)return true; } return false; };
   const settle2=()=>{ html.style.scrollSnapType=''; const ph=pageH(); scrollTo({top:Math.round(scrollY/ph)*ph,behavior:'smooth'}); };
   let G=null;
   addEventListener('wheel',e=>{
@@ -579,7 +588,11 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     G.t=now; clearTimeout(G.timer); const g=G; G.timer=setTimeout(()=>{ if(g.axis==='x'&&LIST)settle2(); },GAP);   /* the timer only settles list; it must not end the gesture, or it would bypass HOLD (caught in testing: a turn-back stalled 214 ms, the timer fired, and the same swipe stepped back a card) */
     if(!G.axis){ if(Math.abs(dx)>Math.abs(dy)){ if(canScrollX(e.target,dx)){G.axis='inner';return;} G.axis=(dx<0&&G.atTop&&!openCard)?'release':'x'; } else if(dy!==0) G.axis='y'; else return; }
     if(G.axis==='inner'||G.axis==='release')return;                     // an inner scroller's, or the browser's
-    if(G.axis==='y'){ if(!LIST&&!openCard&&G.startCur===N-1&&dy>0&&scrollY>=html.scrollHeight-innerHeight-2){ G.acc+=dy; if(!G.fired&&G.acc>STEP*2){G.fired=true;lastAct=now;endFlip('wheel-y');} } return; }
+    // a long last tile: the document is at its end while the side still has words below. The side takes the wheel, and a
+    // gesture it took is its own to the end, momentum included: only a NEW gesture, on a side at its end, turns the tile over
+    // (tile#343: the back opened while the visitor was still reading the front)
+    if(G.axis==='y'&&dy&&!G.inner&&canScrollY(e.target,dy)) G.inner=true;
+    if(G.axis==='y'){ if(!G.inner&&!LIST&&!openCard&&G.startCur===N-1&&dy>0&&scrollY>=html.scrollHeight-innerHeight-2){ G.acc+=dy; if(!G.fired&&G.acc>STEP*2){G.fired=true;lastAct=now;endFlip('wheel-y');} } return; }
     e.preventDefault();                                                 // ours, from the first event: no history swipe
     if(LIST){ if(openCard)return; html.style.scrollSnapType='none'; scrollBy({top:dx,behavior:'instant'}); return; }
     // a new swipe can start while the last one's momentum is still arriving: macOS keeps the stream going with no gap, so it

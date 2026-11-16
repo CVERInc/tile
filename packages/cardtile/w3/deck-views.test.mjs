@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import worker, { renderCardHTML } from '../serve/card-worker.mjs';
 import { withDeck, openingView, DECK_JS_PATH, DECK_TRY_URL } from './deck-page.mjs';
 import { deckStrings, DECK_STRINGS } from './deck-i18n.mjs';
+import { EDIT3_STRINGS } from './edit3-i18n.mjs';
 import { makeWindow } from './mini-dom.mjs';
 import { hrefAllowed } from '../../sitetile/site-core.js';
 
@@ -1122,5 +1123,97 @@ test('tile#343 each side carries two marks after what it holds, and says which e
     // …and the wall is still the engine's markup: the marks are the pile's, not the tile's
     p.win.__deckView('wall'); p.win.tick(1000); holds(p, 'wall', `${view} (held) → wall`);
     assert.equal(p.doc.querySelectorAll('main .tile-more').filter((m) => !m.closest('.deck-table')).length, 0, `${view} → wall: a mark was left on the wall`);
+  }
+});
+
+// ---- tile#343 (review of #352): a side that scrolls takes the gesture before the pile does ----
+// A long last tile: the document is already at its last snap point while the tile's own front still has most of its
+// text below. The pile turns its last tile over on a wheel past the end of the document; that must wait until the
+// side has nothing more in that direction, and a gesture (momentum included) that the side took never turns it.
+// 🔴 What this cannot say: native scrolling and momentum. The side's numbers are set by hand, as a browser would
+// report them; verify/tile-sides.mjs asks a real browser with real wheels and keys.
+const longLast = ['---', 'card-page: specimen', 'title: Long last', 'view: stack', '---', '', '## cards', '',
+  '- [ ] %% card: text w=6 back=#about %%', ...Array.from({ length: 30 }, (_, i) => `\tParagraph ${i} long content.`),
+  '', '## back: about | About', '', '- [ ] %% card: text %% The back.', ''].join('\n');
+/** the specimen's one tile, its front 480 px tall onto `inside` px of words */
+const longFront = (md, inside) => {
+  const p = open(md); p.win.__deckJump(p.win.__deckCount() - 1); p.win.tick(3000);
+  const held = p.doc.querySelector('.deck-stack > .deck-card.is-top'), front = held.querySelector('.deck-front');
+  const pageTall = p.doc.scrollHeightOf; p.doc.scrollHeightOf = (el) => (el === front ? inside : pageTall(el));
+  front.clientHeight = 480; front.scrollTop = 0; front.dispatchEvent(new p.win.Event('scroll', { bubbles: false }));
+  return { p, held, front };
+};
+
+test('tile#343 a wheel on a long last front scrolls the front: the tile turns over only when the front is at its end', () => {
+  const { p, held, front } = longFront(longLast, 2400);
+  assert.equal(p.win.__deckCount(), 1, 'the specimen is one tile, with no closing tile after it');
+  assert.ok(held.classList.contains('can-flip'), 'the tile has a back');
+  assert.ok(p.win.scrollY >= p.root.scrollHeight - p.win.innerHeight - 2, 'the document is at its end');
+  const words = front.firstElementChild;   // the wheel lands on the words, not on the side itself
+  let t = 10000;
+  const wheel = (dy, gap = 16) => { t += gap; words.dispatchEvent(new p.win.Event('wheel', { bubbles: true, deltaX: 0, deltaY: dy, deltaMode: 0, timeStamp: t })); p.win.tick(700); };
+  for (let i = 0; i < 8; i++) wheel(100, 16);
+  assert.ok(!p.root.classList.contains('open'), 'a wheel down a front with more below turned the tile over');
+  // the same gesture's momentum arrives after the front has reached its end: still the front's gesture
+  front.scrollTop = 1920;
+  for (let i = 0; i < 8; i++) wheel(60, 16);
+  assert.ok(!p.root.classList.contains('open'), 'the momentum of a gesture the front took turned the tile over');
+  // a new gesture, with the front at its end: the pile's last-tile turn, as before
+  wheel(100, 2000); wheel(100, 16);
+  assert.ok(p.root.classList.contains('open'), 'CONTROL: a new wheel down past a front at its end no longer turns the last tile over');
+  // a last front that shows everything: a wheel past the end of the document turns it over, as before
+  const fits = longFront(longLast, 480);
+  fits.front.dispatchEvent(new fits.p.win.Event('wheel', { bubbles: true, deltaX: 0, deltaY: 100, deltaMode: 0, timeStamp: 5000 })); fits.p.win.tick(700);
+  assert.ok(fits.p.root.classList.contains('open'), 'CONTROL: a last front that fits no longer turns over on a wheel past the end');
+});
+
+test('tile#343 keys and an upward finger on a long last front are the front\'s: they do not turn the tile over', () => {
+  const { p, front } = longFront(longLast, 2400);
+  front.focus();
+  for (const key of [' ', 'PageDown', 'ArrowDown', 'End']) {
+    const ev = new p.win.Event('keydown', { key, bubbles: true });
+    front.dispatchEvent(ev); p.win.tick(700);
+    assert.ok(!p.root.classList.contains('open'), `${JSON.stringify(key)} on a focused long front turned the tile over`);
+    assert.ok(!ev.defaultPrevented, `${JSON.stringify(key)} on a focused long front was taken from the browser (the side would not scroll)`);
+  }
+  // a finger drawn upward on the front (a touch scroll): the pile's own drag leaves it to the browser
+  const pe = (type, x, y) => new p.win.Event(type, { bubbles: true, pointerId: 7, pointerType: 'touch', clientX: x, clientY: y, isTrusted: true });
+  front.dispatchEvent(pe('pointerdown', 200, 600)); p.doc.dispatchEvent(pe('pointermove', 196, 420)); p.doc.dispatchEvent(pe('pointerup', 196, 300)); p.win.tick(700);
+  assert.ok(!p.root.classList.contains('open'), 'an upward finger on a long last front turned the tile over');
+});
+
+test('tile#343 a side that holds more than it shows can be reached by keyboard and is named; a side that fits is not in the Tab order', () => {
+  for (const view of ['stack', 'list']) {
+    const p = open(card({ view }));
+    const front = p.cells[0].parentNode, back = front.closest('.deck-card').querySelector('.deck-back');
+    const tall = new Map(), pageTall = p.doc.scrollHeightOf; p.doc.scrollHeightOf = (el) => (tall.has(el) ? tall.get(el) : pageTall(el));
+    const size = (side, h) => { side.scrollTop = 0; side.clientHeight = 480; tall.set(side, h); side.dispatchEvent(new p.win.Event('scroll', { bubbles: false })); };
+    for (const [name, side, word, rest] of [['front', front, 'Front', null], ['back', back, 'Back', '-1']]) {
+      size(side, 1400);
+      assert.equal(side.getAttribute('tabindex'), '0', `${view} ${name}: a side with more than it shows is not in the Tab order`);
+      assert.equal(side.getAttribute('role'), 'region', `${view} ${name}: a focusable side is not a region`);
+      assert.equal(side.getAttribute('aria-label'), word, `${view} ${name}: the side's name`);
+      size(side, 480);
+      assert.equal(side.getAttribute('tabindex'), rest, `${view} ${name}: a side that shows everything is still in the Tab order`);
+      assert.equal(side.getAttribute('role'), null, `${view} ${name}: a side that shows everything is still a region`);
+      assert.equal(side.getAttribute('aria-label'), null, `${view} ${name}: a side that shows everything is still named`);
+    }
+  }
+  // the name is in the page's own language: the word the editor already uses for that side
+  const ja = longFront(longLast.replace('title: Long last', 'title: Long last\nlang: ja'), 2400);
+  assert.equal(ja.front.getAttribute('aria-label'), '表面', 'a Japanese page names the front in Japanese');
+  for (const [k, words] of Object.entries(EDIT3_STRINGS)) {
+    assert.deepEqual([DECK_STRINGS[k] && DECK_STRINGS[k].front, DECK_STRINGS[k] && DECK_STRINGS[k].back], [words.front, words.back], `${k}: the deck names a side otherwise than the editor does`);
+  }
+});
+
+test('tile#343 a focused side shows the page\'s own focus ring: the deck adds none, and hides it only on a side out of the Tab order', () => {
+  const pageCss = readFileSync(new URL('../serve/card.css', import.meta.url), 'utf8');
+  const deckCss = readFileSync(new URL('./deck.css', import.meta.url), 'utf8');
+  assert.match(pageCss, /\[tabindex\]:focus-visible\s*\{\s*outline:\s*2px solid var\(--cp-accent/, 'the page\'s ring for anything given a tabindex');
+  const sideFocus = [...deckCss.matchAll(/([^{}]*\.deck-(?:face|front|back)\b[^{}]*:focus[^{}]*)\{([^}]*)\}/g)];
+  for (const [, sel, body] of sideFocus) {
+    assert.ok(!/outline/.test(body) || /:not\(\[tabindex="0"\]\)/.test(sel), `deck.css takes the focus ring off a side that can be tabbed to: ${sel.trim()}{${body}}`);
+    assert.ok(!/outline:\s*\d/.test(body), `deck.css draws a ring of its own on a side: ${sel.trim()}{${body}}`);
   }
 });
