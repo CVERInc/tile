@@ -364,6 +364,23 @@ function mergeAssets(existing, staged) {
 // w (col-span) and h (row-span). Returns { placements:[{cell,index,row,col,w,h,type}], rows, cols }.
 // A row-spanning (h>1) cell truly occupies cells in the next row(s); later cells flow around it. No
 // overlap, no manual gaps — the 防醜 guarantee.
+//
+// EVERY cell is placed. There is no row cap and no overflow: the search always ends, because the
+// first row below everything placed so far is empty and any cell fits there (w is clamped to cols).
+// So the grid is at most sum(h) rows tall, and that bound comes from the input, not from a constant.
+// A `r > 10000` "safety" cap used to stop the search instead, and every cell past row 10,000 was
+// left out of `placements` without a word: 40,000 width-2 cells in six columns came back as 30,003
+// (tile#362), and the renderer, which iterates `placements`, dropped the rest from the page.
+//
+// 🔴 The placement is EXACTLY the old first fit: each cell takes the lowest row, then the leftmost
+// column, where its w×h rectangle is free. That is not a skyline. A later small cell can fill a
+// hole left above a taller or wider one, and a per-column-height packer would put it lower, so it
+// would change real layouts. What made the old loop O(n²) was that every cell started its search
+// at row 0. Cells are only ever added, so a position that was not free for a given shape (w, h)
+// stays not free, and the next cell of that shape cannot land before the last one did. Each shape
+// keeps a cursor at its last placement and resumes from there. There are at most
+// SPAN_MAX × SPAN_MAX shapes, and each cursor only moves forward, so the whole pack is linear in
+// the number of cells. card-core.test.js checks the output against the old loop.
 function packGrid(model) {
   const cols = Math.max(1, model.cols || DEFAULT_COLS);
   const occ = [];                                   // occ[r][c] = occupied?
@@ -375,19 +392,22 @@ function packGrid(model) {
   };
   const mark = (r, c, w, h) => { for (let dr = 0; dr < h; dr++) { ensureRow(r + dr); for (let dc = 0; dc < w; dc++) occ[r + dr][c + dc] = true; } };
 
+  const cursor = new Map();                         // `${w}x${h}` → { row, col } of that shape's last placement
   const placements = [];
   (model.cells || []).forEach((cell, index) => {
     const w = Math.min(clampSpan(cell.params.w, SPAN_MAX), cols);   // can't be wider than the grid
     const h = clampSpan(cell.params.h, SPAN_MAX);
-    let r = 0, done = false;
-    while (!done) {
+    const key = w + 'x' + h;
+    const from = cursor.get(key) || { row: 0, col: 0 };
+    let r = from.row, c = from.col;
+    for (;; r++, c = 0) {                          // ends: a row below every placed cell is empty
       ensureRow(r);
-      for (let c = 0; c < cols; c++) {
-        if (fits(r, c, w, h)) { mark(r, c, w, h); placements.push({ cell, index, row: r, col: c, w, h, type: cell.type }); done = true; break; }
-      }
-      r++;
-      if (r > 10000) { done = true; }                               // safety
+      while (c < cols && !fits(r, c, w, h)) c++;
+      if (c < cols) break;
     }
+    mark(r, c, w, h);
+    cursor.set(key, { row: r, col: c });
+    placements.push({ cell, index, row: r, col: c, w, h, type: cell.type });
   });
   return { placements, rows: occ.length, cols };
 }
