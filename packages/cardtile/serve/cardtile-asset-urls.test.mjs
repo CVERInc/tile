@@ -64,8 +64,12 @@ const card = ({ assets = true, override = {} } = {}) => {
 };
 const CARD = card();
 
-/** a store holding `md` under HANDLE (or nothing), optionally stopped / bound to VHOST; records reads */
-const envWith = (md, { stopped = false, vanity = false, handle = HANDLE } = {}) => {
+/**
+ * a store holding `md` under HANDLE (or nothing), optionally stopped / bound to VHOST; records reads.
+ * The local switch is set to 'url' (asset-urls.mjs pictureStrategy): this file is that strategy's
+ * contract. With the switch unset the page is today's inline page (cardtile-picture-switch.test.mjs).
+ */
+const envWith = (md, { stopped = false, vanity = false, handle = HANDLE, pictures = 'url' } = {}) => {
   const kv = new Map([
     ...(md != null ? [[handle, md]] : []),
     ...(vanity ? [[`vanity:${VHOST}`, handle], [`vanityof:${handle}`, VHOST]] : []),
@@ -75,6 +79,7 @@ const envWith = (md, { stopped = false, vanity = false, handle = HANDLE } = {}) 
   return {
     reads,
     PREVIEW: 'false',
+    CARDTILE_PICTURES: pictures,
     CARDS: {
       get: async (k) => { reads.push(k); return kv.get(k) ?? null; },
       async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; },

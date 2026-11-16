@@ -21,7 +21,7 @@ import { resolveChannels } from '../yt-channels.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
-import { assetUrls, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
+import { picturePlan, pictureStrategy, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -439,6 +439,9 @@ function renderFlat(cardMd, ctx) {
     // …or, for an id in this CALLER-supplied map (tile#339, only the page exit below sets it), to that
     // picture's own content-addressed path. Absent: every picture inline, byte for byte as before.
     assetUrls: ctx.assetUrls || undefined,
+    // tile#339 measurement prototype (asset-urls.mjs picturePlan): preloads, reserved boxes and the
+    // after-paint switch for by-URL pictures. CALLER-supplied, like assetUrls; absent: nothing is written.
+    pictures: ctx.pictures || undefined,
     css: CSS,
     arrow: ARROW,           // @cvernet/signet's own arrow, lifted at build time — never re-drawn
     // `arrows: on` puts the little arrow back on link rows and CTAs. DEFAULT OFF — see arrowOf.
@@ -1174,7 +1177,10 @@ const router = {
     const oneCardHost = !!vanityHandle || !!resolved.root;
     const at = { host, vanity: !!vanityHandle };
     const want = cardPath(url.pathname, resolved.handle, oneCardHost);
-    if (!want) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
+    // tile#339: the picture route exists only while the local switch is set (asset-urls.mjs
+    // pictureStrategy). Unset — every deployment today — its paths are unknown paths, as they always were.
+    const pictures = pictureStrategy(env);
+    if (!want || (want === 'asset' && pictures === 'inline')) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
@@ -1316,10 +1322,12 @@ const router = {
     // else (absent, a hand-written value) → undefined, which is the page as it was before the state existed.
     // The Worker does not interpret it further: the platform's one draw rule already did.
     const pool = pooled === POOL_IN ? true : pooled === POOL_OUT ? false : undefined;
-    // tile#339 — the pictures by URL instead of inline base64: hashed here, from the body already read
-    // (no store read), because the render is synchronous. An empty map is the page as it was.
-    const urls = await assetUrls(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle));
-    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, assetUrls: urls, ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) }),
+    // tile#339 — how the pictures travel, by the local switch (asset-urls.mjs; 'inline' unless set): hashed
+    // here, from the body already read (no store read), because the render is synchronous. 'inline' hashes
+    // nothing and hands the renderer nothing, which is the page as it was.
+    const plan = pictures === 'inline' ? {}
+      : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
+    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) }),
       200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
   },
 };

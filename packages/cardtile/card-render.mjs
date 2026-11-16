@@ -1649,7 +1649,30 @@ export function renderPage(model, ctx = {}) {
   const share = ctx.shareTags || {};
   const shareTagsHtml = (share.canonical ? `<link rel="canonical" href="${esc(share.canonical)}">` : '')
     + (share.meta || []).map((t) => `<meta ${t.attr === 'property' ? 'property' : 'name'}="${esc(t.key)}" content="${esc(t.content)}">`).join('');
-  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${shareTagsHtml}${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${qr}${video}${drawer}</body></html>`;
+  const pics = pictureTags(ctx.pictures);
+  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${pics.head}${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${shareTagsHtml}${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${pics.tail}${qr}${video}${drawer}</body></html>`;
+}
+
+// tile#339 MEASUREMENT PROTOTYPE — what the by-URL pictures of a hybrid page add (serve/asset-urls.mjs
+// picturePlan builds `pictures`; only the cardtile worker passes it, and only when its local switch is set):
+//   <head>  a preload for each first-screen picture, high priority, before anything else can queue;
+//           one rule per picture giving its <img> the stored file's own ratio until it arrives
+//           (`auto W/H`: the real ratio wins once known). The `[data-w="6"]` selector is there because
+//           a full-width picture's `aspect-ratio:auto` (CARD_CSS) is the only picture box that sizes
+//           itself from the file; every other one is a square the grid already holds.
+//   </body> after-paint: one frame after DOMContentLoaded, every lazy picture under that path loads now.
+// Every value was written by picturePlan from a handle path and a hex digest; the guard is the floor.
+const PICTURE_PATH = /^\/[A-Za-z0-9._\-/]*$/;
+function pictureTags(p) {
+  if (!p) return { head: '', tail: '' };
+  const preload = (p.preload || []).filter((u) => PICTURE_PATH.test(u))
+    .map((u) => `<link rel="preload" as="image" href="${esc(u)}" fetchpriority="high">`).join('');
+  const rules = (p.reserve || []).filter(([u, w, h]) => PICTURE_PATH.test(u) && w > 0 && h > 0)
+    .map(([u, w, h]) => `img[src="${u}"],.st-card [data-w="6"] img[src="${u}"]{aspect-ratio:auto ${Math.round(w)}/${Math.round(h)}}`).join('');
+  const tail = p.afterPaint && PICTURE_PATH.test(p.afterPaint)
+    ? `<script>addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){setTimeout(function(){document.querySelectorAll('img[loading="lazy"][src^="${p.afterPaint}"]').forEach(function(i){i.loading='eager'})},0)})})</script>`
+    : '';
+  return { head: preload + (rules ? `<style id="cp-pictures">${rules}</style>` : ''), tail };
 }
 
 // Swap the poster for the real player only once someone presses play — youtube-nocookie, and not a

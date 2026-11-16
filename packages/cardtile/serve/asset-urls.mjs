@@ -67,16 +67,128 @@ const hexOf = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SH
  * own domain. An asset left out of the map is inlined by the renderer as before.
  */
 export async function assetUrls(cardMd, assets, base) {
-  const refs = new Set([...String(cardMd || '').matchAll(ASSET_REF_RE)].map((m) => m[1]));
-  const out = {};
-  await Promise.all([...refs].map(async (id) => {
+  return Object.fromEntries([...(await servedPictures(cardMd, assets, base))].map(([id, p]) => [id, p.url]));
+}
+
+/**
+ * servedPictures(cardMd, assets, base) → Map id → { url, bytes }, in the order the card text first names
+ * each picture (the frontmatter's backdrop first, then the cells as written), for every picture assetUrls
+ * would serve by URL.
+ */
+async function servedPictures(cardMd, assets, base) {
+  const refs = [...new Set([...String(cardMd || '').matchAll(ASSET_REF_RE)].map((m) => m[1]))];
+  const found = await Promise.all(refs.map(async (id) => {
     const a = assets && Object.prototype.hasOwnProperty.call(assets, id) ? assets[id] : null;
     // the cheap bound first, so a glyph is never decoded; then the exact length
-    if (!a || decodedLengthAtMost(a) <= INLINE_MAX_BYTES) return;
+    if (!a || decodedLengthAtMost(a) <= INLINE_MAX_BYTES) return null;
     const bytes = rasterBytes(a);
-    if (bytes && bytes.length > INLINE_MAX_BYTES) out[id] = `${base}a/${await hexOf(bytes)}.${RASTER_EXT[typeOf(a)]}`;
+    if (!bytes || bytes.length <= INLINE_MAX_BYTES) return null;
+    return [id, { url: `${base}a/${await hexOf(bytes)}.${RASTER_EXT[typeOf(a)]}`, bytes }];
   }));
-  return out;
+  return new Map(found.filter(Boolean));
+}
+
+// ── tile#339 MEASUREMENT PROTOTYPE: the local switch ──────────────────────────────────────────────────
+//
+// 🔴 Nothing here is a decision. The owner chose inline pictures on purpose (fewer requests, for the
+// fastest page), so by-URL is measured against that goal before anything ships. `CARDTILE_PICTURES` is
+// read from the cardtile worker's env, never from a request, and is set nowhere in this repository: unset
+// or unknown means 'inline', the page as it was byte for byte, and `…/a/<sha256>.<ext>` answers as any
+// unknown path did. The measurement and its numbers: docs/experiments/cards-pictures-2026-11/.
+//
+//   inline                       every picture a data: URI (today)
+//   url                          every picture (assetUrls decides which) by its own URL; markup unchanged
+//   hybrid-<first>-<rest>        the first FIRST_SCREEN_PICTURES pictures the text names are
+//                                  inline   — left as data: URIs, or
+//                                  preload  — by URL, with <link rel=preload fetchpriority=high> in <head>;
+//                                the rest by URL with their box reserved from the stored bytes' own width
+//                                and height (no layout shift), loading
+//                                  lazy        — as the markup says (loading="lazy"), or
+//                                  after-paint — switched to eager one frame after DOMContentLoaded
+export const PICTURE_STRATEGIES = Object.freeze([
+  'inline', 'url',
+  'hybrid-inline-lazy', 'hybrid-inline-after-paint', 'hybrid-preload-lazy', 'hybrid-preload-after-paint',
+]);
+/** the switch's value for this env: one of PICTURE_STRATEGIES, 'inline' when unset or unknown */
+export const pictureStrategy = (env) => {
+  const v = String((env && env.CARDTILE_PICTURES) || '').trim();
+  return PICTURE_STRATEGIES.includes(v) ? v : 'inline';
+};
+/**
+ * How many pictures, in the order the text names them, count as the first screen. Measured on the
+ * specimens at 390×844 (the README): the default view (stack) and list show one picture, the avatar card;
+ * the wall shows the avatar, the first full-width picture and two more whole, two more in part. Two —
+ * the avatar and the card a first swipe reveals — is what every view shows or shows next.
+ */
+export const FIRST_SCREEN_PICTURES = 2;
+
+/**
+ * pictureSize(bytes) → [width, height] read off the file's own header (PNG, GIF, WebP, JPEG), or null.
+ * No decoding; a header that does not parse is null, and that picture gets no reserved box.
+ * 🔴 Known gaps: AVIF (its size is in an `ispe` box deep in the container) and a JPEG whose EXIF
+ * orientation turns it — the reserved box is then the stored ratio, not the shown one.
+ */
+export function pictureSize(b) {
+  if (!b || b.length < 30) return null;
+  const be16 = (i) => (b[i] << 8) | b[i + 1];
+  const le16 = (i) => b[i] | (b[i + 1] << 8);
+  const ok = (w, h) => (w > 0 && h > 0 ? [w, h] : null);
+  if (b[0] === 0x89 && b[1] === 0x50 && b[12] === 0x49 && b[13] === 0x48 && b[14] === 0x44 && b[15] === 0x52) {
+    return ok(((b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19]) >>> 0, ((b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23]) >>> 0);
+  }
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return ok(le16(6), le16(8));
+  const tag = (i) => String.fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3]);
+  if (tag(0) === 'RIFF' && tag(8) === 'WEBP') {
+    const kind = tag(12);
+    if (kind === 'VP8 ' && b[23] === 0x9d && b[24] === 0x01 && b[25] === 0x2a) return ok(le16(26) & 0x3fff, le16(28) & 0x3fff);
+    if (kind === 'VP8L' && b[20] === 0x2f) {
+      return ok(1 + (le16(21) & 0x3fff), 1 + (((b[22] >> 6) | (b[23] << 2) | ((b[24] & 0x0f) << 10))));
+    }
+    if (kind === 'VP8X') return ok(1 + (b[24] | (b[25] << 8) | (b[26] << 16)), 1 + (b[27] | (b[28] << 8) | (b[29] << 16)));
+    return null;
+  }
+  if (b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) return null;
+      const m = b[i + 1];
+      if (m === 0xff) { i += 1; continue; }                                   // fill byte
+      if (m === 0x01 || (m >= 0xd0 && m <= 0xd9)) { i += 2; continue; }       // no length
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return ok(be16(i + 7), be16(i + 5));
+      i += 2 + be16(i + 2);
+    }
+  }
+  return null;
+}
+
+// a URL this module wrote: safe inside a quoted CSS attribute selector and a JS string as it stands
+const PLAIN_PATH = /^\/[A-Za-z0-9._\-/]*$/;
+
+/**
+ * picturePlan(cardMd, assets, base, strategy) → what the renderer is handed for one page:
+ *   { assetUrls: { [id]: url }, pictures: { preload: [url], reserve: [[url, w, h]], afterPaint: prefix } | undefined }
+ * 'inline' → { assetUrls: undefined, pictures: undefined }: the renderer's own default, untouched.
+ */
+export async function picturePlan(cardMd, assets, base, strategy) {
+  if (!PICTURE_STRATEGIES.includes(strategy) || strategy === 'inline') return { assetUrls: undefined, pictures: undefined };
+  const served = await servedPictures(cardMd, assets, base);
+  if (strategy === 'url') return { assetUrls: Object.fromEntries([...served].map(([id, p]) => [id, p.url])), pictures: undefined };
+  const [, first, rest] = /^hybrid-(inline|preload)-(lazy|after-paint)$/.exec(strategy);
+  const firstIds = new Set([...served.keys()].slice(0, FIRST_SCREEN_PICTURES));
+  const urls = {};
+  const preload = [];
+  const reserve = [];
+  for (const [id, p] of served) {
+    if (!PLAIN_PATH.test(p.url)) continue;                   // never: base is a handle path, the tail is hex
+    if (firstIds.has(id)) {
+      if (first === 'inline') continue;                      // left out of the map = a data: URI
+      preload.push(p.url);
+    }
+    urls[id] = p.url;
+    const size = pictureSize(p.bytes);
+    if (size) reserve.push([p.url, size[0], size[1]]);
+  }
+  return { assetUrls: urls, pictures: { preload, reserve, afterPaint: rest === 'after-paint' && PLAIN_PATH.test(base) ? `${base}a/` : '' } };
 }
 
 /**
