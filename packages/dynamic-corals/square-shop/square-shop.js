@@ -239,6 +239,8 @@ function loadPersistedCart(storeId, catalogByVariation) {
 	// (and the fork) can read it without a guard.
 	cart.unavailable = new Map();
 	cart.foreign = [];
+	// The bytes this tab last read from or wrote to the key (tile#328) — see rebaseCart below.
+	cart.seen = null;
 	let raw;
 	try {
 		raw = window.localStorage.getItem(cartStore(storeId));
@@ -246,6 +248,8 @@ function loadPersistedCart(storeId, catalogByVariation) {
 		cart.storageAvailable = false;
 		return cart; // storage disabled — start empty, cart still works in-memory
 	}
+	if (raw === undefined) raw = null;
+	cart.seen = raw;
 	if (!raw) return cart;
 	let entries;
 	try {
@@ -255,6 +259,20 @@ function loadPersistedCart(storeId, catalogByVariation) {
 		return cart;
 	}
 	if (!Array.isArray(entries)) { cart.storageAvailable = false; return cart; }
+	fillCartFrom(cart, entries, catalogByVariation);
+	// The ONE automatic write, and there is now almost nothing left for it to do: the same ids and
+	// the same quantities, in this file's own order, with any 0.11.15 three-element row collapsed
+	// back to two. Written only when the bytes actually change, so an ordinary basket — held rows
+	// included, since they are written like every other row — is not rewritten at all and fires no
+	// `dc-cart-changed`.
+	if (JSON.stringify(cartStorageEntries(cart)) !== raw) persistCart(storeId, cart);
+	return cart;
+}
+
+// Sort stored rows into the cart: sellable against the catalog in hand, held, or foreign. Shared by
+// the first read above and by rebaseCart below, so a basket re-read from another tab is held against
+// the catalog exactly the way the first one was.
+function fillCartFrom(cart, entries, catalogByVariation) {
 	for (const row of cartRowsFrom(entries)) {
 		if (!row.vid) { cart.foreign.push(row.foreign); continue; }
 		// The index this is held against must know EVERY variation the catalog sells, not one
@@ -272,27 +290,159 @@ function loadPersistedCart(storeId, catalogByVariation) {
 		if (catalogByVariation.has(row.vid)) cart.set(row.vid, row.qty);
 		else cart.unavailable.set(row.vid, row.qty);
 	}
-	// The ONE automatic write, and there is now almost nothing left for it to do: the same ids and
-	// the same quantities, in this file's own order, with any 0.11.15 three-element row collapsed
-	// back to two. Written only when the bytes actually change, so an ordinary basket — held rows
-	// included, since they are written like every other row — is not rewritten at all and fires no
-	// `dc-cart-changed`.
-	if (JSON.stringify(cartStorageEntries(cart)) !== raw) persistCart(storeId, cart);
-	return cart;
 }
 
+// 🔴 Every caller that changes the basket on a shopper's action calls rebaseCart first (tile#328),
+// so what is written here is never an in-memory copy older than the stored basket.
 function persistCart(storeId, cart) {
 	try {
 		window.localStorage.setItem(cartStore(storeId), JSON.stringify(cartStorageEntries(cart)));
+		// What is stored now, read back rather than assumed: a storage that accepts a write and keeps
+		// nothing must not make this tab's own lines look like lines another tab removed.
+		const stored = window.localStorage.getItem(cartStore(storeId));
+		cart.seen = stored === undefined ? null : stored;
 	} catch {
 		cart.storageAvailable = false;
 		// storage disabled/full — cart still works in-memory this session
 	}
 	// Same-tab localStorage writes don't fire the 'storage' event on THIS window (only other tabs
 	// get that) — this is what lets the header cart badge react on this same page. Single choke
-	// point: every cart mutation in this file (add/±qty/remove) goes through setQty → here.
+	// point: every cart mutation in this file (add/±qty/remove) goes through commit → here.
 	try { window.dispatchEvent(new CustomEvent('dc-cart-changed')); } catch {}
 }
+
+// ── a basket another tab changed (tile#328) ──────────────────────────────
+//
+// 🩸 A shop tab reads the basket once, when it mounts, and keeps it in memory. Through 0.11.20 its
+// next add/±/remove wrote that whole in-memory copy back over the key. If the paid completion page
+// (another tab, or this same tab later, after a Back navigation) had taken the order's lines off in
+// between, that write put them back: the visitor could check out, and pay for, the same lines again.
+// The completion page cannot prevent it; the stale copy lives here.
+//
+// Two parts, both synchronous, no lock and no async protocol (tile#84 showed those cost more than
+// they save):
+//   1. renderCart listens for `storage` on the cart key (and for `pageshow` from the back/forward
+//      cache, where no `storage` event is delivered) and re-reads the basket, so the screen shows
+//      what is stored.
+//   2. rebaseCart runs immediately before every write this file makes on a shopper's action, and
+//      before a checkout is sent. It catches the change whose `storage` event has not been handled
+//      yet: the click and the event are separate tasks and either can run first.
+//
+// WHY A MERGE AND NOT A REFUSAL. Refusing the write when the stored basket moved would lose the
+// click that caused it: an Add pressed in this tab would do nothing. Overwriting is the defect. A
+// three-way merge keeps both: start from the stored basket as it is NOW, and apply only what this
+// tab changed since it last read or wrote the key (`cart.seen`). See mergeCartEntries for the rule.
+//
+// What is not covered: the read and the write are two calls, and a write from another PROCESS can
+// land between them. That window is two adjacent synchronous calls (it was a whole browsing session).
+// Closing it would need a lock every writer of the key takes, and those writers ship on three
+// different deploys.
+
+// The quantity per variation in a stored array. A row named twice counts as the last one, the way
+// fillCartFrom's Map reads it. Rows that are not [id, qty] are not in the index.
+function cartQtyIndex(entries) {
+	const out = new Map();
+	for (const row of cartRowsFrom(Array.isArray(entries) ? entries : [])) {
+		if (row.vid) out.set(row.vid, row.qty);
+	}
+	return out;
+}
+
+// One line, three-way: `base` is what this tab last saw stored, `ours` is this tab's quantity now,
+// `theirs` is what is stored now. 0 means "no such line".
+function mergedCartQty(base, ours, theirs) {
+	// This tab did not change the line, so the stored basket decides. This is the rule that keeps a
+	// settled line settled: the paid completion page removed it, and this tab has no say.
+	if (ours === base) return theirs;
+	// This tab removed the line (×, or − down to nothing). It stays removed, whatever another tab
+	// did to it meanwhile; the shopper watched it leave the basket.
+	if (ours === 0) return 0;
+	// This tab changed the quantity. Apply the change, not the number: a + on a line showing 2,
+	// whose 2 were paid for in another tab, adds one line, not three.
+	const q = theirs + (ours - base);
+	return q < 1 ? 0 : (q > 99 ? 99 : q);
+}
+
+/**
+ * The basket to write, given the stored basket this tab last saw (`base`), the one it holds now
+ * (`ours`, which includes the shopper's latest action) and the one stored now (`theirs`). All three
+ * are arrays in the stored shape. Pure: it reads and writes nothing.
+ *
+ *   • a line this tab did not touch is whatever `theirs` says, so a line another tab REMOVED is not
+ *     put back, and a line another tab ADDED is kept;
+ *   • a line this tab removed stays removed;
+ *   • a quantity this tab changed is applied as a change to the stored quantity, so a line this tab
+ *     ADDED is always there, even if `theirs` has never heard of it.
+ *
+ * Order: `theirs` order, then lines only this tab has, in this tab's order. Rows that are not
+ * [id, qty] come from `theirs` byte for byte, like every other write of this key.
+ */
+function mergeCartEntries(base, ours, theirs) {
+	const b = cartQtyIndex(base);
+	const o = cartQtyIndex(ours);
+	const t = cartQtyIndex(theirs);
+	const out = [];
+	const done = new Set();
+	for (const row of cartRowsFrom(Array.isArray(theirs) ? theirs : [])) {
+		if (!row.vid) { out.push(row.foreign); continue; }
+		if (done.has(row.vid)) continue;
+		done.add(row.vid);
+		const q = mergedCartQty(b.get(row.vid) || 0, o.get(row.vid) || 0, t.get(row.vid));
+		if (q > 0) out.push([row.vid, q]);
+	}
+	for (const [vid, qty] of o) {
+		if (done.has(vid)) continue;
+		const q = mergedCartQty(b.get(vid) || 0, qty, 0);
+		if (q > 0) out.push([vid, q]);
+	}
+	return out;
+}
+
+// The stored bytes as rows: [] for no key, null for bytes that are not a JSON array (nothing to
+// merge with).
+function storedCartEntries(raw) {
+	if (raw === null || raw === undefined || raw === '') return [];
+	try {
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Bring `cart` (in memory) up to the stored basket, keeping what this tab changed since it last read
+ * or wrote the key. Returns whether the basket this tab shows changed. Mutates `cart` in place:
+ * renderCart's closures and an in-flight checkout hold this very Map.
+ *
+ * Nothing changes when the stored bytes are the ones this tab last saw, when storage cannot be read
+ * (storage disabled: the cart is in memory only, as before), or when the stored bytes are not a
+ * basket at all (the next write replaces them, as before).
+ */
+function rebaseCart(storeId, cart, catalogByVariation) {
+	let raw;
+	try {
+		raw = window.localStorage.getItem(cartStore(storeId));
+	} catch {
+		return false;
+	}
+	if (raw === undefined) raw = null;
+	if (raw === cart.seen) return false;
+	const theirs = storedCartEntries(raw);
+	if (theirs === null) return false;
+	const before = cartStorageEntries(cart);
+	const merged = mergeCartEntries(storedCartEntries(cart.seen) || [], before, theirs);
+	cart.clear();
+	cart.unavailable.clear();
+	cart.foreign = [];
+	fillCartFrom(cart, merged, catalogByVariation);
+	cart.seen = raw;
+	return JSON.stringify(cartStorageEntries(cart)) !== JSON.stringify(before);
+}
+
+// One set of window listeners per mounted root: a re-mount on the same root (feelreef's SPA wrapper)
+// stops the previous mount's listeners instead of adding a second set.
+const cartSyncStops = typeof WeakMap === 'function' ? new WeakMap() : null;
 
 // Sweep the records of attempts that were never completed. Guarded on `length`/`key` rather than
 // assuming them: this file runs against several test doubles and a feelreef wrapper, and a storage
@@ -1279,6 +1429,9 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 	const itemsById = new Map(items.map((it) => [it.variation_id, it]));
 	const cartItemsById = cartCatalogByVariation(items);
 	const lineStates = new Map();
+	// True while a cart checkout request is out (tile#328): a `storage` event then waits for the
+	// next action rather than redrawing the pending button. See syncFromStorage below.
+	let checkoutInFlight = false;
 	// clear the cart if we've just returned from a completed checkout, then
 	// hydrate from localStorage (reconciled against the live catalog).
 	// The site locator, read off the host the same way data-cart below is, so the exported
@@ -1310,12 +1463,27 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 	layout.append(grid, panel);
 	root.appendChild(layout);
 
+	// tile#328: bring the in-memory basket up to the stored one (see rebaseCart). A line state for a
+	// line that is no longer in the basket goes with it.
+	function resync() {
+		const changed = rebaseCart(storeId, cart, cartItemsById);
+		for (const vid of [...lineStates.keys()]) if (!cart.has(vid)) lineStates.delete(vid);
+		return changed;
+	}
+
+	// Every write on a shopper's action: the action is already applied to `cart`; re-read the stored
+	// basket in the same task, merge, write, draw.
+	function commit() {
+		resync();
+		persistCart(storeId, cart);
+		render();
+	}
+
 	function setQty(vid, qty) {
 		const q = Math.max(0, Math.min(99, qty | 0));
 		if (q <= 0) { cart.delete(vid); lineStates.delete(vid); }
 		else cart.set(vid, q);
-		persistCart(storeId, cart);
-		render();
+		commit();
 	}
 
 	// The only way a KEPT-but-unsellable row leaves this machine: the shopper says so. There is
@@ -1323,8 +1491,7 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 	// defect this release exists to take back out.
 	function removeUnavailable(vid) {
 		cart.unavailable.delete(vid);
-		persistCart(storeId, cart);
-		render();
+		commit();
 	}
 
 	function stepper(vid, disabled = false) {
@@ -1524,8 +1691,15 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		checkout.textContent = confirmsPrice ? labels.confirmPrice : labels.checkout;
 		checkout.disabled = cart.size === 0 || hasSoldOut || cart.size > MAX_CART_LINES;
 		checkout.addEventListener('click', () => {
+			// tile#328: the screen may show a basket another tab has changed since (a receipt that
+			// took the paid lines off). Send nothing the screen does not show: draw the stored basket
+			// and let the shopper press again.
+			if (resync()) { render(); return; }
 			if (confirmsPrice) lineStates.clear();
-			return startCartCheckout(apiBase, guildId, cart, collectShipping, checkout, labels, checkoutRefs, siteId, handleConflict);
+			checkoutInFlight = true;
+			const done = () => { checkoutInFlight = false; };
+			return startCartCheckout(apiBase, guildId, cart, collectShipping, checkout, labels, checkoutRefs, siteId, handleConflict)
+				.then(done, (e) => { done(); throw e; });
 		});
 		panel.appendChild(checkout);
 		// Finding #12 (2026-09-03 cold-read): the Square-hosted page a shopper lands on after
@@ -1599,6 +1773,48 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 		renderPanel();
 		publishHeld();
 	}
+
+	// tile#328: another tab changed the basket. Re-read it and draw it; never write from here (two
+	// tabs holding different catalogs would otherwise rewrite each other's bytes back and forth).
+	//
+	// Not while a checkout request is in flight: its pending button would be redrawn as a live one,
+	// and the basket on screen would stop being the one that was sent. The next action re-reads
+	// anyway (commit, and the checkout click above), so nothing stale can be written or sent.
+	function syncFromStorage() {
+		if (checkoutInFlight) return;
+		if (root.isConnected === false) { stopSync(); return; }
+		if (resync()) render();
+	}
+	function onStorage(e) {
+		try {
+			if (e && e.key !== null && e.key !== undefined && e.key !== cartStore(storeId)) return;
+			if (e && e.storageArea && e.storageArea !== window.localStorage) return;
+		} catch {
+			return;
+		}
+		syncFromStorage();
+	}
+	// A page restored from the back/forward cache missed every `storage` event while it was stored.
+	// It is the common way to meet this: Checkout leaves THIS tab for the payment page, and Back
+	// from the receipt brings the shop back with the basket it had before the order.
+	function onPageShow(e) {
+		if (e && e.persisted) syncFromStorage();
+	}
+	function stopSync() {
+		try {
+			window.removeEventListener('storage', onStorage);
+			window.removeEventListener('pageshow', onPageShow);
+		} catch {}
+	}
+	try {
+		const previous = cartSyncStops && cartSyncStops.get(root);
+		if (previous) previous();
+		if (typeof window.addEventListener === 'function') {
+			window.addEventListener('storage', onStorage);
+			window.addEventListener('pageshow', onPageShow);
+			if (cartSyncStops) cartSyncStops.set(root, stopSync);
+		}
+	} catch {}
 
 	render();
 }
@@ -1862,5 +2078,8 @@ export {
 	formatPriceRange,
 	taxInclusiveSuffix,
 	cartLinePriceHtml,
-	subtotalLabel
+	subtotalLabel,
+	// tile#328: the merge rule for a basket another tab changed, exported so it is tested as the
+	// pure function it is (cart-cross-tab.test.mjs).
+	mergeCartEntries
 };

@@ -13,6 +13,57 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## 0.11.21 — a shop tab that loaded the basket before an order no longer writes the paid lines back (tile#328)
+
+`square-shop.js` only. The completion page, the checkout request, prices and currency do not change.
+
+| defect | in | effect |
+|---|---|---|
+| the coral reads the basket once, on mount, and every add/±/remove wrote that whole in-memory copy back (`persistCart`) | every version through 0.11.20 | a shop tab that loaded the basket before the order put back the lines the paid completion page had taken off; its Checkout sent them again. Measured on 0.11.20 in `settle.smoke.mjs`: basket `[[zine,2],[printA,3]]`, order settles to `[[printA,3]]`, + on Print A in the stale tab writes `[[zine,2],[printA,4]]`, and Checkout posts both lines |
+
+**The fix.** Two parts, both synchronous; no lock and no async protocol.
+
+1. `renderCart` listens for `storage` on the cart key (a `null` key, from `clear()`, included) and for
+   `pageshow` with `persisted` (a page restored from the back/forward cache missed every `storage`
+   event; Checkout leaves this same tab for the payment page, so Back from the receipt is the common
+   way to meet this). It re-reads the basket and redraws. It never writes: two tabs holding
+   different catalogs would otherwise rewrite each other's bytes. It does nothing while a cart
+   checkout request is in flight (the pending button would be redrawn live); the next action
+   re-reads anyway.
+2. `rebaseCart` re-reads the stored basket immediately before every write on a shopper's action, and
+   before a checkout is sent. It catches the change whose `storage` event has not been handled yet.
+
+**Merge, not refuse.** Refusing the write when the stored basket moved would lose the click that
+caused it (an Add that does nothing). The write is a three-way merge (`mergeCartEntries`): `base` is
+what this tab last read from or wrote to the key (`cart.seen`, read back after each write rather
+than assumed), `ours` is the in-memory basket with the action applied, `theirs` is stored now.
+
+| line | result |
+|---|---|
+| this tab did not change it | `theirs` — so a line another tab removed (the settle) stays removed, and a line another tab added stays |
+| this tab removed it | removed |
+| this tab changed its quantity | `theirs + (ours − base)`, clamped to 1..99, dropped below 1 — so + on a line whose 2 were paid for elsewhere adds one, not three; a line this tab added is always written |
+
+Rows that are not `[id, qty]` come from `theirs` byte for byte. Order: `theirs`, then lines only this
+tab has. With no other writer (`stored === cart.seen`) the write is exactly what 0.11.20 wrote.
+
+**Checkout on a stale screen** sends nothing: if the re-read changes the basket, the stored basket is
+drawn and the shopper presses again. What is sent is always what the screen showed.
+
+**Not covered.** The re-read and the write are two adjacent synchronous calls; a write from another
+browser process can still land between them. Closing that needs a lock every writer of the key
+takes, and those writers ship on three different deploys. A storage that refuses writes keeps its
+lines in memory as before (`cart.seen` does not move, so nothing looks removed). The product page's
+own Add (`product-page-core.js`) reads and writes in one step and is unchanged. The completion page's
+comments still describe this as open; they ship in the site's worker and are left for the next
+change there.
+
+Tests: `cart-cross-tab.test.mjs` (the merge rule, and the real `renderCart` against a storage double
+with the event not yet handled, the `storage` and `pageshow` listeners, a refusing storage,
+re-mount and detach); `settle.smoke.mjs` three new arms with the real coral in a second tab.
+
+---
+
 ## unreleased (completion page only; the coral stays 0.11.20) — a settled order stays settled (tile#84)
 
 Only `shop-function-template.js` changes, so this arrives with a site rebuild. `square-shop.js` is
@@ -46,7 +97,7 @@ basket, visible, and marked settled. `paid-settlement.test.mjs` stops the page a
 - storage unavailable altogether: nothing is read or written (as before).
 
 **Not addressed:** a shop tab that loaded the basket before the order and writes its whole basket
-back after the settle (tile#328). Two renders of the same receipt in two tabs in the very same
+back after the settle (tile#328; addressed in the coral at 0.11.21, above). Two renders of the same receipt in two tabs in the very same
 moment can both find no tombstone; that needs the same order opened twice at once.
 
 An earlier draft of this fix (PR #327, two review rounds, never released) moved the settle behind
