@@ -77,6 +77,18 @@ export const goneKey = (handle) => `gone:${handle}`;
 export const genKey = (handle) => `gen:${handle}`;
 export const cardKey = (handle, gen) => `card:${handle}:${gen}`;
 export const stopKey = (handle, gen) => `stop:${handle}:${gen}`;
+/**
+ * The Card's exchange state (tile#336): `in` or `out`, written by the PLATFORM through
+ * `PUT /_api/cards/<handle>/pool` and by nothing else. It is the platform's one draw rule, already
+ * decided (in = the Card can be dealt in the draw); this store and the Worker never interpret it
+ * further. `in` puts the closing reef.cards card and the footer's `reef.cards` segment on the page,
+ * `out` keeps both off, and an absent key is the page as it was before this key existed.
+ * Generation-scoped like the stop, so a handle deleted and created again starts absent. It has no
+ * pre-generation (legacy) form: it was born after generations.
+ */
+export const poolKey = (handle, gen) => `pool:${handle}:${gen}`;
+export const POOL_IN = 'in';
+export const POOL_OUT = 'out';
 export const GEN0 = '0';
 /** LEGACY (pre-generation) keys, read for generation 0 only. Remove with the fallback. */
 const legacyCardKey = (handle) => handle;
@@ -1256,18 +1268,23 @@ export async function boundHostOf(store, handle, gen) {
 }
 
 /**
- * liveCard: the current lifetime's card body (and stop) under a handle. The ONE read every exit uses
- * — renderer and API alike — so a body cannot be absent on one door and present on another. A body
- * from a dead lifetime is under a key this never computes.
+ * liveCard: the current lifetime's card body (and stop, and exchange state) under a handle. The ONE
+ * read every exit uses — renderer and API alike — so a body cannot be absent on one door and present
+ * on another. A body from a dead lifetime is under a key this never computes.
+ *
+ * `pool: true` (tile#336) adds `pool:<handle>:<gen>` to the SAME parallel round as the body and the
+ * stop: one more KV read beside them, never a serial round trip. `pooled` is the stored value as
+ * written (`in`, `out`) or null; the caller decides what it means.
  */
-export async function liveCard(store, handle, { stop = false, gen: read } = {}) {
+export async function liveCard(store, handle, { stop = false, pool = false, gen: read } = {}) {
   // `gen` lets a caller that already read the generation (the vanity check) judge both by the same read
   const gen = read != null ? read : await generationOf(store, handle);
-  const [md, stopped] = await Promise.all([
+  const [md, stopped, pooled] = await Promise.all([
     readGen(store, cardKey(handle, gen), legacyCardKey(handle), gen),
     stop ? readGen(store, stopKey(handle, gen), legacyStopKey(handle), gen) : null,
+    pool ? store.get(poolKey(handle, gen)) : null,
   ]);
-  return { md, gen, stopped };
+  return { md, gen, stopped, pooled };
 }
 
 /**
@@ -1405,7 +1422,8 @@ async function readCard(store, handle) {
  * delete_card: everything this store holds under a handle goes, and one content-free fact stays.
  *
  * The product owner ruled on reef#2618: the owner downloads first, types the handle, and NOTHING is kept — the
- * handle is free at once. So this removes the card, its serving stop, every parked preview of it, and
+ * handle is free at once. So this removes the card, its serving stop, its exchange state (tile#336),
+ * every parked preview of it, and
  * its own-domain binding; then leaves `gone:<handle>` = `{ deleted_at }` (see goneKey — not served:
  * the public address answers the ordinary no-card 404, tile-lab#51 r2). The tombstone does not reserve
  * the handle: the next save clears it.
@@ -1461,8 +1479,8 @@ async function deleteCard(env, handle, meant = null) {
   // after the rotation reads the store to decide what to delete. Previews are keyed by a random id, so
   // they are found by the handle in their metadata (one parked before that stamp has none and expires
   // within PREVIEW_TTL). The bare legacy body counts as found in any generation (only SERVED in 0).
-  const [bodies, stops, bindings, inverses, drafts, marked, bare] = await Promise.all([
-    listed(cardKey(handle, '')), listed(stopKey(handle, '')),
+  const [bodies, stops, pools, bindings, inverses, drafts, marked, bare] = await Promise.all([
+    listed(cardKey(handle, '')), listed(stopKey(handle, '')), listed(poolKey(handle, '')),
     listed(vanityBindPrefix(handle)), listed(vanityOfKey(handle, '')),
     listed(previewKey(''), (k) => k.metadata && k.metadata.handle === handle),
     store.get(goneKey(handle)).then((v) => v != null), store.get(legacyCardKey(handle)),
@@ -1492,6 +1510,7 @@ async function deleteCard(env, handle, meant = null) {
   const owed = Object.entries(pending).flatMap(([g, hosts]) => [vanityOfKey(handle, g), ...hosts.map((h) => vanityBindKey(handle, g, h))]);
   const doomed = new Set([
     ...bodies, ...stops, cardKey(handle, gen), stopKey(handle, gen), cardKey(handle, ended), stopKey(handle, ended),
+    ...pools, poolKey(handle, gen), poolKey(handle, ended),
     legacyCardKey(handle), legacyStopKey(handle), ...bindings, ...inverses, ...owed, legacyVanityOfKey(handle), ...drafts,
   ]);
   // 🔴 Not `vanity:<host>` from here: the object cleared it above if its owner was this lifetime; the
@@ -1552,6 +1571,8 @@ export function resourceOf(afterPrefix) {
  *          If-Generation: <gen> (optional)  412 `stale_generation` unless <gen> is the current one; nothing moves
  *   PUT    /_api/card/<handle>/stop          —             { reason? } → stop serving
  *   DELETE /_api/card/<handle>/stop          —             resume serving
+ *   PUT    /_api/card/<handle>/pool          —             { in: true|false } → the exchange state (tile#336)
+ *   DELETE /_api/card/<handle>/pool          —             back to absent: the page as it was before the state
  *   PUT    /_api/card/<handle>/asset/<id>    put_asset     { base64, mime }
  *   DELETE /_api/card/<handle>/asset/<id>    delete_asset  refuses while referenced
  *   DELETE /_api/card/<handle>/asset/<id>/fenced
@@ -1673,6 +1694,7 @@ export async function handleApi(request, env, url) {
   const fenced = /^card\/([^/]+)\/asset\/([^/]+)\/fenced$/.exec(rest);
   const card = /^card\/([^/]+)$/.exec(rest);
   const stop = /^card\/([^/]*)\/stop$/.exec(rest);
+  const pool = /^card\/([^/]*)\/pool$/.exec(rest);
   const full = /^card\/([^/]*)\/full$/.exec(rest);
   const lifetime = /^card\/([^/]*)\/lifetime$/.exec(rest);
 
@@ -1722,6 +1744,35 @@ export async function handleApi(request, env, url) {
       return json({ handle, stopped: false });
     }
     return json({ error: `${method} not allowed here.` }, 405);
+  }
+
+  // ── the exchange state (tile#336) ─────────────────────────────────────────────────────────────
+  //
+  // The platform's word on whether this Card is in the exchange: `{ in: true }` or `{ in: false }`,
+  // the value its one draw rule settled on. Stored as `in` / `out` under the current lifetime, the way
+  // a stop is (see poolKey): one admitted before a delete lands on the ended generation's key, which
+  // nothing reads, and is answered 409 `stale_generation`. Anything but a boolean is refused and
+  // writes nothing: a guess here would put a link on a page whose owner said no.
+  if (pool) {
+    let handle;
+    try { handle = decodeURIComponent(pool[1]).toLowerCase(); } catch { handle = ''; }
+    if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(pool[1])}.` }, 400);
+    if (method !== 'PUT' && method !== 'DELETE') return json({ error: `${method} not allowed here.` }, 405);
+    let inPool;
+    if (method === 'PUT') {
+      const body = await readJson(request);
+      inPool = body && typeof body === 'object' ? body.in : undefined;
+      if (typeof inPool !== 'boolean') return json({ error: '`in` must be true or false. Nothing was written.' }, 400);
+    }
+    const gen = await generationOf(store, handle);
+    const key = poolKey(handle, gen);
+    if (method === 'PUT') {
+      await store.put(key, inPool ? POOL_IN : POOL_OUT);
+      if ((await generationOf(store, handle)) !== gen) return json(staleWrite(handle), 409);
+      return json({ handle, gen, in: inPool });
+    }
+    await store.delete(key);
+    return json({ handle, gen, in: null });
   }
 
   // ── the fenced delete_asset (tile#209, reef#2600 door 3) ───────────────────────────────────────

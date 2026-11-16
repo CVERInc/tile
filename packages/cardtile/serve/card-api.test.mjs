@@ -6,7 +6,7 @@
 // refused. Where the pairing is not obvious the comment says which half is the control.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleApi as handleApiAsWritten, previewKey, goneKey, liveCard, cardKey, stopKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, CardLifetime, ENDED_KEEP_MS, TICKET_TTL_MS, PREVIEW_TTL, _internal } from './card-api.mjs';
+import { handleApi as handleApiAsWritten, previewKey, goneKey, liveCard, cardKey, stopKey, poolKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, CardLifetime, ENDED_KEEP_MS, TICKET_TTL_MS, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
@@ -3794,4 +3794,113 @@ test('🔴 both prefixes — an answer that names a path names the one it was ca
   for (const path of ['/_api/previews', '/_api/trys/x', '/_api/vanitys/t', '/_api/cardss/t', '/_api/Cards/t']) {
     assert.deepEqual(await ask('GET', path), { error: `No such endpoint: ${path}` }, path);
   }
+});
+
+// ── the exchange state (tile#336) ────────────────────────────────────────────────────────────────
+// The platform writes `in` / `out` with the Card API bearer, under the current lifetime, and the page
+// reads it beside the body. Every write here is paired with the refusal beside it.
+
+test('tile#336 pool: PUT {in:true|false} stores in/out under the current generation; DELETE clears it; nothing else moves', async () => {
+  const env = envWith({ t: CARD, 'stop:other:0': '{}' });
+  const before = [...env.CARDS._m];
+  const writes = [];
+  const put = env.CARDS.put.bind(env.CARDS);
+  env.CARDS.put = async (k, v, o) => { writes.push(k); await put(k, v, o); };
+  const inRes = await call(env, 'PUT', '/_api/card/T/pool', { in: true });
+  assert.equal(inRes.status, 200);
+  assert.deepEqual(await inRes.json(), { handle: 't', gen: '0', in: true });
+  assert.equal(env.CARDS._m.get(poolKey('t', '0')), 'in');
+  const outRes = await call(env, 'PUT', '/_api/card/t/pool', { in: false });
+  assert.deepEqual(await outRes.json(), { handle: 't', gen: '0', in: false });
+  assert.equal(env.CARDS._m.get(poolKey('t', '0')), 'out');
+  assert.deepEqual(writes, ['pool:t:0', 'pool:t:0'], 'a pool write touches its own key and nothing else');
+  for (let i = 0; i < 2; i++) {
+    const cleared = await call(env, 'DELETE', '/_api/card/t/pool');
+    assert.equal(cleared.status, 200);
+    assert.deepEqual(await cleared.json(), { handle: 't', gen: '0', in: null });
+  }
+  assert.deepEqual([...env.CARDS._m], before, 'DELETE returns the store to absent');
+});
+
+test('tile#336 pool: anything but a boolean `in` is refused and writes nothing (control: a boolean is taken)', async () => {
+  for (const body of [undefined, {}, { in: 'true' }, { in: 1 }, { in: null }, { in: 'in' }, { pool: true }, [true]]) {
+    const env = envWith({ t: CARD });
+    const res = await call(env, 'PUT', '/_api/card/t/pool', body);
+    assert.equal(res.status, 400, JSON.stringify(body));
+    assert.deepEqual(await res.json(), { error: '`in` must be true or false. Nothing was written.' });
+    assert.equal(env.CARDS._m.has(poolKey('t', '0')), false, `${JSON.stringify(body)} wrote a pool key`);
+  }
+  const env = envWith({ t: CARD });
+  assert.equal((await call(env, 'PUT', '/_api/card/t/pool', { in: true })).status, 200, 'CONTROL');
+});
+
+test('tile#336 pool: the Card API bearer guards it both ways; bad handles and other methods are refused', async () => {
+  for (const method of ['PUT', 'DELETE']) {
+    const env = envWith({ t: CARD, [poolKey('t', '0')]: 'out' });
+    const before = [...env.CARDS._m];
+    assert.equal((await call(env, method, '/_api/card/t/pool', { in: true }, null)).status, 401);
+    assert.equal((await call(env, method, '/_api/card/t/pool', { in: true }, 'wrong')).status, 401);
+    assert.equal((await call({ ...env, MCP_TOKEN_HASH: null }, method, '/_api/card/t/pool', { in: true })).status, 503);
+    assert.deepEqual([...env.CARDS._m], before, 'a refused pool write changed the store');
+    assert.equal((await call(env, method, '/_api/card/t/pool', { in: true })).status, 200, 'CONTROL: the bearer is accepted');
+    assert.equal(env.CARDS._m.get(poolKey('t', '0')) ?? null, method === 'PUT' ? 'in' : null);
+  }
+  const env = envWith({ t: CARD });
+  for (const method of ['GET', 'POST', 'PATCH']) {
+    assert.equal((await call(env, method, '/_api/card/t/pool', method === 'GET' ? undefined : { in: true })).status, 405, method);
+  }
+  assert.equal((await call(env, 'PUT', '/_api/card/bad%20handle/pool', { in: true })).status, 400);
+  assert.equal((await call(env, 'PUT', '/_api/card//pool', { in: true })).status, 400);
+  assert.equal((await call(env, 'PUT', '/_api/card/t/pool/extra', { in: true })).status, 404);
+  assert.equal([...env.CARDS._m.keys()].some((k) => k.startsWith('pool:')), false);
+});
+
+test('🔴 tile#336 pool: a write admitted before delete + reuse is refused (409) and is inert on the next owner', async () => {
+  const env = envWith({ t: CARD });
+  const held = holdPut(env, (k) => k.startsWith('pool:t'));
+  const pending = call(env, 'PUT', '/_api/card/t/pool', { in: true });
+  await held.started;
+  await call(env, 'DELETE', '/_api/card/t');
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+  held.release();
+  const late = await pending;
+  assert.equal(late.status, 409);
+  assert.equal((await late.json()).stale_generation, true);
+  assert.equal(env.CARDS._m.get(poolKey('t', '0')), 'in', 'CONTROL: the stale write did land, on the ended lifetime');
+  const fresh = await (await page(env, '/t')).text();
+  assert.ok(fresh.includes('Next owner') && !/data-pool|reef\.cards\//.test(fresh), "a former owner's exchange state reached the next owner's page");
+  // CONTROL: a write in the current lifetime does reach the page
+  const gen = env.CARDS._m.get(genKey('t'));
+  assert.deepEqual(await (await call(env, 'PUT', '/_api/card/t/pool', { in: true })).json(), { handle: 't', gen, in: true });
+  assert.match(await (await page(env, '/t')).text(), /data-pool="card"/);
+});
+
+test("🔴 tile#336 delete sweeps every pool:<handle>:* key — and only that handle's", async () => {
+  const env = envWith({ t: CARD, other: CARD, [poolKey('t', '0')]: 'in', [poolKey('t', 'aaaaaaaaaaaaaaaaaaaaaaaa')]: 'out', [poolKey('other', '0')]: 'in' });
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  assert.deepEqual([...env.CARDS._m.keys()].filter((k) => k.startsWith('pool:')), [poolKey('other', '0')]);
+  // the next lifetime starts absent: today's page
+  assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+  assert.ok(!/data-pool|reef\.cards\//.test(await (await page(env, '/t')).text()));
+});
+
+test('tile#336 liveCard: the pool read is opt-in and rides in the same round as body and stop', async () => {
+  const store = fakeKv({ [cardKey('t', '0')]: CARD, [poolKey('t', '0')]: 'in' });
+  const reads = [];
+  const get = store.get.bind(store);
+  let release; const gate = new Promise((r) => { release = r; });
+  store.get = async (k) => { reads.push(k); if (k === cardKey('t', '0')) await gate; return get(k); };
+  const pending = liveCard(store, 't', { stop: true, pool: true, gen: '0' });
+  await new Promise((r) => setImmediate(r));
+  assert.ok(reads.includes(poolKey('t', '0')), 'the pool read waited for the body');
+  assert.ok(reads.includes(stopKey('t', '0')), 'the stop read waited for the body');
+  release();
+  const got = await pending;
+  assert.equal(got.pooled, 'in');
+  assert.equal(got.md, CARD);
+  // without the option, no pool read and no pooled value (every door but the page)
+  reads.length = 0;
+  const plain = await liveCard(store, 't', { gen: '0' });
+  assert.equal(plain.pooled, null);
+  assert.ok(!reads.some((k) => k.startsWith('pool:')));
 });

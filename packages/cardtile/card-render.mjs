@@ -1380,9 +1380,12 @@ export { linkOf, hostLabel, hostOf, iconDomains };
 // the pool existed (`powered-by` drives the old footer, no closing card). That keeps this inert
 // until the Worker passes a value.
 //
-// 🔴 The link is the bare origin. No `?ref=`: the pool is the platform's promise, not a referral the
-// author runs, so there is no handle to credit.
+// The link is reef.cards with the Card's handle as `?ref=` (tile#336, owner ruling): the footer's
+// `reef.cards` segment and the closing card (whose back pill the deck builds from the same href) go
+// to the same address, the one deck.js has always used for its own reef.cards card. Without a handle
+// (a render that names none) it is the bare origin.
 export const POOL_URL = 'https://reef.cards/';
+export const poolUrl = (handle) => POOL_URL + (handle ? `?ref=${encodeURIComponent(handle)}` : '');
 export const poolOf = (ctx) => (ctx && (ctx.pool === true || ctx.pool === false) ? ctx.pool : undefined);
 // The reef mark, the same strokes the prototype's closing card draws. currentColor, so it takes the
 // accent from `.st-cell-icon` like every other tile's glyph.
@@ -1392,7 +1395,7 @@ const POOL_GLYPH = '<svg class="st-cell-icon" viewBox="0 0 100 100" fill="none" 
 // its own `.st-grid` section so the packer never sees it, and it has no `data-cell` (the editor maps
 // boxes back to the file by that; this box is not in the file) and no `data-coral-type`.
 // Self-contained: no fetched icon, no script, nothing outside this string.
-const POOL_CARD_HTML = `<section class="st-grid st-pool" data-pool="card"><div class="st-cells-wrap"><div class="st-cells"><div class="st-cell st-cell-tile st-pool-card" data-span="6x1" data-w="6"><a class="st-cell-link" href="${esc(POOL_URL)}" target="_blank" rel="${REL_OWN}"><div class="st-cell-head">${POOL_GLYPH}</div><div class="st-cell-body"><div class="st-cell-title">${esc('reef.cards')}</div></div></a></div></div></div></section>`;
+const poolCardHtml = (handle) => `<section class="st-grid st-pool" data-pool="card"><div class="st-cells-wrap"><div class="st-cells"><div class="st-cell st-cell-tile st-pool-card" data-span="6x1" data-w="6"><a class="st-cell-link" href="${esc(poolUrl(handle))}" target="_blank" rel="${REL_OWN}"><div class="st-cell-head">${POOL_GLYPH}</div><div class="st-cell-body"><div class="st-cell-title">${esc('reef.cards')}</div></div></a></div></div></div></section>`;
 
 export function renderGrid(model, ctx = {}) {
   ctx = { name: '', icons: {}, ...ctx };
@@ -1482,7 +1485,7 @@ export function renderGrid(model, ctx = {}) {
     ? ' st-card-marks-mono' : '';
   const editCss = ctx.editIndex ? `<style>${EDIT_ONLY_CSS}</style>` : '';
   // The card pool's closing card: last thing on the card, never inside a drawer.
-  if (!ctx.inDrawer && poolOf(ctx) === true) parts.push(POOL_CARD_HTML);
+  if (!ctx.inDrawer && poolOf(ctx) === true) parts.push(poolCardHtml(ctx.handle));
   return `<div class="st-card${skin}${head}${marks}"><style>${NATIVE_CSS}</style>${editCss}${parts.join('')}</div>`;
 }
 
@@ -1585,7 +1588,7 @@ export function renderPage(model, ctx = {}) {
   const pool = poolOf(ctx);
   const ref = ctx.handle ? `?ref=${encodeURIComponent(ctx.handle)}` : '';
   const powered = pool === true
-    ? `&nbsp;&nbsp;|&nbsp;&nbsp;<a href="${esc(POOL_URL)}" target="_blank" rel="${REL_OWN}">reef.cards</a>`
+    ? `&nbsp;&nbsp;|&nbsp;&nbsp;<a href="${esc(poolUrl(ctx.handle))}" target="_blank" rel="${REL_OWN}">reef.cards</a>`
     : pool === false ? ''
       : ctx.poweredBy
         ? `&nbsp;&nbsp;|&nbsp;&nbsp;Powered by <a href="https://feelreef.com/signup${ref}">feelreef</a>`

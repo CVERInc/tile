@@ -17,7 +17,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { renderCardHTML } from '../serve/card-worker.mjs';
+import worker, { renderCardHTML } from '../serve/card-worker.mjs';
 import { withDeck, openingView, DECK_JS_PATH, DECK_TRY_URL } from './deck-page.mjs';
 import { deckStrings, DECK_STRINGS } from './deck-i18n.mjs';
 import { makeWindow } from './mini-dom.mjs';
@@ -942,3 +942,149 @@ for (const ending of Object.keys(ENDINGS)) for (const [view, other] of [['list',
     }
   });
 }
+
+// ── the exchange state, as the Worker serves it (tile#336) ─────────────────────────────────────────
+// The platform writes `pool:<handle>:<gen>` = `in` / `out` into the Worker's store; the Worker reads it
+// beside the body and hands the renderer true / false; absent is the page as it was. Here the page is
+// fetched from the REAL Worker over a stand-in KV, and then the REAL deck.js runs over it in all three
+// views: `in` → the closing reef.cards card is the last card of the pile (its back pill and the footer
+// segment both go to reef.cards/?ref=<handle>), `out` → neither, and the one-DOM rule (#302) holds.
+const REEF = 'https://reef.cards/?ref=specimen';
+const kvOf = (seed, reads = []) => ({
+  async get(k) { reads.push(k); return Object.hasOwn(seed, k) ? seed[k] : null; },
+  async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; },
+});
+const served = async (md, pool, { host = 'card.feelreef.com', path = '/specimen', env = {}, seed = {}, reads } = {}) => {
+  const kv = kvOf({ 'card:specimen:0': md, ...(pool !== undefined ? { 'pool:specimen:0': pool } : {}), ...seed }, reads);
+  const res = await worker.fetch(new Request(`https://${host}${path}`), { PREVIEW: 'false', CARDS: kv, ...env });
+  return { status: res.status, html: await res.text() };
+};
+const powered = (md) => md.replace('title: Specimen', 'title: Specimen\npowered-by: on');
+/** what the visitor can see of the exchange in the view the page is in now */
+const exchangeOf = (p) => {
+  const { doc } = p;
+  const fd = doc.querySelector('footer.st-footer > div');
+  const footerLinks = fd.querySelectorAll('a').filter((a) => /reef\.cards|feelreef\.com\/signup/.test(a.getAttribute('href') || ''))
+    .map((a) => `${a.getAttribute('href')} ${a.textContent}`);
+  const tiles = doc.querySelectorAll('.st-pool-card');
+  const deckCards = doc.querySelectorAll('.deck-card').sort((a, b) => +a.dataset.i - +b.dataset.i);
+  const last = deckCards.at(-1);
+  const lastBack = last && last.querySelector('.deck-go a.btn');
+  // the wall: the engine's blocks in page order, outside drawers and the deck's table
+  const blocks = doc.querySelectorAll('main .st-grid, main .st-bleed').filter((e) => !e.closest('.dc-drawer') && !e.closest('.deck-table'));
+  return {
+    footerLinks, tiles: tiles.length,
+    lastCardIsPool: !!(last && last.querySelector('.st-pool-card')),
+    lastBack: lastBack ? `${lastBack.getAttribute('href')} ${lastBack.textContent.trim()}` : null,
+    deckReefCards: doc.querySelectorAll('.deck-reef').length,
+    wallLastIsPool: blocks.length > 0 && blocks.at(-1).classList.contains('st-pool'),
+  };
+};
+
+for (const md of [card({ view: 'stack' }), powered(card({ view: 'stack' }))]) {
+  const label = md.includes('powered-by') ? ' (powered-by: on, ignored)' : '';
+  test(`🔴 tile#336 served with pool:in${label}: the reef card is the last card and the footer names reef.cards, in all three views`, async () => {
+    const { status, html } = await served(md, 'in');
+    assert.equal(status, 200);
+    const p = open(md, { page: () => html });
+    for (const view of ['stack', 'list', 'wall', 'list', 'stack', 'wall']) {
+      if (view !== p.root.dataset.view) p.press(view);
+      holds(p, view, `pool:in, ${view}`);
+      const x = exchangeOf(p);
+      assert.deepEqual(x.footerLinks, [`${REEF} reef.cards`], `${view}: the footer's right segment`);
+      assert.equal(x.tiles, 1, `${view}: one closing card on the page`);
+      assert.equal(x.deckReefCards, 0, `${view}: the deck drew a reef.cards card of its own as well`);
+      if (view === 'wall') assert.ok(x.wallLastIsPool, 'wall: the closing card is the last block');
+      else {
+        assert.ok(x.lastCardIsPool, `${view}: the last card of the pile is not the reef card`);
+        assert.equal(x.lastBack, `${REEF} reef.cards ↗`, `${view}: the reef card's back pill`);
+      }
+    }
+    // the closing tile is one of the engine's cells, so the #302 rule above covered it as well
+    assert.ok(p.cells.some((c) => c.classList.contains('st-pool-card')));
+  });
+
+  test(`🔴 tile#336 served with pool:out${label}: no reef card and no reef.cards footer segment, in all three views`, async () => {
+    const { status, html } = await served(md, 'out');
+    assert.equal(status, 200);
+    assert.ok(!/Powered by/.test(html), 'out: powered-by does not bring the old footer back');
+    // what tells out from absent on the wire: the deck is told the Card is out, so it draws nothing of its own
+    assert.ok(html.includes('window.__pool=false;') && !html.includes('window.__pool=true'), 'out: the deck is not told the Card is out');
+    const p = open(md, { page: () => html });
+    for (const view of ['stack', 'list', 'wall']) {
+      if (view !== p.root.dataset.view) p.press(view);
+      holds(p, view, `pool:out, ${view}`);
+      const x = exchangeOf(p);
+      assert.deepEqual(x.footerLinks, [], `${view}: footer`);
+      assert.equal(x.tiles, 0, `${view}: closing card`);
+      assert.equal(x.deckReefCards, 0, `${view}: the deck's own reef card`);
+      assert.ok(!x.lastCardIsPool && !x.wallLastIsPool);
+    }
+  });
+}
+
+test('tile#336 served with the key absent: nothing pool-shaped, and any value but in/out serves the same bytes as absent', async () => {
+  for (const md of [card({ view: 'stack' }), powered(card({ view: 'stack' }))]) {
+    const absent = (await served(md, undefined)).html;
+    assert.ok(!/data-pool|window\.__pool|reef\.cards\//.test(absent), 'absent: nothing pool-shaped');
+    assert.equal(/Powered by/.test(absent), md.includes('powered-by'), 'absent: powered-by keeps its old meaning');
+    for (const junk of ['', 'IN', 'true', '1', 'yes', 'on', '{"in":true}']) {
+      assert.equal((await served(md, junk)).html, absent, `pool value ${JSON.stringify(junk)}`);
+    }
+    // CONTROL: the two values that mean something do change the page
+    assert.notEqual((await served(md, 'in')).html, absent);
+    assert.notEqual((await served(md, 'out')).html, absent);
+  }
+});
+
+test('tile#336 the Worker reads the exchange state once, in the same round as body and stop; a stop still wins', async () => {
+  // the body read is held: if the pool read were a serial trip after it, it would not have started yet
+  const reads = [];
+  let release; const gate = new Promise((r) => { release = r; });
+  const seed = { 'card:specimen:0': card(), 'pool:specimen:0': 'in' };
+  const kv = { async get(k) { reads.push(k); if (k === 'card:specimen:0') await gate; return Object.hasOwn(seed, k) ? seed[k] : null; },
+    async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
+  const pending = worker.fetch(new Request('https://card.feelreef.com/specimen'), { PREVIEW: 'false', CARDS: kv });
+  await new Promise((r) => setImmediate(r));
+  const started = [...reads];
+  release();
+  const res = await pending;
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /data-pool="card"/);
+  assert.ok(started.includes('card:specimen:0') && started.includes('stop:specimen:0'), 'setup: body and stop are in flight');
+  assert.ok(started.includes('pool:specimen:0'), 'the pool read waited for the body');
+  assert.equal(reads.filter((k) => k === 'pool:specimen:0').length, 1, 'read once');
+  const stopped = await served(card(), 'in', { seed: { 'stop:specimen:0': '{}' } });
+  assert.equal(stopped.status, 404, 'a stopped Card in the exchange is still not served');
+  assert.ok(!/data-pool|reef\.cards\/\?ref/.test(stopped.html));
+});
+
+test('tile#336 a Card on its own domain carries the same exchange state (the key is per handle, not per host)', async () => {
+  const seed = { 'vanity:card.example': 'specimen' };
+  for (const [pool, tiles] of [['in', 1], ['out', 0], [undefined, 0]]) {
+    const { status, html } = await served(card(), pool, { host: 'card.example', path: '/', seed });
+    assert.equal(status, 200);
+    assert.equal((html.match(/data-pool="card"/g) || []).length, tiles, `own domain, pool ${pool}`);
+    assert.equal(html.includes(`href="${REEF}"`), pool === 'in');
+  }
+});
+
+test("tile#336 reef.cards's own root card never reads or shows the exchange state (control: another Card on reef.cards does)", async () => {
+  const env = { CARD_CANONICAL_HOST: 'reef.cards' };
+  const root = card().replace('title: Specimen', 'title: feelreef');
+  const reads = [];
+  const kv = kvOf({ 'card:feelreef:0': root, 'pool:feelreef:0': 'in', 'card:specimen:0': card(), 'pool:specimen:0': 'in' }, reads);
+  const home = await worker.fetch(new Request('https://reef.cards/'), { PREVIEW: 'false', CARDS: kv, ...env });
+  assert.equal(home.status, 200);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /<title>feelreef/);
+  assert.ok(!/data-pool|reef\.cards\/\?ref/.test(homeHtml), 'the root card linked to itself');
+  assert.ok(!reads.some((k) => k.startsWith('pool:')), 'the root card read a pool key');
+  // the same Card under its handle on a host that routes by path but has no root (the SaaS fallback origin)
+  const fallback = await worker.fetch(new Request('https://saas.feelreef.com/feelreef'), { PREVIEW: 'false', CARDS: kv, ...env });
+  assert.equal(fallback.status, 200);
+  assert.ok(!/data-pool|reef\.cards\/\?ref/.test(await fallback.text()), 'the root card showed the exchange under its handle');
+  assert.ok(!reads.some((k) => k.startsWith('pool:')), 'the root card read a pool key under its handle');
+  const other = await worker.fetch(new Request('https://reef.cards/specimen'), { PREVIEW: 'false', CARDS: kv, ...env });
+  assert.match(await other.text(), /data-pool="card"/, 'CONTROL: a guest Card on reef.cards does carry it');
+});
