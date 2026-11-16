@@ -518,8 +518,8 @@ statuses and reasons keep their existing messages.
 A send refused with HTTP 404 and `reason: "not_claimed"` (the owner never claimed Inbox) shows
 the site form's own `errorNotClaimed` sentence, “This site isn't taking messages right now.”,
 never a retry instruction. Each locale says exactly what the form says on a page in that
-language: en, ja, ko, zh-tw and zh-cn use the form's sentence for that locale; the form has no
-de, fr, es or pt table and shows its English sentence there, so the bubble does too. A 404
+language: each of the nine locales uses the form's sentence for that locale (de, fr, es and pt-br
+since tile#318; before it the form had no row for them and both corals showed English). A 404
 without that reason keeps the ordinary error.
 
 After either terminal refusal (this one or a full inbox), the grounded answer's
@@ -539,14 +539,20 @@ just this coral, without changing any deployment's channels:
 
 ```sh
 node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
-sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.9.0/inbox-bubble.js
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.9.1/inbox-bubble.js
 ```
 
 The registry directory passed to the build belongs to the caller. `out/` above is ignored
 scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
 repository described in [the registry README](../registry/README.md). A published version
-is immutable: if that deployment already has different bytes at 0.9.0, stop and choose a
+is immutable: if that deployment already has different bytes at 0.9.1, stop and choose a
 new version before publishing.
+
+**0.9.1 is 0.9.0 plus the not-claimed sentence** (tile#187, tile#318). A send refused with 404
+`not_claimed` shows the site form's `errorNotClaimed` sentence instead of a retry instruction, and
+the send-to-a-person button is removed after that refusal or a full inbox (tile#187, merged after
+0.9.0 without a bump). In de, fr, es and pt-br that sentence is now the form's translated one
+(tile#318) instead of English. A patch version: every attribute keeps its meaning.
 
 **0.9.0 resizes the corner and moves bubbles in and out** (reef#3306). The dock's bubbles are 52px with a
 22px glyph and sit 20px off the edges from 700px wide, 44px / 20px / 16px below that; an installed app's
@@ -571,7 +577,7 @@ it is above the 0.7.12 floor.
 
 > **Historical for the version steps.** The first three steps are done: checked 2026-11-10, the
 > public registry serves `inbox-bubble` v0 = latest = 0.8.0 and `dock` v0 = latest = 0.1.0
-> (`X-Coral-Resolved`). Don't re-run them for a later version. To publish 0.9.0 (or any later
+> (`X-Coral-Resolved`). Don't re-run them for a later version. To publish 0.9.1 (or any later
 > patch), publish it as a new immutable version, repoint `latest` and then `v0` to it, and verify
 > `X-Coral-Resolved` and the body stamp name that version, as in "Publishing" above. The last two
 > steps are about the dock embed and the appbar engine, not a version number. They were not

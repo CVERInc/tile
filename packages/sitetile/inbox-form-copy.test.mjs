@@ -2,9 +2,9 @@
 // pattern" — a submitting state, a success CARD, and an inline retry error, replacing a same-size
 // paragraph under a form that STAYS). Form.astro's own rendering is covered end-to-end by
 // smoke-build.mjs (the ONE fixture locale, en-US, since forms.md declares `lang: en-US`); this file
-// is the locale TABLE's own unit coverage — every key, every one of the five rows
-// (ja/zh-tw/zh-cn/ko/en) inboxFormLocaleKey can resolve to, and the tag-matching rules that route a
-// site's raw `lang:` frontmatter to one of them. A locale missing here breaks silently: a Korean
+// is the locale TABLE's own unit coverage — every key, the five original rows (ja/zh-tw/zh-cn/ko/en),
+// and the tag-matching rules that route a site's raw `lang:` frontmatter to one of them. The other
+// platform locales' rows are held by inbox-form-locales.test.mjs. A locale missing here breaks silently: a Korean
 // contact form falling back to `undefined.submitting` renders "undefined" as the button's own
 // label, and nothing in the build catches it — this table is exactly where that should be caught.
 //   run: node packages/sitetile/inbox-form-copy.test.mjs
@@ -169,7 +169,7 @@ test('🔴 routes every lang a site could plausibly write, including Simplified 
   same('zh-Hans', 'zh-CN');
   same('zh-Hans-SG', 'zh-SG');
   assert.notDeepEqual(inboxFormCopy('zh-Hans'), inboxFormCopy('zh-Hant'), 'the two scripts must not collapse to one row');
-  same('fr-FR', 'en-US'); // an unmapped language still gets a full row, never a hole
+  same('it-IT', 'en-US'); // a language the platform does not ship still gets a full row, never a hole
   same('', 'en-US');
 });
 

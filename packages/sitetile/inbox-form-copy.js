@@ -72,6 +72,25 @@ export const DEFAULT_LANG = 'zh-Hant';
  * (works with zero JS); the AJAX enhancement intercepts the same click to reset and re-show the
  * form in place instead of navigating.
  */
+const EN = {
+  fieldRequired: 'This field is required.',
+  sentWithEmail: "Your message was received. The reply will go to {email}.",
+  sentWithEmailGeneric: "Your message was received. The reply will go to the address you entered.",
+  sentNoEmail: "Leave an email if you'd like a reply.",
+  submitting: 'Sending…',
+  successHeading: 'Sent',
+  backHome: 'Back to homepage',
+  errorNetwork: 'Your connection seems to be having trouble — check it and try again.',
+  errorServer: "Couldn't send that — please try again.",
+  errorNotClaimed: "This site isn't taking messages right now.",
+  errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
+  errorTooLong: 'That message is too long — please shorten it and send again.',
+  errorRateLimited: 'Too many messages were sent just now — please wait a moment and try again.',
+  sendAnother: 'Send another',
+};
+
+// One row per locale the platform ships — the nine of cardtile's SANDBOX_LOCALES, the same nine the
+// inbox-bubble coral carries (tile#318). inbox-form-locales.test.mjs asks that list, not this one.
 const INBOX_FORM_LOCALE = {
   ja: {
     fieldRequired: 'この項目は必須です。',
@@ -137,31 +156,89 @@ const INBOX_FORM_LOCALE = {
     errorRateLimited: '너무 자주 보냈습니다. 잠시 후 다시 시도해 주세요.',
     sendAnother: '다시 보내기',
   },
-  en: {
-    fieldRequired: 'This field is required.',
-    sentWithEmail: "Your message was received. The reply will go to {email}.",
-    sentWithEmailGeneric: "Your message was received. The reply will go to the address you entered.",
-    sentNoEmail: "Leave an email if you'd like a reply.",
-    submitting: 'Sending…',
-    successHeading: 'Sent',
-    backHome: 'Back to homepage',
-    errorNetwork: 'Your connection seems to be having trouble — check it and try again.',
-    errorServer: "Couldn't send that — please try again.",
-    errorNotClaimed: "This site isn't taking messages right now.",
-    errorInboxStorageFull: "This site's inbox is full and can't take new messages right now.",
-    errorTooLong: 'That message is too long — please shorten it and send again.',
-    errorRateLimited: 'Too many messages were sent just now — please wait a moment and try again.',
-    sendAnother: 'Send another',
+  en: EN,
+  de: {
+    fieldRequired: 'Dieses Feld ist erforderlich.',
+    sentWithEmail: 'Ihre Nachricht ist eingegangen. Die Antwort geht an {email}.',
+    sentWithEmailGeneric: 'Ihre Nachricht ist eingegangen. Die Antwort geht an die eingegebene Adresse.',
+    sentNoEmail: 'Geben Sie eine E-Mail-Adresse an, wenn Sie eine Antwort wünschen.',
+    submitting: 'Wird gesendet…',
+    successHeading: 'Gesendet',
+    backHome: 'Zurück zur Startseite',
+    errorNetwork: 'Ihre Verbindung scheint gestört zu sein – bitte prüfen Sie Ihre Verbindung und versuchen Sie es erneut.',
+    errorServer: 'Konnte nicht gesendet werden – bitte versuchen Sie es erneut.',
+    errorNotClaimed: 'Diese Website nimmt derzeit keine Nachrichten entgegen.',
+    errorInboxStorageFull: 'Das Postfach dieser Website ist voll und kann derzeit keine neuen Nachrichten annehmen.',
+    errorTooLong: 'Diese Nachricht ist zu lang – bitte kürzen Sie sie und senden Sie sie erneut.',
+    errorRateLimited: 'Gerade wurden zu viele Nachrichten gesendet – bitte warten Sie einen Moment und versuchen Sie es erneut.',
+    sendAnother: 'Weitere Nachricht senden',
+  },
+  fr: {
+    fieldRequired: 'Ce champ est obligatoire.',
+    sentWithEmail: 'Votre message a bien été reçu. La réponse sera envoyée à {email}.',
+    sentWithEmailGeneric: 'Votre message a bien été reçu. La réponse sera envoyée à l’adresse indiquée.',
+    sentNoEmail: 'Indiquez une adresse e-mail si vous souhaitez une réponse.',
+    submitting: 'Envoi en cours…',
+    successHeading: 'Envoyé',
+    backHome: 'Retour à l’accueil',
+    errorNetwork: 'Votre connexion semble poser problème — vérifiez-la et réessayez.',
+    errorServer: 'Impossible d’envoyer le message — veuillez réessayer.',
+    errorNotClaimed: 'Ce site n’accepte pas de messages pour le moment.',
+    errorInboxStorageFull: 'La boîte de réception de ce site est pleine et ne peut pas recevoir de nouveaux messages pour le moment.',
+    errorTooLong: 'Ce message est trop long — veuillez le raccourcir et le renvoyer.',
+    errorRateLimited: 'Trop de messages ont été envoyés — veuillez patienter un instant et réessayer.',
+    sendAnother: 'Envoyer un autre message',
+  },
+  es: {
+    fieldRequired: 'Este campo es obligatorio.',
+    sentWithEmail: 'Tu mensaje se ha recibido. La respuesta se enviará a {email}.',
+    sentWithEmailGeneric: 'Tu mensaje se ha recibido. La respuesta se enviará a la dirección indicada.',
+    sentNoEmail: 'Deja un correo electrónico si quieres recibir una respuesta.',
+    submitting: 'Enviando…',
+    successHeading: 'Enviado',
+    backHome: 'Volver al inicio',
+    errorNetwork: 'Tu conexión parece tener problemas — revísala y vuelve a intentarlo.',
+    errorServer: 'No se ha podido enviar — inténtalo de nuevo.',
+    errorNotClaimed: 'Este sitio no acepta mensajes en este momento.',
+    errorInboxStorageFull: 'El buzón de este sitio está lleno y no puede recibir mensajes nuevos en este momento.',
+    errorTooLong: 'El mensaje es demasiado largo — acórtalo y vuelve a enviarlo.',
+    errorRateLimited: 'Se han enviado demasiados mensajes — espera un momento y vuelve a intentarlo.',
+    sendAnother: 'Enviar otro mensaje',
+  },
+  'pt-br': {
+    fieldRequired: 'Este campo é obrigatório.',
+    sentWithEmail: 'Sua mensagem foi recebida. A resposta será enviada para {email}.',
+    sentWithEmailGeneric: 'Sua mensagem foi recebida. A resposta será enviada para o endereço informado.',
+    sentNoEmail: 'Deixe um e-mail se quiser receber uma resposta.',
+    submitting: 'Enviando…',
+    successHeading: 'Enviado',
+    backHome: 'Voltar ao início',
+    errorNetwork: 'Sua conexão parece estar com problemas — verifique-a e tente novamente.',
+    errorServer: 'Não foi possível enviar — tente novamente.',
+    errorNotClaimed: 'Este site não está recebendo mensagens no momento.',
+    errorInboxStorageFull: 'A caixa de entrada deste site está cheia e não pode receber novas mensagens no momento.',
+    errorTooLong: 'Esta mensagem é muito longa — reduza o texto e envie novamente.',
+    errorRateLimited: 'Muitas mensagens foram enviadas agora há pouco — aguarde um momento e tente novamente.',
+    sendAnother: 'Enviar outra mensagem',
   },
 };
-/** A site's raw `lang:` (BCP-47-ish, whatever an author wrote) → one of the table's keys. */
-function inboxFormLocaleKey(lang) {
+
+/** The table's row keys, in table order. */
+export const INBOX_FORM_LOCALES = Object.freeze(Object.keys(INBOX_FORM_LOCALE));
+
+/**
+ * A site's raw `lang:` (BCP-47-ish, whatever an author wrote) → one of the table's keys.
+ * Same routing as the inbox-bubble coral's `resolveLocale`, so both corals pick one row per page:
+ *   - `zh` with `hans` / `-cn` / `-sg` → `zh-cn`; any other `zh` → `zh-tw`
+ *   - any `pt` tag (`pt`, `pt-BR`, `pt-PT`) → `pt-br`, the one Portuguese row
+ *   - otherwise the primary subtag when it has a row (`ja`, `ko`, `de`, `fr`, `es`, `en`), else `en`
+ */
+export function inboxFormLocaleKey(lang) {
   const tag = String(lang || '').toLowerCase();
   const primary = tag.split('-')[0];
-  if (primary === 'ja') return 'ja';
-  if (primary === 'ko') return 'ko';
   if (primary === 'zh') return /hans|-cn\b|-sg\b/.test(tag) ? 'zh-cn' : 'zh-tw';
-  return 'en';
+  if (primary === 'pt') return 'pt-br';
+  return Object.hasOwn(INBOX_FORM_LOCALE, primary) ? primary : 'en';
 }
 export function inboxFormCopy(lang) {
   return INBOX_FORM_LOCALE[inboxFormLocaleKey(lang)];
