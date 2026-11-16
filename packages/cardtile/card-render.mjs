@@ -249,10 +249,10 @@ const mdInline = (s, ctx) => esc(s)
 // a live card renders nothing at all in that case — which is why they live here, in this file's own
 // four-language table, rather than growing the rendered-card vocabulary.
 const LABELS = {
-  en: { prev: 'Previous', next: 'Next', slide: (n) => `Slide ${n}`, close: 'Close', qr: 'Show QR code', linkUnset: 'No address yet', imgUnset: '+ Add a picture', embed: 'Embedded content' },
-  zh: { prev: '上一張', next: '下一張', slide: (n) => `第 ${n} 張`, close: '關閉', qr: '顯示 QR code', linkUnset: '還沒填網址', imgUnset: '＋ 加一張圖片', embed: '嵌入的內容' },
-  ja: { prev: '前へ', next: '次へ', slide: (n) => `${n} 枚目`, close: '閉じる', qr: 'QR コードを表示', linkUnset: 'URL がまだです', imgUnset: '＋ 画像を追加', embed: '埋め込みコンテンツ' },
-  ko: { prev: '이전', next: '다음', slide: (n) => `${n}번째`, close: '닫기', qr: 'QR 코드 보기', linkUnset: '주소가 아직 없어요', imgUnset: '＋ 사진 추가', embed: '삽입된 콘텐츠' },
+  en: { prev: 'Previous', next: 'Next', slide: (n) => `Slide ${n}`, close: 'Close', qr: 'Show QR code', linkUnset: 'No address yet', imgUnset: '+ Add a picture', embed: 'Embedded content', pagePrev: 'Previous page', pageNext: 'Next page' },
+  zh: { prev: '上一張', next: '下一張', slide: (n) => `第 ${n} 張`, close: '關閉', qr: '顯示 QR code', linkUnset: '還沒填網址', imgUnset: '＋ 加一張圖片', embed: '嵌入的內容', pagePrev: '上一頁', pageNext: '下一頁' },
+  ja: { prev: '前へ', next: '次へ', slide: (n) => `${n} 枚目`, close: '閉じる', qr: 'QR コードを表示', linkUnset: 'URL がまだです', imgUnset: '＋ 画像を追加', embed: '埋め込みコンテンツ', pagePrev: '前のページ', pageNext: '次のページ' },
+  ko: { prev: '이전', next: '다음', slide: (n) => `${n}번째`, close: '닫기', qr: 'QR 코드 보기', linkUnset: '주소가 아직 없어요', imgUnset: '＋ 사진 추가', embed: '삽입된 콘텐츠', pagePrev: '이전 페이지', pageNext: '다음 페이지' },
 };
 
 /**
@@ -1491,8 +1491,9 @@ export function renderGrid(model, ctx = {}) {
   const marks = /^(mono|grey|gray|monochrome)$/.test(String(ctx.iconStyle || '').trim().toLowerCase())
     ? ' st-card-marks-mono' : '';
   const editCss = ctx.editIndex ? `<style>${EDIT_ONLY_CSS}</style>` : '';
-  // The card pool's closing card: last thing on the card, never inside a drawer.
-  if (!ctx.inDrawer && poolOf(ctx) === true) parts.push(poolTileHtml(ctx.handle));
+  // The card pool's closing card: last thing on the card, never inside a drawer — and, on Cards served in
+  // windows (serve/size-tier.mjs), only in the last one (`poolTile: false` on the others; absent: drawn).
+  if (!ctx.inDrawer && poolOf(ctx) === true && ctx.poolTile !== false) parts.push(poolTileHtml(ctx.handle));
   // 🔴 NATIVE_CSS ONCE PER PAGE, in the front grid only (tile#359). renderDrawers draws every back
   // through this function, and each back used to open with its own copy: 10,852 bytes per back,
   // 89% of a 1,000-tile page. A back is not a separate scope. It is in the same document as the
@@ -1672,7 +1673,33 @@ export function renderPage(model, ctx = {}) {
   const shareTagsHtml = (share.canonical ? `<link rel="canonical" href="${esc(share.canonical)}">` : '')
     + (share.meta || []).map((t) => `<meta ${t.attr === 'property' ? 'property' : 'name'}="${esc(t.key)}" content="${esc(t.content)}">`).join('');
   const pics = pictureTags(picPlan);
-  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${pics.head}${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${shareTagsHtml}${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${pics.tail}${qr}${video}${drawer}</body></html>`;
+  const pg = pagerTags(ctx);
+  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}${pg.root}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${pics.head}${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${shareTagsHtml}${pg.head}${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}${pg.body}</main>${footer}${pics.tail}${qr}${video}${drawer}</body></html>`;
+}
+
+/**
+ * The windows of Cards served in parts (serve/size-tier.mjs; CALLER-supplied as `ctx.pager`, only the
+ * cardtile worker sets it): `{ rev, prev, next }`, the revision every window of the page carries and
+ * the addresses of the windows before and after this one (null: none). Absent: nothing is written.
+ *   <html>  data-cardtile-rev: w3/deck.js takes a fetched window only when it says the same revision
+ *   <head>  <link rel="prev|next">
+ *   <main>  after the grid, a <nav> with the same two links, in the language of the Cards: how a reader with
+ *           no script (or whose deck did not come up) walks the Cards, and where w3/deck.js finds the
+ *           next window to fetch. A pile does not draw it (html.deck); the wall shows it at the end.
+ */
+const PAGER_CSS = '.st-pager{display:flex;justify-content:center;gap:24px;margin:24px auto 8px;font-size:15px}.st-pager a{color:var(--cp-accent);text-decoration:none}.st-pager a:hover{text-decoration:underline}html.deck .st-pager{display:none}';
+const PAGER_PATH = /^\/(?![\/\\])[^\s"'<>\\]*$/;
+function pagerTags(ctx) {
+  const pager = ctx.pager;
+  if (!pager || typeof pager !== 'object') return { root: '', head: '', body: '' };
+  // the worker's own addresses for this page's windows (its path, `?w=<n>&r=<hex>`): a path on this host and nothing
+  // else — never a scheme, never `//host` — so the pager links nowhere but to this page's windows
+  const path = (v) => (typeof v === 'string' && PAGER_PATH.test(v) ? v : '');
+  const prev = path(pager.prev);
+  const next = path(pager.next);
+  const head = (prev ? `<link rel="prev" href="${esc(prev)}">` : '') + (next ? `<link rel="next" href="${esc(next)}">` : '');
+  const links = (prev ? `<a rel="prev" href="${esc(prev)}">${esc(label(ctx, 'pagePrev'))}</a>` : '') + (next ? `<a rel="next" href="${esc(next)}">${esc(label(ctx, 'pageNext'))}</a>` : '');
+  return { root: ` data-cardtile-rev="${esc(pager.rev || '')}"`, head, body: links ? `<nav class="st-pager"><style>${PAGER_CSS}</style>${links}</nav>` : '' };
 }
 
 /**

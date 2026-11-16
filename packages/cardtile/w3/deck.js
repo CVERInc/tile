@@ -85,8 +85,8 @@
   // ---- items from a card file: one per `- [ ] %% card: … %% text` line. Kept as text; a card is built only when it is near view ----
   // The marker has two spellings, `%% card:` and `%% cardtile:` (card-core.js RE_CARD_MARKER); k is the length of the one this line uses.
   // `## back: id` lanes are the backs: an item names one with `back=#id`. Items are only read from the first lane.
-  // The `## assets` lane holds the file's pictures (card-core.js RE_ASSET_LANE): its lines are never items. A file the cardtile
-  // worker names in data-card-src is the whole file, pictures included (serve/size-tier.mjs).
+  // The `## assets` lane holds the file's pictures (card-core.js RE_ASSET_LANE): its lines are never items (a file read
+  // whole, from data-card-src or window.__cardMd, has them too).
   const mdTexts=[], backAt=new Map(), backs=new Map(); { const MD=window.__cardMd; if(MD){ let a=0; const L=MD.length; if(MD.startsWith('---\n')){ const e=MD.indexOf('\n---\n',4); a=e<0?0:e+5; }
       // one id rule for both ends (`back=#x%y` and `## back: a|b` used to be cut differently and never matched)
       let cur=null, pics=false, k=0; const ID=/^[^\s%|]+/, BK=/(?:^|\s)back=#([^\s%|]+)/;
@@ -152,7 +152,7 @@
     if(!PIN&&!(o&&o.quiet)){ try{localStorage.setItem(LS,m);}catch(_){} }
     const held=seg.contains(document.activeElement)?document.activeElement:null;
     if(mode==='spread'){ const at=up?up.at:vb?vb.at():wallAt(); mode=m; paintRoot(); if(deck) deck.enter(at,up); else deck=buildDeck(at,up); }
-    else if(m==='spread'){ const at=deck.leave(); mode=m; paintRoot(); wallEnter(at); }
+    else if(m==='spread'){ const at=deck.leave(); mode=m; paintRoot(); wallEnter(at); nearEnd(); }
     else { deck.layout(m); mode=m; paintRoot(); }
     seg.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.m===mode)));
     if(held&&document.activeElement!==held) held.focus({preventScroll:true});
@@ -220,16 +220,52 @@
   // wall: a back opens as the engine's own flipped card (st-back-door / data-back-url);
   // nothing here turns a tile over, and a link with no back= is just a link.
   let vb=null;   // the file wall, once it is set up (virtualBrick)
-  if(mode==='spread'){ if(mdTexts.length) virtualBrick(); } else deck=buildDeck(null);
+  // ---- Cards served in windows (the cardtile worker past its size tier, serve/size-tier.mjs) ----
+  // The page holds the first window of tiles and names the next in its pager (<nav class="st-pager">, a[rel=next]); a reader
+  // with no script follows that link. Here the next window is fetched when the visitor nears the end of what is loaded (the
+  // wall's last rows, a pile's last tiles), and its tiles join the page after the ones already there: the wall shows them in
+  // place, a pile deals them after the tiles it holds (deck.grow). Only a window of this page's revision is taken (data-cardtile-rev on both
+  // roots): another means the Cards changed since this page was served, and nothing more is fetched — the pager's link is still
+  // there, and the cardtile worker sends it to the current revision. A fetch that fails leaves the pager as it was; there is no
+  // retry loop (fetching stays set).
+  const REV=root.getAttribute('data-cardtile-rev');
+  let fetching=false;
+  const pagerNext=()=>document.querySelector('main > .st-pager a[rel="next"]');
+  function more(){ if(REV==null||fetching)return; const a=pagerNext(); const href=a&&a.getAttribute('href'); if(!href)return; fetching=true;
+    fetch(href).then(r=>{ if(!r.ok)throw new Error('HTTP '+r.status); return r.text(); }).then(t=>{
+      const d=new DOMParser().parseFromString(t,'text/html');
+      if(d.documentElement.getAttribute('data-cardtile-rev')!==REV) throw new Error('the Cards changed since this page was served');
+      takeWindow(d); fetching=false; if(deck) deck.grow(); nearEnd();
+    }).catch(e=>{ try{console.warn('deck: the next window did not arrive',e);}catch(_){} }); }
+  // the window's tiles after this page's (before the closing reef.cards section and the pile's own parts), the backs they turn
+  // over to that this page does not hold yet, the scripts its tiles need that this page has not run (the drawer coral, the video
+  // swap; never the deck's own), and the pager's next link moved on. Its other parts (head, footer, the stylesheet of the grid) are
+  // this page's already: every window of one revision is made from the same file by the same renderer.
+  function takeWindow(d){
+    const card=document.querySelector('main > .st-card'), src=d.querySelector('main > .st-card'); if(!card||!src)return;
+    const at=[...card.children].find(c=>c.matches('.st-pool,.deck-veil,.deck-table'))||null;
+    for(const n of [...src.children]) if(n.tagName!=='STYLE') card.insertBefore(n,at);
+    const main=document.querySelector('main'), pg=document.querySelector('main > .st-pager'), mine=document.querySelector('main > .dc-drawer-layer'), theirs=d.querySelector('main > .dc-drawer-layer');
+    if(theirs&&!mine){ const css=theirs.previousElementSibling; if(css&&css.tagName==='STYLE') main.insertBefore(css,pg); main.insertBefore(theirs,pg); }
+    else if(theirs){ const close=mine.querySelector('.dc-drawer-close'); for(const p of [...theirs.children]) if(p.classList.contains('dc-drawer')&&!document.getElementById(p.id)) mine.insertBefore(p,close&&close.parentNode===mine?close:null); }
+    const have=[...document.querySelectorAll('script')];
+    for(const s of d.querySelectorAll('body > script')){ const u=s.getAttribute('src');
+      if(u?(u.startsWith('/_deck/')||have.some(x=>x.getAttribute('src')===u)):(!/st-embed-video-btn/.test(s.textContent)||have.some(x=>!x.getAttribute('src')&&x.textContent===s.textContent)))continue;
+      const n=document.createElement('script'); if(u)n.src=u; else n.textContent=s.textContent; document.body.appendChild(n); }
+    const mineNext=pg&&pg.querySelector('a[rel="next"]'), theirNext=d.querySelector('main > .st-pager a[rel="next"]');
+    if(mineNext){ if(theirNext) mineNext.setAttribute('href',theirNext.getAttribute('href')); else mineNext.remove(); }
+  }
+  // near the end of what is loaded: on the wall, the pager within three screens; in a pile, fewer than 48 loaded tiles ahead
+  function nearEnd(){ if(REV==null||fetching||!pagerNext())return;
+    if(mode==='spread'){ const pg=document.querySelector('main > .st-pager'); if(pg&&pg.getBoundingClientRect().top<innerHeight*3) more(); }
+    else if(deck&&deck.ahead()<48) more(); }
+  if(REV!=null) addEventListener('scroll',()=>{ if(mode==='spread') nearEnd(); },{passive:true});
+  if(mode==='spread'){ if(mdTexts.length) virtualBrick(); nearEnd(); } else deck=buildDeck(null);
   // wall over a card file: only the rows on screen exist. The scroll range is capped (CAP) and mapped to rows, so ~850,000 items are one page.
   // Set up once; the tiles it stands in for stay in the page (the stylesheet hides them under .vb), so a pile can still deal them.
   function virtualBrick(){
     if(vb){ vb.api(); vb.layout(); return; }
-    // the rows go in the page's own grid, never in the closing reef.cards section (.st-pool). A page made from the head of a file
-    // (the cardtile worker's shell, serve/size-tier.mjs) may have no grid of its own at all: one empty grid is made, before that section.
-    let box=[...document.querySelectorAll('main .st-cells')].find(b=>!b.closest('.st-pool'));
-    if(!box){ const sc=document.querySelector('main .st-card'); if(!sc)return; const g=mk('section','st-grid'), w=mk('div','st-cells-wrap'); box=mk('div','st-cells'); w.appendChild(box); g.appendChild(w); sc.insertBefore(g,sc.querySelector('.st-pool')); }
-    box.classList.add('vb');
+    const box=document.querySelector('main .st-cells'); if(!box)return; box.classList.add('vb');
     const tpl=document.getElementById('md-cover'); if(tpl){ const c=tpl.content.firstElementChild.cloneNode(true); const r=c.querySelector('[data-range]'); if(r) r.textContent=numFmt(mdTexts[0])+' – '+numFmt(mdTexts[mdTexts.length-1]); c.classList.add('vb-cover'); box.appendChild(c); }
     const COLS=6, GAP=12, M=mdTexts.length, rows=Math.ceil(M/COLS); const space=mk('div','vb-space'), win=mk('div','vb-win'); space.appendChild(win); box.appendChild(space);
     let rowH=100, scale=1, hit=-1, hitY=-1, FULL=0, SH=0, VIEW=0; const pool=[];
@@ -421,10 +457,6 @@
   const seatNamed=(c,id)=>{ const b=drawers[id], first=!usedBack.has(id); usedBack.add(id); lodge(c); if(first)lodge(b); const k=buildCard(c,first?b:null,{seated:true,back:id}); settled(c); if(first)settled(b); return k; };
   const lend=k=>{ const b=drawers[k.dataset.back], sc=k.querySelector('.deck-back-scroll'); if(!b||!sc||b.parentNode===sc)return; mv(sc,b,null); settled(b); };
   const dealt=i=>{ const k=tileCard(cells[i]); k.dataset.i=String(i); pre[i]=k; mat(k); return k; };
-  // The renderer's closing reef.cards tile (.st-pool-card, drawn when the platform says the Card is in the pool) is the last
-  // card of the pile. On a page whose items are a card file it would be dealt before every item, so there it is held back
-  // and dealt after them (below, with our own last cards).
-  const poolTail=mdTexts.length?cells.find(c=>c.classList.contains('st-pool-card')):null; if(poolTail) cells.splice(cells.indexOf(poolTail),1);
   for(let i=0;i<cells.length;i++) pre.push(null);
   function tileCard(c){
     if(c.classList.contains('st-embed-video')){
@@ -440,7 +472,6 @@
   }
   if(mdTexts.length){ const tpl=document.getElementById('md-cover'); if(tpl){ const c=tpl.content.firstElementChild.cloneNode(true); const r=c.querySelector('[data-range]'); if(r) r.textContent=numFmt(mdTexts[0])+' – '+numFmt(mdTexts[mdTexts.length-1]); addCard(c,null); } }
   P=pre.length; M=mdTexts.length; addingPost=true; window.__mdFirst=P; window.__mdCount=M;
-  if(poolTail) register(tileCard(poolTail));
   // reef's own card at the end of the pile: a plain link card like any other. front = glyph, back = one button.
   const reefFront=mk('div','deck-reef','<div class="mark" aria-hidden="true"><svg width="48" height="48" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M 39.5 78.2 C 39.6 62 39.8 46 40 29.3"/><path d="M 40 29.3 C 37.7 29.2 33.4 28.1 30.7 22.5"/><path d="M 40 29.3 C 42.3 29.2 46.6 28.1 49.3 22.1"/><path d="M 39.5 62 C 33.3 61.6 28.8 59.8 26.5 56.5 C 24.8 54 23.8 50.8 23.7 47.5"/><path d="M 39.7 53.8 C 44.1 49.5 49.6 46.1 55.6 44.1 C 62 41.9 69.5 41.6 76.8 44.1"/><path d="M 62.6 42.2 C 64.1 40.7 66.4 37.3 64.8 31.8"/></svg></div>');
 const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the capacity demo: its own ending, in the page's words like the rest */
@@ -496,6 +527,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     order();
     const top=card(cur); if(above(shade)!==top)put(shade,top,true);
     stack.toggleAttribute('data-first',cur===0); stack.toggleAttribute('data-last',cur===N-1);
+    if(P-1-cur<48) more();   // Cards served in windows: the next one is fetched before the pile reaches its last loaded tile
   }
   const settleHidden=c=>{ if(c.classList.contains('is-deep')){ c.style.visibility='hidden'; c.style.transition='none'; void c.offsetWidth; c.style.visibility=''; c.style.transition=''; } };
   // flight: over the top of the pile in two halves. Half 1 plays where the card is; at the apex the node moves to its new place in the pile
@@ -610,8 +642,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // thumb-drag / space / PageDown / Home / End all work natively, and iOS swipes are real scrolls. The pile only changes when the
   // snap index changes (never scrubbed by scroll offset): sync() queues exactly the steps that bring cur to the snapped page.
   // up to SNAPMAX cards: one snap point per card, exactly as before. Beyond: one tall rail (capped), no snaps; scroll offset → index.
-  const rail=mk('div','deck-rail'); const railSize=()=>{ if(N>SNAPMAX) rail.style.height=Math.round(innerHeight+(N-1)*Math.min(innerHeight,CAP/(N-1)))+'px'; };
-  if(N<=SNAPMAX){ for(let i=0;i<N;i++) rail.appendChild(mk('div','deck-snap')); } else { railSize(); addEventListener('resize',railSize); } document.body.appendChild(rail);
+  // (railSize also follows a pile that grows: Cards served in windows add tiles as they arrive — grow, below)
+  const rail=mk('div','deck-rail'); const railSize=()=>{ if(N>SNAPMAX){ if(rail.firstChild) rail.textContent=''; rail.style.height=Math.round(innerHeight+(N-1)*Math.min(innerHeight,CAP/(N-1)))+'px'; } else while(rail.children.length<N) rail.appendChild(mk('div','deck-snap')); };
+  railSize(); addEventListener('resize',railSize); document.body.appendChild(rail);
   try{history.scrollRestoration='manual';}catch(_){}
   const pageH=()=>Math.max(1e-6,(document.scrollingElement.scrollHeight-innerHeight)/Math.max(1,N-1));
   const goTo=i=>scrollTo({top:i*pageH(),left:0,behavior:'instant'});
@@ -718,7 +751,16 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     fit(); railSize(); queue=0; cur=seatOf(c); unask(); dealIn(up&&up.deal===false); goTo(cur); listTx(); };
   if(at!=null){ cur=seatOf(at); unask(); paint(); goTo(cur); listTx(); }
   // up(): the card that is up; tileFor(c): the tile whose card a pile entered with `c` opens on (glide names it)
-  return {enter,leave,close,layout:window.__deckLayout,up:()=>card(cur),tileFor:c=>cells[seatOf(c)]||null};
+  // grow: the tiles a window brought (takeWindow, above) are dealt after the tiles the pile holds; our own closing ones
+  // (post) stay last. The tile that is up stays up, at the same place on the rail.
+  const known=new Set(cells);
+  const grow=()=>{ if(M)return; const fresh=tiles().filter(c=>!known.has(c)); if(!fresh.length)return;
+    document.querySelectorAll('.dc-drawer').forEach(d=>{ if(!drawers[d.id]) drawers[d.id]=d.querySelector('.dc-drawer-body'); });
+    const k=ON?scrollY/pageH():null;
+    for(const c of fresh){ known.add(c); cells.push(c); pre.push(null); }
+    P=pre.length; post.forEach((c,j)=>{ c.dataset.i=String(P+M+j); }); N=P+M+post.length;
+    railSize(); if(ON){ const y=k*pageH(); if(Math.abs(scrollY-y)>0.5) scrollTo({top:y,left:0,behavior:'instant'}); paint(); if(LIST) listTx(); } };
+  return {enter,leave,close,grow,ahead:()=>P-1-cur,layout:window.__deckLayout,up:()=>card(cur),tileFor:c=>cells[seatOf(c)]||null};
   }
   }
 })();

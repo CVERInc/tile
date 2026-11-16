@@ -67,7 +67,8 @@ const paramsOf = (raw) => new Map(String(raw || '').split(/\s+/).filter(Boolean)
   .map((t) => { const i = t.indexOf('='); return i < 0 ? [t, ''] : [t.slice(0, i), t.slice(i + 1)]; }));
 const TEMPLATE_PARAMS = new Map(Object.entries(BLANKS).map(([t, b]) => [t, paramsOf(b.rawParams)]));   // Map: same reason
 
-const isTemplateCell = (cell) => {
+// exported for serve/size-tier.mjs blankAbove, which asks it of one tile at a time
+export const isTemplateCell = (cell) => {
   const bodies = TEMPLATE_BODIES.get(cell.type);
   if (!bodies || !bodies.has(String(cell.body ?? ''))) return false;
   const own = TEMPLATE_PARAMS.get(cell.type) || new Map();

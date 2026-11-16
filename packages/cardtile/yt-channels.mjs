@@ -42,6 +42,11 @@ export function channelsIn(cardMd) {
   const md = String(cardMd || '');
   let model;
   try { model = parseCard(md); } catch { return []; }
+  return channelsOf(model);
+}
+
+/** channelsIn's answer for a model already parsed (serve/size-tier.mjs: one window of long Cards) */
+export function channelsOf(model) {
   const out = new Set();
   const cells = [...(model.cells || []), ...(model.drawers || []).flatMap((d) => d.cells || [])];
   for (const cell of cells) {
@@ -61,7 +66,15 @@ export function channelsIn(cardMd) {
  * looks up.
  */
 export async function resolveChannels(cardMd, doFetch) {
-  const ids = channelsIn(cardMd);
+  return resolveChannelIds(channelsIn(cardMd), doFetch);
+}
+
+/** resolveChannels for a model already parsed (one window of long Cards: only its own video tiles) */
+export async function resolveChannelsOf(model, doFetch) {
+  return resolveChannelIds(channelsOf(model), doFetch);
+}
+
+async function resolveChannelIds(ids, doFetch) {
   if (!ids.length) return {};
   const got = await Promise.all(ids.map((c) => resolveChannel(c, doFetch)));
   const out = {};
