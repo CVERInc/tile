@@ -1,0 +1,6 @@
+{"oldSpaceMB":128,"exit":134,"load1":8.57,"loadWait":"ok","at":"2026-11-16T13:13:04Z","result":null,"diedIn":"view: worker.fetch","outOfMemory":true}
+{"oldSpaceMB":256,"exit":134,"load1":8.57,"loadWait":"ok","at":"2026-11-16T13:13:07Z","result":null,"diedIn":"view: worker.fetch","outOfMemory":true}
+{"oldSpaceMB":384,"exit":134,"load1":8.20,"loadWait":"ok","at":"2026-11-16T13:13:17Z","result":null,"diedIn":"view: worker.fetch","outOfMemory":true}
+{"oldSpaceMB":512,"exit":134,"load1":8.02,"loadWait":"ok","at":"2026-11-16T13:13:28Z","result":null,"diedIn":"view: worker.fetch","outOfMemory":true}
+{"oldSpaceMB":768,"exit":134,"load1":8.19,"loadWait":"ok","at":"2026-11-16T13:13:37Z","result":null,"diedIn":"view: worker.fetch","outOfMemory":true}
+{"oldSpaceMB":1024,"exit":0,"load1":8.57,"loadWait":"ok","at":"2026-11-16T13:13:46Z","result":{"stage":"view","sample":{"bytes":26214400,"utf16Units":26210617,"newlines":867935},"view":{"path":"/every-number","status":200,"type":"text/html; charset=utf-8","bytes":160336614,"wallMs":8217,"cpuMs":12251,"rssBeforeMB":187.7,"heapUsedAfterMB":402.6},"peakRssMB":1745.5,"networkAttempts":0}}
