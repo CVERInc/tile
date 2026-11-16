@@ -2502,3 +2502,282 @@ test('tile#187: a refusal a retry can fix keeps the send-to-a-person button, ena
 		assert.equal(r.toHuman.textContent, coral.COPY.en.toHumanAfterRefusal, String(status));
 	}
 });
+
+// ── tile#84: a send still in the air when the panel is unmounted ─────────────────────────────
+//
+// 🩸 THE ORPHAN POLLER. A visitor presses Send (or "to a person", or the hand-off form's Send),
+// `send()` is awaiting, the SPA navigates and calls `unmount(el)` — and THEN the 200 arrives. The
+// answer's continuation used to run in full against a panel nobody can see: it stored the handle,
+// re-rendered the detached root, and `renderMessages()` started `setInterval(refresh, POLL_MS)`,
+// which nothing was ever going to clear again. The B9 test above mounts and unmounts synchronously,
+// so no answer is ever in the air when it unmounts, and it could not see this.
+//
+// What is measured, per path: after the unmount, the late 200 starts no interval, sends no request
+// and changes not one byte of the panel's (detached) markup, attributes, labels or text. The answer
+// itself is held by the test and released only after the unmount returns.
+//
+// 🔴 r2: ONE STORAGE WRITE IS REQUIRED, NOT FORBIDDEN. r1 asserted that storage did not change at
+// all, which pinned the regression the review found: the server had ACCEPTED the message, and the
+// conversation id it answered with is this browser's only way back to it. So storage must now change
+// in exactly one key, the tenant's handle, and that key must name the accepted conversation.
+
+/** Everything a render could have changed under `node`: markup, attributes, labels, children. */
+function domDigest(node, seen = new Set()) {
+	if (!node || typeof node !== 'object' || seen.has(node)) return null;
+	seen.add(node);
+	return {
+		html: node.html, attrs: { ...node.attrs }, text: node.textContent, disabled: node.disabled, value: node.value,
+		children: (node.children || []).map((c) => domDigest(c, seen)),
+		shadow: domDigest(node.shadowRoot, seen),
+		nodes: [...(node.nodes ? node.nodes.entries() : [])].map(([k, v]) => [k, domDigest(v, seen)])
+	};
+}
+
+/** The keys whose value differs from `before` (added, changed or removed), with their new value. */
+function storageChanges(before) {
+	const out = {};
+	for (const k of new Set([...before.keys(), ...storage.keys()])) {
+		if (before.get(k) !== storage.get(k)) out[k] = storage.has(k) ? storage.get(k) : null;
+	}
+	return out;
+}
+
+/** The handle `saveHandle` wrote under `key`, parsed, or null. */
+const storedHandle = (key) => (storage.has(key) ? JSON.parse(storage.get(key)) : null);
+
+/** The handle key of a mount made by `mountFresh` (kind `site`, its own `data-id`). */
+const handleKeyOf = (el) => `reef-inbox:site:${el.getAttribute('data-id')}`;
+
+/**
+ * Mount a KAITO-less or KAITO site with an Inbox, drive `start(root)` up to the moment the POST to
+ * /api/inbox is in the air, unmount, then let a 200 land. Returns what changed after the unmount.
+ */
+async function lateAnswerAfterUnmount(attrs, start) {
+	let release;
+	const held = new Promise((r) => { release = r; });
+	let posted = false;
+	respond = (url, init) => {
+		if (url.endsWith('/api/kaito')) return { ok: true, status: 200, json: async () => ({ kind: 'refused', text: 'no record' }) };
+		if (url.endsWith('/api/inbox') && init.method === 'POST') {
+			posted = true;
+			return held.then(() => ({ ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'late-conv', reply_within_hours: 4 }) }));
+		}
+		if (url.includes('/api/inbox/conversation') || (init.headers && init.headers['x-inbox-conversation'])) {
+			return { ok: true, status: 200, json: async () => ({ ok: true, messages: [{ from: 'visitor', text: 'late' }], status: 'open' }) };
+		}
+		return undefined;
+	};
+	try {
+		const { el, root } = await mountFresh({ 'data-ai-log': '0', ...attrs });
+		await openBubble(root);
+		await start(root);
+		for (let i = 0; i < 5 && !posted; i++) await settle();
+		assert.ok(posted, 'the send never reached the network — this arm measures nothing');
+		const host = el.children[0];
+		assert.equal(coral.unmount(el), true);
+		const pollers = timers.size;
+		const reqs = requests.length;
+		const before = new Map(storage);
+		const dom = JSON.stringify(domDigest(host));
+		release();
+		for (let i = 0; i < 10; i++) await settle();
+		return {
+			pollers: timers.size - pollers,
+			requests: requests.slice(reqs).map((r) => `${r.init.method || 'GET'} ${new URL(r.url).pathname}`),
+			storageChanges: storageChanges(before),
+			handleKey: handleKeyOf(el),
+			domChanged: JSON.stringify(domDigest(host)) !== dom
+		};
+	} finally {
+		respond = null;
+	}
+}
+
+for (const [name, attrs, start] of [
+	['the compose box (no KAITO)', {}, async (root) => {
+		composeBox(root).value = 'hello, is anyone there?';
+		// Not awaited: the submit handler awaits the very answer this test is holding.
+		void root.querySelector('.dc-inbox-form').emit('submit');
+	}],
+	['"to a person" after a refusal (the hand-off form)', { 'data-kaito': '1' }, async (root) => {
+		composeBox(root).value = 'do you ship abroad?';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		const form = root.querySelector('.dc-inbox-handoff');
+		form.querySelector('textarea').value = 'do you ship abroad?';
+		void form.emit('submit');
+	}]
+]) {
+	test(`tile#84: ${name} — a 200 that lands after unmount starts no poller, leaves the DOM alone, and keeps the accepted handle`, async () => {
+		const r = await lateAnswerAfterUnmount(attrs, start);
+		assert.equal(r.pollers, 0, `${r.pollers} interval(s) started on an unmounted panel`);
+		assert.deepEqual(r.requests, [], 'the unmounted panel kept talking to the network');
+		assert.deepEqual(Object.keys(r.storageChanges), [r.handleKey], 'the handle, and only the handle, is written after unmount');
+		assert.equal(storedHandle(r.handleKey).conv, 'late-conv', 'the handle names the conversation the server accepted');
+		assert.equal(storedHandle(r.handleKey).mode, 'human');
+		assert.equal(r.domChanged, false, 'the late answer rewrote the unmounted panel');
+	});
+}
+
+test('tile#84: the quiet "still want a person?" press (escalate) — a late 200 after unmount keeps only the handle', async () => {
+	let release;
+	const held = new Promise((r) => { release = r; });
+	let posted = false;
+	respond = (url, init) => {
+		if (url.endsWith('/api/kaito')) return { ok: true, status: 200, json: async () => ({ kind: 'grounded', text: 'An answer', source_url: 'https://example.test/source' }) };
+		if (url.endsWith('/api/inbox') && init.method === 'POST') {
+			posted = true;
+			return held.then(() => ({ ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'late-esc', reply_within_hours: 4 }) }));
+		}
+		return undefined;
+	};
+	try {
+		const { el, root } = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
+		await openBubble(root);
+		composeBox(root).value = 'Please ask a person';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		for (let i = 0; i < 5 && !posted; i++) await settle();
+		assert.ok(posted, 'the escalation never reached the network — this test measures nothing');
+		const host = el.children[0];
+		assert.equal(coral.unmount(el), true);
+		const pollers = timers.size, reqs = requests.length;
+		const before = new Map(storage);
+		const dom = JSON.stringify(domDigest(host));
+		release();
+		for (let i = 0; i < 10; i++) await settle();
+		assert.equal(timers.size - pollers, 0, 'an interval started on an unmounted panel');
+		assert.deepEqual(requests.slice(reqs).map((r) => r.url), [], 'the unmounted panel kept talking to the network');
+		const key = handleKeyOf(el);
+		assert.deepEqual(Object.keys(storageChanges(before)), [key], 'the handle, and only the handle, is written after unmount');
+		const h = storedHandle(key);
+		assert.deepEqual([h.conv, h.hasEmail, h.mode], ['late-esc', false, 'human']);
+		assert.equal(JSON.stringify(domDigest(host)), dom, 'the late answer rewrote the unmounted panel');
+	} finally {
+		respond = null;
+	}
+});
+
+// ── tile#84 r2: the review's two inbox probes, kept as tests ──────────────────────────────────
+
+test('tile#84 r2 (review probe 1): a first message accepted after unmount is still reachable from the next mount', async () => {
+	// A first-time visitor (no handle, no email) sends; the SPA unmounts the bubble; THEN the server
+	// accepts the message. r1 dropped the answer whole, so the next mount had no handle, could not
+	// show the message or the owner's reply, and a second Send opened a second conversation.
+	let release;
+	const held = new Promise((r) => { release = r; });
+	let posted = false;
+	respond = (url, init) => {
+		if (url.endsWith('/api/inbox') && init.method === 'POST') {
+			posted = true;
+			return held.then(() => ({ ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'accepted-first', reply_within_hours: 4 }) }));
+		}
+		if (init.headers && init.headers['x-inbox-conversation']) {
+			return { ok: true, status: 200, json: async () => ({ ok: true, messages: [{ from: 'visitor', text: 'accepted message' }], status: 'open' }) };
+		}
+		return undefined;
+	};
+	try {
+		const { el, root } = await mountFresh({ 'data-ai-log': '0' });
+		const key = handleKeyOf(el);
+		assert.equal(storage.has(key), false, 'a first-time visitor: no handle yet');
+		await openBubble(root);
+		composeBox(root).value = 'accepted message';
+		void root.querySelector('.dc-inbox-form').emit('submit');
+		for (let i = 0; i < 5 && !posted; i++) await settle();
+		assert.ok(posted, 'the send never reached the network; this test measures nothing');
+		coral.unmount(el);
+		release();
+		for (let i = 0; i < 10; i++) await settle();
+		assert.equal(storedHandle(key)?.conv, 'accepted-first', 'the accepted conversation must be this browser\'s handle');
+
+		// The next route mounts the bubble again for the same tenant: it must find the thread.
+		const from = requests.length;
+		const again = await mountFresh({ 'data-ai-log': '0', 'data-id': el.getAttribute('data-id') });
+		await openBubble(again.root);
+		for (let i = 0; i < 5; i++) await settle();
+		assert.ok(transcriptConvs(from).includes('accepted-first'), 'the remounted bubble never asked for the accepted thread');
+		coral.unmount(again.el);
+	} finally {
+		respond = null;
+	}
+});
+
+test('tile#84 r2 (review probe 2): unmount during the hand-off\'s transcript read leaves the detached form alone', async () => {
+	// The hand-off send succeeds, the panel re-renders and awaits `refresh()`; the SPA unmounts
+	// during that read. r1 then returned `true`, so `bindCompose` cleared and focused a textarea
+	// that is no longer on the page.
+	let release;
+	const held = new Promise((r) => { release = r; });
+	let reading = false;
+	respond = (url, init) => {
+		if (url.endsWith('/api/kaito')) return { ok: true, status: 200, json: async () => ({ kind: 'refused', text: 'no record' }) };
+		if (url.endsWith('/api/inbox') && init.method === 'POST') return { ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'handoff-ok', reply_within_hours: 4 }) };
+		if (init.headers && init.headers['x-inbox-conversation']) { reading = true; return held; }
+		return undefined;
+	};
+	try {
+		const { el, root } = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' });
+		await openBubble(root);
+		composeBox(root).value = 'question';
+		await root.querySelector('.dc-inbox-form').emit('submit');
+		await root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		const form = root.querySelector('.dc-inbox-handoff');
+		const ta = form.querySelector('textarea');
+		ta.value = 'question';
+		const sending = form.emit('submit');
+		for (let i = 0; i < 10 && !reading; i++) await settle();
+		assert.ok(reading, 'the transcript read never started; this test measures nothing');
+		coral.unmount(el);
+		focused = null;
+		release({ ok: true, status: 200, json: async () => ({ ok: true, messages: [], status: 'open' }) });
+		await sending;
+		assert.equal(ta.value, 'question', 'the detached hand-off textarea was cleared');
+		assert.notEqual(focused, ta, 'the detached hand-off textarea was focused');
+		assert.equal(ta.getAttribute('aria-busy'), 'true', 'the detached form was reset as if it were still on the page');
+		assert.equal(storedHandle(handleKeyOf(el))?.conv, 'handoff-ok', 'the accepted hand-off keeps its handle');
+	} finally {
+		respond = null;
+	}
+});
+
+test('tile#84 r2: a late answer does not overwrite a handle a newer mount wrote after the send left', async () => {
+	// How "newer" is decided: the handle key's bytes when the send left, compared with its bytes when
+	// the answer lands. Here a second mount of the same tenant sends and is answered while the first
+	// mount's answer is still in the air; the first answer must not take the handle back.
+	let releaseOld;
+	const heldOld = new Promise((r) => { releaseOld = r; });
+	let posts = 0;
+	respond = (url, init) => {
+		if (url.endsWith('/api/inbox') && init.method === 'POST') {
+			posts++;
+			if (posts === 1) return heldOld.then(() => ({ ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'older', reply_within_hours: 4 }) }));
+			return { ok: true, status: 200, json: async () => ({ ok: true, conversation_id: 'newer', reply_within_hours: 4 }) };
+		}
+		if (init.headers && init.headers['x-inbox-conversation']) return { ok: true, status: 200, json: async () => ({ ok: true, messages: [], status: 'open' }) };
+		return undefined;
+	};
+	try {
+		const first = await mountFresh({ 'data-ai-log': '0' });
+		const key = handleKeyOf(first.el);
+		await openBubble(first.root);
+		composeBox(first.root).value = 'first';
+		void first.root.querySelector('.dc-inbox-form').emit('submit');
+		for (let i = 0; i < 5 && posts < 1; i++) await settle();
+		coral.unmount(first.el);
+
+		const second = await mountFresh({ 'data-ai-log': '0', 'data-id': first.el.getAttribute('data-id') });
+		await openBubble(second.root);
+		composeBox(second.root).value = 'second';
+		await second.root.querySelector('.dc-inbox-form').emit('submit');
+		for (let i = 0; i < 5; i++) await settle();
+		assert.equal(storedHandle(key)?.conv, 'newer', 'the newer mount stored its own conversation');
+
+		releaseOld();
+		for (let i = 0; i < 10; i++) await settle();
+		assert.equal(storedHandle(key)?.conv, 'newer', 'the late answer overwrote the newer mount\'s handle');
+		coral.unmount(second.el);
+	} finally {
+		respond = null;
+	}
+});

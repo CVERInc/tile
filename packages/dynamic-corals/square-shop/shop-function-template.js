@@ -425,31 +425,90 @@ function cartAfterOrder(rawCart, rawSold) {
 	return rows.filter(function (e) { return !(Array.isArray(e) && ids.indexOf(String(e[0] || '')) >= 0); });
 }
 
-// Apply cartAfterOrder to the basket as it is at the moment of writing, not as it was when the
-// page read it.
+// ─── THE PAID SETTLE ──────────────────────────────────────────────────────────
 //
-// 🔴 tile#40. The completion page used to `getItem` the basket, work out what to keep, and
-// `setItem` that answer over the whole key. localStorage has no compare-and-swap, so anything
-// another tab wrote to the key after that read — an add-to-cart in a second tab — was overwritten
-// by an answer computed without it. This re-reads the key immediately before writing and, if it
-// moved, recomputes against the new value (bounded, so a key that never settles still ends in a
-// write rather than a spin). It shrinks the window to two adjacent synchronous calls; closing it
-// completely would need a lock every writer of the key takes, and the writers of this key ship on
-// three different deploys.
+// What a confirmed-paid order does to this browser's basket. It runs in ONE synchronous step, in
+// the same task that received the `paid` answer: nothing here awaits, so there is no moment at
+// which the receipt is on screen and the basket is still unsettled.
 //
-// No record (an older coral, or storage that refused the write) still removes the whole key —
-// the pre-0.11.16 behaviour, kept so that shopper is never left with a basket that never clears.
-function settleCartAfterOrder(ls, cartKey, soldKey) {
+// Three keys, all in the visitor's own localStorage:
+//
+//   dc-square-shop-cart:<storeId>           the basket
+//   dc-square-shop-sold:<ref>               written by the coral as the checkout leaves: what that
+//                                           attempt sent. Swept by the coral after a week.
+//   dc-square-shop-settled:<storeId>:<ref>  tile#84: THIS ORDER IS SETTLED IN THIS BROWSER. One key
+//                                           per paid order, holding the time it was written. Only
+//                                           its presence is read. It is never removed, and the
+//                                           coral's sweep (which matches `dc-square-shop-sold:`
+//                                           only) never touches it.
+//
+// 🩸 tile#84. The sold record is consumed by the first paid render. A second render of the same
+// order (a reload, the receipt opened again from history or an email) found no record and took
+// the "no record" path below: the whole basket key removed, including everything the visitor had
+// put in it since. The tombstone makes every later render of a settled order touch nothing.
+//
+// WHY NO EXPIRY. A receipt URL can be reopened from history, a bookmark or an email at any time,
+// and any expiry turns that reopen back into a whole-basket clear. A tombstone is about 100
+// characters, and there is one per paid order placed in this browser on this site; a thousand
+// orders is about 0.1 MB of the origin's several MB.
+//
+// ORDER OF WRITES, chosen so that stopping between any two of them (a crashed renderer, or a write
+// storage refuses) never takes the lines off twice and never takes the whole-key clear for an
+// order that was settled:
+//
+//   1. the tombstone   before the basket. Written after the basket, a stop between the two would
+//                      leave the basket settled and the record still there with no tombstone, so a
+//                      reload would subtract the same lines a second time.
+//   2. the basket      the subtraction (or, with no record, the whole-key clear).
+//   3. the record      removed last. Removed before the tombstone, a stop between the two would
+//                      leave neither, so a reload would take the whole-key clear.
+//
+// A stop between 1 and 2 leaves the paid lines in the basket, visible, with the order marked
+// settled: nothing comes off twice and nothing else goes, at the cost of lines the visitor
+// removes by hand. That is the only such window, and it needs a crash inside one synchronous task.
+//
+// REFUSED WRITES (storage full) keep the behaviour from before tile#84, with nothing added:
+//   · the tombstone is refused: the order settles exactly as before, without one. A later render
+//     of it finds no record and no tombstone and takes the whole-key clear (the pre-tile#84 reload).
+//   · the basket write is refused: the tombstone is taken back (`removeItem` is never refused for
+//     quota) and the error goes to the caller, so nothing came off, the record stays, and the next
+//     render of the receipt tries again, as before.
+//
+// No record (an older coral, or storage that refused the record at checkout) still removes the
+// whole key, the pre-0.11.16 behaviour, kept so that shopper is never left with a basket that never
+// clears. It is written with a tombstone like any other order, so it happens once per order.
+//
+// 🔴 ONE READ, ONE WRITE. 0.11.19 re-read the basket "immediately before writing" and recomputed up
+// to eight times if it had moved. Both reads ran in the same task, and a browser applies another
+// tab's localStorage write to this tab only between tasks, so the loop never ran a second time. It
+// is gone. A shop tab that loaded the basket before the order and writes its whole basket back
+// after this step can still put the paid lines back: that is tile#328.
+//
+// Returns whether the basket's bytes changed, so a render that changed nothing announces nothing.
+//
+// ⚠️ Ships as its own source text inside the completion page (`.toString()`), so it may not name
+// anything outside itself except `cartAfterOrder`, which ships beside it.
+function settleCartAfterOrder(ls, cartKey, soldKey, settledKey) {
+	if (settledKey && ls.getItem(settledKey) !== null) return false;
 	const rawSold = soldKey ? ls.getItem(soldKey) : null;
-	let kept = null;
-	for (let i = 0; i < 8; i++) {
-		const before = ls.getItem(cartKey);
-		kept = cartAfterOrder(before, rawSold);
-		if (ls.getItem(cartKey) === before) break;
+	let marked = false;
+	if (settledKey) {
+		try { ls.setItem(settledKey, String(Date.now())); marked = true; } catch (e) { marked = false; }
 	}
-	if (kept && kept.length) ls.setItem(cartKey, JSON.stringify(kept));
-	else ls.removeItem(cartKey);
+	const before = ls.getItem(cartKey);
+	const kept = cartAfterOrder(before, rawSold);
+	const after = kept && kept.length ? JSON.stringify(kept) : null;
+	if (after !== before) {
+		try {
+			if (after === null) ls.removeItem(cartKey);
+			else ls.setItem(cartKey, after);
+		} catch (e) {
+			if (marked) ls.removeItem(settledKey);
+			throw e;
+		}
+	}
 	if (soldKey) ls.removeItem(soldKey);
+	return after !== before;
 }
 
 // ─── ECPAY ORDER RESULT ───────────────────────────────────────────────────────
@@ -593,7 +652,7 @@ function completionBody(copy, locale, outcomeUrl, shopPath, storeId, hasRef, ref
 <h1 id="dc-shop-heading">${initial.heading}</h1>
 <section class="dc-shop-complete" aria-live="polite"><div id="dc-shop-outcome"><p>${initial.body}</p>${backLink}</div></section>
 </div>
-${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const settleCartAfterOrder=${settleCartAfterOrder.toString()};const ecpayResultView=${ecpayResultView.toString()};let B=null;try{const ss=window.sessionStorage;B=ss&&C.ref?JSON.parse(ss.getItem('dc-native-ecpay:'+C.ref)||'null'):null}catch(e){B=null}if(!B||typeof B!=='object'||typeof B.order_id!=='string'||!B.order_id)B=null;const outcomeUrl=B?C.outcomeUrl.replace(/([?&]ref=)[^&]*/,'$1'+encodeURIComponent(B.order_id)):C.outcomeUrl;const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const formatMoney=${completionFormatMoneySource()};const money=(n,c)=>formatMoney({minor:Number(n)||0,currency:c,locale:C.locale});const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(ecpayResultView(C,d,B,esc,money,setHeading,root)){if(shouldClearCartForOutcome(d.state)){try{settleCartAfterOrder(localStorage,'dc-square-shop-cart:'+C.storeId,C.ref?'dc-square-shop-sold:'+C.ref:'');window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}}return}const summary=()=>{const all=Array.isArray(d.lines)?d.lines:[];const lines=all.filter(x=>!(x&&(x.kind==='fee'||x.kind==='discount')));const off=all.filter(x=>x&&x.kind==='discount');const fee=all.filter(x=>x&&x.kind==='fee');return(lines.length||off.length||fee.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+off.map(x=>'<li class="dc-shop-discount">'+esc(x.name||(C.e&&C.e.discount)||'')+' — −'+esc(money(Math.abs(Number(x.amount_minor)||0),d.currency))+'</li>').join('')+fee.map(x=>'<li class="dc-shop-fee">'+esc(x.name||(C.e&&C.e.fee)||'')+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')};if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);try{settleCartAfterOrder(localStorage,'dc-square-shop-cart:'+C.storeId,C.ref?'dc-square-shop-sold:'+C.ref:'');window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}root.innerHTML=summary()+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='refunded'){setHeading(C.copy.refunded);root.innerHTML='<p>'+esc(C.copy.refundedBody)+'</p>'+summary()+'<p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
+${hasRef ? `<script>(function(){const C=${data},root=document.getElementById('dc-shop-outcome'),heading=document.getElementById('dc-shop-heading');let tries=0;const shouldClearCartForOutcome=${shouldClearCartForOutcome.toString()};const cartAfterOrder=${cartAfterOrder.toString()};const settleCartAfterOrder=${settleCartAfterOrder.toString()};const settle=()=>{try{if(settleCartAfterOrder(localStorage,'dc-square-shop-cart:'+C.storeId,C.ref?'dc-square-shop-sold:'+C.ref:'',C.ref?'dc-square-shop-settled:'+C.storeId+':'+C.ref:''))window.dispatchEvent(new CustomEvent('dc-cart-changed'))}catch(e){}};const ecpayResultView=${ecpayResultView.toString()};let B=null;try{const ss=window.sessionStorage;B=ss&&C.ref?JSON.parse(ss.getItem('dc-native-ecpay:'+C.ref)||'null'):null}catch(e){B=null}if(!B||typeof B!=='object'||typeof B.order_id!=='string'||!B.order_id)B=null;const outcomeUrl=B?C.outcomeUrl.replace(/([?&]ref=)[^&]*/,'$1'+encodeURIComponent(B.order_id)):C.outcomeUrl;const esc=s=>{const n=document.createElement('span');n.textContent=String(s==null?'':s);return n.innerHTML};const formatMoney=${completionFormatMoneySource()};const money=(n,c)=>formatMoney({minor:Number(n)||0,currency:c,locale:C.locale});const setHeading=s=>{heading.textContent=s;document.title=s};const back=(state)=>{setHeading(C.copy[state]);root.innerHTML='<p>'+esc(C.copy[state+'Body'])+'</p><p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>'};async function check(){let d;try{const r=await fetch(outcomeUrl,{headers:{Accept:'application/json'},credentials:'same-origin'});d=await r.json();if(!r.ok||!d||d.ok!==true)throw 0}catch(e){back('unknown');return}if(ecpayResultView(C,d,B,esc,money,setHeading,root)){if(shouldClearCartForOutcome(d.state)){settle()}return}const summary=()=>{const all=Array.isArray(d.lines)?d.lines:[];const lines=all.filter(x=>!(x&&(x.kind==='fee'||x.kind==='discount')));const off=all.filter(x=>x&&x.kind==='discount');const fee=all.filter(x=>x&&x.kind==='fee');return(lines.length||off.length||fee.length?'<ul class="st-list">'+lines.map(x=>'<li>'+esc(x.name)+' × '+esc(x.qty)+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+off.map(x=>'<li class="dc-shop-discount">'+esc(x.name||(C.e&&C.e.discount)||'')+' — −'+esc(money(Math.abs(Number(x.amount_minor)||0),d.currency))+'</li>').join('')+fee.map(x=>'<li class="dc-shop-fee">'+esc(x.name||(C.e&&C.e.fee)||'')+' — '+esc(money(x.amount_minor,d.currency))+'</li>').join('')+'</ul>':'')+'<p class="dc-shop-total">'+esc(C.copy.total)+': '+esc(money(d.total_minor,d.currency))+(d.currency==='JPY'?' <small>'+esc(C.copy.tax)+'</small>':'')+'</p>'+(d.order_ref?'<p>'+esc(C.copy.order)+': <strong>'+esc(d.order_ref)+'</strong></p>':'')};if(shouldClearCartForOutcome(d.state)){setHeading(C.copy.paid);settle();root.innerHTML=summary()+'<p>'+esc(C.copy.receipt)+'</p>';return}if(d.state==='refunded'){setHeading(C.copy.refunded);root.innerHTML='<p>'+esc(C.copy.refundedBody)+'</p>'+summary()+'<p><a class="st-runtime-action" href="'+esc(C.shopPath)+'">'+esc(C.copy.back)+'</a></p>';return}if(d.state==='pending'){setHeading(C.copy.pending);tries++;if(tries<40){root.innerHTML='<p>'+esc(C.copy.pendingBody)+'</p>';setTimeout(check,3000)}else root.innerHTML='<p>'+esc(C.copy.waiting)+'</p>';return}if(d.state==='canceled'){back('canceled');return}back('unknown')}check()})();</script>` : ''}`;
 }
 
 async function renderCompletion(request, env, cfg, shop, checkoutResult) {

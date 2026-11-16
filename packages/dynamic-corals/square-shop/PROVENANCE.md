@@ -13,6 +13,49 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## unreleased (completion page only; the coral stays 0.11.20) — a settled order stays settled (tile#84)
+
+Only `shop-function-template.js` changes, so this arrives with a site rebuild. `square-shop.js` is
+byte for byte 0.11.20, so there is no new coral version.
+
+| defect | in | effect |
+|---|---|---|
+| `settleCartAfterOrder` re-read the basket in the same task it read it in, "retrying" up to eight times | 0.11.19 | a browser applies another tab's write only between tasks, so the loop never ran a second time. It is removed: one read, one write |
+| the sold record is consumed by the first paid render, and a render with no record removes the whole basket key | 0.11.16 | reloading the receipt, or opening it again later, emptied a basket the visitor had filled since the order |
+
+**The fix.** The paid render writes `dc-square-shop-settled:<storeId>:<client_request_ref>` (the
+time, read only for its presence) in the same synchronous step that takes the lines off. A render
+that finds it touches nothing. It is never removed: the coral's one-week sweep matches
+`dc-square-shop-sold:` only, and a receipt URL can be reopened at any time, so any expiry would
+bring the whole-basket clear back for that reopen.
+
+**Order of writes** (all in one task, after the `paid` answer, before the receipt is drawn):
+tombstone, basket, record removal. Tombstone after the basket would let a stop between the two
+subtract twice on reload; record removal before the tombstone would let a stop between them take
+the whole-key clear on reload. A stop between tombstone and basket leaves the paid lines in the
+basket, visible, and marked settled. `paid-settlement.test.mjs` stops the page after each write.
+
+**Refused writes** keep the behaviour from before, with no new machinery:
+
+- tombstone refused: the order settles as before, without one; a later render of its receipt
+  finds neither record nor tombstone and takes the whole-key clear (the old reload behaviour);
+- basket write refused: the tombstone is taken back, nothing comes off, the record stays, and the
+  next render of the receipt tries again (as before); the receipt still says paid;
+- the sold record refused at checkout (by the coral): that order's paid render takes the whole-key
+  clear, once (as before, but now only once per order);
+- storage unavailable altogether: nothing is read or written (as before).
+
+**Not addressed:** a shop tab that loaded the basket before the order and writes its whole basket
+back after the settle (tile#328). Two renders of the same receipt in two tabs in the very same
+moment can both find no tombstone; that needs the same order opened twice at once.
+
+An earlier draft of this fix (PR #327, two review rounds, never released) moved the settle behind
+a wait and a paid-intent key the coral applied later. Review showed that this split could leave
+paid lines chargeable (a closed tab with an older coral, a refused reconcile, cross-tab overlap) and
+it was withdrawn in favour of the synchronous step above.
+
+---
+
 ## 0.11.19 — 2026-09-29 — a paid order takes its lines off the basket as it is now (tile#40)
 
 0.11.16 made a paid completion remove only the rows the order carried. It still wrote its answer
