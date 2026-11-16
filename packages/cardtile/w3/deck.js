@@ -274,7 +274,7 @@
   document.addEventListener('pointerup',dragEnd,true); document.addEventListener('pointercancel',dragEnd,true);
   let flingDir=0;
   // a card that is not the top card, wherever and however it shows, is a button to itself (next → +1 page, previous → −1)
-  stack.addEventListener('click',e=>{ if(!e.isTrusted)return; /* the QR borrow clicks the avatar programmatically; that is not a person choosing a card */ if(openCard||fanned||document.documentElement.classList.contains('fan-closing'))return; const c=e.target.closest('.deck-card'); if(!c||c.classList.contains('is-top'))return; const dir=c.classList.contains('is-next1')?1:c.classList.contains('is-prev1')?-1:0; if(!dir)return; e.stopPropagation(); e.preventDefault(); const ph=pageH(); flingDir=dir; scrollTo({top:c.classList.contains('wrap')?0:(cur+dir)*ph,behavior:'instant'}); },true);   // same sideways flight as a drag; under the last card is the first: clicking it goes back to the top
+  stack.addEventListener('click',e=>{ if(!e.isTrusted)return; /* the QR borrow clicks the avatar programmatically; that is not a person choosing a card */ if(openCard||fanned||document.documentElement.classList.contains('fan-closing'))return; const c=e.target.closest('.deck-card'); if(!c||c.classList.contains('is-top'))return; const dir=c.classList.contains('is-next1')?1:c.classList.contains('is-prev1')?-1:0; if(!dir)return; e.stopPropagation(); e.preventDefault(); const ph=pageH(); flingDir=dir; if(c.classList.contains('wrap')){ wrapBack(); return; } scrollTo({top:(cur+dir)*ph,behavior:'instant'}); },true);   // same sideways flight as a drag; under the last card is the first: clicking it goes back to the top (wrapBack)
   const cards=[]; let openCard=null;   // cards = the cards that exist right now (the window around cur), in index order
   // all items: pre (cells written in the page) · md (the card file, built on demand) · post (our own last card)
   const pre=[], post=[], lazy=new Map(); let P=0, M=0, N=0, addingPost=false;
@@ -503,6 +503,15 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     };
     tick();
   }
+  // The tap on the first card under the last (`wrap`): back to the first card as a run of every card in between, the first
+  // one flung in from the side it was tapped on (flingDir). A pile of up to JUMP+1 cards leaves it to the scroll: sync() walks
+  // it one card per 120 ms, the prototype's run. A longer one used to be a JUMP there — sync() cannot tell this tap from a
+  // thumb dragged across the scrollbar — and the first card came up with no motion at all (a pile of 22, in Safari and in
+  // Chromium alike; the prototype's pile has 10). So here the run is queued BEFORE the scroll, at the riffle's pace (fast,
+  // settling into 120 ms: 21 cards rise over ~1.2 s), and sync() then finds cur+queue already at the top and adds nothing.
+  // Past the whole pile (2·WIN+3 cards: beyond it cards are made as the window moves) it stays the jump; with reduced motion,
+  // as before.
+  const wrapBack=()=>{ const K=cur; if(!reduced&&!running&&queue===0&&K>JUMP&&N<=2*WIN+3){ riffle=K; step(-K); } scrollTo({top:0,behavior:'instant'}); };
   // scroll: the browser owns it. The document is n pages tall with one snap point per card, so the scrollbar reads "card i of n",
   // thumb-drag / space / PageDown / Home / End all work natively, and iOS swipes are real scrolls. The pile only changes when the
   // snap index changes (never scrubbed by scroll offset): sync() queues exactly the steps that bring cur to the snapped page.
