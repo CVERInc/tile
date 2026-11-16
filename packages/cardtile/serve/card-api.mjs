@@ -1753,20 +1753,22 @@ export async function handleApi(request, env, url) {
   // a stop is (see poolKey): one admitted before a delete lands on the ended generation's key, which
   // nothing reads, and is answered 409 `stale_generation`. Anything but a boolean is refused and
   // writes nothing: a guess here would put a link on a page whose owner said no.
+  //
+  // 🔴 The lifetime is read BEFORE the body, as /stop does (review r1 on #337): a body can take as long
+  // as its sender likes, and a generation read after it is whoever owns the handle when it arrives.
+  // A lifetime that ended while the body was in flight is refused before anything is written.
   if (pool) {
     let handle;
     try { handle = decodeURIComponent(pool[1]).toLowerCase(); } catch { handle = ''; }
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(pool[1])}.` }, 400);
     if (method !== 'PUT' && method !== 'DELETE') return json({ error: `${method} not allowed here.` }, 405);
-    let inPool;
-    if (method === 'PUT') {
-      const body = await readJson(request);
-      inPool = body && typeof body === 'object' ? body.in : undefined;
-      if (typeof inPool !== 'boolean') return json({ error: '`in` must be true or false. Nothing was written.' }, 400);
-    }
     const gen = await generationOf(store, handle);
     const key = poolKey(handle, gen);
     if (method === 'PUT') {
+      const body = await readJson(request);
+      const inPool = body && typeof body === 'object' ? body.in : undefined;
+      if (typeof inPool !== 'boolean') return json({ error: '`in` must be true or false. Nothing was written.' }, 400);
+      if ((await generationOf(store, handle)) !== gen) return json(staleWrite(handle), 409);
       await store.put(key, inPool ? POOL_IN : POOL_OUT);
       if ((await generationOf(store, handle)) !== gen) return json(staleWrite(handle), 409);
       return json({ handle, gen, in: inPool });

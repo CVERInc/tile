@@ -3875,6 +3875,69 @@ test('🔴 tile#336 pool: a write admitted before delete + reuse is refused (409
   assert.match(await (await page(env, '/t')).text(), /data-pool="card"/);
 });
 
+/**
+ * A PUT whose body has not arrived yet: the stream hands over nothing until `release()`, and
+ * `started` resolves the first time the handler asks it for bytes — i.e. when it is waiting on
+ * `request.json()`. A real stream, not a stubbed `json`, so the twin run (which re-makes the Request
+ * on the other prefix and passes the same body along) holds it too.
+ */
+const heldBodyPut = (env, path, value) => {
+  const started = deferred(), release = deferred();
+  const body = new ReadableStream({
+    async pull(c) {
+      started.resolve();
+      await release.promise;
+      c.enqueue(new TextEncoder().encode(JSON.stringify(value)));
+      c.close();
+    },
+  }, { highWaterMark: 0 });
+  const url = new URL('https://card.feelreef.com' + path);
+  const req = new Request(url, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    body,
+    duplex: 'half',
+  });
+  return { pending: handleApi(req, env, url), started: started.promise, release: () => release.resolve() };
+};
+
+test('🔴 tile#336 pool: a PUT still reading its body when the card is deleted and reused is refused (409); the next owner is untouched', async () => {
+  // review r1 on #337: the generation was read AFTER the body, so a body held across delete + reuse
+  // was written under the NEW owner's generation and answered 200. `in: false` would have overwritten
+  // a next owner's `in`, so both values are run, each against a next owner whose state differs from it.
+  for (const value of [true, false]) {
+    const env = envWith({ t: CARD });
+    const held = heldBodyPut(env, '/_api/card/t/pool', { in: value });
+    await held.started;
+    assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+    assert.equal((await call(env, 'PUT', '/_api/card/t', { markdown: NEXT })).status, 200);
+    const gen = env.CARDS._m.get(genKey('t'));
+    assert.match(gen, /^[0-9a-f]{24}$/);
+    // the next owner's own state: absent for the late `in: true`, `in` for the late `in: false`
+    if (!value) assert.equal((await call(env, 'PUT', '/_api/card/t/pool', { in: true })).status, 200, 'CONTROL: the next owner joins');
+    const own = value ? undefined : 'in';
+    const before = [...env.CARDS._m].filter(([k]) => k.startsWith('pool:'));
+    held.release();
+    const late = await held.pending;
+    assert.equal(late.status, 409, `in: ${value}`);
+    assert.equal((await late.json()).stale_generation, true);
+    assert.equal(env.CARDS._m.get(poolKey('t', gen)), own, `in: ${value} reached the next owner's lifetime`);
+    assert.deepEqual([...env.CARDS._m].filter(([k]) => k.startsWith('pool:')), before, `in: ${value} wrote a pool key`);
+    const fresh = await (await page(env, '/t')).text();
+    assert.ok(fresh.includes('Next owner'));
+    assert.equal(/data-pool="card"/.test(fresh), !value, `in: ${value} changed the next owner's page`);
+  }
+  // CONTROL: the same held body, released with no delete in between, is written and answered 200
+  const env = envWith({ t: CARD });
+  const held = heldBodyPut(env, '/_api/card/t/pool', { in: true });
+  await held.started;
+  held.release();
+  const ok = await held.pending;
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { handle: 't', gen: '0', in: true });
+  assert.equal(env.CARDS._m.get(poolKey('t', '0')), 'in');
+});
+
 test("🔴 tile#336 delete sweeps every pool:<handle>:* key — and only that handle's", async () => {
   const env = envWith({ t: CARD, other: CARD, [poolKey('t', '0')]: 'in', [poolKey('t', 'aaaaaaaaaaaaaaaaaaaaaaaa')]: 'out', [poolKey('other', '0')]: 'in' });
   assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
