@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { renderCardHTML } from './serve/card-worker.mjs';
-import { renderPage, NATIVE_CSS } from './card-render.mjs';
+import { renderPage, renderDrawers, NATIVE_CSS } from './card-render.mjs';
 import { parseCard } from './card-core.js';
 
 // a Cards file with `backs` backs, each opened from a front tile and holding a few tiles of its own
@@ -74,3 +74,33 @@ test('200 backs: the page no longer grows by the stylesheet per back', () => {
   // the copies alone used to be 201 × 10,852 bytes; the whole page is now well under that
   assert.ok(Buffer.byteLength(html) < 201 * Buffer.byteLength(NATIVE_CSS) / 2, `${Buffer.byteLength(html)} bytes`);
 });
+
+// renderDrawers is exported, and a caller may insert the backs without the front grid. That fragment
+// has no other copy to lean on, so it carries exactly one of its own (tile#360 review).
+for (const backs of [1, 3]) {
+  test(`renderDrawers on its own with ${backs} backs carries the stylesheet exactly once, ahead of the backs`, () => {
+    const html = renderDrawers(parseCard(withBacks(backs)), { handle: 'someone' });
+    assert.equal(count(html, 'class="dc-drawer"'), backs, 'every back is drawn');
+    assert.equal(count(html, NATIVE_CSS), 1);
+    assert.equal(count(html, STYLE), 1);
+    assert.ok(html.startsWith(STYLE), 'the copy opens the fragment');
+  });
+}
+
+test('renderDrawers with no backs is still empty: nothing to style, nothing emitted', () => {
+  assert.equal(renderDrawers(parseCard(withBacks(0)), {}), '');
+});
+
+test('renderDrawers with ctx.styled leaves the stylesheet to the caller', () => {
+  const html = renderDrawers(parseCard(withBacks(3)), { styled: true });
+  assert.equal(count(html, 'class="dc-drawer"'), 3);
+  assert.equal(count(html, NATIVE_CSS), 0);
+});
+
+for (const backs of [0, 1, 3, 200]) {
+  test(`renderPage with ${backs} backs carries the stylesheet exactly once`, () => {
+    const html = renderPage(parseCard(withBacks(backs)), { name: 'Someone' });
+    assert.equal(count(html, 'class="dc-drawer"'), backs);
+    assert.equal(count(html, NATIVE_CSS), 1);
+  });
+}

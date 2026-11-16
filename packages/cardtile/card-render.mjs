@@ -1508,6 +1508,10 @@ export function renderGrid(model, ctx = {}) {
  *
  * This used to be ~60 lines of inlined CSS plus a whole client stapled into every card that had a
  * drawer. As a coral it has one home, and a Site can install it too.
+ *
+ * ctx.styled: the caller has already put NATIVE_CSS on the page (renderPage does, in the front grid).
+ * Without it, the fragment opens with its own single copy, so a caller that inserts the backs on their
+ * own still gets the rules every `.st-card` inside them relies on (tile#360 review).
  */
 export function renderDrawers(model, ctx = {}) {
   const drawers = model.drawers || [];
@@ -1537,7 +1541,9 @@ export function renderDrawers(model, ctx = {}) {
   // LINK: what it does is leave the fragment, which is navigation, and navigation is the one thing
   // that still works when the script never arrives.
   const close = `<a href="#" class="dc-drawer-close" role="button" aria-label="${esc(label(ctx, 'close'))}">✕</a>`;
-  return `<style>${DRAWER_CSS}</style><div class="dc-drawer-layer" data-dynamic-coral="drawer"><a href="#" class="dc-drawer-scrim" aria-hidden="true" tabindex="-1"></a>${panels}${close}</div>`;
+  // One copy for the whole fragment, never one per back: renderGrid leaves it out of every back.
+  const native = ctx.styled ? '' : `<style>${NATIVE_CSS}</style>`;
+  return `${native}<style>${DRAWER_CSS}</style><div class="dc-drawer-layer" data-dynamic-coral="drawer"><a href="#" class="dc-drawer-scrim" aria-hidden="true" tabindex="-1"></a>${panels}${close}</div>`;
 }
 
 /** renderPage: full standalone HTML (reuses the live CSS + QR-on-avatar-click). */
@@ -1554,7 +1560,7 @@ export function renderPage(model, ctx = {}) {
   const backdrop = backdropUrl
     ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, accentC))}</style>`
     : '';
-  const grid = backdrop + renderGrid(model, ctx) + renderDrawers(model, ctx);
+  const grid = backdrop + renderGrid(model, ctx) + renderDrawers(model, { ...ctx, styled: true });
   const css = ctx.css || '';
   // The avatar-morph QR popup is the `qr` dynamic coral (packages/dynamic-corals/qr). It mounts on
   // the [data-dynamic-coral="qr"] wrapper the profile cell emits — no page-baked matrix, no re-break.
