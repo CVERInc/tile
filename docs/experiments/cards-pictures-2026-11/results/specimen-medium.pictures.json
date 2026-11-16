@@ -1,0 +1,66 @@
+[
+ {
+  "id": "sha256-a48f7e7ef31f7762",
+  "type": "image/webp",
+  "bytes": 51396,
+  "w": 512,
+  "h": 512,
+  "q": 0.5
+ },
+ {
+  "id": "sha256-7449cceb5a11c8c1",
+  "type": "image/webp",
+  "bytes": 153200,
+  "w": 1600,
+  "h": 1000,
+  "q": 0.29
+ },
+ {
+  "id": "sha256-c990f0401ca3a003",
+  "type": "image/webp",
+  "bytes": 121700,
+  "w": 1200,
+  "h": 1200,
+  "q": 0.25
+ },
+ {
+  "id": "sha256-d4549afa0ef044d3",
+  "type": "image/jpeg",
+  "bytes": 123858,
+  "w": 1200,
+  "h": 1200,
+  "q": 0.3
+ },
+ {
+  "id": "sha256-21e5bc304fbeb365",
+  "type": "image/webp",
+  "bytes": 87486,
+  "w": 1000,
+  "h": 1000,
+  "q": 0.25
+ },
+ {
+  "id": "sha256-d068fcb3bb088e84",
+  "type": "image/webp",
+  "bytes": 153336,
+  "w": 1600,
+  "h": 1000,
+  "q": 0.3
+ },
+ {
+  "id": "sha256-85c4439fcaea8e6c",
+  "type": "image/webp",
+  "bytes": 121440,
+  "w": 1200,
+  "h": 1200,
+  "q": 0.26
+ },
+ {
+  "id": "sha256-32530e48b6ca70e2",
+  "type": "image/webp",
+  "bytes": 86424,
+  "w": 1000,
+  "h": 1000,
+  "q": 0.24
+ }
+]

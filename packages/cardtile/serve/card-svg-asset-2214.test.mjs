@@ -3,8 +3,9 @@
 //
 // 🔴 WHAT THIS IS HOLDING. reef's `put_asset` accepts image/svg+xml again (reef PR #2228) on ONE
 // premise, measured on this repo at fdb68c3: an asset is only ever shown as a PICTURE — base64 inside
-// `<img src="data:…">` or a CSS `url()` — so an SVG with `<script>` in it runs nothing. There is no
-// per-asset route, the icon exits refuse a non-raster avatar, and the thin markdown exit drops the
+// `<img src="data:…">` or a CSS `url()` — so an SVG with `<script>` in it runs nothing. The one
+// per-asset route (tile#339, `…/a/<sha256>.<ext>`) serves the raster allowlist only, so an SVG stays a
+// data: URI and that route 404s it (cardtile-asset-urls.test.mjs); the icon exits refuse a non-raster avatar, and the thin markdown exit drops the
 // lane. If any of that changes (an asset route, an inline `<svg>`, an `<object>` embed, an icon exit
 // that passes the avatar through), SVG on reef must go behind `attachment` + `CSP: sandbox` first —
 // and the red here is how that gets noticed. Assertions are about what a CLIENT gets: every exit —

@@ -138,19 +138,65 @@
   // The switch. Never a reload: stack ⇄ list is the pile re-arranging itself; to or from the wall the tiles change homes.
   // Focus stays on the switcher (its buttons are never moved), and the place you were reading carries over.
   // o.quiet: a view somebody else names (the editor's preview) is not this visitor's pick, so it is not remembered.
-  const setMode=(m,o)=>{ if(!VIEWS.includes(m))return false; if(m===mode)return true;
+  // o.glide: the visitor pressed the switcher — a switch to or from the wall is drawn as one motion (glide, below)
+  // A switch asked for while a glide's update has not run yet (the page is still the view it is leaving) waits for it: any
+  // switch, not only another glide — stack ⇄ list made at once there would be undone by the update a moment later.
+  // So does a press on the view still on screen (the switcher's buttons, below): it is a press back, the visitor's last pick.
+  const setMode=(m,o)=>{ if(!VIEWS.includes(m))return false; if(gliding){ gliding.then(()=>setMode(m,o)); return true; } if(m===mode)return true;
+    if(o&&o.glide&&(m==='spread')!==(mode==='spread')&&glide(m)) return true;
+    return swap(m,o); };
+  const swap=(m,o,up)=>{ if(!VIEWS.includes(m)||m===mode)return false;
     if(!PIN&&!(o&&o.quiet)){ try{localStorage.setItem(LS,m);}catch(_){} }
     const held=seg.contains(document.activeElement)?document.activeElement:null;
-    if(mode==='spread'){ const at=vb?vb.at():wallAt(); mode=m; paintRoot(); if(deck) deck.enter(at); else deck=buildDeck(at); }
+    if(mode==='spread'){ const at=up?up.at:vb?vb.at():wallAt(); mode=m; paintRoot(); if(deck) deck.enter(at,up); else deck=buildDeck(at,up); }
     else if(m==='spread'){ const at=deck.leave(); mode=m; paintRoot(); wallEnter(at); }
     else { deck.layout(m); mode=m; paintRoot(); }
     seg.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.m===mode)));
     if(held&&document.activeElement!==held) held.focus({preventScroll:true});
     return true; };
+  // ---- to or from the wall, as one motion (tile#342) ----
+  // Stack ⇄ list glide by themselves (__deckLayout's FLIP). To or from the wall the tiles change homes, so the browser draws the
+  // change instead: a view transition (deck.css, "the wall's transition"). The card you are on and its tile on the wall are one
+  // thing seen twice — the tile is the card's front — so they carry one name, data-deck-up, on whichever of the two is drawn: it
+  // flies between the two places while the rest of the page cross-fades. The switcher has a name of its own and is not animated:
+  // it is in one place in every view (deck.css, "one switcher, one place"), and it stays there.
+  // None of this where the browser has no view transitions (or no moveBefore: below), or the visitor asks for less motion: the switch is the instant one
+  // (to stack, the pile is still dealt). The state changes inside the transition's update — the browser takes its picture of the
+  // page as it was first, a frame later — so a press that arrives before that update has run waits for it.
+  let gliding=null, glides=0;
+  const vtName='data-deck-up', unname=()=>document.querySelectorAll('['+vtName+']').forEach(e=>e.removeAttribute(vtName));
+  const vbTile=i=>{ if(typeof i!=='number')return null; for(const t of document.querySelectorAll('.vb-win .vb-tile')) if(!t.hidden&&t._i===i)return t; return null; };
+  // 🔴 …and only where the browser has Element.moveBefore. That is a stand-in for the one engine family the transition has been
+  // SEEN to start and end in place (w3/deck-switcher.smoke.mjs). A switch to or from the wall scrolls the document (the pile's
+  // scroll is its card number, the wall's is where you were reading), and the WebKit we can run draws a transition's pictures of
+  // the page at the wrong scroll offset when its update scrolls the document — no deck needed to see it, a long page and
+  // scrollTo() in the update do it: the page as it was is drawn off screen at the start, the page as it is is drawn displaced
+  // until the end, then jumps. A jump is what this is here to remove. Firefox was not looked at. Lift this for an engine when
+  // the smoke is green in it.
+  const glide=m=>{
+    if(typeof document.startViewTransition!=='function'||typeof root.moveBefore!=='function'||matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+    const toWall=m==='spread';
+    // the card or tile you are on, in the view you are leaving. Into a pile: the one under the middle of the wall (the pile opens
+    // on it); null at the very top of the wall, where the pile opens on its first card.
+    let up=null, from=null;
+    if(toWall) from=deck&&deck.up();
+    else { const at=vb?vb.at():wallAt(); up={at,deal:false}; from=at==null?(deck?deck.tileFor(null):DRAW?null:tiles()[0]):vbTile(at)||(at.nodeType===1?at:null); }
+    const face=toWall&&from&&from.querySelector('.deck-front > .st-cell');   // the tile on the card that is up (null: a card that is no tile)
+    unname(); if(from) from.setAttribute(vtName,'');
+    root.classList.add('deck-glide');
+    let t; try{ t=document.startViewTransition(()=>{ unname(); swap(m,null,up);
+      const to=toWall?(face&&face.isConnected&&face.closest('.deck-card')==null?face:vbTile(vb&&vb.at())):deck&&deck.up();
+      if(to) to.setAttribute(vtName,''); }); }
+    catch(_){ unname(); root.classList.remove('deck-glide'); return false; }
+    // a later glide skips this one (the browser ends a transition when another starts): only the latest one tidies up
+    const n=++glides, done=()=>{ if(n!==glides)return; unname(); root.classList.remove('deck-glide'); };
+    gliding=t.updateCallbackDone.then(()=>{},()=>{}).then(()=>{ if(n===glides) gliding=null; });
+    t.finished.then(done,done);
+    return true; };
   window.__deckSetMode=setMode;
   window.__deckView=v=>setMode(V2M[v],{quiet:true});   // by the name people see ('stack' | 'list' | 'wall'); true when the page now shows it
   seg.querySelectorAll('button').forEach(b=>{ if(!VIEWS.includes(b.dataset.m))b.remove(); }); if(VIEWS.length<2)seg.style.display='none';   // one view = nothing to switch
-  seg.querySelectorAll('button').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.m===mode)); b.onclick=()=>{ if(b.dataset.m!==mode){setMode(b.dataset.m);return;} if(b.dataset.m==='deck'&&window.__deckFanToggle) window.__deckFanToggle(); if(b.dataset.m==='list'&&window.__deckListHome) window.__deckListHome(); };});
+  seg.querySelectorAll('button').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.m===mode)); b.onclick=()=>{ if(gliding||b.dataset.m!==mode){setMode(b.dataset.m,{glide:true});return;} if(b.dataset.m==='deck'&&window.__deckFanToggle) window.__deckFanToggle(); if(b.dataset.m==='list'&&window.__deckListHome) window.__deckListHome(); };});
   // spread mode = an ordinary one-page site; the exchange shows as one footer line, same href as the deck's last card
   const GLYPH='<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 39.5 78.2 C 39.6 62 39.8 46 40 29.3"/><path d="M 40 29.3 C 37.7 29.2 33.4 28.1 30.7 22.5"/><path d="M 40 29.3 C 42.3 29.2 46.6 28.1 49.3 22.1"/><path d="M 39.5 62 C 33.3 61.6 28.8 59.8 26.5 56.5 C 24.8 54 23.8 50.8 23.7 47.5"/><path d="M 39.7 53.8 C 44.1 49.5 49.6 46.1 55.6 44.1 C 62 41.9 69.5 41.6 76.8 44.1"/><path d="M 62.6 42.2 C 64.1 40.7 66.4 37.3 64.8 31.8"/></svg>';
   // the footer is site chrome: identical in every view
@@ -207,7 +253,7 @@
     api(); vb={api,layout,show,at};
   }
   // ---- the pile (stack and list). Built once; `at` is the tile to open on (null: the first card). ----
-  function buildDeck(at){
+  function buildDeck(at,up){
   ON=true;
   let LIST=mode==='list';   // the deck engine, laid out one card under another with ordinary scrolling (Safari tab view); no pile physics
 
@@ -274,7 +320,7 @@
   document.addEventListener('pointerup',dragEnd,true); document.addEventListener('pointercancel',dragEnd,true);
   let flingDir=0;
   // a card that is not the top card, wherever and however it shows, is a button to itself (next → +1 page, previous → −1)
-  stack.addEventListener('click',e=>{ if(!e.isTrusted)return; /* the QR borrow clicks the avatar programmatically; that is not a person choosing a card */ if(openCard||fanned||document.documentElement.classList.contains('fan-closing'))return; const c=e.target.closest('.deck-card'); if(!c||c.classList.contains('is-top'))return; const dir=c.classList.contains('is-next1')?1:c.classList.contains('is-prev1')?-1:0; if(!dir)return; e.stopPropagation(); e.preventDefault(); const ph=pageH(); flingDir=dir; scrollTo({top:c.classList.contains('wrap')?0:(cur+dir)*ph,behavior:'instant'}); },true);   // same sideways flight as a drag; under the last card is the first: clicking it goes back to the top
+  stack.addEventListener('click',e=>{ if(!e.isTrusted)return; /* the QR borrow clicks the avatar programmatically; that is not a person choosing a card */ if(openCard||fanned||document.documentElement.classList.contains('fan-closing'))return; const c=e.target.closest('.deck-card'); if(!c||c.classList.contains('is-top'))return; const dir=c.classList.contains('is-next1')?1:c.classList.contains('is-prev1')?-1:0; if(!dir)return; e.stopPropagation(); e.preventDefault(); const ph=pageH(); flingDir=dir; if(c.classList.contains('wrap')){ wrapBack(); return; } scrollTo({top:(cur+dir)*ph,behavior:'instant'}); },true);   // same sideways flight as a drag; under the last card is the first: clicking it goes back to the top (wrapBack)
   const cards=[]; let openCard=null;   // cards = the cards that exist right now (the window around cur), in index order
   // all items: pre (cells written in the page) · md (the card file, built on demand) · post (our own last card)
   const pre=[], post=[], lazy=new Map(); let P=0, M=0, N=0, addingPost=false;
@@ -289,7 +335,7 @@
   // a card that leaves the window: one built from the page (a tile, our own last card) goes to the bench and comes back as it
   // was; one built from a line of a card file is text and nothing else, so it is dropped and built again when it is needed
   // (a file can hold ~850,000 of them)
-  const away=c=>{ const i=idx(c); unput(c); if(i>=P&&i<P+M){ c.remove(); lazy.delete(i); } else mv(bench,c,null); };
+  const away=c=>{ const i=idx(c); unput(c); if(i>=P&&i<P+M){ unmark(c); c.remove(); lazy.delete(i); } else mv(bench,c,null); };
   let pushed=false; addEventListener('popstate',()=>{ if(openCard){pushed=false; close();} });
   const docksInert=on=>document.querySelectorAll('dc-dock').forEach(d=>{ d.inert=on; });   /* the dice was tappable through the frosted glass */
   // 🔴 ONE TURN AT A TIME. A card that is put back shows its back for the first half of deck-put, and a back two tiles name is
@@ -299,17 +345,36 @@
   // for again turns at once: its back never left it. With reduced motion there is no turn, so nothing waits.
   const PUT_MS=600; let putting=null, putT=0, wants=null;
   const putOver=c=>{ if(putting!==c)return; clearTimeout(putT); putting=null; const k=wants; wants=null; if(k&&ON&&!openCard&&!fanned&&k.isConnected&&idx(k)===cur&&k.querySelector('.deck-back')&&(LIST||k.classList.contains('is-top'))) open(k); };   /* only the card that is still up, and still has a back: anything else and the request is dropped */
-  const open=card=>{if(putting&&putting!==card){wants=card;return;}if(putting){clearTimeout(putT);putting=null;}wants=null;if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
+  const open=card=>{if(putting&&putting!==card){wants=card;return;}if(putting){clearTimeout(putT);putting=null;}wants=null;if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');if(bk){bk.scrollTop=0;tellMore(bk);}/* a back is read from its top each time it is turned up, and says at once whether it holds more (the back may have been lent to this tile a moment ago) */bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
   let lastFocus=null;
   const close=()=>{wants=null;/* putting back is also taking back a card that was asked for and has not turned yet */if(!openCard)return;const c=openCard;if(pushed){pushed=false;try{history.back();}catch(_){}}c.classList.remove('is-open');c.classList.remove('flipping-open');void c.offsetWidth;c.classList.add('flipping-close');c.addEventListener('animationend',function h(e){if(e.animationName!=='deck-put')return;c.removeEventListener('animationend',h);c.classList.remove('flipped');putOver(c);});if(!matchMedia('(prefers-reduced-motion: reduce)').matches){clearTimeout(putT);putting=c;putT=setTimeout(()=>putOver(c),PUT_MS);}else c.classList.remove('flipped');/* no animation, so no animationend: the face goes back now, or the card would show its back for good *//* flipping-close stays: its fill IS the rest pose, so nothing re-animates after the end; the next open() removes it */openCard=null;document.documentElement.classList.remove('open');docksInert(false);if(lastFocus&&lastFocus.focus){lastFocus.focus();lastFocus=null;}};
+  // ---- marks: a side that holds more than it shows says so, at the edge that has more beyond it (tile#343) ----
+  // A side is a window of a fixed size and scrolls when what it holds is longer (deck.css: "a side is a window"). Each side
+  // carries two marks, after what it holds (so a front's tile is still its first child): the stylesheet keeps them at the
+  // side's top and bottom edges and draws the one the side names in data-more ("up", "down", both, or no attribute at all:
+  // everything shows). It is told again when the side scrolls and when the side, or the box it holds, changes size — a
+  // picture that arrives, a back that is lent to this tile, the window. Decoration only: the marks say nothing to a reader
+  // (aria-hidden) and take no tap; the side is what scrolls, by finger, wheel or keys.
+  // Keys need a way in: a side that holds more than it shows is in the Tab order (tabindex 0), a region named for the side
+  // ("Front", "Back": the editor's words for it, in the page's language), and shows the page's own focus ring (card.css,
+  // [tabindex]:focus-visible). A side that shows everything is not a stop: a front has no tabindex, a back keeps -1, the
+  // place its turn sends focus to (open). Safari does not put a scrolling box in the Tab order of its own accord.
+  const CHEV='<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>';
+  const tellMore=side=>{ const up=side.scrollTop>1, down=side.scrollTop+side.clientHeight<side.scrollHeight-1; const v=up&&down?'up down':up?'up':down?'down':''; if(v){ if(side.getAttribute('data-more')!==v) side.setAttribute('data-more',v); } else if(side.hasAttribute('data-more')) side.removeAttribute('data-more');
+    const isBack=side.classList.contains('deck-back'), set=(k,val)=>{ if(val==null){ if(side.hasAttribute(k)) side.removeAttribute(k); } else if(side.getAttribute(k)!==val) side.setAttribute(k,val); };
+    if(up||down){ set('tabindex','0'); set('role','region'); set('aria-label',isBack?say('back'):say('front')); } else { set('tabindex',isBack?'-1':null); set('role',null); set('aria-label',null); } };
+  const sized=typeof ResizeObserver==='function'?new ResizeObserver(es=>{ const seen=new Set(); for(const e of es){ const f=e.target.closest&&e.target.closest('.deck-face'); if(f&&!seen.has(f)){ seen.add(f); tellMore(f); } } }):null;
+  const marks=(side,held)=>{ for(const to of ['up','down']){ const m=mk('span','tile-more',CHEV); m.dataset.to=to; m.setAttribute('aria-hidden','true'); side.appendChild(m); }
+    side.addEventListener('scroll',()=>tellMore(side),{passive:true}); if(sized){ sized.observe(side); if(held&&held.nodeType===1) sized.observe(held); } };
+  const unmark=card=>{ if(sized) for(const f of card.querySelectorAll('.deck-face')){ sized.unobserve(f); for(const c of f.children) sized.unobserve(c); } };   // a tile that is dropped for good (away) is not watched any longer
   const addCard=(frontNode,backNode,opts={})=>register(buildCard(frontNode,backNode,{...opts,seated:true}));
   // seated: the card goes on the bench BEFORE its faces are filled, so a tile moves from the page into a card that is already
   // in the page — it is never outside the document, not even while its card is being put together. With slots (pileOrder) it
   // goes straight into the stack instead, not drawn until it has a slot, so the tile's frame does not move a second time.
   function buildCard(frontNode,backNode,opts={}){
-    const card=mk('div','deck-card'); if(opts.seated) (SLOTS?stack:bench).appendChild(card); if(frontNode&&frontNode.dataset&&frontNode.dataset.theme) card.style.cssText=frontNode.dataset.theme; const front=mk('div','deck-face deck-front'); card.appendChild(front); if(opts.seated) mv(front,frontNode,null); else front.appendChild(frontNode);
+    const card=mk('div','deck-card'); if(opts.seated) (SLOTS?stack:bench).appendChild(card); if(frontNode&&frontNode.dataset&&frontNode.dataset.theme) card.style.cssText=frontNode.dataset.theme; const front=mk('div','deck-face deck-front'); card.appendChild(front); if(opts.seated) mv(front,frontNode,null); else front.appendChild(frontNode); marks(front,frontNode);
     if(opts.back) card.dataset.back=opts.back;   // the back is one a tile names (shared: see lend); its face is made even while another card has the node
-    if(backNode||opts.back){card.classList.add('can-flip'); const back=mk('div','deck-face deck-back'); back.tabIndex=-1; const sc=mk('div','deck-back-scroll'); back.appendChild(sc); card.appendChild(back); if(backNode){ if(opts.seated) mv(sc,backNode,null); else sc.appendChild(backNode); }
+    if(backNode||opts.back){card.classList.add('can-flip'); const back=mk('div','deck-face deck-back'); back.tabIndex=-1; const sc=mk('div','deck-back-scroll'); back.appendChild(sc); card.appendChild(back); if(backNode){ if(opts.seated) mv(sc,backNode,null); else sc.appendChild(backNode); } marks(back,sc);
       front.addEventListener('click',e=>{ if(e.target.closest('a,button,input,.cp-icon,#qr-holder'))return; if(String(getSelection()).length)return; if((LIST||card.classList.contains('is-top'))&&!openCard) open(card); });
       let hadSel=false; back.addEventListener('pointerdown',()=>{ hadSel=String(getSelection()).length>0; });   /* a drag that selects text, or the tap that clears a selection, is not a close */
       back.addEventListener('click',e=>{ if(e.target.closest('a,button,input,select,textarea,label'))return; if(hadSel||String(getSelection()).length){hadSel=false;return;} if(openCard===card) close(); });}
@@ -385,9 +450,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // draw it in a pile. The footer has two homes as well: under the cards in a pile, where the engine put it on the wall.
   { const ft=document.querySelector('footer.st-footer'); if(ft){ lodge(ft); host.insertBefore(ft,table); settled(ft); } }   // same stacking context as the table, so z 5 really sits under the cards
   let homing=0, wasAt=0; window.__deckListHome=()=>{ if(!ON||!LIST)return; const ph=pageH(); if(scrollY<=ph/2&&wasAt>0){ homing=Date.now(); scrollTo({top:wasAt*ph,behavior:'smooth'}); wasAt=0; return; } wasAt=cur; document.documentElement.classList.remove('list-away'); homing=Date.now(); scrollTo({top:0,behavior:'smooth'}); };
-  window.__deckFanToggle=()=>{ if(!ON||LIST)return; if(fanned)fanIn(); else fanOut(); };
+  window.__deckFanToggle=()=>{ if(!ON||LIST)return; settleWrap(); if(fanned)fanIn(); else fanOut(); };
   // stack ⇄ list without a reload: the same cards glide from one arrangement to the other (FLIP), then the other arrangement's scrolling takes over
-  window.__deckLayout=(m)=>{ const toList=m==='list'; if(!ON||toList===LIST)return; if(fanned)fanIn(); close(); if(!toList)document.documentElement.classList.remove('list-away');     const before=new Map(cards.map(c=>[c,c.getBoundingClientRect()]));   // cards that join the window during the switch have no before: they just appear
+  window.__deckLayout=(m)=>{ const toList=m==='list'; if(!ON||toList===LIST)return; settleWrap(); if(fanned)fanIn(); close(); if(!toList)document.documentElement.classList.remove('list-away');     const before=new Map(cards.map(c=>[c,c.getBoundingClientRect()]));   // cards that join the window during the switch have no before: they just appear
     cards.forEach(c=>{ c.style.transition='none'; c.style.opacity='1'; c.style.visibility='visible'; c.style.transform=''; });
     LIST=toList; document.documentElement.classList.toggle('list',LIST); paint();
     fit(); goTo(cur); listTx();
@@ -424,18 +489,21 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // flight: over the top of the pile in two halves. Half 1 plays where the card is; at the apex the node moves to its new place in the pile
   // (front of DOM for to-back, end of DOM for from-back) and half 2 plays there. Both halves share the apex pose, so the swap is invisible.
   const FLIGHT=['to-back-1','to-back-2','from-back-1','from-back-2'];
+  const flown=new Map();   // a card in flight → its animationend listeners (land() takes them off when a run is settled)
   const flight=(c,kind)=>{ c.classList.add('travel'); c.classList.remove(...FLIGHT); c.classList.toggle('side',flingDir!==0); c.style.setProperty('--fdir',String(flingDir||1)); flingDir=0; void c.offsetWidth; c.classList.add(kind+'-1');
     const onEnd1=e=>{ if(!new RegExp('^deck-'+kind+'(-side)?-1$').test(e.animationName))return; c.removeEventListener('animationend',onEnd1);
       c.classList.remove(kind+'-1');
       if(kind==='to-back'){ put(c,above(gshadow)); } else { put(c,null); if(card(cur)===c)put(shade,c,true); }
       void c.offsetWidth; c.classList.add(kind+'-2');
-      const onEnd2=e2=>{ if(!new RegExp('^deck-'+kind+'(-side)?-2$').test(e2.animationName))return; c.removeEventListener('animationend',onEnd2); c.classList.remove(kind+'-2','travel'); settleHidden(c); order(); if(!running&&!stack.querySelector('.travel')){stack.classList.remove('busy'); requestAnimationFrame(hovEval); setTimeout(hovEval,560);} };
-      c.addEventListener('animationend',onEnd2); };
-    c.addEventListener('animationend',onEnd1); };
+      const onEnd2=e2=>{ if(!new RegExp('^deck-'+kind+'(-side)?-2$').test(e2.animationName))return; c.removeEventListener('animationend',onEnd2); flown.delete(c); c.classList.remove(kind+'-2','travel'); settleHidden(c); order(); if(!running&&!stack.querySelector('.travel')){stack.classList.remove('busy'); requestAnimationFrame(hovEval); setTimeout(hovEval,560);} };
+      flown.set(c,[onEnd2]); c.addEventListener('animationend',onEnd2); };
+    flown.set(c,[onEnd1]); c.addEventListener('animationend',onEnd1); };
+  const land=c=>{ for(const f of flown.get(c)||[]) c.removeEventListener('animationend',f); flown.delete(c); c.classList.remove('travel','side',...FLIGHT); settleHidden(c); };   // a flight cut short: the card is where paint() puts it, now
   // the deal: the pile lands on the table — when the page opens on it, and each time the wall is left for it
-  const dealIn=()=>{ if(!LIST){ stack.classList.add('dealing'); } paint(); if(!LIST) cards.forEach(c=>{c.style.transform='translateY(60vh)';c.style.opacity='0';});
+  // quiet: the pile is not dealt but simply there — the wall's transition (glide) is how it arrives
+  const dealIn=quiet=>{ if(quiet){ paint(); return; } if(!LIST){ stack.classList.add('dealing'); } paint(); if(!LIST) cards.forEach(c=>{c.style.transform='translateY(60vh)';c.style.opacity='0';});
   requestAnimationFrame(()=>requestAnimationFrame(()=>{stack.classList.remove('dealing'); stack.classList.add('dealt'); const vis=cards.filter(c=>!c.classList.contains('is-deep')); cards.forEach(c=>{if(!vis.includes(c)){c.style.transform='';c.style.opacity='';}}); vis.slice().reverse().forEach((c,i)=>setTimeout(()=>{c.style.transform='';c.style.opacity='';},i*110)); setTimeout(()=>stack.classList.remove('dealt'),vis.length*110+700);})); };
-  dealIn();
+  dealIn(up&&up.deal===false);
   // ---- fan: tap the table (not a card) while closed → cards spread like a hand. Slide a finger across: the card under it rises; lift → it becomes the top. Tap the table again / Esc → fold. ----
   let fanned=false, fanStep=0, fanScale=1, fanHot=-1;
   let fanT=0, fanP=0; // fanT: how far the whole fan sits below the pile (px); fanP: pivot distance below the card centre (px)
@@ -485,7 +553,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   document.addEventListener('pointercancel',()=>{ fanDown=false; fanHover(-1); },true);
   stack.addEventListener('click',e=>{ if(document.documentElement.classList.contains('fan-closing')){e.preventDefault();e.stopPropagation();} },true);
   document.addEventListener('click',e=>{ if(!ON||openCard||fanned||document.documentElement.classList.contains('fan-closing'))return; if(e.target.closest('.deck-card,.deck-bar,.deck-seg,.deck-player,a,button,input,label,.cp-icon,#qr-holder,#qr-overlay,#qr-group,dc-dock,[data-dynamic-coral]'))return; fanOut(); });   // dock items retarget shadow clicks to the host: not the table
-  let queue=0, running=false;
+  let queue=0, running=false, runT=0, wrapping=false;   // wrapping: the run queued by wrapBack() is under way
   const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
   let movedOnce=false, moveTimer=null;
   function moving(){ if(!movedOnce){movedOnce=true;return;} document.documentElement.classList.add('moving'); clearTimeout(moveTimer); moveTimer=setTimeout(()=>document.documentElement.classList.remove('moving'),600); }
@@ -494,15 +562,38 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   function run(){
     running=true; stack.classList.add('busy');
     const tick=()=>{
-      if(queue===0){running=false; if(!stack.querySelector('.travel'))stack.classList.remove('busy'); return;}
+      if(queue===0){running=false; wrapping=false; if(!stack.querySelector('.travel'))stack.classList.remove('busy'); return;}
       const dir=Math.sign(queue); const n=N; queue-=dir;
       if(dir>0){ const leaving=card(cur); if(!reduced)leaving.classList.add('travel'); cur=(cur+1)%n; unask(); paint(); if(!reduced)flight(leaving,'to-back'); }
       else { cur=(cur-1+n)%n; unask(); const rising=card(cur); if(!reduced)rising.classList.add('travel'); paint(); if(!reduced)flight(rising,'from-back'); }
       let wait=120; if(riffle){ const k=riffle-Math.abs(queue); wait=Math.round(28+92*Math.pow(k/riffle,2)); if(!queue) riffle=0; }   /* a riffle starts fast and settles into the normal pace */
-      setTimeout(tick, reduced?0:wait);
+      runT=setTimeout(tick, reduced?0:wait);
     };
     tick();
   }
+  // The tap on the first card under the last (`wrap`): back to the first card as a run of every card in between, the first
+  // one flung in from the side it was tapped on (flingDir). A pile of up to JUMP+1 cards leaves it to the scroll: sync() walks
+  // it one card per 120 ms, the prototype's run. A longer one used to be a JUMP there — sync() cannot tell this tap from a
+  // thumb dragged across the scrollbar — and the first card came up with no motion at all (a pile of 22, in Safari and in
+  // Chromium alike; the prototype's pile has 10). So here the run is queued BEFORE the scroll, at the riffle's pace (fast,
+  // settling into 120 ms: 21 cards rise over ~1.2 s), and sync() then finds cur+queue already at the top and adds nothing.
+  // Past the whole pile (2·WIN+3 cards: beyond it cards are made as the window moves) it stays the jump; with reduced motion,
+  // as before.
+  const wrapBack=()=>{ const K=cur; if(!reduced&&!running&&queue===0&&K>JUMP&&N<=2*WIN+3){ riffle=K; step(-K); wrapping=running; } scrollTo({top:0,behavior:'instant'}); };
+  // That run is ~1.2 s in which the page is already at the top while cur still walks down to it. Whatever the visitor does
+  // in it — opens a card, taps, scrolls, presses a key, switches to the list or the wall, resizes — first SETTLES the run:
+  // the queue is dropped, the cards in flight land, and the deck is where the run was going (the first card up, the page
+  // at its top), painted once; only then is the action applied, to that deck. Left running, the run kept paint()ing under
+  // the action: a card opened on the way (Enter) lost its turn while the page stayed open on the first card's front, and
+  // a switch to the list scrolled to the card on the way while the run went on to set cur=0 under it.
+  const settleWrap=()=>{ if(!wrapping)return; wrapping=false; clearTimeout(runT); queue=0; riffle=0; running=false; flingDir=0;
+    cur=0; unask(); for(const c of [...flown.keys()]) land(c); paint(); stack.classList.remove('busy'); };
+  // A press on the pile itself while it runs was aimed at a card in flight, which the settle has just moved: that tap is
+  // spent on the settle, and its click (on whatever is under the finger now — the table, so the fan opened) is dropped.
+  // A press anywhere else (the switcher, a dock) keeps its click: the settle does not move it.
+  { const s=()=>{ if(ON) settleWrap(); }; const kill=ev=>{ ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('pointerdown',e=>{ if(!ON||!wrapping)return; const onPile=!!(e.target&&e.target.closest&&e.target.closest('.deck-stack')); settleWrap(); if(onPile){ document.addEventListener('click',kill,{capture:true,once:true}); const up=()=>{ removeEventListener('pointerup',up,true); removeEventListener('pointercancel',up,true); setTimeout(()=>document.removeEventListener('click',kill,true),0); }; addEventListener('pointerup',up,true); addEventListener('pointercancel',up,true); } },true);   /* the click comes in the same task as its pointerup: gone after it, however long the press */
+    addEventListener('keydown',s,true); addEventListener('wheel',s,{capture:true,passive:true}); addEventListener('resize',s); }
   // scroll: the browser owns it. The document is n pages tall with one snap point per card, so the scrollbar reads "card i of n",
   // thumb-drag / space / PageDown / Home / End all work natively, and iOS swipes are real scrolls. The pile only changes when the
   // snap index changes (never scrubbed by scroll offset): sync() queues exactly the steps that bring cur to the snapped page.
@@ -513,10 +604,10 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const pageH=()=>Math.max(1e-6,(document.scrollingElement.scrollHeight-innerHeight)/Math.max(1,N-1));
   const goTo=i=>scrollTo({top:i*pageH(),left:0,behavior:'instant'});
   // a jump, not a walk: step() animates one card per 120ms, so a dice landing 400,000 cards away must set cur directly
-  window.__deckJump=(i,o)=>{ i=Math.max(0,Math.min(N-1,i|0)); if(openCard)close(); if(fanned)fanIn(); queue=0; cur=i; unask(); paint(); goTo(i); if(LIST)listTx(); if(o&&o.open)requestAnimationFrame(()=>requestAnimationFrame(()=>{ const c=card(i); if(c.querySelector('.deck-back')) open(c); })); };
+  window.__deckJump=(i,o)=>{ i=Math.max(0,Math.min(N-1,i|0)); settleWrap(); if(openCard)close(); if(fanned)fanIn(); queue=0; cur=i; unask(); paint(); goTo(i); if(LIST)listTx(); if(o&&o.open)requestAnimationFrame(()=>requestAnimationFrame(()=>{ const c=card(i); if(c.querySelector('.deck-back')) open(c); })); };
   // the dice: riffle through the real cards before the target and land on it face up, not opened.
   // Scroll goes to the target first and the riffle is queued, so sync() sees cur+queue === the scrolled index and stays quiet.
-  window.__deckRiffle=(t)=>{ t=Math.max(0,Math.min(N-1,t|0)); if(openCard)close(); if(fanned)fanIn(); const K=Math.min(18,t);
+  window.__deckRiffle=(t)=>{ t=Math.max(0,Math.min(N-1,t|0)); settleWrap(); if(openCard)close(); if(fanned)fanIn(); const K=Math.min(18,t);
     if(reduced||K===0){ window.__deckJump(t); return; } queue=0; riffle=0;
     if(LIST){ cur=t-K; unask(); paint(); goTo(t-K); listTx(); requestAnimationFrame(()=>scrollTo({top:t*pageH(),behavior:'smooth'})); return; }
     const go=()=>{ cur=t-K; unask(); paint(); goTo(t); riffle=K; step(K); };
@@ -524,7 +615,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   window.__deckCount=()=>N; window.__deckCur=()=>cur;   // the editor asks which card is up, to open its row there
   let syncQueued=false;
   const sync=()=>{ syncQueued=false; if(openCard||fanned)return;
-    { const ph=pageH(); const off=scrollY/ph-cur; const f=ph>=innerHeight*0.5?Math.max(-1,Math.min(1,off)):0; const top=card(cur); cards.forEach(c=>{ if(c!==top&&c.style.getPropertyValue('--peek')) c.style.removeProperty('--peek'); }); if(top&&!running&&!top.classList.contains('travel')){ const lift=Math.abs(f)<0.5?f*-180:0; top.classList.toggle('peeking',Math.abs(lift)>0.5); top.style.setProperty('--peek',lift.toFixed(1)+'px'); } } const want=Math.max(0,Math.min(N-1,Math.round(scrollY/pageH()))); const d=want-(cur+queue); if(Math.abs(d)>JUMP&&!openCard){ queue=0; cur=want; unask(); paint(); } else if(d)step(d); };   // far = a jump (thumb-drag across a long deck), near = the walk   // one swipe = one card is the browser's job (scroll-snap-stop: always); clamping here broke thumb-drag and End
+    { const ph=pageH(); const off=scrollY/ph-cur; const f=ph>=innerHeight*0.5?Math.max(-1,Math.min(1,off)):0; const top=card(cur); cards.forEach(c=>{ if(c!==top&&c.style.getPropertyValue('--peek')) c.style.removeProperty('--peek'); }); if(top&&!running&&!top.classList.contains('travel')){ const lift=Math.abs(f)<0.5?f*-180:0; top.classList.toggle('peeking',Math.abs(lift)>0.5); top.style.setProperty('--peek',lift.toFixed(1)+'px'); } } const want=Math.max(0,Math.min(N-1,Math.round(scrollY/pageH()))); if(want!==0) settleWrap(); const d=want-(cur+queue); if(Math.abs(d)>JUMP&&!openCard){ queue=0; cur=want; unask(); paint(); } else if(d)step(d); };   // far = a jump (thumb-drag across a long deck), near = the walk   // one swipe = one card is the browser's job (scroll-snap-stop: always); clamping here broke thumb-drag and End
   // list: the vertical scroll position IS the horizontal position — one rail, one scrollbar, one snap per card
   const listTx=()=>{ if(!ON||!LIST)return; const ph=pageH(); const k=scrollY/ph; const want=Math.max(0,Math.min(N-1,Math.round(k))); if(want!==cur){ cur=want; unask(); if(openCard&&openCard!==card(cur)) close(); paint(); }
     const w=cards[0]?cards[0].getBoundingClientRect().width:400; const s0=cards[0]?idx(cards[0]):0; const kk=N>SNAPMAX&&Math.abs(k-Math.round(k))<0.06?Math.round(k):k; stack.style.setProperty('--tx',(-(kk-s0)*(w+18)).toFixed(1)+'px');   /* a long deck's card is ~17px of scroll and scrollY is whole pixels: at rest, sit exactly on the card */   /* the row starts at the window's first card */ if(Date.now()-homing>=800) document.documentElement.classList.toggle('list-away',scrollY>ph/2); };
@@ -554,6 +645,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   function endFlip(via){ const c=card(N-1); if(cur!==N-1||!c||openCard)return; if(!c.querySelector('.deck-back')){bump(1);return;} open(c); }
   const GAP=180, HOLD=400, STEP=26, html=document.documentElement; let lastAct=0;
   const canScrollX=(el,dx)=>{ for(;el&&el!==document.body&&el!==html;el=el.parentElement){ const cs=getComputedStyle(el); if(/(auto|scroll)/.test(cs.overflowX)&&el.scrollWidth>el.clientWidth+1){ if(dx>0?el.scrollLeft+el.clientWidth<el.scrollWidth-1:el.scrollLeft>0)return true; } } return false; };
+  // the same question up and down: a side of a tile is a scroller (deck.css: "a side is a window"), and so is anything a tile
+  // scrolls inside it. While one under the wheel still has more in the wheel's direction, the wheel is its, not the pile's.
+  const canScrollY=(el,dy)=>{ for(;el&&el!==document.body&&el!==html;el=el.parentElement){ if(!(el.scrollHeight>el.clientHeight+1))continue; if(!(el.classList&&el.classList.contains('deck-face'))&&!/(auto|scroll)/.test(getComputedStyle(el).overflowY||''))continue; if(dy>0?el.scrollTop+el.clientHeight<el.scrollHeight-1:el.scrollTop>1)return true; } return false; };
   const settle2=()=>{ html.style.scrollSnapType=''; const ph=pageH(); scrollTo({top:Math.round(scrollY/ph)*ph,behavior:'smooth'}); };
   let G=null;
   addEventListener('wheel',e=>{
@@ -566,7 +660,11 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     G.t=now; clearTimeout(G.timer); const g=G; G.timer=setTimeout(()=>{ if(g.axis==='x'&&LIST)settle2(); },GAP);   /* the timer only settles list; it must not end the gesture, or it would bypass HOLD (caught in testing: a turn-back stalled 214 ms, the timer fired, and the same swipe stepped back a card) */
     if(!G.axis){ if(Math.abs(dx)>Math.abs(dy)){ if(canScrollX(e.target,dx)){G.axis='inner';return;} G.axis=(dx<0&&G.atTop&&!openCard)?'release':'x'; } else if(dy!==0) G.axis='y'; else return; }
     if(G.axis==='inner'||G.axis==='release')return;                     // an inner scroller's, or the browser's
-    if(G.axis==='y'){ if(!LIST&&!openCard&&G.startCur===N-1&&dy>0&&scrollY>=html.scrollHeight-innerHeight-2){ G.acc+=dy; if(!G.fired&&G.acc>STEP*2){G.fired=true;lastAct=now;endFlip('wheel-y');} } return; }
+    // a long last tile: the document is at its end while the side still has words below. The side takes the wheel, and a
+    // gesture it took is its own to the end, momentum included: only a NEW gesture, on a side at its end, turns the tile over
+    // (tile#343: the back opened while the visitor was still reading the front)
+    if(G.axis==='y'&&dy&&!G.inner&&canScrollY(e.target,dy)) G.inner=true;
+    if(G.axis==='y'){ if(!G.inner&&!LIST&&!openCard&&G.startCur===N-1&&dy>0&&scrollY>=html.scrollHeight-innerHeight-2){ G.acc+=dy; if(!G.fired&&G.acc>STEP*2){G.fired=true;lastAct=now;endFlip('wheel-y');} } return; }
     e.preventDefault();                                                 // ours, from the first event: no history swipe
     if(LIST){ if(openCard)return; html.style.scrollSnapType='none'; scrollBy({top:dx,behavior:'instant'}); return; }
     // a new swipe can start while the last one's momentum is still arriving: macOS keeps the stream going with no gap, so it
@@ -600,14 +698,15 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const seatOf=c=>typeof c==='number'?Math.max(0,Math.min(N-1,P+c)):Math.max(0,cells.indexOf(c));   // a tile's card has the tile's own place in the dealt order as its number; a number is an item of the card file (the file wall's vb.at)
   // leave: put a held card back, fold the fan, stop answering, and send every tile home. Returns the tile of the card that was up
   // (over a card file: the number of the item that was up).
-  const leave=()=>{ if(fanned)fanIn(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
+  const leave=()=>{ settleWrap(); if(fanned)fanIn(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
     queue=0; drag=null; LD=null; hx=-1; ON=false; stack.classList.remove('hov'); root.classList.remove('list-away','fan','fan-closing','moving','open');
     cards.forEach(c=>c.style.removeProperty('--peek')); rehome(true); for(const k in API) delete window[k]; return up; };
   // enter: the tiles take their seats again and the pile is dealt, open on the card whose tile was in the middle of the wall
-  const enter=c=>{ ON=true; LIST=mode==='list'; rehome(false); Object.assign(window,API); try{history.scrollRestoration='manual';}catch(_){}
-    fit(); railSize(); queue=0; cur=seatOf(c); unask(); dealIn(); goTo(cur); listTx(); };
+  const enter=(c,up)=>{ ON=true; LIST=mode==='list'; rehome(false); Object.assign(window,API); try{history.scrollRestoration='manual';}catch(_){}
+    fit(); railSize(); queue=0; cur=seatOf(c); unask(); dealIn(up&&up.deal===false); goTo(cur); listTx(); };
   if(at!=null){ cur=seatOf(at); unask(); paint(); goTo(cur); listTx(); }
-  return {enter,leave,close,layout:window.__deckLayout};
+  // up(): the card that is up; tileFor(c): the tile whose card a pile entered with `c` opens on (glide names it)
+  return {enter,leave,close,layout:window.__deckLayout,up:()=>card(cur),tileFor:c=>cells[seatOf(c)]||null};
   }
   }
 })();
