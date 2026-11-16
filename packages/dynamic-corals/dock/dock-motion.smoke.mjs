@@ -2,15 +2,31 @@
 // cannot see — computed geometry at two widths in both corners, the installed-app bar staying at its
 // own size, and which transitions of presence play an animation.
 //
+//   (cd <this repo> && python3 -m http.server 8749 &)
 //   PLAYWRIGHT=/path/to/node_modules/playwright/index.js \
-//     node packages/dynamic-corals/dock/dock-motion.smoke.mjs [path/to/dock.js]
+//     node packages/dynamic-corals/dock/dock-motion.smoke.mjs http://127.0.0.1:8749/packages/dynamic-corals/dock/
 //
-// The optional argument is a different copy of dock.js (the mutation runs use it: break the copy,
-// the matching arm must go red). Chromium only. Exits 1 on any failure.
+// The argument is the base URL of this directory, the same one scripts/test.sh hands every browser
+// smoke; dock.js and ../inbox-bubble/inbox-bubble.js are read from it. DOCK_MOTION_SRC=<path> reads
+// dock.js from that file instead (the mutation runs use it: break a copy, the matching arm must go
+// red). Chromium only. Exits 1 on any failure.
+//
+// 🩸 tile#329: this smoke used to take an optional PATH as its argument. test.sh passes a URL, so it
+// died on ENOENT before checking anything, and under `set -e` every smoke after it never ran.
 const pw = await import(process.env.PLAYWRIGHT || 'playwright');
 const lib = pw.default ?? pw;
+const base = process.argv[2];
+if (!base) throw new Error('usage: node dock-motion.smoke.mjs <url of packages/dynamic-corals/dock/>');
 const { readFileSync } = await import('node:fs');
-const SRC = readFileSync(process.argv[2] || new URL('./dock.js', import.meta.url), 'utf8');
+const fetchText = async (url) => {
+  const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+  return r.text();
+};
+const SRC = process.env.DOCK_MOTION_SRC
+  ? readFileSync(process.env.DOCK_MOTION_SRC, 'utf8')
+  : await fetchText(new URL('dock.js', base));
+const INBOX_SRC = await fetchText(new URL('../inbox-bubble/inbox-bubble.js', base));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const results = [];
@@ -219,8 +235,7 @@ for (const how of ['hidden', 'removed']) {
 }
 // An inbox bubble whose panel is open is removed: it vanishes, no ghost, no shrink.
 {
-  const { readFileSync: rd } = await import('node:fs');
-  const inboxJs = rd(new URL('../inbox-bubble/inbox-bubble.js', import.meta.url), 'utf8');
+  const inboxJs = INBOX_SRC;
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 800 } });
   const p = await ctx.newPage();
   await p.addInitScript(HOOK);
