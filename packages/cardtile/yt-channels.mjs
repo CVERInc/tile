@@ -92,8 +92,8 @@ export function keptChannels({ seconds = CHANNEL_KEPT_SECONDS, most = CHANNEL_KE
 }
 
 /**
- * Resolve the channels a card's video cells name, concurrently. Returns { [ref]: {id, title,
- * channelId} } — keyed by what the card WROTE (UC id or @handle), because that is what the renderer
+ * Resolve the channels the page's video cells name, concurrently. Returns { [ref]: {id, title,
+ * channelId} } — keyed by what the page WROTE (UC id or @handle), because that is what the renderer
  * looks up. A ref missing from the answer is drawn in the renderer's degraded state (card-render.mjs,
  * `case 'video'`): a poster-less play button that opens the channel.
  *
