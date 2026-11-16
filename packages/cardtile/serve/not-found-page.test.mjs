@@ -72,13 +72,23 @@ const titleOf = (html) => /<title>([^<]*)<\/title>/.exec(html)?.[1];
 const visible = (html) => html.replace(/<style\b[\s\S]*?<\/style>/g, '').replace(/<script\b[\s\S]*?<\/script>/g, '');
 
 // The sentences, as written in card-worker.mjs. Kept here in full so a change to a visitor's words is a
-// change to a test, and so the three written languages are checked against text nobody derived.
+// change to a test, and so every written language is checked against text nobody derived. The sentence
+// names no product: "Cards" is a name, never a count, so "No Cards here." is not a sentence it can be in.
 const WORDS = {
-  en: 'No Cards here.',
-  zh: '這裡沒有 Cards。',
-  ja: 'ここに Cards はありません。',
+  en: 'Nothing here.',
+  zh: '這裡什麼都沒有。',
+  ja: 'ここには何もありません。',
+  ko: '여기에는 아무것도 없습니다.',
+  'zh-Hans': '这里什么都没有。',
+  de: 'Hier ist nichts.',
+  fr: "Il n'y a rien ici.",
+  es: 'Aquí no hay nada.',
+  pt: 'Não há nada aqui.',
 };
-const TAGS = { en: 'en-US', zh: 'zh-TW', ja: 'ja-JP' };
+const TAGS = {
+  en: 'en-US', zh: 'zh-TW', ja: 'ja-JP', ko: 'ko-KR', 'zh-Hans': 'zh-CN',
+  de: 'de-DE', fr: 'fr-FR', es: 'es-ES', pt: 'pt-BR',
+};
 const sentence = (html) => /<div class="st-cell st-prose"[^>]*><p>([^<]*)<\/p>/.exec(html)?.[1];
 
 // ── 1. the words follow the visitor ───────────────────────────────────────────────────────────────
@@ -104,23 +114,24 @@ test('tile#340 ①: the page speaks the visitor’s language, and says in Vary t
   }
 });
 
-test('tile#340 ①: the three written languages are three different pages', async () => {
+test('tile#340 ①: the nine written languages are nine different pages', async () => {
   const bodies = new Set();
   for (const tag of Object.values(TAGS)) bodies.add((await ask('card.feelreef.com', '/nobody', { headers: { 'accept-language': tag } })).body);
-  assert.equal(bodies.size, 3);
+  assert.equal(bodies.size, 9);
 });
 
-test('tile#340 ①: a language with no sentence of its own gets the English page whole, and the list of those is exact', async () => {
+test('tile#340 ①: every locale has its sentence; a language outside them gets the English page whole', async () => {
   assert.equal(typeof W.NOT_FOUND_WORDS, 'object', 'card-worker.mjs exports no NOT_FOUND_WORDS');
   assert.deepEqual(W.NOT_FOUND_WORDS, WORDS, 'the sentences are the ones this file spells out');
+  assert.deepEqual(Object.keys(TAGS).sort(), [...LOCALE_KEYS].sort(), 'this file asks in every locale');
+  for (const key of LOCALE_KEYS) assert.equal(SANDBOX_LOCALES[key].lang, TAGS[key], `${key}: the tag this file asks with`);
   const missing = LOCALE_KEYS.filter((k) => !W.NOT_FOUND_WORDS[k]);
-  // 🔴 TRANSLATIONS NEEDED. A locale leaves this list in the same change that adds its sentence.
-  assert.deepEqual(missing.sort(), ['de', 'es', 'fr', 'ko', 'pt', 'zh-Hans']);
+  assert.deepEqual(missing, [], 'a locale with no sentence of its own');
   const english = await ask('card.feelreef.com', '/nobody');
-  for (const key of missing) {
-    const r = await ask('card.feelreef.com', '/nobody', { headers: { 'accept-language': SANDBOX_LOCALES[key].lang } });
-    assert.equal(r.body, english.body, `${key}: not the English page byte for byte (a page in two languages)`);
-    assert.deepEqual(r.headers, english.headers, key);
+  for (const tag of ['it-IT', 'nl', 'xx']) {
+    const r = await ask('card.feelreef.com', '/nobody', { headers: { 'accept-language': tag } });
+    assert.equal(r.body, english.body, `${tag}: not the English page byte for byte (a page in two languages)`);
+    assert.deepEqual(r.headers, english.headers, tag);
   }
 });
 

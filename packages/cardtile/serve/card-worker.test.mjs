@@ -2030,7 +2030,7 @@ test('reef#2725 r3 ②: switch unset, card.feelreef.com serves today\'s page byt
 // comparison is the same handle in two stores — retired, and never there — on every exit a visitor
 // or a crawler can reach, headers included. A retired Card that also has its own domain is in the
 // retired store: the old 301 to that domain would have named the binding.
-const NO_CARD = /<div class="st-card">[\s\S]*<p>No Cards here\.<\/p>[\s\S]*href="https:\/\/feelreef\.com\/"/;
+const NO_CARD = /<div class="st-card">[\s\S]*<p>Nothing here\.<\/p>[\s\S]*href="https:\/\/feelreef\.com\/"/;
 const STOP = JSON.stringify({ stopped_at: '2026-01-01T00:00:00.000Z', reason: 'Review requested' });
 // tile-lab#51 r2: a DELETED Card (reef#2618) as deleteCard leaves the store — the lifetime rotated
 // (`gen:`), a body and a domain binding stranded under the ended generation (a delete that died

@@ -640,10 +640,17 @@ const cardHandleHeader = (vanityHandle) => (vanityHandle && VALID_HANDLE.test(va
 //
 // `views: stack` — one view, so the deck draws no switcher (deck.js: "one view = nothing to switch")
 // and a visitor's stored pick of another view is not offered: there is nothing here to see three ways.
+// The sentence names no product: "Cards" is a name, never a count, so it says only that nothing is here.
 export const NOT_FOUND_WORDS = {
-  en: 'No Cards here.',
-  zh: '這裡沒有 Cards。',
-  ja: 'ここに Cards はありません。',
+  en: 'Nothing here.',
+  zh: '這裡什麼都沒有。',
+  ja: 'ここには何もありません。',
+  ko: '여기에는 아무것도 없습니다.',
+  'zh-Hans': '这里什么都没有。',
+  de: 'Hier ist nichts.',
+  fr: "Il n'y a rien ici.",
+  es: 'Aquí no hay nada.',
+  pt: 'Não há nada aqui.',
 };
 const notFoundHome = (face) => (face === CARDS_HOST
   ? { name: CARDS_HOST, url: `https://${CARDS_HOST}/` }
