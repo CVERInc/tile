@@ -1,0 +1,16 @@
+tile-side-gestures (chromium): one long last tile with a back, stack 390
+   ✓ the specimen: one tile, the document at its end, the front 1181 px longer than it shows
+   ✓ wheel: six wheels down on the front did not turn the tile over (front at 600 of 1181)
+   ✓ wheel: …and they scrolled the front
+   ✓ wheel: the front reached its end (1181 of 1181)
+   ✓ wheel: the rest of a gesture the front took did not turn the tile over
+   ✓ CONTROL wheel: a new wheel down on a front at its end turns the last tile over
+   ✓ keys: the long front is a Tab stop, a region named "Front" (tabindex 0, role region, name Front)
+   ✓ keys: Tab reached the front (2 presses)
+   ✓ keys: the focused front shows the page's ring (solid 2px)
+   ✓ keys: PageDown scrolled the front (0 → 418) and did not turn the tile over
+   ✓ keys: Space scrolled the front (418 → 836) and did not turn the tile over
+   ✓ keys: at the front's end, Space / PageDown / ArrowDown did not turn the tile over (1181 of 1181)
+   ✓ fits: a front that shows everything is not a Tab stop (tabindex null, 0 px more)
+   ✓ fits: a back that shows everything keeps tabindex -1 (-1)
+✅ tile-side-gestures: all held

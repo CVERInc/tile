@@ -1272,6 +1272,12 @@ export async function boundHostOf(store, handle, gen) {
  * read every exit uses — renderer and API alike — so a body cannot be absent on one door and present
  * on another. A body from a dead lifetime is under a key this never computes.
  *
+ * The stop is the one deliberate difference between the doors: the public door withholds a stopped
+ * body (the no-card 404), and the authenticated reads still answer it, because the owner may read
+ * their own file while it is stopped. So those reads ask for the stop too and REPORT it
+ * (`serving: { stopped }`, `X-Cards-Serving` on /full, tile#338): a caller that can read a body can
+ * also tell that the public door will not serve it.
+ *
  * `pool: true` (tile#336) adds `pool:<handle>:<gen>` to the SAME parallel round as the body and the
  * stop: one more KV read beside them, never a serial round trip. `pooled` is the stored value as
  * written (`in`, `out`) or null; the caller decides what it means.
@@ -1410,14 +1416,21 @@ const readJson = async (request) => {
 };
 
 /**
- * get: handle → { md, version, gen } | null. Null is "no such card", never an error — and a body from
- * a deleted lifetime is no such card (see genKey).
+ * get: handle → { md, version, gen, stopped } | null. Null is "no such card", never an error — and a
+ * body from a deleted lifetime is no such card (see genKey). `stopped` is whether the public door
+ * withholds this body (a serving stop in the same lifetime), read in the same parallel round as the
+ * body (tile#338). Reading it never lifts or writes it.
  */
 async function readCard(store, handle) {
-  const { md, gen } = await liveCard(store, handle);
+  const { md, gen, stopped } = await liveCard(store, handle, { stop: true });
   if (md === null) return null;
-  return { md, version: await cardVersion(md), gen };
+  return { md, version: await cardVersion(md), gen, stopped: stopped != null };
 }
+
+/** what an authenticated read says about the public door: the JSON answers' `serving` field */
+const servingOf = (row) => ({ stopped: row.stopped });
+/** the same, for /full, which answers raw markdown and so carries it as a header */
+const SERVING_HEADER = 'X-Cards-Serving';
 
 // 🩸 `writeCard` (write + read back + assert, carried over from reef's card-store.js) is gone since
 // tile#209 r2. Its premise was that KV is the card's truth, so the version handed back had to be read
@@ -1568,9 +1581,12 @@ export function resourceOf(afterPrefix) {
  * handleApi: the `/_api/*` surface, or null when the request is not ours (the card renderer takes it).
  *
  * Routes:
- *   POST   /_api/cards                       list_cards    { handles: [...] } → summaries
- *   GET    /_api/card/<handle>               get_cards      thin markdown + manifest + version
- *   GET    /_api/card/<handle>/full          —             full markdown for the owner
+ *   POST   /_api/cards                       list_cards    { handles: [...] } → summaries, each with `serving`
+ *   GET    /_api/card/<handle>               get_cards      thin markdown + manifest + version + `serving`
+ *   GET    /_api/card/<handle>/full          —             full markdown for the owner, even while stopped;
+ *          answers the header `X-Cards-Serving: serving|stopped`
+ *          `serving: { stopped: true|false }` (tile#338): whether the public door withholds this body
+ *                  (a serving stop in the current lifetime). Reported, never changed, by these reads.
  *   GET    /_api/card/<handle>/lifetime      —             → { handle, gen }: the current generation (reef#2618 r4)
  *   PUT    /_api/card/<handle>               save_cards     { markdown, base_version, dry_run, create }
  *          answers { handle, version, commit: { gen, lifetime, serial }, bytes, … } — `commit` orders
@@ -1635,6 +1651,7 @@ export async function handleApi(request, env, url) {
         version: row.version,
         bytes: row.md.length,
         assets: assetManifest(row.md).length,
+        serving: servingOf(row),
       });
     }
     return json({ cards: out });
@@ -1724,10 +1741,14 @@ export async function handleApi(request, env, url) {
     try { handle = decodeURIComponent(full[1]).toLowerCase(); } catch { handle = ''; }
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(full[1])}.` }, 400);
     if (method !== 'GET') return json({ error: `${method} not allowed here.` }, 405);
-    const { md } = await liveCard(store, handle);
+    // liveCard, not readCard: /full answers no version, so it does not hash the whole body for one
+    const { md, stopped } = await liveCard(store, handle, { stop: true });
     if (md == null) return json({ error: `No card at "${handle}".` }, 404);
     return new Response(md, {
-      headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' },
+      headers: {
+        'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store',
+        [SERVING_HEADER]: stopped != null ? 'stopped' : 'serving',
+      },
     });
   }
 
@@ -1850,6 +1871,7 @@ export async function handleApi(request, env, url) {
         markdown: thinCard(row.md),
         assets: assetManifest(row.md),
         total_bytes: row.md.length,
+        serving: servingOf(row),
       });
     }
 
