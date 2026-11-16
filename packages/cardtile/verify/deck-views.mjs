@@ -30,6 +30,10 @@
 //             a tile changes its parent: held where the browser has Element.moveBefore, or where
 //             the `frames` step saw this engine keep a frame through a change of parent; elsewhere
 //             REPORTED, with that step's answer as the reason.
+//   once      AN EMBED LOADS ONCE (tile#324). The bio page opened on each view and left alone, then its embed brought
+//             on screen (a jump to its card, which moves no node, or a scroll on the wall): from page load to then,
+//             the embed frame navigates once and keeps the word it wrote. In WebKit a lazy frame that had never
+//             loaded, moved onto its card, loaded at the move and AGAIN when it first came on screen.
 //   frames    WHAT THIS ENGINE KEEPS A FRAME'S DOCUMENT THROUGH, asked of the bare DOM: a move to
 //             another parent (insertBefore), a move of its ancestor, display:none and back, a slot
 //             reassigned, a slot moved, and moveBefore where it exists. The slots are what the pile
@@ -70,7 +74,8 @@
 //   … --no-move-before           take Element.moveBefore away before the page runs: the path WebKit and
 //                                Firefox take today. 🔴 Still Chromium underneath — it shows what the
 //                                fallback does to a frame, not how another engine paints.
-//   … --only a,b                 just these steps (prepaint lang frames paint walk print boot long editor file draw turn before)
+//   … --no-look                  the walk does not look at the embed before a switch (lookAtEmbed): is that still needed?
+//   … --only a,b                 just these steps (prepaint lang once frames paint walk print boot long editor file draw turn before)
 //   … --dry                      no browser: serve the pages, read the markup back, exit
 //
 // Pictures: out/card-verify/deck-views/<engine>/ (walk/ holds one per switch), listed in
@@ -93,6 +98,7 @@ const BASE = opt('--base') ? resolve(opt('--base')) : '';
 const FULL = args.includes('--full');
 const ENGINE = opt('--engine') || 'chromium';
 const NOMB = args.includes('--no-move-before');   // take Element.moveBefore away: the path a browser without it takes
+const NOLOOK = args.includes('--no-look');   // the walk does not bring the embed on screen before a switch (see lookAtEmbed)
 const LABEL = ENGINE + (NOMB ? '-no-movebefore' : '');
 const ONLY = opt('--only') ? opt('--only').split(',') : null;
 const want = (step) => !ONLY || ONLY.includes(step);
@@ -387,6 +393,30 @@ async function langPage(accept, words, size) {
   return s.labels;
 }
 
+// ── once: an embed loads once, from page load to the first time it is on screen (tile#324) ───────
+// The bio page opened on a view, left alone, then the embed brought on screen (in a pile: a jump to its card, which moves
+// no node; on the wall: a scroll). Counted: the embed frame's navigations from the start, and its word before and after.
+// Seen in WebKit on 46eb564: opened on list, one load at boot and one more on the jump; opened on stack, two at boot.
+async function once(view, size) {
+  at('once', 'bio', view, sz(size));
+  const { ctx, page, seen } = await newPage(size);
+  await page.goto(`${head.url}/bio-${view}`, { waitUntil: 'load' }); await settle(page, 2000);
+  const atLoad = seen.childNavs, w0 = await embedWord(page);
+  const off = await page.evaluate(() => { const r = document.querySelector('.st-embed-html iframe').getBoundingClientRect(); return !(r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight); });
+  await page.evaluate(() => { const t = document.querySelector('.st-embed-html'), k = t.closest('.deck-card');
+    if (k && window.__deckJump) window.__deckJump(+k.dataset.i); else t.scrollIntoView({ block: 'center', behavior: 'instant' }); });
+  await settle(page, 1500);
+  const w1 = await embedWord(page), n = seen.childNavs;
+  const on = await page.evaluate(() => { const r = document.querySelector('.st-embed-html iframe').getBoundingClientRect(); return r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight; });
+  const frames = page.frames().filter((f) => f !== page.mainFrame()).length;
+  console.log(`  bio-${view} ${sz(size)}: the embed ${off ? 'starts off screen' : 'starts on screen'}; its frame navigated ${atLoad} time(s) by load + 2 s, ${n} once it had been on screen (${w0} → ${w1})`);
+  num('once:navigations-at-load', atLoad); num('once:navigations', n);
+  ok(frames === 1 && on && !!w1, `CONTROL: the page has one frame, the embed's, and it is on screen with its word (${frames} frame(s), on screen=${on}, word ${w1})`, `once:${view}:control`);
+  ok(n === 1 && w0 === w1, `${view}: the embed loads once — its frame navigated ${n} time(s) from page load to after it was first on screen, and kept the word it wrote at load (${w0} → ${w1})`, `once:${view}:loads-once`);
+  ok(seen.errs.length === 0, `no console errors (${seen.errs.slice(0, 3).join(' | ') || 'none'})`, `once:${view}:no-errors`);
+  await ctx.close();
+}
+
 // ── walk: load, the six switches, a card turned over, the drawer, the embed ──────────────────────
 // every ordered pair, as one walk from each opening view
 const WALK = { stack: ['list', 'wall', 'stack', 'wall', 'list', 'stack'], list: ['stack', 'wall', 'list', 'wall', 'stack', 'list'], wall: ['stack', 'list', 'wall', 'list', 'stack', 'wall'] };
@@ -505,13 +535,16 @@ async function walk(handle, view, size, pics) {
   const keeps = spec === 'bio' ? await framesOnce() : null;   // may a wall switch be held? (the frames step's answer for this engine)
   let from = view, wasWall = view === 'wall', wasPile = view !== 'wall'; const flips = { stack: 0, list: 0 }; let drawers = 0, woken = 0;
   // 🔴 The embed is LOOKED AT before it is asked whether a switch kept its document, whenever it is off screen or has none.
-  // Its frame is loading="lazy", and in WebKit a frame of the deck that has not been on screen since it loaded loads AGAIN the
-  // first time it is (on 1f2cc78 too: a page opened on list loads it off screen, and a jump in list, which moves no node, loads
-  // it again). A frame that moved and is off screen may also have no document yet. Either way the switch that first puts
-  // it on screen would be blamed for that load (seen: list → stack on a page opened on list). So the walk looks at it first, as
-  // a visitor would before caring whether it kept its state, and says how often it had to.
+  // Its frame is loading="lazy". Until tile#324, in WebKit a frame of the deck that had not been on screen since it loaded
+  // loaded AGAIN the first time it was (a page opened on list loaded it off screen, and a jump in list, which moves no node,
+  // loaded it again); deck.js now takes `loading` off a frame it re-inserts, and the `once` step holds that. What is left: a
+  // lazy frame that is off screen may have no document yet (with moveBefore it stays lazy), and the switch that first puts it
+  // on screen would be blamed for that load. So the walk looks at it first, as a visitor would before caring whether it kept
+  // its state, and says how often it had to. --no-look skips the look: in WebKit after tile#324 the full walk is green
+  // without it (on 46eb564: 5 failures). Not yet asked of Chromium; if it is green there too, the look can go.
   const lookAtEmbed = async (when) => {
     const w = await embedWord(page);
+    if (NOLOOK) return w;
     const off = await page.evaluate(() => { const f = document.querySelector('.st-embed-html iframe'); if (!f) return true; const r = f.getBoundingClientRect(); return !(r.width > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight); });
     if (w && !off) return w;
     woken++;
@@ -977,6 +1010,10 @@ try {
     await paint('stack', PHONE, true);    // k = 1: the ruler on a frame that nothing zooms
     await paint('wall', PHONE, true);
     if (FULL) await paint('list', DESK, true);
+  }
+  if (want('once')) {
+    console.log('── once: an embed loads once, from page load to the first time it is on screen');
+    for (const v of VIEWS) await once(v, PHONE);
   }
   if (want('walk')) {
     console.log('── walk: load, the six switches, a card turned over, the drawer, the embed');

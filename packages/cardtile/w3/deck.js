@@ -115,7 +115,15 @@
   // mv is every move of a node that may hold a frame: between the two homes, and the pile's own re-ordering (order, flight, the
   // fan, the bench). Element.moveBefore keeps a frame's document (an embed, a playing video); insertBefore loads it again. Seen in
   // Chromium: with insertBefore in order(), an embed loaded again on every stack ⇄ list and on every card that passed over it.
-  const mv=(p,n,ref)=>{ if(!p||(n.parentNode===p&&n.nextSibling===ref))return; if(p.moveBefore&&n.isConnected&&p.isConnected){ try{ p.moveBefore(n,ref); return; }catch(_){} } p.insertBefore(n,ref); };
+  // 🔴 …and a frame that is put back in by insertBefore is loaded at once, not lazily. An embed's frame is loading="lazy". In
+  // WebKit a lazy frame that has never loaded (parsed in the grid, which a pile does not draw) starts loading the moment it is
+  // inserted again, wherever it is, and its lazy trigger is still armed: the first time it is on screen it loads a SECOND time,
+  // with no node moved (tile#324: a page opened on list loaded the embed at boot and again on the jump to it; on stack, twice at
+  // boot). Taking `loading` off before the insert leaves one load. What it costs, only where there is no moveBefore: a frame
+  // moved while off screen loads then rather than when it is first seen (once either way), and an embed nobody ever brings on
+  // screen is loaded all the same (WebKit loaded it at the move already). With moveBefore nothing is re-inserted: lazy stays.
+  const eager=n=>{ if(n.isConnected&&n.querySelectorAll) for(const f of n.querySelectorAll('iframe[loading]')) f.removeAttribute('loading'); };
+  const mv=(p,n,ref)=>{ if(!p||(n.parentNode===p&&n.nextSibling===ref))return; if(p.moveBefore&&n.isConnected&&p.isConnected){ try{ p.moveBefore(n,ref); return; }catch(_){} } eager(n); p.insertBefore(n,ref); };
   const rehome=wall=>twoHomes.forEach((h,n)=>{ if(wall) mv(h.mark.parentNode,n,h.mark.nextSibling); else mv(h.to,n,h.next); });
   // the tiles that are cards: every tile of the card itself — in a grid, in a run of links, or set full-bleed (a text tile).
   // Not a back's tiles (a back is in its drawer on the wall and on its card in a pile), and not the file wall's own cover.
@@ -234,7 +242,7 @@
   const sr=SLOTS?stack.attachShadow({mode:'open',slotAssignment:'manual'}):null; const slotOf=new Map();
   const unput=n=>{ const s=slotOf.get(n); if(s){ s.remove(); slotOf.delete(n); } };
   const put=(n,ref,plain)=>{ if(!SLOTS){ if(plain) stack.insertBefore(n,ref); else mv(stack,n,ref); return; }
-    if(n.parentNode!==stack){ unput(n); stack.appendChild(n); }   // onto the table (from the bench, or new): the one move it makes
+    if(n.parentNode!==stack){ unput(n); eager(n); stack.appendChild(n); }   // onto the table (from the bench, or new): the one move it makes (eager: see mv)
     let s=slotOf.get(n); const r=ref&&slotOf.get(ref)||null; if(s&&s.parentNode===sr&&s.nextSibling===r)return;
     if(!s){ s=document.createElement('slot'); s.__n=n; slotOf.set(n,s); } sr.insertBefore(s,r); if(s.assignedNodes()[0]!==n) s.assign(n); };
   const above=n=>{ if(!SLOTS)return n.nextSibling; const s=slotOf.get(n), x=s&&s.nextSibling; return x?x.__n:null; };
