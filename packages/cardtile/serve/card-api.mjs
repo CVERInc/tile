@@ -1539,7 +1539,7 @@ async function deleteCard(env, handle, meant = null) {
  *
  * 🔴 A HANDLE SPELLED `cards` (or `card`) IS A HANDLE LIKE ANY OTHER. This Worker keeps no list of
  * reserved handles: which names may be registered is the registry's question (see the note above
- * NOT_FOUND_CARD in card-worker.mjs), and this API serves whatever handle it is handed. Such a
+ * notFound in card-worker.mjs), and this API serves whatever handle it is handed. Such a
  * card is `/_api/card/cards` or `/_api/cards/cards`: the first segment is the resource, the second
  * the handle, and only the first is ever rewritten.
  *

@@ -1442,7 +1442,7 @@ test('an unknown path under a stopped handle returns the no-card page without an
   assert.equal(res.status, 404);
   assert.equal(res.headers.get('cache-control'), 'public, max-age=60');
   assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
-  assert.equal(res.headers.get('vary'), 'Accept');
+  assert.equal(res.headers.get('vary'), 'Accept, Accept-Language');   // tile#340: the page's words follow the visitor
   assert.match(await res.text(), NO_CARD);
 });
 
@@ -1600,14 +1600,14 @@ test('reef#2725 ②: with the switch on, the old card addresses 301 to reef.card
       assert.equal(res.status, 404, url);
       assert.match(await res.text(), /<!doctype html>/, 'bare /_api keeps its HTML 404');
       assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
-      assert.equal(res.headers.get('vary'), 'Accept');
+      assert.equal(res.headers.get('vary'), 'Accept, Accept-Language');
     }
   }
   const newHostApi = await worker.fetch(new Request('https://reef.cards/_api'), env);
   assert.equal(newHostApi.status, 404);
   assert.match(await newHostApi.text(), /<!doctype html>/, 'bare /_api on reef.cards keeps its HTML 404');
   assert.equal(newHostApi.headers.get('x-robots-tag'), null, 'reef.cards is indexable; a 404 needs no header');
-  assert.equal(newHostApi.headers.get('vary'), 'Accept');
+  assert.equal(newHostApi.headers.get('vary'), 'Accept, Accept-Language');
   // switch OFF (unset, or anything that is not exactly reef.cards): the old host serves, as today
   for (const off of [{}, { CARD_CANONICAL_HOST: 'card.feelreef.com' }, { CARD_CANONICAL_HOST: 'evil.example' }, { CARD_CANONICAL_HOST: '' }]) {
     const e = { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }), ...off };
@@ -1829,7 +1829,7 @@ test('reef#2725 r3: switch off keeps the old bare /_api response', async () => {
   assert.equal(api.status, 404);
   assert.match(await api.text(), /<!doctype html>/, 'bare /_api keeps its HTML 404');
   assert.equal(api.headers.get('x-robots-tag'), 'noindex, nofollow');
-  assert.equal(api.headers.get('vary'), 'Accept');
+  assert.equal(api.headers.get('vary'), 'Accept, Accept-Language');
 });
 
 test('reef#2725 ③: ONE noindex predicate — host × handle × switch', () => {
@@ -2030,7 +2030,7 @@ test('reef#2725 r3 ②: switch unset, card.feelreef.com serves today\'s page byt
 // comparison is the same handle in two stores — retired, and never there — on every exit a visitor
 // or a crawler can reach, headers included. A retired Card that also has its own domain is in the
 // retired store: the old 301 to that domain would have named the binding.
-const NO_CARD = /<div class="st-card">[\s\S]*<p>There's no card here\.<\/p>[\s\S]*href="https:\/\/feelreef\.com\/"/;
+const NO_CARD = /<div class="st-card">[\s\S]*<p>No Cards here\.<\/p>[\s\S]*href="https:\/\/feelreef\.com\/"/;
 const STOP = JSON.stringify({ stopped_at: '2026-01-01T00:00:00.000Z', reason: 'Review requested' });
 // tile-lab#51 r2: a DELETED Card (reef#2618) as deleteCard leaves the store — the lifetime rotated
 // (`gen:`), a body and a domain binding stranded under the ended generation (a delete that died

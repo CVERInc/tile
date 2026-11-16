@@ -86,12 +86,15 @@ const envFor = (setting, extra = {}) => ({ PREVIEW: 'false', MCP_TOKEN_HASH: TOK
 //   reef.cards       DARK    the dark host's empty 404 (no store read)
 //                    MIRROR  card.feelreef.com's answer to the same path, byte for byte, plus
 //                            `X-Robots-Tag: noindex, nofollow`
+//                    NAMED   tile#340: the nothing-here page. The old host answers it (status and every
+//                            header, plus the robots header), but the page names the host the
+//                            visitor asked: its body is the one the cutover serves at that path
 //                    LIVE    the cutover's answer (whatever it is: not the dark 404)
 //   card.feelreef    SERVE   today's answer (the baseline every other column is compared with)
 //                    SAME    byte for byte the baseline
 //                    MOVED   301 → https://reef.cards<same path + query>
 //                    STAYS   not a 301 to reef.cards
-const DARK = 'dark', MIRROR = 'mirror', LIVE = 'live';
+const DARK = 'dark', MIRROR = 'mirror', NAMED = 'named', LIVE = 'live';
 const SERVE = 'serve', SAME = 'same', MOVED = 'moved', STAYS = 'stays';
 const PREVIEW_ID = 'a'.repeat(32);
 const EDITOR_ASSET = `/try/edit/a/${BORROWED['Sortable.min.js'].hash}/Sortable.min.js`;
@@ -113,8 +116,8 @@ const ROUTES = [
   ['root icon', '/favicon.ico', {}, [DARK, MIRROR, LIVE], [SERVE, SAME, MOVED]],
   ['root download', '/feelreef.md', {}, [DARK, MIRROR, LIVE], [SERVE, SAME, MOVED]],
   ['Card with its own domain', '/v?from=qr', {}, [DARK, MIRROR, LIVE], [SERVE, SAME, MOVED]],
-  ['no such Card', '/nobody', {}, [DARK, MIRROR, LIVE], [SERVE, SAME, MOVED]],
-  ['unknown sub-path', '/t/x', {}, [DARK, MIRROR, LIVE], [SERVE, SAME, MOVED]],
+  ['no such Card', '/nobody', {}, [DARK, NAMED, LIVE], [SERVE, SAME, MOVED]],
+  ['unknown sub-path', '/t/x', {}, [DARK, NAMED, LIVE], [SERVE, SAME, MOVED]],
   ['deck script', DECK_JS_PATH, {}, [DARK, MIRROR, LIVE], [SERVE, SAME, MOVED]],
   ['deck stylesheet', DECK_CSS_PATH, {}, [DARK, MIRROR, LIVE], [SERVE, SAME, MOVED]],
   ['QR coral', `/_coral/qr-${QR_VERSION}.js`, {}, [DARK, MIRROR, LIVE], [SERVE, SAME, MOVED]],
@@ -215,6 +218,13 @@ test('tile#299 ②: the decision table — setting × card host × route class',
           const mirrored = await ask(setting, OLD, path, init);
           assert.deepEqual(s, withHeader(mirrored, 'x-robots-tag', 'noindex, nofollow'), `reef.cards ${where}: mirrors card.feelreef.com`);
           assert.doesNotMatch(String(new Map(s.headers).get('location') ?? ''), /reef\.cards/, `reef.cards ${where}: never sends a visitor to a reef.cards address`);
+        } else if (onNew[col] === NAMED) {
+          const mirrored = await ask(setting, OLD, path, init);
+          const cutover = await ask({ CARD_CANONICAL_HOST: 'reef.cards' }, NEW, path, init);
+          assert.equal(s.status, 404, `reef.cards ${where}`);
+          assert.deepEqual({ ...s, body: '' }, { ...withHeader(mirrored, 'x-robots-tag', 'noindex, nofollow'), body: '' }, `reef.cards ${where}: the old host’s status and headers`);
+          assert.equal(s.body, cutover.body, `reef.cards ${where}: the page the cutover serves there`);
+          assert.notEqual(s.body, mirrored.body, `reef.cards ${where}: CONTROL — the two hosts’ pages differ, so the line above compares something`);
         } else {
           assert.notDeepEqual(s, DARK_ANSWER, `reef.cards ${where}: the cutover serves this route`);
         }
