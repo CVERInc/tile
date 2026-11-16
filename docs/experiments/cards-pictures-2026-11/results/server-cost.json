@@ -1,0 +1,438 @@
+[
+ {
+  "handle": "specimen-heavy",
+  "strategy": "inline",
+  "status": 200,
+  "htmlBytes": 9878118,
+  "inline": 36,
+  "byUrl": 0,
+  "preloads": 0,
+  "pageMsMedian": 226.6,
+  "pictureMsMedian": null,
+  "pictureMsTotal": null,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": null
+ },
+ {
+  "handle": "specimen-heavy",
+  "strategy": "url",
+  "status": 200,
+  "htmlBytes": 52126,
+  "inline": 0,
+  "byUrl": 36,
+  "preloads": 0,
+  "pageMsMedian": 128.7,
+  "pictureMsMedian": 45.7,
+  "pictureMsTotal": 1636.3,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy",
+  "strategy": "hybrid-inline-lazy",
+  "status": 200,
+  "htmlBytes": 526362,
+  "inline": 2,
+  "byUrl": 34,
+  "preloads": 0,
+  "pageMsMedian": 155.8,
+  "pictureMsMedian": 37.2,
+  "pictureMsTotal": 1315.6,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy",
+  "strategy": "hybrid-inline-after-paint",
+  "status": 200,
+  "htmlBytes": 526604,
+  "inline": 2,
+  "byUrl": 34,
+  "preloads": 0,
+  "pageMsMedian": 129.2,
+  "pictureMsMedian": 30,
+  "pictureMsTotal": 1098.6,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy",
+  "strategy": "hybrid-preload-lazy",
+  "status": 200,
+  "htmlBytes": 61366,
+  "inline": 0,
+  "byUrl": 36,
+  "preloads": 2,
+  "pageMsMedian": 113.1,
+  "pictureMsMedian": 27.4,
+  "pictureMsTotal": 987.9,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy",
+  "strategy": "hybrid-preload-after-paint",
+  "status": 200,
+  "htmlBytes": 61608,
+  "inline": 0,
+  "byUrl": 36,
+  "preloads": 2,
+  "pageMsMedian": 113.8,
+  "pictureMsMedian": 26.9,
+  "pictureMsTotal": 1040,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy-wall",
+  "strategy": "inline",
+  "status": 200,
+  "htmlBytes": 9878169,
+  "inline": 36,
+  "byUrl": 0,
+  "preloads": 0,
+  "pageMsMedian": 202.9,
+  "pictureMsMedian": null,
+  "pictureMsTotal": null,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": null
+ },
+ {
+  "handle": "specimen-heavy-wall",
+  "strategy": "url",
+  "status": 200,
+  "htmlBytes": 52357,
+  "inline": 0,
+  "byUrl": 36,
+  "preloads": 0,
+  "pageMsMedian": 105.9,
+  "pictureMsMedian": 33.2,
+  "pictureMsTotal": 1219,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy-wall",
+  "strategy": "hybrid-inline-lazy",
+  "status": 200,
+  "htmlBytes": 526923,
+  "inline": 2,
+  "byUrl": 34,
+  "preloads": 0,
+  "pageMsMedian": 131.8,
+  "pictureMsMedian": 30.3,
+  "pictureMsTotal": 1016.8,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy-wall",
+  "strategy": "hybrid-inline-after-paint",
+  "status": 200,
+  "htmlBytes": 527170,
+  "inline": 2,
+  "byUrl": 34,
+  "preloads": 0,
+  "pageMsMedian": 127.7,
+  "pictureMsMedian": 29.2,
+  "pictureMsTotal": 1002.2,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy-wall",
+  "strategy": "hybrid-preload-lazy",
+  "status": 200,
+  "htmlBytes": 61967,
+  "inline": 0,
+  "byUrl": 36,
+  "preloads": 2,
+  "pageMsMedian": 115,
+  "pictureMsMedian": 34.8,
+  "pictureMsTotal": 1263.8,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-heavy-wall",
+  "strategy": "hybrid-preload-after-paint",
+  "status": 200,
+  "htmlBytes": 62214,
+  "inline": 0,
+  "byUrl": 36,
+  "preloads": 2,
+  "pageMsMedian": 119.4,
+  "pictureMsMedian": 33.1,
+  "pictureMsTotal": 1227.6,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium",
+  "strategy": "inline",
+  "status": 200,
+  "htmlBytes": 1237191,
+  "inline": 8,
+  "byUrl": 0,
+  "preloads": 0,
+  "pageMsMedian": 25.1,
+  "pictureMsMedian": null,
+  "pictureMsTotal": null,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": null
+ },
+ {
+  "handle": "specimen-medium",
+  "strategy": "url",
+  "status": 200,
+  "htmlBytes": 39254,
+  "inline": 0,
+  "byUrl": 8,
+  "preloads": 0,
+  "pageMsMedian": 16.3,
+  "pictureMsMedian": 5.7,
+  "pictureMsTotal": 45.2,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium",
+  "strategy": "hybrid-inline-lazy",
+  "status": 200,
+  "htmlBytes": 313450,
+  "inline": 2,
+  "byUrl": 6,
+  "preloads": 0,
+  "pageMsMedian": 21.8,
+  "pictureMsMedian": 4.7,
+  "pictureMsTotal": 27.1,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium",
+  "strategy": "hybrid-inline-after-paint",
+  "status": 200,
+  "htmlBytes": 313693,
+  "inline": 2,
+  "byUrl": 6,
+  "preloads": 0,
+  "pageMsMedian": 16.6,
+  "pictureMsMedian": 3.8,
+  "pictureMsTotal": 23.7,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium",
+  "strategy": "hybrid-preload-lazy",
+  "status": 200,
+  "htmlBytes": 41578,
+  "inline": 0,
+  "byUrl": 8,
+  "preloads": 2,
+  "pageMsMedian": 15.1,
+  "pictureMsMedian": 3.9,
+  "pictureMsTotal": 32.4,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium",
+  "strategy": "hybrid-preload-after-paint",
+  "status": 200,
+  "htmlBytes": 41821,
+  "inline": 0,
+  "byUrl": 8,
+  "preloads": 2,
+  "pageMsMedian": 13.9,
+  "pictureMsMedian": 3.8,
+  "pictureMsTotal": 31.2,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium-wall",
+  "strategy": "inline",
+  "status": 200,
+  "htmlBytes": 1237242,
+  "inline": 8,
+  "byUrl": 0,
+  "preloads": 0,
+  "pageMsMedian": 30.2,
+  "pictureMsMedian": null,
+  "pictureMsTotal": null,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": null
+ },
+ {
+  "handle": "specimen-medium-wall",
+  "strategy": "url",
+  "status": 200,
+  "htmlBytes": 39345,
+  "inline": 0,
+  "byUrl": 8,
+  "preloads": 0,
+  "pageMsMedian": 14.5,
+  "pictureMsMedian": 6,
+  "pictureMsTotal": 41.1,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium-wall",
+  "strategy": "hybrid-inline-lazy",
+  "status": 200,
+  "htmlBytes": 313591,
+  "inline": 2,
+  "byUrl": 6,
+  "preloads": 0,
+  "pageMsMedian": 16.4,
+  "pictureMsMedian": 4.2,
+  "pictureMsTotal": 25.7,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium-wall",
+  "strategy": "hybrid-inline-after-paint",
+  "status": 200,
+  "htmlBytes": 313839,
+  "inline": 2,
+  "byUrl": 6,
+  "preloads": 0,
+  "pageMsMedian": 17.2,
+  "pictureMsMedian": 3.6,
+  "pictureMsTotal": 21.2,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium-wall",
+  "strategy": "hybrid-preload-lazy",
+  "status": 200,
+  "htmlBytes": 41759,
+  "inline": 0,
+  "byUrl": 8,
+  "preloads": 2,
+  "pageMsMedian": 13.4,
+  "pictureMsMedian": 3.8,
+  "pictureMsTotal": 31.5,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ },
+ {
+  "handle": "specimen-medium-wall",
+  "strategy": "hybrid-preload-after-paint",
+  "status": 200,
+  "htmlBytes": 42007,
+  "inline": 0,
+  "byUrl": 8,
+  "preloads": 2,
+  "pageMsMedian": 13.3,
+  "pictureMsMedian": 3.7,
+  "pictureMsTotal": 30.1,
+  "pageCacheControl": "public, max-age=60",
+  "pictureHeaders": {
+   "cache-control": "public, max-age=31536000, immutable",
+   "content-type": "image/webp",
+   "x-content-type-options": "nosniff",
+   "x-robots-tag": "noindex, nofollow"
+  }
+ }
+]

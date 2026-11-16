@@ -1663,14 +1663,14 @@ export function renderPage(model, ctx = {}) {
 //   </body> after-paint: one frame after DOMContentLoaded, every lazy picture under that path loads now.
 // Every value was written by picturePlan from a handle path and a hex digest; the guard is the floor.
 const PICTURE_PATH = /^\/[A-Za-z0-9._\-/]*$/;
-function pictureTags(p) {
-  if (!p) return { head: '', tail: '' };
-  const preload = (p.preload || []).filter((u) => PICTURE_PATH.test(u))
+function pictureTags(plan) {
+  if (!plan) return { head: '', tail: '' };
+  const preload = (plan.preload || []).filter((u) => PICTURE_PATH.test(u))
     .map((u) => `<link rel="preload" as="image" href="${esc(u)}" fetchpriority="high">`).join('');
-  const rules = (p.reserve || []).filter(([u, w, h]) => PICTURE_PATH.test(u) && w > 0 && h > 0)
+  const rules = (plan.reserve || []).filter(([u, w, h]) => PICTURE_PATH.test(u) && w > 0 && h > 0)
     .map(([u, w, h]) => `img[src="${u}"],.st-card [data-w="6"] img[src="${u}"]{aspect-ratio:auto ${Math.round(w)}/${Math.round(h)}}`).join('');
-  const tail = p.afterPaint && PICTURE_PATH.test(p.afterPaint)
-    ? `<script>addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){setTimeout(function(){document.querySelectorAll('img[loading="lazy"][src^="${p.afterPaint}"]').forEach(function(i){i.loading='eager'})},0)})})</script>`
+  const tail = plan.afterPaint && PICTURE_PATH.test(plan.afterPaint)
+    ? `<script>addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){setTimeout(function(){document.querySelectorAll('img[loading="lazy"][src^="${plan.afterPaint}"]').forEach(function(i){i.loading='eager'})},0)})})</script>`
     : '';
   return { head: preload + (rules ? `<style id="cp-pictures">${rules}</style>` : ''), tail };
 }
