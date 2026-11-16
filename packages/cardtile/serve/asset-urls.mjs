@@ -100,7 +100,8 @@ async function servedPictures(cardMd, assets, base) {
 //
 //   inline                       every picture a data: URI (today)
 //   url                          every picture (assetUrls decides which) by its own URL; markup unchanged
-//   hybrid-<first>-<rest>        the first FIRST_SCREEN_PICTURES pictures the text names are
+//   hybrid-<first>-<rest>        the first FIRST_SCREEN_PICTURES pictures the page draws (its front, in
+//                                markup order; card-render firstScreenPictures) are
 //                                  inline   — left as data: URIs, or
 //                                  preload  — by URL, with <link rel=preload fetchpriority=high> in <head>;
 //                                the rest by URL with their box reserved from the stored bytes' own width
@@ -117,7 +118,7 @@ export const pictureStrategy = (env) => {
   return PICTURE_STRATEGIES.includes(v) ? v : 'inline';
 };
 /**
- * How many pictures, in the order the text names them, count as the first screen. Measured on the
+ * How many pictures, in the order the page draws them, count as the first screen. Measured on the
  * specimens at 390×844 (the README): the default view (stack) and list show one picture, the avatar card;
  * the wall shows the avatar, the first full-width picture and two more whole, two more in part. Two —
  * the avatar and the card a first swipe reveals — is what every view shows or shows next.
@@ -168,36 +169,39 @@ const PLAIN_PATH = /^\/[A-Za-z0-9._\-/]*$/;
 
 /**
  * picturePlan(cardMd, assets, base, strategy) → what the renderer is handed for one page:
- *   { assetUrls: { [id]: url }, pictures: { preload: [url], reserve: [[url, w, h]], afterPaint: prefix } | undefined,
- *     served: [{ hex, ext, bytes }] }
+ *   { assetUrls: { [id]: url }, pictures: { first, count, reserve: [[url, w, h]], afterPaint: prefix } | undefined,
+ *     served: [{ url, hex, ext, bytes }] }
  * 'inline' → { assetUrls: undefined, pictures: undefined }: the renderer's own default, untouched.
- * `served` is every picture this page names by URL, decoded and hashed already (the plan needed both):
- * what the cardtile worker hands its picture cache, so the visitor's picture requests find them there.
+ * 🔴 The plan does not pick the first-screen pictures. The text cannot say which pictures the page draws
+ * first, or at all: an `asset:` reference in a field nothing renders still matches ASSET_REF_RE. The plan
+ * hands the renderer the rule — `first` ('inline' | 'preload') for the first `count` pictures — and the
+ * renderer applies it in the order it draws them (card-render firstScreenPictures).
+ * `served` is every picture this page could name by URL, decoded and hashed already (the plan needed
+ * both), in text order. The cardtile worker keeps in its picture cache only those the rendered page
+ * names, in the order it names them (card-render picturesInRenderOrder).
  */
 export async function picturePlan(cardMd, assets, base, strategy) {
   if (!PICTURE_STRATEGIES.includes(strategy) || strategy === 'inline') return { assetUrls: undefined, pictures: undefined };
   const served = await servedPictures(cardMd, assets, base);
-  const kept = (urls) => [...served].filter(([id]) => urls[id]).map(([, p]) => ({ hex: p.hex, ext: p.ext, bytes: p.bytes }));
+  const kept = (urls) => [...served].filter(([id]) => urls[id]).map(([, p]) => ({ url: p.url, hex: p.hex, ext: p.ext, bytes: p.bytes }));
   if (strategy === 'url') {
     const all = Object.fromEntries([...served].map(([id, p]) => [id, p.url]));
     return { assetUrls: all, pictures: undefined, served: kept(all) };
   }
   const [, first, rest] = /^hybrid-(inline|preload)-(lazy|after-paint)$/.exec(strategy);
-  const firstIds = new Set([...served.keys()].slice(0, FIRST_SCREEN_PICTURES));
   const urls = {};
-  const preload = [];
   const reserve = [];
   for (const [id, p] of served) {
     if (!PLAIN_PATH.test(p.url)) continue;                   // never: base is a handle path, the tail is hex
-    if (firstIds.has(id)) {
-      if (first === 'inline') continue;                      // left out of the map = a data: URI
-      preload.push(p.url);
-    }
     urls[id] = p.url;
     const size = pictureSize(p.bytes);
     if (size) reserve.push([p.url, size[0], size[1]]);
   }
-  return { assetUrls: urls, pictures: { preload, reserve, afterPaint: rest === 'after-paint' && PLAIN_PATH.test(base) ? `${base}a/` : '' }, served: kept(urls) };
+  return {
+    assetUrls: urls,
+    pictures: { first, count: FIRST_SCREEN_PICTURES, reserve, afterPaint: rest === 'after-paint' && PLAIN_PATH.test(base) ? `${base}a/` : '' },
+    served: kept(urls),
+  };
 }
 
 /**

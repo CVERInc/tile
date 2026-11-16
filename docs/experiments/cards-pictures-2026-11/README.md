@@ -127,7 +127,13 @@ Host CPU of the cardtile worker, medians, `hybrid-preload-lazy`, measured by
   the two within 2–10 % of each other: 36.1 and 35.1 ms after, 37.3 and 38.7 ms before, per heavy picture.
   Across all sittings the uncached path measured 26–51 ms per heavy picture and the cached one 0.2–0.4 ms.
 - **The page view pays for keeping the pictures once**: about 10 ms more on the heavy page's first view
-  (129.8 against 120.4 ms in the same run), one cache read on later views.
+  (129.8 against 120.4 ms in the same run), one cache read on later views. That run kept all 36.
+- **Since then a page view keeps at most its first 10 pictures** (in the order the page draws them), and
+  fewer when its YouTube tiles already spent the request's budget: every Cache API call is a subrequest,
+  and the Workers Free plan allows 50 per invocation, `fetch()` included (`picture-cache.mjs`
+  `prefillCalls`: 1 read + 10 writes + 1 write of 50, 8 held back). On the heavy page pictures 11–36 are
+  therefore kept by their own first request, which costs the "miss" column once per data center per
+  hour. Not re-measured.
 - What is not in these numbers: the store and the cache are in-memory stand-ins that answer at once. The
   time a real store takes to hand over a ~10 MB body 36 times is the larger saving and is not measured
   here; neither is a real cache's lookup time, eviction, or the fact that each data center has its own
@@ -160,7 +166,9 @@ How it stops when the page does:
   the page, but `public, max-age=31536000, immutable` lets any shared cache keep a picture for a year after
   the page stops. Inline pictures disappear with the page's 60 s. If a stop must take pictures down
   everywhere, use `private` (browser cache only) or a shorter shared lifetime; this was not measured.
-- **First screen = the first two pictures the text names.** That is the avatar and the next card in the
+- **First screen = the first two pictures the page draws** on its front (markup order, backs excluded; the
+  measured runs used the first two the text names; on the specimens every reference is a drawn front tile,
+  in order, so by construction the two are the same). That is the avatar and the next tile in the
   stack and list, and part of the wall's first screen (the wall shows about five). Preloading only the
   avatar might recover the ~0.16 s by-URL is ahead in the cold stack; not measured.
 - **No validator on the page.** The page carries no `ETag`, so a repeat visit after 60 s downloads the

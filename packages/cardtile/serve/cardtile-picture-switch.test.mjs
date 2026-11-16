@@ -12,6 +12,7 @@ import { deflateSync, crc32 } from 'node:zlib';
 import worker, { renderCardHTML } from './card-worker.mjs';
 // a namespace, so a missing export fails its own test rather than the whole file
 import * as AU from './asset-urls.mjs';
+import * as R from '../card-render.mjs';
 
 const HANDLE = 'tidepool';
 const VHOST = 'links.tidepool-example.test';
@@ -136,6 +137,61 @@ test('🔴 #339 switch — hybrid-preload-*: every picture by URL, the first two
   assert.ok(v.text.includes(`img[loading="lazy"][src^="/a/"]`), 'the vanity page switches /a/ pictures');
 });
 
+// The first screen is what the page DRAWS first, never what its text names first (review of tile PR #354,
+// finding 1). Two references the page never draws sit in an unused frontmatter field, and a back (what a
+// tile shows when it turns over, closed when the page opens) is written before the front lane; the front
+// draws one feature picture, then another. By text order the first two would be the unused pair.
+const ghostPage = () => {
+  const [g1, g2, back, seen, next] = [P.bd, P.f2, P.f3, P.f1, P.avatar];
+  const md = [
+    '---', `card-page: ${HANDLE}`, 'title: Tide Pool', `note: asset:${g1.id} asset:${g2.id}`, '---', '',
+    '## back: more', '', `- [ ] %% card: feature w=6 img=asset:${back.id} %%`, '',
+    '## front', '', `- [ ] %% card: feature w=6 img=asset:${seen.id} %%`, `- [ ] %% card: feature w=6 img=asset:${next.id} %%`,
+    '', '## assets', '', ...PICS.map((p) => `- [ ] %% card: asset id=${p.id} mime=${p.mime} %% ${p.b.toString('base64')}`),
+  ].join('\n') + '\n';
+  return { md, ghosts: [g1, g2], back, seen, next };
+};
+const urlOf = (p) => `/${HANDLE}/a/${p.hex}.${p.ext}`;
+
+test('🔴 #339 switch — hybrid-preload: the preloads are the first two pictures the front draws, never an unused or back reference', async () => {
+  const { md, ghosts, back, seen, next } = ghostPage();
+  for (const rest of ['lazy', 'after-paint']) {
+    const { text } = await get(PAGE, envWith(md, { pictures: `hybrid-preload-${rest}` }));
+    const head = text.slice(0, text.indexOf('</head>'));
+    const preloads = [...head.matchAll(/<link rel="preload" as="image" href="([^"]+)" fetchpriority="high">/g)].map((m) => m[1]);
+    assert.deepEqual(preloads, [urlOf(seen), urlOf(next)], `${rest}: the preloads are not the front's first two pictures`);
+    // control: the back's picture is on the page, by URL, and gets its box — it is just not first
+    assert.ok(text.includes(`src="${urlOf(back)}"`), `${rest}: CONTROL: the back's picture is on the page`);
+    for (const g of ghosts) assert.ok(!text.includes(g.hex), `${rest}: ${g.name}, never drawn, is named by the page`);
+  }
+  // a front with one picture: the second slot stays empty rather than go to the closed back
+  const one = md.replace(`- [ ] %% card: feature w=6 img=asset:${next.id} %%\n`, '');
+  assert.notEqual(one, md, 'CONTROL: the second front picture was taken out');
+  const { text } = await get(PAGE, envWith(one, { pictures: 'hybrid-preload-lazy' }));
+  const preloads = [...text.matchAll(/<link rel="preload" as="image" href="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(preloads, [urlOf(seen)], 'a back\'s picture took a first-screen slot');
+  assert.ok(text.includes(`src="${urlOf(back)}"`), 'CONTROL: the back\'s picture is on the page by URL');
+});
+
+test('🔴 #339 switch — hybrid-inline: the pictures left inline are the first two the front draws, never an unused or back reference', async () => {
+  const { md, ghosts, back, seen, next } = ghostPage();
+  const { text } = await get(PAGE, envWith(md, { pictures: 'hybrid-inline-lazy' }));
+  for (const p of [seen, next]) {
+    assert.ok(text.includes(p.b.toString('base64').slice(0, 300)), `${p.name}, drawn first, is not inline`);
+    assert.ok(!text.includes(p.hex), `${p.name}, drawn first, still has a URL`);
+  }
+  assert.ok(text.includes(`src="${urlOf(back)}"`), 'the back\'s picture is not by URL');
+  assert.ok(text.includes(`img[src="${urlOf(back)}"]`), 'the back\'s picture has no reserved box');
+  for (const g of ghosts) assert.ok(!text.includes(g.hex) && !text.includes(g.b.toString('base64').slice(0, 300)), `${g.name}, never drawn, is on the page`);
+});
+
+test('🔴 #339 switch — picturesInRenderOrder: where each URL first stands in the markup, the absent left out', () => {
+  assert.equal(typeof R.picturesInRenderOrder, 'function');
+  const html = '<img src="/h/a/b.png"><i style="background:url(&quot;/h/a/a.png&quot;)"></i><img src="/h/a/b.png">';
+  assert.deepEqual(R.picturesInRenderOrder(html, ['/h/a/a.png', '/h/a/c.png', '/h/a/b.png', '/h/a/a.png']), ['/h/a/b.png', '/h/a/a.png']);
+  assert.deepEqual(R.picturesInRenderOrder('', ['/h/a/a.png']), []);
+});
+
 // ── 3. the pieces ─────────────────────────────────────────────────────────────────────────────────
 
 test('🔴 #339 switch — pictureSize reads width and height off PNG, JPEG, WebP (VP8, VP8L, VP8X) and GIF headers', () => {
@@ -156,9 +212,12 @@ test('🔴 #339 switch — the renderer writes only plain paths from `pictures`,
   const plain = renderCardHTML(md, { handle: HANDLE });
   assert.equal(renderCardHTML(md, { handle: HANDLE, pictures: undefined }), plain);
   const bad = '/x"><script>alert(1)</script>';
-  const html = renderCardHTML(md, { handle: HANDLE, pictures: { preload: [bad], reserve: [[bad, 1, 1]], afterPaint: bad } });
+  const html = renderCardHTML(md, { handle: HANDLE, pictures: { first: 'preload', count: 2, reserve: [[bad, 1, 1]], afterPaint: bad } });
   assert.ok(!html.includes('alert(1)'), 'a non-path value reached the page');
-  const ok = renderCardHTML(md, { handle: HANDLE, pictures: { preload: ['/t/a/x.png'], reserve: [['/t/a/x.png', 4, 3]], afterPaint: '/t/a/' } });
+  const viaMap = renderCardHTML(md, { handle: HANDLE, assetUrls: { [P.avatar.id]: bad }, pictures: { first: 'preload', count: 2, reserve: [[bad, 1, 1]], afterPaint: '' } });
+  assert.ok(!viaMap.includes('<script>alert(1)'), 'a non-path picture URL reached the page unescaped');
+  assert.ok(!viaMap.includes('rel="preload" as="image"'), 'a non-path picture URL was preloaded');
+  const ok = renderCardHTML(md, { handle: HANDLE, assetUrls: { [P.avatar.id]: '/t/a/x.png' }, pictures: { first: 'preload', count: 2, reserve: [['/t/a/x.png', 4, 3]], afterPaint: '/t/a/' } });
   assert.ok(ok.includes('<link rel="preload" as="image" href="/t/a/x.png" fetchpriority="high">'));
   assert.ok(ok.includes('{aspect-ratio:auto 4/3}'));
   assert.ok(ok.includes(`src^="/t/a/"`));

@@ -14,7 +14,7 @@
 // The render path (resolveHandle → renderCardHTML) is pure and node-testable; the fetch handler is
 // the only edge-specific shell. One brain, two runtimes (same pattern as events-worker).
 import { parseCard, serializeCard } from '../card-core.js';
-import { renderPage, poolOf } from '../card-render.mjs';
+import { renderPage, poolOf, picturesInRenderOrder } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { VIDEO_RE } from '../yt.mjs';
 import { resolveChannels } from '../yt-channels.mjs';
@@ -22,7 +22,7 @@ import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
 import { picturePlan, pictureStrategy, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
-import { cachedPicture, keepPicture, keepPictures } from './picture-cache.mjs';
+import { cachedPicture, keepPicture, keepPictures, prefillCalls } from './picture-cache.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -1337,7 +1337,10 @@ const router = {
     // Failure is not propagated. resolveChannels never throws and returns {} when YouTube is
     // unreachable, which lands the block on its designed degraded state (condition 3). A creator's
     // card must not go down because a video platform did.
-    const videos = await resolveChannels(cardMd, ytFetch);
+    // tile#339: each fetch counted, because the picture cache's prefill below shares this invocation's
+    // subrequest budget with it (picture-cache.mjs prefillCalls)
+    let ytCalls = 0;
+    const videos = await resolveChannels(cardMd, (u) => { ytCalls += 1; return ytFetch(u); });
 
     // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
     // address under the switch (reef.cards' root card = the bare origin), whatever host answered.
@@ -1354,14 +1357,19 @@ const router = {
     // nothing and hands the renderer nothing, which is the page as it was.
     const plan = pictures === 'inline' ? {}
       : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
+    const page = renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) });
     // tile#339 step 1: what this render decoded and hashed for the plan is kept for the picture requests
-    // the page is about to cause (picture-cache.mjs keepPictures; one cache read when all are kept already)
+    // the page is about to cause (picture-cache.mjs keepPictures; one cache read when all are kept already):
+    // only the pictures the rendered page names, in the order it draws them (a reference the page never
+    // draws causes no request), and only as many as the budget left after YouTube allows (prefillCalls)
     if (plan.served && plan.served.length) {
-      const keeping = keepPictures(resolved.handle, gen, plan.served);
+      const bodyAt = page.indexOf('<body');
+      const drawn = picturesInRenderOrder(bodyAt < 0 ? page : page.slice(bodyAt), plan.served.map((p) => p.url));
+      const byUrl = new Map(plan.served.map((p) => [p.url, p]));
+      const keeping = keepPictures(resolved.handle, gen, drawn.map((u) => byUrl.get(u)), prefillCalls(ytCalls));
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
     }
-    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) }),
-      200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
+    return html(page, 200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
   },
 };
 

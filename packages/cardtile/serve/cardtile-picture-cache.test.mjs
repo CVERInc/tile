@@ -18,6 +18,7 @@ import worker from './card-worker.mjs';
 import { handleApi, liveCard, cardKey, HostBindings, CardLifetime, _internal } from './card-api.mjs';
 // a namespace, so a missing export fails its own test rather than the whole file
 import * as AU from './asset-urls.mjs';
+import * as PC from './picture-cache.mjs';
 
 const HANDLE = 'tidepool';
 const OTHER = 'saltmarsh';            // never created: what a handle with no page answers
@@ -139,7 +140,7 @@ async function world(opts = {}) {
   const env = { CARDS: fakeKv(), MCP_TOKEN_HASH: TOKEN_HASH, PREVIEW: 'false', ...(pictures !== undefined ? { CARDTILE_PICTURES: pictures } : {}) };
   env.HOST_BINDINGS = objectNs(HostBindings, env);
   env.CARD_LIFETIMES = objectNs(CardLifetime, env);
-  const gen = await create(env, CARD);
+  const gen = await create(env, opts.md || CARD);
   // generation 0's own-domain binding is the pointer alone (card-api vanityKey)
   if (vanity) { env.CARDS._m.set(`vanity:${VHOST}`, HANDLE); env.CARDS._m.set(`vanityof:${HANDLE}`, VHOST); }
   return { env, gen };
@@ -323,6 +324,77 @@ test('🔴 #339 cache — a hash that is not on this page is a 404 and is never 
   // the same bytes kept for ANOTHER handle answer nothing here
   cache.kept.set(`${CANON}/_picture-cache/${OTHER}/${gen}/${Q.hex}.${Q.ext}`, { body: new Uint8Array(Q.b), headers: [] });
   assert.equal((await get(shared(Q), env)).status, 404, 'another handle\'s entry was served under this one');
+});
+
+// ── 2b. a page view stays inside the invocation's subrequest budget ───────────────────────────────
+//
+// Review of tile PR #354, finding 2: 40 pictures cost 42 Cache API calls on one page view, after one or two
+// YouTube fetches per channel, against the Workers Free plan's 50 per invocation (fetch and Cache API
+// together). 🔴 The stand-ins impose no quota, so these tests COUNT: every Cache API call the page view
+// makes and every fetch it makes, against the numbers picture-cache.mjs fits to.
+const MANY = Array.from({ length: 40 }, (_, i) => pic(`many-${String(i).padStart(2, '0')}`, ['image/png', 'image/jpeg', 'image/webp'][i % 3], 2_000));
+const channel = (i) => `UC${String(i).padStart(22, 'x')}`;
+const richPage = (channels) => [
+  '---', `card-page: ${HANDLE}`, 'title: Tide Pool', '---', '', '## front', '',
+  ...MANY.map((p) => `- [ ] %% card: feature w=3 img=asset:${p.id} %%`),
+  ...Array.from({ length: channels }, (_, i) => `- [ ] %% card: video channel=${channel(i)} %%`),
+  '', '## assets', '', ...MANY.map((p) => `- [ ] %% card: asset id=${p.id} mime=${p.mime} %% ${p.b.toString('base64')}`),
+].join('\n') + '\n';
+/** every fetch is a YouTube feed that answers 404 (the designed no-poster state), counted */
+const countFetches = (t) => {
+  const before = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (u) => { urls.push(String(u && u.url ? u.url : u)); return new Response('', { status: 404 }); };
+  t.after(() => { globalThis.fetch = before; });
+  return urls;
+};
+const cacheCalls = (cache) => cache.calls.match.length + cache.calls.put.length;
+
+test('🔴 #339 cache — 40 pictures and 9 channels: the page view spends at most 12 Cache API calls, on the first 10 pictures it draws', async (t) => {
+  const cache = useCache(t, fakeCache());
+  const fetched = countFetches(t);
+  const { env, gen } = await world({ md: richPage(9) });
+  const from = { calls: cacheCalls(cache), fetched: fetched.length };
+  const page = await get(`${CANON}/${HANDLE}`, env);
+  assert.equal(page.status, 200);
+  const spentYt = fetched.length - from.fetched, spentCache = cacheCalls(cache) - from.calls;
+  assert.equal(spentYt, 9, 'CONTROL: the page view fetched each channel once');
+  assert.ok(spentCache <= 12, `the page view made ${spentCache} Cache API calls`);
+  assert.ok(spentYt + spentCache <= 50 - 8, `the page view made ${spentYt + spentCache} subrequests`);
+  const stored = (p) => `${CANON}/_picture-cache/${HANDLE}/${gen}/${p.hex}.${p.ext}`;
+  assert.deepEqual(cache.calls.put.filter((u) => !u.includes('/set-')).sort(), MANY.slice(0, 10).map(stored).sort(), 'the pictures kept are not the first ten the page draws');
+  assert.equal(cache.calls.put.filter((u) => u.includes('/set-')).length, 1, 'the ten were kept, so the marker was written');
+  // the rest are left to the picture route: the eleventh is read from the file once, then kept
+  const eleventh = MANY[10];
+  const cold = await get(shared(eleventh), env);
+  assert.equal(cold.status, 200);
+  assert.ok(cold.body.equals(eleventh.b));
+  assert.ok(cache.kept.has(stored(eleventh)), 'the picture route did not keep the eleventh');
+  await assertWarm(shared(eleventh), env, cache, eleventh);
+  // a second page view: one marker read, nothing written
+  const puts = cache.calls.put.length;
+  await get(`${CANON}/${HANDLE}`, env);
+  assert.equal(cache.calls.put.length, puts, 'the second view wrote to the cache again');
+  // the numbers the budget is fitted to (picture-cache.mjs)
+  assert.equal(PC.PAGE_SUBREQUESTS, 50);
+  assert.equal(PC.PAGE_SUBREQUESTS_HELD, 8);
+  assert.equal(PC.PICTURE_PREFILL_CALLS, 12);
+});
+
+test('🔴 #339 cache — the prefill shrinks by what YouTube already spent, and stops when nothing is left', async (t) => {
+  for (const [channels, most] of [[30, 12], [36, 6], [40, 0], [45, 0]]) {
+    const cache = useCache(t, fakeCache());
+    const fetched = countFetches(t);
+    const { env } = await world({ md: richPage(channels) });
+    const from = { calls: cacheCalls(cache), fetched: fetched.length };
+    assert.equal((await get(`${CANON}/${HANDLE}`, env)).status, 200);
+    const spentYt = fetched.length - from.fetched, spentCache = cacheCalls(cache) - from.calls;
+    assert.equal(spentYt, channels, `CONTROL ${channels}: one fetch per channel`);
+    assert.equal(spentCache, most, `${channels} channels: ${spentCache} Cache API calls, expected ${most}`);
+    assert.equal(PC.prefillCalls(channels), most);
+    // the YouTube resolution itself is uncapped (not this change); the prefill never adds past the line
+    if (most) assert.ok(spentYt + spentCache <= PC.PAGE_SUBREQUESTS - PC.PAGE_SUBREQUESTS_HELD);
+  }
 });
 
 // ── 3. the cache is never needed, and never trusted beyond its bytes ──────────────────────────────

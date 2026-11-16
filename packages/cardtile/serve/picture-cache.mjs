@@ -40,13 +40,49 @@ import { RASTER_EXT } from './asset-urls.mjs';
 
 /** how long one kept picture (and a page's "all kept" marker) lives in the cache, seconds */
 export const PICTURE_CACHE_SECONDS = 3600;
-/** how many of a page's pictures one page render keeps: each cache write is a call that request pays for */
-export const PICTURE_PREFILL_MAX = 40;
+// ── what a page view may spend on keeping its pictures ────────────────────────────────────────────────
+//
+// 🩸 WHY. Every Cache API call (match, put) is a subrequest of the invocation that makes it, and the
+// Workers Free plan allows 50 per invocation, `fetch()` and the Cache API together (developers.cloudflare.com
+// /workers/platform/limits/, as cited in the review of tile PR #354). A page that kept all of a rich
+// page's pictures at once — 40 puts, a marker read and a marker write — spent 42 on that alone, after the
+// page path had already fetched one or two YouTube URLs per channel it names (yt-channels.mjs, uncapped).
+// Past the limit the put fails, the marker is never written, and every later view tries the same
+// oversized batch again. The Paid plan's limit is larger (its number was not re-checked for this); a
+// page that fits Free fits Paid, so Free is the one to fit.
+//
+// So a page view keeps at most PICTURE_PREFILL_CALLS calls' worth — one marker read, PICTURE_PREFILL_CALLS
+// − 2 pictures, one marker write — and less when the page path has already spent its budget on YouTube:
+// prefillCalls(spent). The pictures kept are the first ones the page draws (the worker passes them in
+// render order), which are the ones its first screens ask for: two on the first screen, about five on the
+// wall's (asset-urls FIRST_SCREEN_PICTURES). Every other picture is kept by its own first request, on the
+// picture route, which is a separate invocation with its own budget (a stop read, one match, one put).
+/** the per-invocation subrequest limit the page path is fitted to: Workers Free, fetch() and Cache API together */
+export const PAGE_SUBREQUESTS = 50;
+/** held back for whatever else the page path may call that is not counted here (store reads, if the
+ *  platform counts them, are about six on a page view: generation, body, stop, pool, domain bindings) */
+export const PAGE_SUBREQUESTS_HELD = 8;
+/** the most Cache API calls one page view spends keeping pictures: 1 marker match + 10 puts + 1 marker put */
+export const PICTURE_PREFILL_CALLS = 12;
+/**
+ * prefillCalls(spent) → how many Cache API calls this page view may spend keeping pictures, after `spent`
+ * subrequests (the YouTube fetches it already made): PICTURE_PREFILL_CALLS, or what is left under
+ * PAGE_SUBREQUESTS − PAGE_SUBREQUESTS_HELD, or 0 when that cannot keep one picture (match + put + marker).
+ */
+export const prefillCalls = (spent) => {
+  const left = PAGE_SUBREQUESTS - PAGE_SUBREQUESTS_HELD - Math.max(0, Number(spent) || 0);
+  const calls = Math.min(PICTURE_PREFILL_CALLS, left);
+  return calls >= 3 ? calls : 0;
+};
 /** the stored type each URL extension stands for (RASTER_EXT, the other way) */
 export const EXT_TYPE = Object.freeze(Object.fromEntries(Object.entries(RASTER_EXT).map(([type, ext]) => [ext, type])));
 
 // a fixed origin, whatever host the request came in on (the avatar relay's key does the same, card-worker
-// avatarCacheKey): the entry is one per picture, not one per host
+// avatarCacheKey): the entry is one per picture, not one per host.
+// Not shared with the avatar relay's cache code: the two differ exactly where their rules live — the key
+// (an upstream URL's hash there; handle, generation and content hash here) and the answer (the relay
+// returns the stored response, headers and all; this re-derives the type from the URL extension and
+// trusts only the bytes) — and what is left in common is `caches.default` and a catch around match/put.
 const CACHE_ORIGIN = 'https://card.feelreef.com';
 // only what the store itself writes: a handle (card-api VALID_HANDLE) and a generation (`0`, or the 24
 // hex of card-api newGen). Anything else is not kept and not looked up.
@@ -95,12 +131,14 @@ export async function keepPicture(handle, gen, hex, ext, bytes) {
  * (asset-urls picturePlan's `served`), so the picture requests that page causes are hits. One marker per
  * (lifetime, set of pictures) says "these are all kept": a page view that finds it writes nothing, and
  * it is written only when every picture was taken, so a failed write is tried again by the next view.
- * At most PICTURE_PREFILL_MAX pictures, in page order; the rest are kept by their own first request.
- * Resolves to how many pictures it wrote.
+ * It spends at most `calls` Cache API calls (prefillCalls): the first `calls` − 2 pictures of `served`,
+ * which the caller passes in the order the page draws them; the rest are kept by their own first
+ * request. Resolves to how many pictures it wrote.
  */
-export async function keepPictures(handle, gen, served) {
+export async function keepPictures(handle, gen, served, calls = PICTURE_PREFILL_CALLS) {
   const cache = theCache();
-  const some = (served || []).slice(0, PICTURE_PREFILL_MAX);
+  const room = Math.min(PICTURE_PREFILL_CALLS, Math.floor(Number(calls) || 0)) - 2;
+  const some = room > 0 ? (served || []).slice(0, room) : [];
   if (!cache || !some.length) return 0;
   try {
     const names = some.map((p) => `${p.hex}.${p.ext}`).sort().join('\n');
