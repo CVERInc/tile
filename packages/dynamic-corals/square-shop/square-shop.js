@@ -239,7 +239,8 @@ function loadPersistedCart(storeId, catalogByVariation) {
 	// (and the fork) can read it without a guard.
 	cart.unavailable = new Map();
 	cart.foreign = [];
-	// The bytes this tab last read from or wrote to the key (tile#328) — see rebaseCart below.
+	// The stored bytes this in-memory basket is built from (tile#328): bytes this tab read AND took
+	// in, or bytes it wrote itself. Never bytes it only looked at — see persistCart and rebaseCart.
 	cart.seen = null;
 	let raw;
 	try {
@@ -265,7 +266,11 @@ function loadPersistedCart(storeId, catalogByVariation) {
 	// back to two. Written only when the bytes actually change, so an ordinary basket — held rows
 	// included, since they are written like every other row — is not rewritten at all and fires no
 	// `dc-cart-changed`.
-	if (JSON.stringify(cartStorageEntries(cart)) !== raw) persistCart(storeId, cart);
+	if (JSON.stringify(cartStorageEntries(cart)) !== raw) {
+		persistCart(storeId, cart);
+		// Whatever another tab wrote in the meantime is taken in now, not on its event (tile#328).
+		rebaseCart(storeId, cart, catalogByVariation);
+	}
 	return cart;
 }
 
@@ -293,14 +298,22 @@ function fillCartFrom(cart, entries, catalogByVariation) {
 }
 
 // 🔴 Every caller that changes the basket on a shopper's action calls rebaseCart first (tile#328),
-// so what is written here is never an in-memory copy older than the stored basket.
+// so what is written here is never an in-memory copy older than the stored basket — and calls it
+// again right after, so whatever another tab wrote in between is taken in before anything is drawn.
+//
+// 🩸 THE BASELINE IS WHAT THIS TAB WROTE, NOT WHAT IT READS BACK. The first 0.11.21 draft read the
+// key back after writing and kept THAT as `cart.seen`. Another process can write between the two
+// calls (the paid completion page settling the order), and then `cart.seen` named bytes this basket
+// was never built from: the paid lines stayed in memory, while the settle's own `storage` event and
+// the Checkout re-read both compared equal to `cart.seen` and did nothing — the panel kept the paid
+// lines and Checkout sent them. A baseline may only ever hold bytes this basket was built from.
 function persistCart(storeId, cart) {
 	try {
-		window.localStorage.setItem(cartStore(storeId), JSON.stringify(cartStorageEntries(cart)));
-		// What is stored now, read back rather than assumed: a storage that accepts a write and keeps
-		// nothing must not make this tab's own lines look like lines another tab removed.
-		const stored = window.localStorage.getItem(cartStore(storeId));
-		cart.seen = stored === undefined ? null : stored;
+		const written = JSON.stringify(cartStorageEntries(cart));
+		window.localStorage.setItem(cartStore(storeId), written);
+		// Only once the write was accepted: a refused write leaves the stored basket, and the
+		// baseline, as they were, and this tab's unwritten change stays a change.
+		cart.seen = written;
 	} catch {
 		cart.storageAvailable = false;
 		// storage disabled/full — cart still works in-memory this session
@@ -331,7 +344,11 @@ function persistCart(storeId, cart) {
 // WHY A MERGE AND NOT A REFUSAL. Refusing the write when the stored basket moved would lose the
 // click that caused it: an Add pressed in this tab would do nothing. Overwriting is the defect. A
 // three-way merge keeps both: start from the stored basket as it is NOW, and apply only what this
-// tab changed since it last read or wrote the key (`cart.seen`). See mergeCartEntries for the rule.
+// tab changed since the stored bytes it last took in or wrote (`cart.seen`). See mergeCartEntries.
+//
+// After every write, the stored basket is read once more and merged the same way (the base is then
+// exactly what was written, so the result is exactly what is stored now). A write from another tab
+// that lands between this tab's write and that read is taken in at once, never just recorded.
 //
 // What is not covered: the read and the write are two calls, and a write from another PROCESS can
 // land between them. That window is two adjacent synchronous calls (it was a whole browsing session).
@@ -411,9 +428,9 @@ function storedCartEntries(raw) {
 }
 
 /**
- * Bring `cart` (in memory) up to the stored basket, keeping what this tab changed since it last read
- * or wrote the key. Returns whether the basket this tab shows changed. Mutates `cart` in place:
- * renderCart's closures and an in-flight checkout hold this very Map.
+ * Bring `cart` (in memory) up to the stored basket, keeping what this tab changed since the stored
+ * bytes it is built from (`cart.seen`). Returns whether the basket this tab shows changed. Mutates
+ * `cart` in place: renderCart's closures and an in-flight checkout hold this very Map.
  *
  * Nothing changes when the stored bytes are the ones this tab last saw, when storage cannot be read
  * (storage disabled: the cart is in memory only, as before), or when the stored bytes are not a
@@ -1472,10 +1489,11 @@ function renderCart(root, items, apiBase, guildId, labels, collectShipping, deta
 	}
 
 	// Every write on a shopper's action: the action is already applied to `cart`; re-read the stored
-	// basket in the same task, merge, write, draw.
+	// basket in the same task, merge, write, take in anything written meanwhile, draw.
 	function commit() {
 		resync();
 		persistCart(storeId, cart);
+		resync();
 		render();
 	}
 

@@ -35,8 +35,11 @@ there to find. Every other copy is downstream of this one:
 
 **Merge, not refuse.** Refusing the write when the stored basket moved would lose the click that
 caused it (an Add that does nothing). The write is a three-way merge (`mergeCartEntries`): `base` is
-what this tab last read from or wrote to the key (`cart.seen`, read back after each write rather
-than assumed), `ours` is the in-memory basket with the action applied, `theirs` is stored now.
+the stored bytes this in-memory basket is built from (`cart.seen`: bytes this tab read and took in,
+or bytes it wrote itself), `ours` is the in-memory basket with the action applied, `theirs` is
+stored now. Right after every write the key is read once more and merged the same way (`base` is
+then exactly what was written, so the result is exactly what is stored), so a write another tab
+made in between is taken in and drawn at once.
 
 | line | result |
 |---|---|
@@ -46,6 +49,17 @@ than assumed), `ours` is the in-memory basket with the action applied, `theirs` 
 
 Rows that are not `[id, qty]` come from `theirs` byte for byte. Order: `theirs`, then lines only this
 tab has. With no other writer (`stored === cart.seen`) the write is exactly what 0.11.20 wrote.
+
+**The baseline is what this tab wrote, not what it reads back** (review round 1 of this change). The
+first draft read the key back after each write and kept those bytes as `cart.seen`. When another
+process wrote in between (the settle, in the instant after this tab's write), `cart.seen` named
+bytes the in-memory basket was never built from: the settle's own `storage` event and the Checkout
+re-read both compared equal to it and did nothing, the panel kept the paid zines, and Checkout sent
+`VZINE × 2` with `VPRINTA × 4` (measured in Chromium, `settle.smoke.mjs`, last arm, on that draft). A
+key that reads back `null` after this tab's write is the completion page's whole-key `removeItem`
+(a settle that leaves nothing, or the no-record clear), and is taken in like any other write. A
+storage double that accepts writes and keeps nothing therefore now reads as "another tab cleared
+the basket"; a browser's storage always reads back what it was just given in the same task.
 
 **Checkout on a stale screen** sends nothing: if the re-read changes the basket, the stored basket is
 drawn and the shopper presses again. What is sent is always what the screen showed.
@@ -60,7 +74,9 @@ change there.
 
 Tests: `cart-cross-tab.test.mjs` (the merge rule, and the real `renderCart` against a storage double
 with the event not yet handled, the `storage` and `pageshow` listeners, a refusing storage,
-re-mount and detach); `settle.smoke.mjs` three new arms with the real coral in a second tab.
+re-mount and detach, and another process writing between this tab's write and its next read);
+`settle.smoke.mjs` three new arms with the real coral in a second tab, and one with the real
+settle function run inside the shop tab's own write.
 
 ---
 

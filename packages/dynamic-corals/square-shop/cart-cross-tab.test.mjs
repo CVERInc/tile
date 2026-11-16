@@ -5,12 +5,14 @@
 // in-memory copy back over the key, so a basket the completion page had already taken the paid
 // lines off came back with them in it, ready to be checked out and paid for again.
 //
-// Two halves are tested here:
+// Three parts are tested here:
 //   1. the merge rule (`mergeCartEntries`), as the pure function it is;
 //   2. the real renderCart against a storage double, in the case the `storage` listener cannot
 //      cover: the click is handled before the other tab's `storage` event is (separate tasks, either
 //      can run first; and a page restored from the back/forward cache never receives the event).
 //      These fail on 0.11.20, which wrote its stale copy back.
+//   3. the same, with another process writing between this tab's write and its next read. These
+//      fail on the first 0.11.21 draft, which took the bytes it read back as already taken in.
 // The browser half — a real second tab, a real `storage` event — is settle.smoke.mjs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -151,16 +153,20 @@ const walk = (el, out = []) => { out.push(el); for (const c of el.children) walk
 const byClass = (root, cls) => walk(root).filter((e) => String(e.className).split(/\s+/).includes(cls));
 
 // `refuse`: setItem throws, as a full storage does.
-function loadShop(initial, { refuse = false } = {}) {
+// `afterNextWrite(store)`: runs once, right after this tab's next write of the basket key lands and
+// before the coral's next storage call returns: another browser process writing the key in between.
+function loadShop(initial, { refuse = false, afterNextWrite = null } = {}) {
 	const store = new Map(Object.entries(initial || {}));
 	const writes = [];
 	const posts = [];
 	const winListeners = Object.create(null);
+	let interleave = afterNextWrite;
 	const localStorage = {
 		getItem: (k) => (store.has(k) ? store.get(k) : null),
 		setItem: (k, v) => {
 			if (refuse) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
 			writes.push([k, v]); store.set(k, String(v));
+			if (k === CART_KEY && interleave) { const fn = interleave; interleave = null; fn(store); }
 		},
 		removeItem: (k) => { store.delete(k); }
 	};
@@ -207,8 +213,9 @@ function loadShop(initial, { refuse = false } = {}) {
 	const checkoutButton = () => byClass(root, 'dc-square-shop-checkout')[0];
 	const lineNames = () => byClass(root, 'dc-square-shop-line').map((l) => byClass(l, 'dc-square-shop-line-name')[0].textContent);
 	const stored = () => JSON.parse(store.get(CART_KEY) || 'null');
+	const afterNextWriteOf = (fn) => { interleave = fn; };
 	return { root, store, writes, posts, winListeners, otherTabWrites, plusOn, minusOn, removeOn, press, addButtons,
-		checkoutButton, lineNames, stored, mountOnce };
+		checkoutButton, lineNames, stored, mountOnce, afterNextWriteOf };
 }
 
 const BEFORE = JSON.stringify([[ZINE, 2], [PA, 3]]);
@@ -325,4 +332,70 @@ test('one tab alone: every write is exactly what it was before (no other writer,
 		[[ZINE, 1], [PA, 4], [PB, 1]],
 		[[ZINE, 1], [PA, 4]]
 	]);
+});
+
+// ── 3. another process writes between this tab's write and anything it reads next ──────────────
+// The completion page settles the order in the instant after this tab wrote its basket. Whatever this
+// tab reads next is bytes it never put into its in-memory basket; the tab must not take them as its
+// baseline without taking them in. If it did, the completion's own `storage` event (raw === baseline)
+// and the Checkout re-read would both see "nothing changed" while the panel still held the paid lines.
+
+const PLUSSED = JSON.stringify([[ZINE, 2], [PA, 4]]);
+const SETTLED_AFTER_PLUS = JSON.stringify([[PA, 4]]);
+
+test('a settle that lands right after this tab\'s write: the panel takes it in, the event changes nothing more, Checkout sends no paid line', async () => {
+	const t = loadShop({ [CART_KEY]: BEFORE });
+	t.afterNextWriteOf((store) => { store.set(CART_KEY, SETTLED_AFTER_PLUS); });
+	t.plusOn('Print A');
+	assert.deepEqual(t.writes.map(([, v]) => v), [PLUSSED], 'the + itself was written as it was before');
+	assert.deepEqual(t.stored(), [[PA, 4]], 'the settle won on disk');
+	assert.deepEqual(t.lineNames(), ['Print A'], 'the settle is taken in at once, before its event arrives');
+	const writesBefore = t.writes.length;
+	t.otherTabWrites(SETTLED_AFTER_PLUS, true); // the completion page's own storage event, delivered late
+	assert.deepEqual(t.lineNames(), ['Print A'], 'the paid zines are still on screen after the settle\'s own event');
+	assert.equal(t.writes.length, writesBefore, 'taking the settle in writes nothing');
+	await t.press(t.checkoutButton());
+	await t.press(t.checkoutButton());
+	assert.ok(t.posts.length >= 1, 'a checkout was sent');
+	for (const p of t.posts) {
+		assert.deepEqual(p.items, [{ variation_id: PA, quantity: 4 }], 'the paid zines were sent to checkout again');
+	}
+});
+
+test('a settle that lands right after this tab\'s write, event never delivered: the next edit does not write the paid lines back', () => {
+	const t = loadShop({ [CART_KEY]: BEFORE });
+	t.afterNextWriteOf((store) => { store.set(CART_KEY, SETTLED_AFTER_PLUS); });
+	t.plusOn('Print A');
+	t.press(t.addButtons().at(-1)); // Print B: the grid's last card, and never in the basket
+	assert.deepEqual(t.stored(), [[PA, 4], [PB, 1]], 'the paid zines were written back by the next edit');
+});
+
+test('a whole-key clear that lands right after this tab\'s write (a settle with nothing left): nothing paid stays, nothing paid is sent', async () => {
+	const t = loadShop({ [CART_KEY]: JSON.stringify([[ZINE, 2]]) });
+	t.afterNextWriteOf((store) => { store.delete(CART_KEY); });
+	t.plusOn('Zine');
+	assert.equal(t.store.has(CART_KEY), false, 'the clear won on disk');
+	t.otherTabWrites(null, true);
+	assert.deepEqual(t.lineNames(), [], 'the cleared basket is still on screen after the clear\'s own event');
+	const checkout = t.checkoutButton();
+	if (checkout && !checkout.disabled) { await t.press(checkout); await t.press(t.checkoutButton()); }
+	assert.deepEqual(t.posts, [], 'a cleared basket was sent to checkout');
+});
+
+test('a settle that lands right after the mount\'s one automatic write: its event is taken in', () => {
+	// A 0.11.15 three-element row makes the mount rewrite the basket in this file's own shape.
+	const t = loadShop({ [CART_KEY]: JSON.stringify([[ZINE, 1, 2], [PA, 3]]) },
+		{ afterNextWrite: (store) => { store.set(CART_KEY, SETTLED); } });
+	assert.deepEqual(t.writes.map(([, v]) => v), [BEFORE], 'the mount wrote the basket in the two-element shape');
+	assert.deepEqual(t.lineNames(), ['Print A'], 'the first drawing already shows the settled basket');
+	t.otherTabWrites(SETTLED, true);
+	assert.deepEqual(t.lineNames(), ['Print A']);
+});
+
+test('a write that lands as written is the baseline: one tab alone still rebases nothing', () => {
+	const t = loadShop({ [CART_KEY]: BEFORE });
+	t.plusOn('Print A');
+	t.otherTabWrites(PLUSSED, true); // an event repeating exactly what this tab wrote
+	assert.deepEqual(t.lineNames(), ['Zine', 'Print A']);
+	assert.deepEqual(t.writes.map(([, v]) => v), [PLUSSED]);
 });

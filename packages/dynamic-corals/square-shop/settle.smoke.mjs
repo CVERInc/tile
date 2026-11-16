@@ -32,8 +32,18 @@
 //   checkout, event withheld     Checkout on that stale screen sends nothing, draws the stored
 //                                basket, and the next press sends only what is left.
 //
+// One more (tile#328, review round 1) runs the settle in the instant AFTER the shop tab writes its
+// basket and before the coral's next storage call returns. Another tab cannot be scheduled into that
+// instant (a browser hands a tab another tab's write only between tasks), so the stand-in for it is
+// the completion page's own settle function, imported from ./shop-function-template.js and run in the
+// shop tab from inside its localStorage.setItem, against the browser's real storage:
+//
+//   settle between write and read   the shop tab's panel drops the paid lines at once, and Checkout
+//                                   sends only what is left. The first 0.11.21 draft read the settled
+//                                   bytes back, kept them as "already taken in", and sent the zines.
+//
 // Every request is answered by page.route; nothing leaves the machine.
-import { completionBody, COMPLETE_COPY } from './shop-function-template.js';
+import { completionBody, COMPLETE_COPY, cartAfterOrder, settleCartAfterOrder } from './shop-function-template.js';
 
 const pw = await import(process.env.PLAYWRIGHT || 'playwright');
 const chromium = pw.chromium ?? pw.default?.chromium;
@@ -213,6 +223,88 @@ async function staleArm({ label, withhold, act, expectCart, expectPosts }) {
 	await ctx.close();
 }
 
+// Runs in the shop tab before the coral. Once `window.__settleAfterNextCartWrite` is set, the next
+// write of the basket key is followed, inside the same setItem call, by the completion page's settle.
+const settleInsideNextCartWrite = ({ cartKey, soldKey, settledKey, source }) => {
+	const settle = new Function(source + '\nreturn settleCartAfterOrder;')();
+	const set = Storage.prototype.setItem;
+	window.__settleAfterNextCartWrite = false;
+	window.__settledInside = false;
+	Storage.prototype.setItem = function (k, v) {
+		set.call(this, k, v);
+		if (k === cartKey && this === window.localStorage && window.__settleAfterNextCartWrite) {
+			window.__settleAfterNextCartWrite = false;
+			window.__settledInside = settle(window.localStorage, cartKey, soldKey, settledKey);
+		}
+	};
+};
+
+async function readbackArm({ label }) {
+	const ctx = await b.newContext();
+	const ref = 'r-' + label.replace(/\W+/g, '-');
+	const posts = [];
+	await ctx.route(shopUrl, (r) => r.fulfill({ contentType: 'text/html', body: '<!doctype html><title>shop</title>' }));
+	await ctx.route(coralUrl, (r) => r.fulfill({ contentType: 'text/html', body: coralPage }));
+	await ctx.route(payUrl, (r) => r.fulfill({ contentType: 'text/html', body: '<!doctype html><title>pay</title>' }));
+	await ctx.route('**/__settle-api/api/v2/shop/catalog**', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(CATALOG) }));
+	await ctx.route('**/__settle-api/api/v2/shop/cart', (r) => {
+		posts.push(JSON.parse(r.request().postData() || 'null'));
+		return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ url: payUrl }) });
+	});
+
+	const seed = await ctx.newPage();
+	await seed.goto(shopUrl, { waitUntil: 'load', timeout: 20000 });
+	await seed.evaluate(({ cartKey, ref, ZINE, PA }) => {
+		localStorage.clear();
+		localStorage.setItem(cartKey, JSON.stringify([[ZINE, 2], [PA, 3]]));
+		localStorage.setItem('dc-square-shop-sold:' + ref, JSON.stringify({ t: Date.now(), ids: [ZINE], lines: [[ZINE, 2]] }));
+	}, { cartKey: CART_KEY, ref, ZINE, PA });
+
+	const shop = await ctx.newPage();
+	const errs = [];
+	shop.on('pageerror', (e) => errs.push(String(e)));
+	await shop.addInitScript(settleInsideNextCartWrite, {
+		cartKey: CART_KEY, soldKey: 'dc-square-shop-sold:' + ref, settledKey: `dc-square-shop-settled:${STORE}:${ref}`,
+		source: cartAfterOrder.toString() + '\n' + settleCartAfterOrder.toString()
+	});
+	await shop.goto(coralUrl, { waitUntil: 'load', timeout: 20000 });
+	await shop.waitForFunction(() => document.querySelectorAll('.dc-square-shop-cart .dc-square-shop-line').length === 2, null, { timeout: 10000 });
+
+	const problems = [];
+	await shop.evaluate(() => { window.__settleAfterNextCartWrite = true; });
+	try {
+		await plusOnPrintA(shop);
+		await shop.waitForTimeout(200);
+	} catch (e) {
+		problems.push(`the shop tab did not get through its +: ${String(e && e.message || e).split('\n')[0]}`);
+	}
+	if (!await shop.evaluate(() => window.__settledInside)) problems.push('the settle did not run inside the shop tab\'s write');
+	const names = await lineNames(shop);
+	if (JSON.stringify(names) !== JSON.stringify(['Print A'])) problems.push(`after the +, the panel shows ${JSON.stringify(names)}, expected ["Print A"]`);
+	// One press: the screen already shows the stored basket, so it is sent.
+	try {
+		await Promise.all([
+			shop.waitForURL('**/__settle-pay.html', { timeout: 5000 }),
+			shop.locator('.dc-square-shop-checkout').click({ timeout: 5000 })
+		]);
+	} catch (e) {
+		problems.push(`Checkout did not leave for the payment page: ${String(e && e.message || e).split('\n')[0]}`);
+	}
+	const cart = JSON.parse(await seed.evaluate((k) => localStorage.getItem(k), CART_KEY) || 'null');
+	const tomb = await seed.evaluate((k) => localStorage.getItem(k), `dc-square-shop-settled:${STORE}:${ref}`);
+	const items = posts.map((p) => p && p.items);
+
+	if (errs.length) problems.push(`page errors: ${errs.join(' | ')}`);
+	if (JSON.stringify(cart) !== JSON.stringify([[PA, 4]])) problems.push(`basket ${JSON.stringify(cart)}, expected ${JSON.stringify([[PA, 4]])}`);
+	if (tomb === null) problems.push('no tombstone for the settled order');
+	if (JSON.stringify(items) !== JSON.stringify([[{ variation_id: PA, quantity: 4 }]])) {
+		problems.push(`checkout sent ${JSON.stringify(items)}, expected ${JSON.stringify([[{ variation_id: PA, quantity: 4 }]])}`);
+	}
+	console.log(`  ${problems.length ? '✗' : '✓'} ${label}  panel=${JSON.stringify(names)} basket=${JSON.stringify(cart)} posts=${JSON.stringify(items)}`);
+	for (const x of problems) failures.push(`${label}: ${x}`);
+	await ctx.close();
+}
+
 const plusOnPrintA = (shop) => shop.locator('.dc-square-shop-cart .dc-square-shop-line', { hasText: 'Print A' })
 	.locator('button[aria-label="Increase quantity"]').click({ timeout: 5000 });
 
@@ -239,6 +331,7 @@ await staleArm({ label: 'stale shop tab, storage event withheld: Checkout sends 
 		]);
 	},
 	expectCart: [[PA, 3]], expectPosts: [[{ variation_id: PA, quantity: 3 }]] });
+await readbackArm({ label: 'the settle lands between the shop tab\'s write and its next read: the panel drops the paid lines, Checkout sends none' });
 await b.close();
 
 if (failures.length) {
