@@ -325,8 +325,9 @@ test('full owner read refuses bad handles before touching the store', async () =
   const res = await call(env, 'GET', '/_api/card/%54/full');
   assert.equal(res.status, 200);
   assert.equal(await res.text(), CARD);
-  // the generation, that generation's body, and — generation 0 only — the pre-r3 bare key (reef#2618 r3)
-  assert.deepEqual(reads.sort(), ['card:t:0', 'gen:t', 't']);
+  // the generation, that generation's body and serving stop, and — generation 0 only — the pre-r3 bare
+  // keys (reef#2618 r3); the stop is reported, never decides the answer (tile#338)
+  assert.deepEqual(reads.sort(), ['card:t:0', 'gen:t', 'stop:t', 'stop:t:0', 't']);
 });
 
 // ── serving stop ─────────────────────────────────────────────────────────────────────────────────
