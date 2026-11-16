@@ -1088,3 +1088,91 @@ test("tile#336 reef.cards's own root page never reads or shows the exchange stat
   const other = await worker.fetch(new Request('https://reef.cards/specimen'), { PREVIEW: 'false', CARDS: kv, ...env });
   assert.match(await other.text(), /data-pool="card"/, 'CONTROL: another handle on reef.cards does carry it');
 });
+
+// ── the first card peeks under the last, and a tap on it goes back to the start (tile#345) ─────────
+// The prototype's rule, which deck.js carries: the pile is a ring for DRAWING only. At the last card the
+// slot under it (is-next1) holds the first card, marked `wrap`, so its edge shows under the last one.
+// A card that is not the top card is a button to itself; a tap on the `wrap` card scrolls to the top,
+// and the deck walks back to the first card one card per 120 ms (its own riffle), the first card to rise
+// flung in from the side it was tapped on. Scrolling stays LINEAR: nothing past the last card wraps
+// (testers swiped round and round and never found the last card's button), and the keys are the page's.
+// What a browser adds — that the edge is really drawn, really hit, and the flight's timing and easing —
+// is asked of real Chromium by verify/stack-wrap.mjs.
+const POOLS = { 'no reef.cards card': {}, "the deck's own reef.cards card last": { deck: { pool: true } }, "the renderer's reef.cards tile last": { pool: true } };
+const pileOrder = (p) => p.doc.querySelectorAll('.deck-stack > .deck-card');   // drawing order: the top card is the last
+const firstCard = (p) => p.cells[0].closest('.deck-card');
+const travelling = (p) => p.doc.querySelectorAll('.deck-card.travel');
+const cardAt = (p, i) => p.doc.querySelectorAll('.deck-stack > .deck-card').find((c) => +c.dataset.i === i);
+for (const [name, ctx] of Object.entries(POOLS)) {
+  test(`tile#345 stack, ${name}: at the last card the first card is the one under it, marked wrap — and only there`, () => {
+    const p = open(card(), { ctx, moveBefore: true });
+    const N = p.win.__deckCount(), first = firstCard(p);
+    if (ctx.deck) assert.equal(N, p.cells.length + 1, `CONTROL: the deck's own reef.cards card is in the pile (${N} cards, ${p.cells.length} tiles)`);
+    if (ctx.pool) assert.ok(p.cells[p.cells.length - 1].classList.contains('st-pool-card') && N === p.cells.length, 'CONTROL: the renderer\'s reef.cards tile is the last card');
+    for (let i = 0; i < N - 1; i++) {
+      p.win.__deckJump(i); p.win.tick(1000);
+      assert.equal(p.doc.querySelectorAll('.deck-card.wrap').length, 0, `card ${i} is up: a card is marked wrap before the last card`);
+    }
+    p.win.__deckJump(N - 1); p.win.tick(1000);
+    holds(p, 'stack', 'at the last card');
+    const order = pileOrder(p), top = order[order.length - 1];
+    assert.ok(top.classList.contains('is-top') && +top.dataset.i === N - 1, 'CONTROL: the last card is up');
+    assert.ok(first.classList.contains('is-next1') && first.classList.contains('wrap'), `the first card under the last is "${first.className}", not is-next1 wrap`);
+    same(order[order.length - 2], first, 'the first card is not drawn directly under the last card');
+    assert.equal(p.doc.querySelectorAll('.deck-card.wrap').length, 1, 'more than one card is marked wrap');
+  });
+
+  test(`tile#345 stack, ${name}: a tap on the first card under the last goes back to it, one card per 120 ms, the first one flung in from the side`, () => {
+    const p = open(card(), { ctx, moveBefore: true });
+    const N = p.win.__deckCount(), first = firstCard(p);
+    p.win.__deckJump(N - 1); p.win.tick(1000);
+    tap(p, p.cells[0]);
+    assert.equal(p.win.scrollY, 0, 'the tap did not take the page to the first card\'s place (the top)');
+    p.win.tick(16);   // the scroll is read on the next frame: the walk starts there
+    const rose = cardAt(p, N - 2);
+    assert.equal(p.win.__deckCur(), N - 2, 'the walk back did not start with the card before the last');
+    assert.ok(['travel', 'side', 'from-back-1'].every((k) => rose.classList.contains(k)), `the first card to rise is "${rose.className}": not flung from the side`);
+    assert.equal(rose.style.getPropertyValue('--fdir'), '1', 'the first card to rise does not come from the side the first card was tapped on');
+    for (let k = N - 3; k >= 0; k--) {
+      p.win.tick(120);
+      assert.equal(p.win.__deckCur(), k, `120 ms later the walk is not at card ${k}`);
+      const c = cardAt(p, k);
+      assert.ok(c.classList.contains('travel') && c.classList.contains('from-back-1') && !c.classList.contains('side'), `card ${k} rises as "${c.className}": not the plain flight over the top`);
+    }
+    p.win.tick(1000);
+    assert.equal(p.win.__deckCur(), 0, 'the walk did not end on the first card');
+    assert.ok(first.classList.contains('is-top'), 'the first card is not up');
+    assert.equal(p.doc.querySelectorAll('.deck-card.wrap').length, 0, 'a card is still marked wrap on the first card');
+    holds(p, 'stack', 'back on the first card');
+  });
+}
+
+test('tile#345 stack, reduced motion: a tap on the first card under the last goes back at once, and no card travels', () => {
+  const p = open(card(), { ctx: { deck: { pool: true } }, moveBefore: true, reducedMotion: true });
+  const N = p.win.__deckCount(), first = firstCard(p);
+  p.win.__deckJump(N - 1); p.win.tick(1000);
+  assert.ok(first.classList.contains('wrap'), 'CONTROL: the first card is under the last');
+  let flew = 0;
+  tap(p, p.cells[0]);
+  for (let t = 0; t < 20; t++) { p.win.tick(1); flew += travelling(p).length; }
+  assert.equal(p.win.__deckCur(), 0, `20 ms after the tap card ${p.win.__deckCur()} is up, not the first`);
+  assert.ok(first.classList.contains('is-top'), 'the first card is not up');
+  assert.equal(flew, 0, 'a card travelled with reduced motion');
+});
+
+test('tile#345 stack stays linear: past the last card a scroll, End and ArrowRight (held or pressed) never wrap to the first card', () => {
+  const p = open(card(), { ctx: { deck: { pool: true } }, moveBefore: true });
+  const N = p.win.__deckCount(), first = firstCard(p);
+  const key = (k, more = {}) => { p.win.dispatchEvent(new p.win.Event('keydown', { key: k, cancelable: true, ...more })); p.win.tick(1000); };
+  p.win.__deckJump(N - 1); p.win.tick(1000);
+  p.win.scrollTo({ top: p.win.scrollY + 5 * p.win.innerHeight }); p.win.tick(1000);
+  assert.equal(p.win.__deckCur(), N - 1, 'a scroll past the end left the last card');
+  key('End'); assert.equal(p.win.__deckCur(), N - 1, 'End left the last card');
+  key('ArrowRight', { repeat: true }); assert.equal(p.win.__deckCur(), N - 1, 'a held ArrowRight wrapped');
+  key('ArrowRight'); assert.equal(p.win.__deckCur(), N - 1, 'ArrowRight at the last card wrapped to the first');
+  assert.ok(!first.classList.contains('is-top'), 'the first card came up without a tap');
+  // …and the way back without the tap is the page's own: a scroll to the top walks back like any scroll
+  key('Escape');
+  p.win.scrollTo({ top: 0 }); p.win.tick(3000);
+  assert.equal(p.win.__deckCur(), 0, 'CONTROL: a scroll to the top walks back to the first card');
+});
