@@ -21,6 +21,7 @@ import { resolveChannels } from '../yt-channels.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
+import { assetUrls, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
 
 // One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
 // minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
@@ -291,7 +292,8 @@ export function resolveHandle(host, pathname, vanity = {}) {
  *   'fat'                   the whole file, assets included (/index.md, /<handle>.md)
  *   'avatar'                the card's own avatar only, never an icon badge
  *   'ico' | 'svg' | 'apple' one of the card's icon files (card-icon.mjs)
- *   'alias'                 /<handle> on the card's own domain → 301 to its root
+ *   'asset'                 one picture by its bytes' hash: `…/a/<sha256>.<ext>` (tile#339, asset-urls.mjs)
+ *   'alias'               /<handle> on the card's own domain → 301 to its root
  *   null                    nothing lives here → 404
  *
  * 🩸 WHY IT EXISTS (reef#1090). resolveHandle answers "WHICH card", and on a vanity host it answers
@@ -302,7 +304,8 @@ export function resolveHandle(host, pathname, vanity = {}) {
  * sub-path of a card: the QR and the canonical→vanity 301 carry the ROOT (plus the query string,
  * which is not the path), the download link is /index.md or /<handle>.md, and every asset the page
  * loads (/_coral/, /_icon/, /_yt/) is routed above before a handle is resolved. So the card answers
- * on its own address and nowhere else.
+ * on its own address and nowhere else — except its own pictures (tile#339), which the page names under
+ * `a/` beside it, by exactly one spelling: 64 lower-case hex digits and the extension of a raster type.
  *
  * 🔴 The one sub-path with a history is /<handle> on the card's own domain: before a domain's
  * vanity key existed, `<their-domain>/<handle>` was how the card was reached there (CUSTOM-DOMAIN.md,
@@ -321,6 +324,9 @@ export function cardPath(pathname, handle, isVanity) {
     if (lower === `/${h}` || lower === `/${h}/`) return 'alias';
     // Keep /<handle> as the page alias even when the handle itself is "avatar".
     if (p === '/avatar' || p === `/${h}/avatar`) return 'avatar';
+    // tile#339: a picture by its bytes' hash (asset-urls.mjs). `/<h>/a/…` too: the root card, whose
+    // page is `/`, names its pictures there, because `/a/…` on a shared host is the handle `a`.
+    if (ASSET_TAIL_RE.test(p) || (lower.startsWith(`/${h}/`) && ASSET_TAIL_RE.test(p.slice(h.length + 1)))) return 'asset';
     return null;
   }
   const m = /^\/([^/]+)(\/.*)?$/.exec(p);
@@ -329,8 +335,16 @@ export function cardPath(pathname, handle, isVanity) {
   if (seg === `${h}.md`) return rest ? null : 'fat';
   if (seg !== h) return null;
   if (rest === '/avatar') return 'avatar';
+  if (ASSET_TAIL_RE.test(m[2] || '')) return 'asset';   // the unstripped tail: a file has no trailing `/`
   return rest ? iconKind(rest) : 'page';
 }
+/** the `<hex>` and `<ext>` of an asset path cardPath routed to 'asset' */
+const assetRef = (pathname) => {
+  const m = /\/a\/([0-9a-f]{64})\.([a-z]+)$/.exec(pathname);
+  return m ? { hex: m[1], ext: m[2] } : null;
+};
+/** where a card's pictures live on the host serving it: `/` on its own domain, `/<handle>/` otherwise */
+const assetBase = (handle, oneCardDomain) => (oneCardDomain ? '/' : `/${handle}/`);
 
 /**
  * cardUrlFor: (handle, vanity) → the card's public URL. The INVERSE of resolveHandle, and it lives
@@ -421,7 +435,10 @@ function renderFlat(cardMd, ctx) {
     name,
     handle: ctx.handle || '',              // → the footer's feelreef.com/signup?ref=<handle>
     icons: ICONS,
-    assets: model.assets,        // the card's own images, resolved to data: URIs at render
+    assets: model.assets,        // the card's own images, resolved to data: URIs at render…
+    // …or, for an id in this CALLER-supplied map (tile#339, only the page exit below sets it), to that
+    // picture's own content-addressed path. Absent: every picture inline, byte for byte as before.
+    assetUrls: ctx.assetUrls || undefined,
     css: CSS,
     arrow: ARROW,           // @cvernet/signet's own arrow, lifted at build time — never re-drawn
     // `arrows: on` puts the little arrow back on link rows and CTAs. DEFAULT OFF — see arrowOf.
@@ -1183,6 +1200,27 @@ const router = {
 
     if (want === 'alias' && cardMd != null) return Response.redirect(`https://${host}/${url.search}`, 301);
 
+    // tile#339 — one picture, by its bytes' SHA-256 (asset-urls.mjs). An image exit like the avatar, so it
+    // answers on both hosts, before the page's canonical→vanity 301. Read from the body this lifetime
+    // already returned (no key of its own, nothing in caches.default): a stop, a delete or a new lifetime
+    // takes it down on the next request. Every miss — no card, stopped, a hash not on this card, a type
+    // the route does not serve — is the answer this host gives a card that is not there: the no-card
+    // page on ours (one page for every "no card", tile-lab#51), the small 404 on a creator's domain.
+    if (want === 'asset') {
+      const ref = assetRef(url.pathname);
+      const found = cardMd && ref ? await findAsset(parseCard(cardMd).assets, ref.hex, ref.ext) : null;
+      if (!found) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
+      return new Response(found.bytes, {
+        headers: {
+          'Content-Type': found.type,
+          'Cache-Control': ASSET_CACHE,
+          // the type is the store's own `mime=`, from a raster allowlist; never let a client second-guess it
+          'X-Content-Type-Options': 'nosniff',
+          ...ROBOTS_HEADERS(env, resolved.handle, at, blank),
+        },
+      });
+    }
+
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
     // cardAvatar validates stored raster assets; remote pictures pass the proxy's type allowlist.
     if (want === 'avatar') {
@@ -1278,7 +1316,10 @@ const router = {
     // else (absent, a hand-written value) → undefined, which is the page as it was before the state existed.
     // The Worker does not interpret it further: the platform's one draw rule already did.
     const pool = pooled === POOL_IN ? true : pooled === POOL_OUT ? false : undefined;
-    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) }),
+    // tile#339 — the pictures by URL instead of inline base64: hashed here, from the body already read
+    // (no store read), because the render is synchronous. An empty map is the page as it was.
+    const urls = await assetUrls(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle));
+    return html(renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, assetUrls: urls, ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) }),
       200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
   },
 };

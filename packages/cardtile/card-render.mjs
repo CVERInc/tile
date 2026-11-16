@@ -133,8 +133,9 @@ const cardHref = (ctx, raw) => {
   return bothReadings(hrefAllowed, s) ? s : refuse(ctx, s, 'link');
 };
 /**
- * an author's picture, resolved: a card asset (`asset:<id>`) becomes its stored data: URI — the store
- * picked the bytes and the MIME, and it only ever lands in `<img>` / `url()` — while anything the author
+ * an author's picture, resolved: a card asset (`asset:<id>`) becomes its stored data: URI, or its own
+ * path when the caller handed one in (resolveAsset) — the store picked the bytes and the MIME, and it
+ * only ever lands in `<img>` / `url()` — while anything the author
  * typed is judged by the picture policy. '' for an asset that does not resolve (as before); null when refused.
  */
 const cardImg = (ctx, raw) => {
@@ -309,16 +310,22 @@ const cssUrl = (u) => String(u == null ? '' : u).replace(/[\\'"()\s]/g, (c) => (
 // `fallbacks` are tried in order if the first icon fails to load — a 404 otherwise leaves a broken
 // image slot on a creator's card, which is worse than no icon at all. Inline onerror rather than a
 // script: it has to work on the very first paint, and it is three tokens of behaviour, not a client.
-// `asset:<id>` → the bytes that live in the card's own `## assets` lane, as a data: URI. A card that
-// carries its images is a card a creator can take with them; resolving happens here, at render, so
-// nothing upstream ever has to think about storage. An unresolvable reference yields '' rather than
-// a broken URL — a missing picture beats a request to somewhere that does not exist.
+// `asset:<id>` → the bytes that live in the card's own `## assets` lane. A card that carries its images
+// is a card a creator can take with them; resolving happens here, at render, so nothing upstream ever
+// has to think about storage. An unresolvable reference yields '' rather than a broken URL — a missing
+// picture beats a request to somewhere that does not exist.
+// tile#339: `ctx.assetUrls` (id → that picture's own content-addressed path) is CALLER-supplied, and only
+// the cardtile worker's page exit supplies it (serve/asset-urls.mjs decides which pictures get one and
+// why). Every other id — and every render without the map: the editor, previews — is a data: URI, as before.
 const ASSET_RE = /^asset:(.+)$/;
 function resolveAsset(url, ctx) {
   const m = ASSET_RE.exec(String(url || '').trim());
   if (!m) return url;
-  const a = ctx.assets && ctx.assets[m[1].trim()];
-  return a ? `data:${a.mime};base64,${a.b64}` : '';
+  const id = m[1].trim();
+  const a = ctx.assets && ctx.assets[id];
+  if (!a) return '';
+  const byUrl = ctx.assetUrls && Object.prototype.hasOwnProperty.call(ctx.assetUrls, id) ? ctx.assetUrls[id] : '';
+  return byUrl || `data:${a.mime};base64,${a.b64}`;
 }
 
 /**
