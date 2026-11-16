@@ -1,0 +1,1075 @@
+TAP version 13
+# Subtest: stack → list: no navigation, the same cell nodes, the switcher keeps focus
+ok 1 - stack → list: no navigation, the same cell nodes, the switcher keeps focus
+  ---
+  duration_ms: 59.349791
+  type: 'test'
+  ...
+# Subtest: stack → wall: no navigation, the same cell nodes, the switcher keeps focus
+ok 2 - stack → wall: no navigation, the same cell nodes, the switcher keeps focus
+  ---
+  duration_ms: 18.189945
+  type: 'test'
+  ...
+# Subtest: list → stack: no navigation, the same cell nodes, the switcher keeps focus
+ok 3 - list → stack: no navigation, the same cell nodes, the switcher keeps focus
+  ---
+  duration_ms: 13.819272
+  type: 'test'
+  ...
+# Subtest: list → wall: no navigation, the same cell nodes, the switcher keeps focus
+ok 4 - list → wall: no navigation, the same cell nodes, the switcher keeps focus
+  ---
+  duration_ms: 14.634727
+  type: 'test'
+  ...
+# Subtest: wall → stack: no navigation, the same cell nodes, the switcher keeps focus
+ok 5 - wall → stack: no navigation, the same cell nodes, the switcher keeps focus
+  ---
+  duration_ms: 8.379706
+  type: 'test'
+  ...
+# Subtest: wall → list: no navigation, the same cell nodes, the switcher keeps focus
+ok 6 - wall → list: no navigation, the same cell nodes, the switcher keeps focus
+  ---
+  duration_ms: 7.54691
+  type: 'test'
+  ...
+# Subtest: every ordered pair in one sitting: one page, twelve switches, still the same nodes
+ok 7 - every ordered pair in one sitting: one page, twelve switches, still the same nodes
+  ---
+  duration_ms: 22.388854
+  type: 'test'
+  ...
+# Subtest: with Element.moveBefore the cells are moved, not re-inserted
+ok 8 - with Element.moveBefore the cells are moved, not re-inserted
+  ---
+  duration_ms: 9.209451
+  type: 'test'
+  ...
+# Subtest: the card you were on carries over: stack ⇄ list keep it, the wall scrolls to its tile, and back
+ok 9 - the card you were on carries over: stack ⇄ list keep it, the wall scrolls to its tile, and back
+  ---
+  duration_ms: 17.016169
+  type: 'test'
+  ...
+# Subtest: the wall at the very top opens the pile on its first card
+ok 10 - the wall at the very top opens the pile on its first card
+  ---
+  duration_ms: 7.5434
+  type: 'test'
+  ...
+# Subtest: a back, the door to it and the footer are the same nodes in every view
+ok 11 - a back, the door to it and the footer are the same nodes in every view
+  ---
+  duration_ms: 14.692348
+  type: 'test'
+  ...
+# Subtest: a card can be turned over in stack and list, and a switch puts it back first
+ok 12 - a card can be turned over in stack and list, and a switch puts it back first
+  ---
+  duration_ms: 9.314505
+  type: 'test'
+  ...
+# Subtest: a switch made with a card held gives focus back to the switcher, not to where the card was picked up from
+ok 13 - a switch made with a card held gives focus back to the switcher, not to where the card was picked up from
+  ---
+  duration_ms: 17.214956
+  type: 'test'
+  ...
+# Subtest: Enter on the switcher switches, and does not also turn the top card over
+ok 14 - Enter on the switcher switches, and does not also turn the top card over
+  ---
+  duration_ms: 11.923384
+  type: 'test'
+  ...
+# Subtest: a card put back before its turn ends does not take focus afterwards
+ok 15 - a card put back before its turn ends does not take focus afterwards
+  ---
+  duration_ms: 9.570562
+  type: 'test'
+  ...
+# Subtest: the root is the word on the opening view: deck.js opens on what it says, not on a second opinion
+ok 16 - the root is the word on the opening view: deck.js opens on what it says, not on a second opinion
+  ---
+  duration_ms: 10.986075
+  type: 'test'
+  ...
+# Subtest: every tile is a card: a run of full-width links is dealt too
+ok 17 - every tile is a card: a run of full-width links is dealt too
+  ---
+  duration_ms: 10.457869
+  type: 'test'
+  ...
+# Subtest: deck.css declares what deck.js leaves to it: what is not drawn in a pile, and what is not drawn on the wall
+ok 18 - deck.css declares what deck.js leaves to it: what is not drawn in a pile, and what is not drawn on the wall
+  ---
+  duration_ms: 2.088674
+  type: 'test'
+  ...
+# Subtest: 200 tiles: only a window of cards is on the table, and every tile stays in the document
+ok 19 - 200 tiles: only a window of cards is on the table, and every tile stays in the document
+  ---
+  duration_ms: 283.527511
+  type: 'test'
+  ...
+# Subtest: {}: the served markup opens on stack, before the deck's script
+ok 20 - {}: the served markup opens on stack, before the deck's script
+  ---
+  duration_ms: 6.424265
+  type: 'test'
+  ...
+# Subtest: {}: deck.js alone (a page without the markup) decides the same
+ok 21 - {}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 5.033144
+  type: 'test'
+  ...
+# Subtest: {"view":"stack"}: the served markup opens on stack, before the deck's script
+ok 22 - {"view":"stack"}: the served markup opens on stack, before the deck's script
+  ---
+  duration_ms: 7.423087
+  type: 'test'
+  ...
+# Subtest: {"view":"stack"}: deck.js alone (a page without the markup) decides the same
+ok 23 - {"view":"stack"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 6.616982
+  type: 'test'
+  ...
+# Subtest: {"view":"list"}: the served markup opens on list, before the deck's script
+ok 24 - {"view":"list"}: the served markup opens on list, before the deck's script
+  ---
+  duration_ms: 4.979792
+  type: 'test'
+  ...
+# Subtest: {"view":"list"}: deck.js alone (a page without the markup) decides the same
+ok 25 - {"view":"list"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 4.92347
+  type: 'test'
+  ...
+# Subtest: {"view":"wall"}: the served markup opens on wall, before the deck's script
+ok 26 - {"view":"wall"}: the served markup opens on wall, before the deck's script
+  ---
+  duration_ms: 9.635354
+  type: 'test'
+  ...
+# Subtest: {"view":"wall"}: deck.js alone (a page without the markup) decides the same
+ok 27 - {"view":"wall"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 4.563039
+  type: 'test'
+  ...
+# Subtest: {"views":"wall"}: the served markup opens on wall, before the deck's script
+ok 28 - {"views":"wall"}: the served markup opens on wall, before the deck's script
+  ---
+  duration_ms: 6.744995
+  type: 'test'
+  ...
+# Subtest: {"views":"wall"}: deck.js alone (a page without the markup) decides the same
+ok 29 - {"views":"wall"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 4.492977
+  type: 'test'
+  ...
+# Subtest: {"views":"list wall"}: the served markup opens on list, before the deck's script
+ok 30 - {"views":"list wall"}: the served markup opens on list, before the deck's script
+  ---
+  duration_ms: 9.326294
+  type: 'test'
+  ...
+# Subtest: {"views":"list wall"}: deck.js alone (a page without the markup) decides the same
+ok 31 - {"views":"list wall"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 6.178689
+  type: 'test'
+  ...
+# Subtest: {"views":"wall, stack"}: the served markup opens on wall, before the deck's script
+ok 32 - {"views":"wall, stack"}: the served markup opens on wall, before the deck's script
+  ---
+  duration_ms: 5.969212
+  type: 'test'
+  ...
+# Subtest: {"views":"wall, stack"}: deck.js alone (a page without the markup) decides the same
+ok 33 - {"views":"wall, stack"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 4.790776
+  type: 'test'
+  ...
+# Subtest: {"views":"stack list","view":"wall"}: the served markup opens on stack, before the deck's script
+ok 34 - {"views":"stack list","view":"wall"}: the served markup opens on stack, before the deck's script
+  ---
+  duration_ms: 7.815219
+  type: 'test'
+  ...
+# Subtest: {"views":"stack list","view":"wall"}: deck.js alone (a page without the markup) decides the same
+ok 35 - {"views":"stack list","view":"wall"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 6.649783
+  type: 'test'
+  ...
+# Subtest: {"views":"stack list","view":"list"}: the served markup opens on list, before the deck's script
+ok 36 - {"views":"stack list","view":"list"}: the served markup opens on list, before the deck's script
+  ---
+  duration_ms: 7.017764
+  type: 'test'
+  ...
+# Subtest: {"views":"stack list","view":"list"}: deck.js alone (a page without the markup) decides the same
+ok 37 - {"views":"stack list","view":"list"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 5.397745
+  type: 'test'
+  ...
+# Subtest: {"views":"nonsense"}: the served markup opens on stack, before the deck's script
+ok 38 - {"views":"nonsense"}: the served markup opens on stack, before the deck's script
+  ---
+  duration_ms: 11.656346
+  type: 'test'
+  ...
+# Subtest: {"views":"nonsense"}: deck.js alone (a page without the markup) decides the same
+ok 39 - {"views":"nonsense"}: deck.js alone (a page without the markup) decides the same
+  ---
+  duration_ms: 6.814078
+  type: 'test'
+  ...
+# Subtest: a visitor's last pick opens the page — before the deck's script, and only when the file offers it
+ok 40 - a visitor's last pick opens the page — before the deck's script, and only when the file offers it
+  ---
+  duration_ms: 27.21002
+  type: 'test'
+  ...
+# Subtest: the editor names the view: a stored pick is ignored, and its switch is in place and remembers nothing
+ok 41 - the editor names the view: a stored pick is ignored, and its switch is in place and remembers nothing
+  ---
+  duration_ms: 7.474028
+  type: 'test'
+  ...
+# Subtest: __deckView refuses a view the file does not offer
+ok 42 - __deckView refuses a view the file does not offer
+  ---
+  duration_ms: 7.404016
+  type: 'test'
+  ...
+# Subtest: without scripts the page is the wall, and a deck script that fails to load says so
+ok 43 - without scripts the page is the wall, and a deck script that fails to load says so
+  ---
+  duration_ms: 5.985013
+  type: 'test'
+  ...
+# Subtest: withDeck leaves a page it cannot read alone, and never writes the attribute twice
+ok 44 - withDeck leaves a page it cannot read alone, and never writes the attribute twice
+  ---
+  duration_ms: 1.173045
+  type: 'test'
+  ...
+# Subtest: deck.js throws half-way through building the pile: every tile is back on the wall, which is the engine's markup
+ok 45 - deck.js throws half-way through building the pile: every tile is back on the wall, which is the engine's markup
+  ---
+  duration_ms: 13.45957
+  type: 'test'
+  ...
+# Subtest: deck.js throws on a page that opens on the wall: still the wall, and no switcher that does nothing
+ok 46 - deck.js throws on a page that opens on the wall: still the wall, and no switcher that does nothing
+  ---
+  duration_ms: 7.798998
+  type: 'test'
+  ...
+# Subtest: the deck's script threw before doing anything, or never ran: when the page is parsed and no deck has reported, it is the wall
+ok 47 - the deck's script threw before doing anything, or never ran: when the page is parsed and no deck has reported, it is the wall
+  ---
+  duration_ms: 7.909381
+  type: 'test'
+  ...
+# Subtest: a deck that came up is not taken for one that did not
+ok 48 - a deck that came up is not taken for one that did not
+  ---
+  duration_ms: 7.040375
+  type: 'test'
+  ...
+# Subtest: the deck's script is slow: after a short wait the wall is shown, and the pile still opens when the script arrives
+ok 49 - the deck's script is slow: after a short wait the wall is shown, and the pile still opens when the script arrives
+  ---
+  duration_ms: 6.396745
+  type: 'test'
+  ...
+# Subtest: two tiles that name one back, opened on stack: no id is in the document twice, in any view
+ok 50 - two tiles that name one back, opened on stack: no id is in the document twice, in any view
+  ---
+  duration_ms: 8.591972
+  type: 'test'
+  ...
+# Subtest: two tiles that name one back, opened on list: no id is in the document twice, in any view
+ok 51 - two tiles that name one back, opened on list: no id is in the document twice, in any view
+  ---
+  duration_ms: 13.74967
+  type: 'test'
+  ...
+# Subtest: two tiles that name one back, opened on wall: no id is in the document twice, in any view
+ok 52 - two tiles that name one back, opened on wall: no id is in the document twice, in any view
+  ---
+  duration_ms: 16.473063
+  type: 'test'
+  ...
+# Subtest: the back two tiles name is on whichever of their cards is turned over — the same node — and in its drawer on the wall
+ok 53 - the back two tiles name is on whichever of their cards is turned over — the same node — and in its drawer on the wall
+  ---
+  duration_ms: 27.993874
+  type: 'test'
+  ...
+# Subtest: the file's default back (`back: "\#id"`) is one node too, however many tiles take it
+ok 54 - the file's default back (`back: "\#id"`) is one node too, however many tiles take it
+  ---
+  duration_ms: 18.715501
+  type: 'test'
+  ...
+# Subtest: a card-file page, stack ⇄ wall: the item you were on is where the wall opens, and the wall's item is the card that is up
+ok 55 - a card-file page, stack ⇄ wall: the item you were on is where the wall opens, and the wall's item is the card that is up
+  ---
+  duration_ms: 63.723345
+  type: 'test'
+  ...
+# Subtest: a card-file page, list ⇄ wall: the item you were on is where the wall opens, and the wall's item is the card that is up
+ok 56 - a card-file page, list ⇄ wall: the item you were on is where the wall opens, and the wall's item is the card that is up
+  ---
+  duration_ms: 50.853861
+  type: 'test'
+  ...
+# Subtest: the draw page: a shuffled pile, and the wall after it is the engine's grid, runs and bleed again
+ok 57 - the draw page: a shuffled pile, and the wall after it is the engine's grid, runs and bleed again
+  ---
+  duration_ms: 13.674377
+  type: 'test'
+  ...
+# Subtest: the draw page that opens on the wall: the engine's markup stays as it was while the pile is dealt from it
+ok 58 - the draw page that opens on the wall: the engine's markup stays as it was while the pile is dealt from it
+  ---
+  duration_ms: 17.230996
+  type: 'test'
+  ...
+# Subtest: a card file that cannot be fetched (data-card-src): the page is the wall, and says the deck is off
+ok 59 - a card file that cannot be fetched (data-card-src): the page is the wall, and says the deck is off
+  ---
+  duration_ms: 62.032203
+  type: 'test'
+  ...
+# Subtest: a card file that is slow or never answers: after the wait the wall is shown, not an empty table, and the pile opens if it arrives
+ok 60 - a card file that is slow or never answers: after the wait the wall is shown, not an empty table, and the pile opens if it arrives
+  ---
+  duration_ms: 13.853883
+  type: 'test'
+  ...
+# Subtest: inline scripts and inline handlers refused (a strict CSP): no deck → the wall; deck.js throws → the wall; deck.js runs → the pile
+ok 61 - inline scripts and inline handlers refused (a strict CSP): no deck → the wall; deck.js throws → the wall; deck.js runs → the pile
+  ---
+  duration_ms: 26.027894
+  type: 'test'
+  ...
+# Subtest: a card-file page in en: the item count, the last card and its button say the table's words
+ok 62 - a card-file page in en: the item count, the last card and its button say the table's words
+  ---
+  duration_ms: 5.707214
+  type: 'test'
+  ...
+# Subtest: a card-file page in zh-TW: the item count, the last card and its button say the table's words
+ok 63 - a card-file page in zh-TW: the item count, the last card and its button say the table's words
+  ---
+  duration_ms: 6.974033
+  type: 'test'
+  ...
+# Subtest: a card-file page in de: the item count, the last card and its button say the table's words
+ok 64 - a card-file page in de: the item count, the last card and its button say the table's words
+  ---
+  duration_ms: 5.56088
+  type: 'test'
+  ...
+# Subtest: the home page's "try it" link goes to the sandbox deck-page.mjs names, and deck.js writes no address of its own
+ok 65 - the home page's "try it" link goes to the sandbox deck-page.mjs names, and deck.js writes no address of its own
+  ---
+  duration_ms: 5.165908
+  type: 'test'
+  ...
+# Subtest: a translation with markup in it is text at every sink: no element is made from it
+ok 66 - a translation with markup in it is text at every sink: no element is made from it
+  ---
+  duration_ms: 26.908021
+  type: 'test'
+  ...
+# Subtest: CONTROL: the table is right about the repo's rule for a Card link, and the deck's rule is never wider
+ok 67 - CONTROL: the table is right about the repo's rule for a Card link, and the deck's rule is never wider
+  ---
+  duration_ms: 0.522186
+  type: 'test'
+  ...
+# Subtest: the card-file page's button: only an absolute http(s) address handed over is made a link
+ok 68 - the card-file page's button: only an absolute http(s) address handed over is made a link
+  ---
+  duration_ms: 219.179857
+  type: 'test'
+  ...
+# Subtest: the card-file page's button: an address with a quote in it stays inside the href — no attribute is made from it
+ok 69 - the card-file page's button: an address with a quote in it stays inside the href — no attribute is made from it
+  ---
+  duration_ms: 5.496148
+  type: 'test'
+  ...
+# Subtest: the card-file page's button: the address deck-page.mjs names is the link
+ok 70 - the card-file page's button: the address deck-page.mjs names is the link
+  ---
+  duration_ms: 5.045754
+  type: 'test'
+  ...
+# Subtest: the home page's "try it" link: only an absolute http(s) address handed over is made a link
+ok 71 - the home page's "try it" link: only an absolute http(s) address handed over is made a link
+  ---
+  duration_ms: 140.529878
+  type: 'test'
+  ...
+# Subtest: the home page's "try it" link: an address with a quote in it stays inside the href — no attribute is made from it
+ok 72 - the home page's "try it" link: an address with a quote in it stays inside the href — no attribute is made from it
+  ---
+  duration_ms: 4.295791
+  type: 'test'
+  ...
+# Subtest: the home page's "try it" link: the address deck-page.mjs names is the link
+ok 73 - the home page's "try it" link: the address deck-page.mjs names is the link
+  ---
+  duration_ms: 4.26119
+  type: 'test'
+  ...
+# Subtest: list, the named back: B asked for while A is being put back gets the back when A's turn ends, not before
+ok 74 - list, the named back: B asked for while A is being put back gets the back when A's turn ends, not before
+  ---
+  duration_ms: 11.304884
+  type: 'test'
+  ...
+# Subtest: list, the named back: an animationend that never comes does not leave B waiting
+ok 75 - list, the named back: an animationend that never comes does not leave B waiting
+  ---
+  duration_ms: 8.21098
+  type: 'test'
+  ...
+# Subtest: list, the named back: with reduced motion there is no turn to wait for — B opens at once
+ok 76 - list, the named back: with reduced motion there is no turn to wait for — B opens at once
+  ---
+  duration_ms: 7.127017
+  type: 'test'
+  ...
+# Subtest: list, the default back: B asked for while A is being put back gets the back when A's turn ends, not before
+ok 77 - list, the default back: B asked for while A is being put back gets the back when A's turn ends, not before
+  ---
+  duration_ms: 11.199602
+  type: 'test'
+  ...
+# Subtest: list, the default back: an animationend that never comes does not leave B waiting
+ok 78 - list, the default back: an animationend that never comes does not leave B waiting
+  ---
+  duration_ms: 7.011744
+  type: 'test'
+  ...
+# Subtest: list, the default back: with reduced motion there is no turn to wait for — B opens at once
+ok 79 - list, the default back: with reduced motion there is no turn to wait for — B opens at once
+  ---
+  duration_ms: 6.818288
+  type: 'test'
+  ...
+# Subtest: stack, the named back: B asked for while A is being put back gets the back when A's turn ends, not before
+ok 80 - stack, the named back: B asked for while A is being put back gets the back when A's turn ends, not before
+  ---
+  duration_ms: 6.503368
+  type: 'test'
+  ...
+# Subtest: stack, the named back: an animationend that never comes does not leave B waiting
+ok 81 - stack, the named back: an animationend that never comes does not leave B waiting
+  ---
+  duration_ms: 9.350016
+  type: 'test'
+  ...
+# Subtest: stack, the named back: with reduced motion there is no turn to wait for — B opens at once
+ok 82 - stack, the named back: with reduced motion there is no turn to wait for — B opens at once
+  ---
+  duration_ms: 6.482018
+  type: 'test'
+  ...
+# Subtest: stack, the default back: B asked for while A is being put back gets the back when A's turn ends, not before
+ok 83 - stack, the default back: B asked for while A is being put back gets the back when A's turn ends, not before
+  ---
+  duration_ms: 7.582861
+  type: 'test'
+  ...
+# Subtest: stack, the default back: an animationend that never comes does not leave B waiting
+ok 84 - stack, the default back: an animationend that never comes does not leave B waiting
+  ---
+  duration_ms: 6.988763
+  type: 'test'
+  ...
+# Subtest: stack, the default back: with reduced motion there is no turn to wait for — B opens at once
+ok 85 - stack, the default back: with reduced motion there is no turn to wait for — B opens at once
+  ---
+  duration_ms: 9.978684
+  type: 'test'
+  ...
+# Subtest: a card asked for during a put-back turn is not turned over when it is put back first, or when the view leaves the pile
+ok 86 - a card asked for during a put-back turn is not turned over when it is put back first, or when the view leaves the pile
+  ---
+  duration_ms: 14.73776
+  type: 'test'
+  ...
+# Subtest: A asked for again during its own put-back turn turns over at once: the back never left it
+ok 87 - A asked for again during its own put-back turn turns over at once: the back never left it
+  ---
+  duration_ms: 6.652763
+  type: 'test'
+  ...
+# Subtest: with reduced motion a card that is put back shows its front again at once, in stack and list
+ok 88 - with reduced motion a card that is put back shows its front again at once, in stack and list
+  ---
+  duration_ms: 18.133224
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by a jump (__deckJump) to C, the turn ends (animationend) — nothing turns over
+ok 89 - list: B waits for A's turn, the visitor leaves by a jump (__deckJump) to C, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 14.72774
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by a jump (__deckJump) to C and comes back before the turn ends (animationend) — the request is not revived
+ok 90 - list: B waits, the visitor leaves by a jump (__deckJump) to C and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 16.203325
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by a jump (__deckJump) to C, the turn ends (the 600 ms fallback) — nothing turns over
+ok 91 - list: B waits for A's turn, the visitor leaves by a jump (__deckJump) to C, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 11.301225
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by a jump (__deckJump) to C and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 92 - list: B waits, the visitor leaves by a jump (__deckJump) to C and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 7.966333
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a jump (__deckJump) to C, the turn ends (animationend) — nothing turns over
+ok 93 - stack: B waits for A's turn, the visitor leaves by a jump (__deckJump) to C, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 7.720996
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a jump (__deckJump) to C and comes back before the turn ends (animationend) — the request is not revived
+ok 94 - stack: B waits, the visitor leaves by a jump (__deckJump) to C and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 7.727806
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a jump (__deckJump) to C, the turn ends (the 600 ms fallback) — nothing turns over
+ok 95 - stack: B waits for A's turn, the visitor leaves by a jump (__deckJump) to C, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 14.41999
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a jump (__deckJump) to C and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 96 - stack: B waits, the visitor leaves by a jump (__deckJump) to C and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 10.363796
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by the dice's riffle (__deckRiffle) to C, the turn ends (animationend) — nothing turns over
+ok 97 - list: B waits for A's turn, the visitor leaves by the dice's riffle (__deckRiffle) to C, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 9.17912
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by the dice's riffle (__deckRiffle) to C and comes back before the turn ends (animationend) — the request is not revived
+ok 98 - list: B waits, the visitor leaves by the dice's riffle (__deckRiffle) to C and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 17.202635
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by the dice's riffle (__deckRiffle) to C, the turn ends (the 600 ms fallback) — nothing turns over
+ok 99 - list: B waits for A's turn, the visitor leaves by the dice's riffle (__deckRiffle) to C, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 7.699484
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by the dice's riffle (__deckRiffle) to C and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 100 - list: B waits, the visitor leaves by the dice's riffle (__deckRiffle) to C and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 13.11599
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the dice's riffle (__deckRiffle) to C, the turn ends (animationend) — nothing turns over
+ok 101 - stack: B waits for A's turn, the visitor leaves by the dice's riffle (__deckRiffle) to C, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 10.196251
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the dice's riffle (__deckRiffle) to C and comes back before the turn ends (animationend) — the request is not revived
+ok 102 - stack: B waits, the visitor leaves by the dice's riffle (__deckRiffle) to C and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 10.288074
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the dice's riffle (__deckRiffle) to C, the turn ends (the 600 ms fallback) — nothing turns over
+ok 103 - stack: B waits for A's turn, the visitor leaves by the dice's riffle (__deckRiffle) to C, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 8.85428
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the dice's riffle (__deckRiffle) to C and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 104 - stack: B waits, the visitor leaves by the dice's riffle (__deckRiffle) to C and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 6.034584
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by the arrow key (a walk), the turn ends (animationend) — nothing turns over
+ok 105 - list: B waits for A's turn, the visitor leaves by the arrow key (a walk), the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 7.385335
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by the arrow key (a walk) and comes back before the turn ends (animationend) — the request is not revived
+ok 106 - list: B waits, the visitor leaves by the arrow key (a walk) and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 21.711592
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by the arrow key (a walk), the turn ends (the 600 ms fallback) — nothing turns over
+ok 107 - list: B waits for A's turn, the visitor leaves by the arrow key (a walk), the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 11.860442
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by the arrow key (a walk) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 108 - list: B waits, the visitor leaves by the arrow key (a walk) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 14.976387
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the arrow key (a walk), the turn ends (animationend) — nothing turns over
+ok 109 - stack: B waits for A's turn, the visitor leaves by the arrow key (a walk), the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 13.882604
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the arrow key (a walk) and comes back before the turn ends (animationend) — the request is not revived
+ok 110 - stack: B waits, the visitor leaves by the arrow key (a walk) and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 13.230014
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the arrow key (a walk), the turn ends (the 600 ms fallback) — nothing turns over
+ok 111 - stack: B waits for A's turn, the visitor leaves by the arrow key (a walk), the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 8.488568
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the arrow key (a walk) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 112 - stack: B waits, the visitor leaves by the arrow key (a walk) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 7.728576
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by the arrow key the other way (a walk back, onto A), the turn ends (animationend) — nothing turns over
+ok 113 - list: B waits for A's turn, the visitor leaves by the arrow key the other way (a walk back, onto A), the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 14.317207
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by the arrow key the other way (a walk back, onto A) and comes back before the turn ends (animationend) — the request is not revived
+ok 114 - list: B waits, the visitor leaves by the arrow key the other way (a walk back, onto A) and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 13.489032
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by the arrow key the other way (a walk back, onto A), the turn ends (the 600 ms fallback) — nothing turns over
+ok 115 - list: B waits for A's turn, the visitor leaves by the arrow key the other way (a walk back, onto A), the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 9.320335
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by the arrow key the other way (a walk back, onto A) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 116 - list: B waits, the visitor leaves by the arrow key the other way (a walk back, onto A) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 9.49973
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the arrow key the other way (a walk back, onto A), the turn ends (animationend) — nothing turns over
+ok 117 - stack: B waits for A's turn, the visitor leaves by the arrow key the other way (a walk back, onto A), the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 15.467542
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the arrow key the other way (a walk back, onto A) and comes back before the turn ends (animationend) — the request is not revived
+ok 118 - stack: B waits, the visitor leaves by the arrow key the other way (a walk back, onto A) and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 25.187779
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the arrow key the other way (a walk back, onto A), the turn ends (the 600 ms fallback) — nothing turns over
+ok 119 - stack: B waits for A's turn, the visitor leaves by the arrow key the other way (a walk back, onto A), the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 19.66421
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the arrow key the other way (a walk back, onto A) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 120 - stack: B waits, the visitor leaves by the arrow key the other way (a walk back, onto A) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 16.645058
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a tap on the next card (a walk), the turn ends (animationend) — nothing turns over
+ok 121 - stack: B waits for A's turn, the visitor leaves by a tap on the next card (a walk), the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 14.807832
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a tap on the next card (a walk) and comes back before the turn ends (animationend) — the request is not revived
+ok 122 - stack: B waits, the visitor leaves by a tap on the next card (a walk) and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 32.245494
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a tap on the next card (a walk), the turn ends (the 600 ms fallback) — nothing turns over
+ok 123 - stack: B waits for A's turn, the visitor leaves by a tap on the next card (a walk), the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 8.298853
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a tap on the next card (a walk) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 124 - stack: B waits, the visitor leaves by a tap on the next card (a walk) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 6.805227
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by a sideways wheel swipe, the turn ends (animationend) — nothing turns over
+ok 125 - list: B waits for A's turn, the visitor leaves by a sideways wheel swipe, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 7.329133
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by a sideways wheel swipe and comes back before the turn ends (animationend) — the request is not revived
+ok 126 - list: B waits, the visitor leaves by a sideways wheel swipe and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 18.207655
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by a sideways wheel swipe, the turn ends (the 600 ms fallback) — nothing turns over
+ok 127 - list: B waits for A's turn, the visitor leaves by a sideways wheel swipe, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 8.18617
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by a sideways wheel swipe and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 128 - list: B waits, the visitor leaves by a sideways wheel swipe and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 8.554331
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a sideways wheel swipe, the turn ends (animationend) — nothing turns over
+ok 129 - stack: B waits for A's turn, the visitor leaves by a sideways wheel swipe, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 17.37243
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a sideways wheel swipe and comes back before the turn ends (animationend) — the request is not revived
+ok 130 - stack: B waits, the visitor leaves by a sideways wheel swipe and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 24.367883
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a sideways wheel swipe, the turn ends (the 600 ms fallback) — nothing turns over
+ok 131 - stack: B waits for A's turn, the visitor leaves by a sideways wheel swipe, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 14.884204
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a sideways wheel swipe and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 132 - stack: B waits, the visitor leaves by a sideways wheel swipe and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 8.738087
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a drag of the top card, the turn ends (animationend) — nothing turns over
+ok 133 - stack: B waits for A's turn, the visitor leaves by a drag of the top card, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 9.128639
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a drag of the top card and comes back before the turn ends (animationend) — the request is not revived
+ok 134 - stack: B waits, the visitor leaves by a drag of the top card and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 23.055474
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a drag of the top card, the turn ends (the 600 ms fallback) — nothing turns over
+ok 135 - stack: B waits for A's turn, the visitor leaves by a drag of the top card, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 10.420998
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a drag of the top card and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 136 - stack: B waits, the visitor leaves by a drag of the top card and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 8.19207
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by a finger dragging the row, the turn ends (animationend) — nothing turns over
+ok 137 - list: B waits for A's turn, the visitor leaves by a finger dragging the row, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 10.546871
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by a finger dragging the row and comes back before the turn ends (animationend) — the request is not revived
+ok 138 - list: B waits, the visitor leaves by a finger dragging the row and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 15.309517
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by a finger dragging the row, the turn ends (the 600 ms fallback) — nothing turns over
+ok 139 - list: B waits for A's turn, the visitor leaves by a finger dragging the row, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 14.370339
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by a finger dragging the row and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 140 - list: B waits, the visitor leaves by a finger dragging the row and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 10.883092
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by the scrollbar, one card on, the turn ends (animationend) — nothing turns over
+ok 141 - list: B waits for A's turn, the visitor leaves by the scrollbar, one card on, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 9.007504
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by the scrollbar, one card on and comes back before the turn ends (animationend) — the request is not revived
+ok 142 - list: B waits, the visitor leaves by the scrollbar, one card on and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 20.945879
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn, the visitor leaves by the scrollbar, one card on, the turn ends (the 600 ms fallback) — nothing turns over
+ok 143 - list: B waits for A's turn, the visitor leaves by the scrollbar, one card on, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 20.31444
+  type: 'test'
+  ...
+# Subtest: list: B waits, the visitor leaves by the scrollbar, one card on and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 144 - list: B waits, the visitor leaves by the scrollbar, one card on and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 28.19852
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the scrollbar, one card on, the turn ends (animationend) — nothing turns over
+ok 145 - stack: B waits for A's turn, the visitor leaves by the scrollbar, one card on, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 11.954645
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the scrollbar, one card on and comes back before the turn ends (animationend) — the request is not revived
+ok 146 - stack: B waits, the visitor leaves by the scrollbar, one card on and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 28.366195
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the scrollbar, one card on, the turn ends (the 600 ms fallback) — nothing turns over
+ok 147 - stack: B waits for A's turn, the visitor leaves by the scrollbar, one card on, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 14.154562
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the scrollbar, one card on and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 148 - stack: B waits, the visitor leaves by the scrollbar, one card on and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 19.290618
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the scrollbar, far (a jump, not a walk), the turn ends (animationend) — nothing turns over
+ok 149 - stack: B waits for A's turn, the visitor leaves by the scrollbar, far (a jump, not a walk), the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 26.457847
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the scrollbar, far (a jump, not a walk) and comes back before the turn ends (animationend) — the request is not revived
+ok 150 - stack: B waits, the visitor leaves by the scrollbar, far (a jump, not a walk) and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 15.439951
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by the scrollbar, far (a jump, not a walk), the turn ends (the 600 ms fallback) — nothing turns over
+ok 151 - stack: B waits for A's turn, the visitor leaves by the scrollbar, far (a jump, not a walk), the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 14.451621
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by the scrollbar, far (a jump, not a walk) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 152 - stack: B waits, the visitor leaves by the scrollbar, far (a jump, not a walk) and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 14.76945
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a card picked from the fan, the turn ends (animationend) — nothing turns over
+ok 153 - stack: B waits for A's turn, the visitor leaves by a card picked from the fan, the turn ends (animationend) — nothing turns over
+  ---
+  duration_ms: 27.155488
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a card picked from the fan and comes back before the turn ends (animationend) — the request is not revived
+ok 154 - stack: B waits, the visitor leaves by a card picked from the fan and comes back before the turn ends (animationend) — the request is not revived
+  ---
+  duration_ms: 10.419278
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn, the visitor leaves by a card picked from the fan, the turn ends (the 600 ms fallback) — nothing turns over
+ok 155 - stack: B waits for A's turn, the visitor leaves by a card picked from the fan, the turn ends (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 11.81177
+  type: 'test'
+  ...
+# Subtest: stack: B waits, the visitor leaves by a card picked from the fan and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+ok 156 - stack: B waits, the visitor leaves by a card picked from the fan and comes back before the turn ends (the 600 ms fallback) — the request is not revived
+  ---
+  duration_ms: 16.655488
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn and the dice's riffle lands on B itself (animationend) — it left B to get there, nothing turns over
+ok 157 - list: B waits for A's turn and the dice's riffle lands on B itself (animationend) — it left B to get there, nothing turns over
+  ---
+  duration_ms: 16.39553
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn and the dice's riffle lands on B itself (the 600 ms fallback) — it left B to get there, nothing turns over
+ok 158 - list: B waits for A's turn and the dice's riffle lands on B itself (the 600 ms fallback) — it left B to get there, nothing turns over
+  ---
+  duration_ms: 9.800809
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn and the dice's riffle lands on B itself (animationend) — it left B to get there, nothing turns over
+ok 159 - stack: B waits for A's turn and the dice's riffle lands on B itself (animationend) — it left B to get there, nothing turns over
+  ---
+  duration_ms: 7.942252
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn and the dice's riffle lands on B itself (the 600 ms fallback) — it left B to get there, nothing turns over
+ok 160 - stack: B waits for A's turn and the dice's riffle lands on B itself (the 600 ms fallback) — it left B to get there, nothing turns over
+  ---
+  duration_ms: 9.759488
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn and the view is switched to stack and back, or to the wall and back (animationend) — nothing turns over
+ok 161 - list: B waits for A's turn and the view is switched to stack and back, or to the wall and back (animationend) — nothing turns over
+  ---
+  duration_ms: 20.159935
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn and the view is switched to list and back, or to the wall and back (animationend) — nothing turns over
+ok 162 - stack: B waits for A's turn and the view is switched to list and back, or to the wall and back (animationend) — nothing turns over
+  ---
+  duration_ms: 14.775111
+  type: 'test'
+  ...
+# Subtest: list: B waits for A's turn and the view is switched to stack and back, or to the wall and back (the 600 ms fallback) — nothing turns over
+ok 163 - list: B waits for A's turn and the view is switched to stack and back, or to the wall and back (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 21.722863
+  type: 'test'
+  ...
+# Subtest: stack: B waits for A's turn and the view is switched to list and back, or to the wall and back (the 600 ms fallback) — nothing turns over
+ok 164 - stack: B waits for A's turn and the view is switched to list and back, or to the wall and back (the 600 ms fallback) — nothing turns over
+  ---
+  duration_ms: 13.377609
+  type: 'test'
+  ...
+# Subtest: 🔴 tile\#336 served with pool:in: the closing reef.cards tile is the last of the pile and the footer names reef.cards, in all three views
+ok 165 - 🔴 tile\#336 served with pool:in: the closing reef.cards tile is the last of the pile and the footer names reef.cards, in all three views
+  ---
+  duration_ms: 70.295124
+  type: 'test'
+  ...
+# Subtest: 🔴 tile\#336 served with pool:out: no closing reef.cards tile and no reef.cards footer segment, in all three views
+ok 166 - 🔴 tile\#336 served with pool:out: no closing reef.cards tile and no reef.cards footer segment, in all three views
+  ---
+  duration_ms: 18.060221
+  type: 'test'
+  ...
+# Subtest: 🔴 tile\#336 served with pool:in (powered-by: on, ignored): the closing reef.cards tile is the last of the pile and the footer names reef.cards, in all three views
+ok 167 - 🔴 tile\#336 served with pool:in (powered-by: on, ignored): the closing reef.cards tile is the last of the pile and the footer names reef.cards, in all three views
+  ---
+  duration_ms: 27.787608
+  type: 'test'
+  ...
+# Subtest: 🔴 tile\#336 served with pool:out (powered-by: on, ignored): no closing reef.cards tile and no reef.cards footer segment, in all three views
+ok 168 - 🔴 tile\#336 served with pool:out (powered-by: on, ignored): no closing reef.cards tile and no reef.cards footer segment, in all three views
+  ---
+  duration_ms: 14.998147
+  type: 'test'
+  ...
+# Subtest: tile\#336 served with the key absent: nothing pool-shaped, and any value but in/out serves the same bytes as absent
+ok 169 - tile\#336 served with the key absent: nothing pool-shaped, and any value but in/out serves the same bytes as absent
+  ---
+  duration_ms: 64.860769
+  type: 'test'
+  ...
+# Subtest: tile\#336 the Worker reads the exchange state once, in the same round as body and stop; a stop still wins
+ok 170 - tile\#336 the Worker reads the exchange state once, in the same round as body and stop; a stop still wins
+  ---
+  duration_ms: 60.793374
+  type: 'test'
+  ...
+# Subtest: tile\#336 an own-domain address carries the same exchange state (the key is per handle, not per host)
+ok 171 - tile\#336 an own-domain address carries the same exchange state (the key is per handle, not per host)
+  ---
+  duration_ms: 7.174438
+  type: 'test'
+  ...
+# Subtest: tile\#336 reef.cards's own root page never reads or shows the exchange state (control: another handle on reef.cards does)
+ok 172 - tile\#336 reef.cards's own root page never reads or shows the exchange state (control: another handle on reef.cards does)
+  ---
+  duration_ms: 11.613574
+  type: 'test'
+  ...
+# Subtest: tile\#343 each side carries two marks after what it holds, and says which edge has more beyond it
+not ok 173 - tile\#343 each side carries two marks after what it holds, and says which edge has more beyond it
+  ---
+  duration_ms: 9.771818
+  type: 'test'
+  location: './packages/cardtile/w3/deck-views.test.mjs:1096:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    stack front: the side's marks
+    + actual - expected
+    
+    + []
+    - [
+    -   'up',
+    -   'down'
+    - ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'up'
+    1: 'down'
+  actual:
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (./packages/cardtile/w3/deck-views.test.mjs:1106:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..173
+# tests 173
+# suites 0
+# pass 172
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3242.856479

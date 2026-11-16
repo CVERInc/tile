@@ -133,8 +133,9 @@ const cardHref = (ctx, raw) => {
   return bothReadings(hrefAllowed, s) ? s : refuse(ctx, s, 'link');
 };
 /**
- * an author's picture, resolved: a card asset (`asset:<id>`) becomes its stored data: URI — the store
- * picked the bytes and the MIME, and it only ever lands in `<img>` / `url()` — while anything the author
+ * an author's picture, resolved: a card asset (`asset:<id>`) becomes its stored data: URI, or its own
+ * path when the caller handed one in (resolveAsset) — the store picked the bytes and the MIME, and it
+ * only ever lands in `<img>` / `url()` — while anything the author
  * typed is judged by the picture policy. '' for an asset that does not resolve (as before); null when refused.
  */
 const cardImg = (ctx, raw) => {
@@ -309,16 +310,22 @@ const cssUrl = (u) => String(u == null ? '' : u).replace(/[\\'"()\s]/g, (c) => (
 // `fallbacks` are tried in order if the first icon fails to load — a 404 otherwise leaves a broken
 // image slot on a creator's card, which is worse than no icon at all. Inline onerror rather than a
 // script: it has to work on the very first paint, and it is three tokens of behaviour, not a client.
-// `asset:<id>` → the bytes that live in the card's own `## assets` lane, as a data: URI. A card that
-// carries its images is a card a creator can take with them; resolving happens here, at render, so
-// nothing upstream ever has to think about storage. An unresolvable reference yields '' rather than
-// a broken URL — a missing picture beats a request to somewhere that does not exist.
+// `asset:<id>` → the bytes that live in the card's own `## assets` lane. A card that carries its images
+// is a card a creator can take with them; resolving happens here, at render, so nothing upstream ever
+// has to think about storage. An unresolvable reference yields '' rather than a broken URL — a missing
+// picture beats a request to somewhere that does not exist.
+// tile#339: `ctx.assetUrls` (id → that picture's own content-addressed path) is CALLER-supplied, and only
+// the cardtile worker's page exit supplies it (serve/asset-urls.mjs decides which pictures get one and
+// why). Every other id — and every render without the map: the editor, previews — is a data: URI, as before.
 const ASSET_RE = /^asset:(.+)$/;
 function resolveAsset(url, ctx) {
   const m = ASSET_RE.exec(String(url || '').trim());
   if (!m) return url;
-  const a = ctx.assets && ctx.assets[m[1].trim()];
-  return a ? `data:${a.mime};base64,${a.b64}` : '';
+  const id = m[1].trim();
+  const a = ctx.assets && ctx.assets[id];
+  if (!a) return '';
+  const byUrl = ctx.assetUrls && Object.prototype.hasOwnProperty.call(ctx.assetUrls, id) ? ctx.assetUrls[id] : '';
+  return byUrl || `data:${a.mime};base64,${a.b64}`;
 }
 
 /**
@@ -1556,11 +1563,17 @@ export function renderPage(model, ctx = {}) {
   // stack showed .st-backdrop sitting above the drawer body. Computed style cannot see this.
   // the one place the author's `accent:` is read: a colour, or the default (see cssColor)
   const accentC = ctx.accent ? cssColor(ctx.accent) : '';
-  const backdropUrl = cardImg(ctx, ctx.backdrop) || '';
-  const backdrop = backdropUrl
-    ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, accentC))}</style>`
-    : '';
-  const grid = backdrop + renderGrid(model, ctx) + renderDrawers(model, { ...ctx, styled: true });
+  // the page's front (backdrop and front tiles, what is on screen when it opens) and its backs (closed
+  // until a visitor turns a tile over), kept apart so the first-screen pictures are chosen from the front
+  // (`ctx` here is the render's context for this pass: the caller's, or a copy of it — firstScreenPictures)
+  const body = (ctx) => {
+    const backdropUrl = cardImg(ctx, ctx.backdrop) || '';
+    const backdrop = backdropUrl
+      ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, accentC))}</style>`
+      : '';
+    return { front: backdrop + renderGrid(model, ctx), backs: renderDrawers(model, { ...ctx, styled: true }) };
+  };
+  const { grid, pics: picPlan } = firstScreenPictures(body, ctx);
   const css = ctx.css || '';
   // The avatar-morph QR popup is the `qr` dynamic coral (packages/dynamic-corals/qr). It mounts on
   // the [data-dynamic-coral="qr"] wrapper the profile cell emits — no page-baked matrix, no re-break.
@@ -1658,7 +1671,73 @@ export function renderPage(model, ctx = {}) {
   const share = ctx.shareTags || {};
   const shareTagsHtml = (share.canonical ? `<link rel="canonical" href="${esc(share.canonical)}">` : '')
     + (share.meta || []).map((t) => `<meta ${t.attr === 'property' ? 'property' : 'name'}="${esc(t.key)}" content="${esc(t.content)}">`).join('');
-  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${shareTagsHtml}${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${qr}${video}${drawer}</body></html>`;
+  const pics = pictureTags(picPlan);
+  return `<!doctype html><html lang="${lang}"${mode ? ` data-theme="${mode}"` : ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${pics.head}${generatorTag ? `<meta name="generator" content="${esc(generatorTag)}">` : ''}<title>${esc(ctx.name)}</title>${shareTagsHtml}${iconTags}<style>${css}</style>${accent}${theme}</head><body><main class="st-wrap">${grid}</main>${footer}${pics.tail}${qr}${video}${drawer}</body></html>`;
+}
+
+/**
+ * picturesInRenderOrder(html, urls) → the `urls` that occur in `html`, in the order each first occurs.
+ * The order a page draws its pictures in IS where they stand in its markup: the stack and list views
+ * deal its tiles in document order, and the wall is the same markup laid out with no reordering.
+ */
+export function picturesInRenderOrder(html, urls) {
+  const s = String(html || '');
+  return [...new Set(urls || [])].filter((u) => typeof u === 'string' && u)
+    .map((u) => [u, s.indexOf(u)]).filter(([, i]) => i >= 0)
+    .sort((a, b) => a[1] - b[1]).map(([u]) => u);
+}
+
+// tile#339 — which pictures are the first screen, read off the RENDERED page, never off the text.
+// 🩸 picturePlan used to take the first two `asset:` references in the raw markdown. A reference the
+// page never draws (an unused frontmatter field, a tile type that ignores it) or draws only on a back
+// took a slot, and the
+// picture the visitor actually sees was not preloaded (review of tile PR #354, finding 1).
+// `pictures.first` 'preload' — one render, all by URL: the first `count` picture URLs on the front get
+// the preloads. 'inline' — a probe render (all by URL, destination callbacks off so the real render
+// reports each destination once) finds them, and the page is rendered again with those left as data:
+// URIs. Reserved boxes are written only for pictures the page draws by URL, in the order it draws them.
+function firstScreenPictures(body, ctx) {
+  const plan = ctx.pictures;
+  const join = (b) => b.front + b.backs;
+  if (!plan) return { grid: join(body(ctx)), pics: null };
+  const map = ctx.assetUrls || {};
+  const urls = Object.values(map).filter((u) => typeof u === 'string' && PICTURE_PATH.test(u));
+  const n = Math.max(0, Math.floor(Number(plan.count) || 0));
+  let c = ctx;
+  if (plan.first === 'inline' && n) {
+    const probe = body({ ...ctx, onDestination: undefined, onRefusedDestination: undefined });
+    const first = new Set(picturesInRenderOrder(probe.front, urls).slice(0, n));
+    if (first.size) c = { ...ctx, assetUrls: Object.fromEntries(Object.entries(map).filter(([, u]) => !first.has(u))) };
+  }
+  const b = body(c);
+  const grid = join(b);
+  const shown = picturesInRenderOrder(grid, urls);
+  const at = new Map(shown.map((u, i) => [u, i]));
+  const reserve = (plan.reserve || []).filter((r) => Array.isArray(r) && at.has(r[0])).sort((x, y) => at.get(x[0]) - at.get(y[0]));
+  const preload = plan.first === 'preload' ? picturesInRenderOrder(b.front, urls).slice(0, n) : [];
+  return { grid, pics: { preload, reserve, afterPaint: plan.afterPaint } };
+}
+
+// tile#339 MEASUREMENT PROTOTYPE — what the by-URL pictures of a hybrid page add (serve/asset-urls.mjs
+// picturePlan builds `pictures`; only the cardtile worker passes it, and only when its local switch is set):
+//   <head>  a preload for each first-screen picture (firstScreenPictures), high priority, before anything else can queue;
+//           one rule per picture giving its <img> the stored file's own ratio until it arrives
+//           (`auto W/H`: the real ratio wins once known). The `[data-w="6"]` selector is there because
+//           a full-width picture's `aspect-ratio:auto` (CARD_CSS) is the only picture box that sizes
+//           itself from the file; every other one is a square the grid already holds.
+//   </body> after-paint: one frame after DOMContentLoaded, every lazy picture under that path loads now.
+// Every value was written by picturePlan from a handle path and a hex digest; the guard is the floor.
+const PICTURE_PATH = /^\/[A-Za-z0-9._\-/]*$/;
+function pictureTags(plan) {
+  if (!plan) return { head: '', tail: '' };
+  const preload = (plan.preload || []).filter((u) => PICTURE_PATH.test(u))
+    .map((u) => `<link rel="preload" as="image" href="${esc(u)}" fetchpriority="high">`).join('');
+  const rules = (plan.reserve || []).filter(([u, w, h]) => PICTURE_PATH.test(u) && w > 0 && h > 0)
+    .map(([u, w, h]) => `img[src="${u}"],.st-card [data-w="6"] img[src="${u}"]{aspect-ratio:auto ${Math.round(w)}/${Math.round(h)}}`).join('');
+  const tail = plan.afterPaint && PICTURE_PATH.test(plan.afterPaint)
+    ? `<script>addEventListener('DOMContentLoaded',function(){requestAnimationFrame(function(){setTimeout(function(){document.querySelectorAll('img[loading="lazy"][src^="${plan.afterPaint}"]').forEach(function(i){i.loading='eager'})},0)})})</script>`
+    : '';
+  return { head: preload + (rules ? `<style id="cp-pictures">${rules}</style>` : ''), tail };
 }
 
 // Swap the poster for the real player only once someone presses play — youtube-nocookie, and not a

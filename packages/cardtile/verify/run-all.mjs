@@ -45,7 +45,7 @@ const only = onlyAt >= 0 ? (args[onlyAt + 1] || '') : '';
 const TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS || 90_000);
 
 // Helpers, not harnesses: they export, they do not measure.
-const NOT_A_HARNESS = new Set(['paths.mjs', 'run-all.mjs']);
+const NOT_A_HARNESS = new Set(['paths.mjs', 'run-all.mjs', 'stack-wrap-arms.mjs']);
 
 const files = readdirSync(HERE)
   .filter((f) => f.endsWith('.mjs') && !NOT_A_HARNESS.has(f))

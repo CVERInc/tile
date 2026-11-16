@@ -1,0 +1,1449 @@
+tile-sides: every tile of the specimen, front and back — stack 390, list 390, stack 1280, list 1280
+ stack at 390
+   ✓ stack 390: the pile has the specimen's 11 tiles (11)
+   ✓ stack 390 · profile: the tile came up, front showing
+   ✓ stack 390 · picture: the tile came up, front showing
+   ✓ stack 390 · tall-picture: the tile came up, front showing
+   ✓ stack 390 · video: the tile came up, front showing
+   ✓ stack 390 · social: the tile came up, front showing
+   ✓ stack 390 · tall-back: the tile came up, front showing
+   ✓ stack 390 · long-back: the tile came up, front showing
+   ✓ stack 390 · long-front: the tile came up, front showing
+   ✓ stack 390 · tall-front: the tile came up, front showing
+   ✓ stack 390 · captioned: the tile came up, front showing
+   ✓ stack 390 · link: the tile came up, front showing
+   · stack 390 · profile front: content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · profile front: the side has content to measure (3 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 0)
+   ✓ stack 390 · profile front: nothing is cut at the top (0 px of —; content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile front: nothing is cut at the bottom (0 px of —; content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · profile front: this side holds no more than it shows, and does not scroll (content 254 px, side 481 px, scrollers: none)
+   ✓ stack 390 · profile front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · profile front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · profile back: content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · profile back: the side has content to measure (3 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 0)
+   ✓ stack 390 · profile back: nothing is cut at the top (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile back: nothing is cut at the bottom (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · profile back: this side holds no more than it shows, and does not scroll (content 299 px, side 480 px, scrollers: none)
+   ✓ stack 390 · profile back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · profile back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · profile: the tile turned over
+   · stack 390 · profile back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 390 · profile back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 390 · profile back: it has words to measure
+   ✓ stack 390 · profile back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · profile back: its words stand on a ground of the side's own
+   ✓ stack 390 · profile: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · picture front: content 311 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · picture front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 1)
+   ✓ stack 390 · picture front: nothing is cut at the top (0 px of —; content 311 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · picture front: nothing is cut at the bottom (0 px of —; content 311 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · picture front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · picture front: this side holds no more than it shows, and does not scroll (content 311 px, side 481 px, scrollers: none)
+   ✓ stack 390 · picture front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · picture front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · picture back: content 1002 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 390 · picture back: the side has content to measure (16 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 1)
+   ✓ stack 390 · picture back: nothing is cut at the top (0 px of —; content 1002 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · picture back: nothing is cut at the bottom (0 px of —; content 1002 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · picture back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · picture back: this side holds more than it shows, and scrolls (content 1002 px, side 480 px, scrollers: div.deck-face.deck-back)
+   ✓ stack 390 · picture back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 390 · picture back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 390 · picture back: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 390 · picture back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ stack 390 · picture: the tile turned over
+   · stack 390 · picture back text "A picture and more" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · stack 390 · picture back text "A wide picture on a back." lies over a picture: not judged
+   · stack 390 · picture back text "Paragraph 1 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · picture back text "Paragraph 2 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · picture back text "Paragraph 3 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · picture back text "Paragraph 4 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · picture back text "Paragraph 5 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · picture back text "Paragraph 6 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · picture back text "Paragraph 7 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · picture back text "More 1" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · picture back text "More 2" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · picture back text "More 3" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   ✓ stack 390 · picture back: it has words to measure
+   ✓ stack 390 · picture back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · picture back: its words stand on a ground of the side's own
+   ✓ stack 390 · picture: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · tall-picture front: content 459 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · tall-picture front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 2)
+   ✓ stack 390 · tall-picture front: nothing is cut at the top (0 px of —; content 459 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-picture front: nothing is cut at the bottom (0 px of —; content 459 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-picture front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-picture front: this side holds no more than it shows, and does not scroll (content 459 px, side 481 px, scrollers: none)
+   ✓ stack 390 · tall-picture front: a picture taller than its side fits it whole, and the side does not scroll (content 459 px, side 481 px)
+   ✓ stack 390 · tall-picture front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · tall-picture front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · tall-picture back: content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · tall-picture back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 2)
+   ✓ stack 390 · tall-picture back: nothing is cut at the top (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-picture back: nothing is cut at the bottom (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-picture back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-picture back: this side holds no more than it shows, and does not scroll (content 299 px, side 480 px, scrollers: none)
+   ✓ stack 390 · tall-picture back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · tall-picture back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · tall-picture: the tile turned over
+   · stack 390 · tall-picture back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 390 · tall-picture back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 390 · tall-picture back: it has words to measure
+   ✓ stack 390 · tall-picture back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · tall-picture back: its words stand on a ground of the side's own
+   ✓ stack 390 · tall-picture: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · video front: content 218 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · video front: the side has content to measure (4 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 3)
+   ✓ stack 390 · video front: nothing is cut at the top (0 px of —; content 218 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · video front: nothing is cut at the bottom (0 px of —; content 218 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · video front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · video front: this side holds no more than it shows, and does not scroll (content 218 px, side 481 px, scrollers: none)
+   ✓ stack 390 · video front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · video front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · video back: content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · video back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 3)
+   ✓ stack 390 · video back: nothing is cut at the top (0 px of —; content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · video back: nothing is cut at the bottom (0 px of —; content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · video back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · video back: this side holds no more than it shows, and does not scroll (content 18 px, side 480 px, scrollers: none)
+   ✓ stack 390 · video back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · video back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · video: the tile turned over
+   · stack 390 · video back text "youtube.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · stack 390 · video back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ stack 390 · video back: it has words to measure
+   ⚠ stack 390 · video back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ stack 390 · video back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · video back: its words stand on a ground of the side's own
+   ✓ stack 390 · video: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · social front: content 74 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · social front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 4)
+   ✓ stack 390 · social front: nothing is cut at the top (0 px of —; content 74 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · social front: nothing is cut at the bottom (0 px of —; content 74 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · social front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · social front: this side holds no more than it shows, and does not scroll (content 74 px, side 481 px, scrollers: none)
+   ✓ stack 390 · social front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · social front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · social back: content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · social back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 4)
+   ✓ stack 390 · social back: nothing is cut at the top (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · social back: nothing is cut at the bottom (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · social back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · social back: this side holds no more than it shows, and does not scroll (content 299 px, side 480 px, scrollers: none)
+   ✓ stack 390 · social back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · social back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · social: the tile turned over
+   · stack 390 · social back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 390 · social back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 390 · social back: it has words to measure
+   ✓ stack 390 · social back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · social back: its words stand on a ground of the side's own
+   ✓ stack 390 · social: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · tall-back front: content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · tall-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 5)
+   ✓ stack 390 · tall-back front: nothing is cut at the top (0 px of —; content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-back front: nothing is cut at the bottom (0 px of —; content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-back front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-back front: this side holds no more than it shows, and does not scroll (content 46 px, side 481 px, scrollers: none)
+   ✓ stack 390 · tall-back front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · tall-back front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · tall-back back: content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 390 · tall-back back: the side has content to measure (37 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 5)
+   ✓ stack 390 · tall-back back: nothing is cut at the top (0 px of —; content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · tall-back back: nothing is cut at the bottom (0 px of —; content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · tall-back back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-back back: this side holds more than it shows, and scrolls (content 1101 px, side 480 px, scrollers: div.deck-face.deck-back)
+   ✓ stack 390 · tall-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 390 · tall-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 390 · tall-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 390 · tall-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ stack 390 · tall-back: the tile turned over
+   · stack 390 · tall-back back text "Eighteen tiles" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · stack 390 · tall-back back text "Tile 1 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 2 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 3 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 4 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 5 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 6 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 7 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 8 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 9 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 10 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 11 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 12 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 13 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 14 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 15 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 16 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 17 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 18 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   ✓ stack 390 · tall-back back: it has words to measure
+   ✓ stack 390 · tall-back back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · tall-back back: its words stand on a ground of the side's own
+   ✓ stack 390 · tall-back: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · long-back front: content 20 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · long-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 6)
+   ✓ stack 390 · long-back front: nothing is cut at the top (0 px of —; content 20 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · long-back front: nothing is cut at the bottom (0 px of —; content 20 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · long-back front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · long-back front: this side holds no more than it shows, and does not scroll (content 20 px, side 481 px, scrollers: none)
+   ✓ stack 390 · long-back front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · long-back front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · long-back back: content 1626 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 390 · long-back back: the side has content to measure (21 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 6)
+   ✓ stack 390 · long-back back: nothing is cut at the top (0 px of —; content 1626 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · long-back back: nothing is cut at the bottom (0 px of —; content 1626 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · long-back back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · long-back back: this side holds more than it shows, and scrolls (content 1626 px, side 480 px, scrollers: div.deck-face.deck-back)
+   ✓ stack 390 · long-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 390 · long-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 390 · long-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 390 · long-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ stack 390 · long-back: the tile turned over
+   · stack 390 · long-back back text "A long text" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · stack 390 · long-back back text "Paragraph 1 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 2 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 3 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 4 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 5 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 6 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 7 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 8 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 9 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 10 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 11 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 12 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 13 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 14 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 15 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 16 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 17 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 18 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 19 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 390 · long-back back text "Paragraph 20 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   ✓ stack 390 · long-back back: it has words to measure
+   ✓ stack 390 · long-back back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · long-back back: its words stand on a ground of the side's own
+   ✓ stack 390 · long-back: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · long-front front: content 1419 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 390 · long-front front: the side has content to measure (18 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 7)
+   ✓ stack 390 · long-front front: nothing is cut at the top (0 px of —; content 1419 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · long-front front: nothing is cut at the bottom (0 px of —; content 1419 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · long-front front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · long-front front: this side holds more than it shows, and scrolls (content 1419 px, side 481 px, scrollers: div.deck-face.deck-front)
+   ✓ stack 390 · long-front front: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 390 · long-front front: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 390 · long-front front: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 390 · long-front front: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   · stack 390 · long-front back: content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · long-front back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 7)
+   ✓ stack 390 · long-front back: nothing is cut at the top (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · long-front back: nothing is cut at the bottom (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · long-front back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · long-front back: this side holds no more than it shows, and does not scroll (content 299 px, side 480 px, scrollers: none)
+   ✓ stack 390 · long-front back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · long-front back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · long-front: the tile turned over
+   · stack 390 · long-front back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 390 · long-front back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 390 · long-front back: it has words to measure
+   ✓ stack 390 · long-front back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · long-front back: its words stand on a ground of the side's own
+   ✓ stack 390 · long-front: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · tall-front front: content 938 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 390 · tall-front front: the side has content to measure (18 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 8)
+   ✓ stack 390 · tall-front front: nothing is cut at the top (0 px of —; content 938 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · tall-front front: nothing is cut at the bottom (0 px of —; content 938 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · tall-front front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-front front: this side holds more than it shows, and scrolls (content 938 px, side 481 px, scrollers: div.deck-face.deck-front)
+   ✓ stack 390 · tall-front front: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 390 · tall-front front: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 390 · tall-front front: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 390 · tall-front front: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   · stack 390 · tall-front back: content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · tall-front back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 8)
+   ✓ stack 390 · tall-front back: nothing is cut at the top (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-front back: nothing is cut at the bottom (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-front back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-front back: this side holds no more than it shows, and does not scroll (content 299 px, side 480 px, scrollers: none)
+   ✓ stack 390 · tall-front back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · tall-front back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · tall-front: the tile turned over
+   · stack 390 · tall-front back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 390 · tall-front back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 390 · tall-front back: it has words to measure
+   ✓ stack 390 · tall-front back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · tall-front back: its words stand on a ground of the side's own
+   ✓ stack 390 · tall-front: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · captioned front: content 311 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · captioned front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 9)
+   ✓ stack 390 · captioned front: nothing is cut at the top (0 px of —; content 311 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · captioned front: nothing is cut at the bottom (0 px of —; content 311 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · captioned front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · captioned front: this side holds no more than it shows, and does not scroll (content 311 px, side 481 px, scrollers: none)
+   ✓ stack 390 · captioned front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · captioned front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · captioned back: content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · captioned back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 9)
+   ✓ stack 390 · captioned back: nothing is cut at the top (0 px of —; content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · captioned back: nothing is cut at the bottom (0 px of —; content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · captioned back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · captioned back: this side holds no more than it shows, and does not scroll (content 18 px, side 480 px, scrollers: none)
+   ✓ stack 390 · captioned back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · captioned back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · captioned: the tile turned over
+   · stack 390 · captioned back text "example.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · stack 390 · captioned back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ stack 390 · captioned back: it has words to measure
+   ⚠ stack 390 · captioned back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ stack 390 · captioned back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · captioned back: its words stand on a ground of the side's own
+   ✓ stack 390 · captioned: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · link front: content 65 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · link front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 10)
+   ✓ stack 390 · link front: nothing is cut at the top (0 px of —; content 65 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · link front: nothing is cut at the bottom (0 px of —; content 65 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · link front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · link front: this side holds no more than it shows, and does not scroll (content 65 px, side 481 px, scrollers: none)
+   ✓ stack 390 · link front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · link front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · link back: content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · link back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 10)
+   ✓ stack 390 · link back: nothing is cut at the top (0 px of —; content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · link back: nothing is cut at the bottom (0 px of —; content 18 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · link back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · link back: this side holds no more than it shows, and does not scroll (content 18 px, side 480 px, scrollers: none)
+   ✓ stack 390 · link back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · link back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · link: the tile turned over
+   · stack 390 · link back text "example.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · stack 390 · link back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ stack 390 · link back: it has words to measure
+   ⚠ stack 390 · link back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ stack 390 · link back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · link back: its words stand on a ground of the side's own
+   ✓ stack 390 · link: nothing with edges of its own is drawn beside the held tile (0: )
+ list at 390
+   ✓ list 390: the pile has the specimen's 11 tiles (11)
+   ✓ list 390 · profile: the tile came up, front showing
+   ✓ list 390 · picture: the tile came up, front showing
+   ✓ list 390 · tall-picture: the tile came up, front showing
+   ✓ list 390 · video: the tile came up, front showing
+   ✓ list 390 · social: the tile came up, front showing
+   ✓ list 390 · tall-back: the tile came up, front showing
+   ✓ list 390 · long-back: the tile came up, front showing
+   ✓ list 390 · long-front: the tile came up, front showing
+   ✓ list 390 · tall-front: the tile came up, front showing
+   ✓ list 390 · captioned: the tile came up, front showing
+   ✓ list 390 · link: the tile came up, front showing
+   · list 390 · profile front: content 179 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · profile front: the side has content to measure (3 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 0)
+   ✓ list 390 · profile front: nothing is cut at the top (0 px of —; content 179 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · profile front: nothing is cut at the bottom (0 px of —; content 179 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · profile front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · profile front: this side holds no more than it shows, and does not scroll (content 179 px, side 339 px, scrollers: none)
+   ✓ list 390 · profile front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · profile front: …and draws no mark ({"up":"","down":""})
+   · list 390 · profile back: content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · profile back: the side has content to measure (3 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 0)
+   ✓ list 390 · profile back: nothing is cut at the top (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · profile back: nothing is cut at the bottom (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · profile back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · profile back: this side holds no more than it shows, and does not scroll (content 211 px, side 339 px, scrollers: none)
+   ✓ list 390 · profile back: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · profile back: …and draws no mark ({"up":"","down":""})
+   ✓ list 390 · profile: the tile turned over
+   · list 390 · profile back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 14.1px
+   · list 390 · profile back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 10.6px
+   ✓ list 390 · profile back: it has words to measure
+   ✓ list 390 · profile back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · profile back: its words stand on a ground of the side's own
+   ✓ list 390 · profile: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · picture front: content 213 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · picture front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 1)
+   ✓ list 390 · picture front: nothing is cut at the top (0 px of —; content 213 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · picture front: nothing is cut at the bottom (0 px of —; content 213 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · picture front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · picture front: this side holds no more than it shows, and does not scroll (content 213 px, side 339 px, scrollers: none)
+   ✓ list 390 · picture front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · picture front: …and draws no mark ({"up":"","down":""})
+   · list 390 · picture back: content 708 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 390 · picture back: the side has content to measure (16 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 1)
+   ✓ list 390 · picture back: nothing is cut at the top (0 px of —; content 708 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · picture back: nothing is cut at the bottom (0 px of —; content 708 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · picture back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · picture back: this side holds more than it shows, and scrolls (content 708 px, side 339 px, scrollers: div.deck-face.deck-back)
+   ✓ list 390 · picture back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 390 · picture back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 390 · picture back: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 390 · picture back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ list 390 · picture: the tile turned over
+   · list 390 · picture back text "A picture and more" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 17px
+   · list 390 · picture back text "A wide picture on a back." lies over a picture: not judged
+   · list 390 · picture back text "Paragraph 1 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · picture back text "Paragraph 2 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · picture back text "Paragraph 3 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · picture back text "Paragraph 4 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · picture back text "Paragraph 5 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · picture back text "Paragraph 6 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · picture back text "Paragraph 7 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · picture back text "More 1" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · picture back text "More 2" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · picture back text "More 3" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   ✓ list 390 · picture back: it has words to measure
+   ✓ list 390 · picture back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · picture back: its words stand on a ground of the side's own
+   ✓ list 390 · picture: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · tall-picture front: content 317 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · tall-picture front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 2)
+   ✓ list 390 · tall-picture front: nothing is cut at the top (0 px of —; content 317 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · tall-picture front: nothing is cut at the bottom (0 px of —; content 317 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · tall-picture front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · tall-picture front: this side holds no more than it shows, and does not scroll (content 317 px, side 339 px, scrollers: none)
+   ✓ list 390 · tall-picture front: a picture taller than its side fits it whole, and the side does not scroll (content 317 px, side 339 px)
+   ✓ list 390 · tall-picture front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · tall-picture front: …and draws no mark ({"up":"","down":""})
+   · list 390 · tall-picture back: content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · tall-picture back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 2)
+   ✓ list 390 · tall-picture back: nothing is cut at the top (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · tall-picture back: nothing is cut at the bottom (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · tall-picture back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · tall-picture back: this side holds no more than it shows, and does not scroll (content 211 px, side 339 px, scrollers: none)
+   ✓ list 390 · tall-picture back: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · tall-picture back: …and draws no mark ({"up":"","down":""})
+   ✓ list 390 · tall-picture: the tile turned over
+   · list 390 · tall-picture back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 14.1px
+   · list 390 · tall-picture back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 10.6px
+   ✓ list 390 · tall-picture back: it has words to measure
+   ✓ list 390 · tall-picture back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · tall-picture back: its words stand on a ground of the side's own
+   ✓ list 390 · tall-picture: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · video front: content 150 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · video front: the side has content to measure (4 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 3)
+   ✓ list 390 · video front: nothing is cut at the top (0 px of —; content 150 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · video front: nothing is cut at the bottom (0 px of —; content 150 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · video front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · video front: this side holds no more than it shows, and does not scroll (content 150 px, side 339 px, scrollers: none)
+   ✓ list 390 · video front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · video front: …and draws no mark ({"up":"","down":""})
+   · list 390 · video back: content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · video back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 3)
+   ✓ list 390 · video back: nothing is cut at the top (0 px of —; content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · video back: nothing is cut at the bottom (0 px of —; content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · video back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · video back: this side holds no more than it shows, and does not scroll (content 13 px, side 339 px, scrollers: none)
+   ✓ list 390 · video back: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · video back: …and draws no mark ({"up":"","down":""})
+   ✓ list 390 · video: the tile turned over
+   · list 390 · video back text "youtube.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 10.6px
+   · list 390 · video back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 10.6px
+   ✓ list 390 · video back: it has words to measure
+   ⚠ list 390 · video back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ list 390 · video back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · video back: its words stand on a ground of the side's own
+   ✓ list 390 · video: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · social front: content 52 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · social front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 4)
+   ✓ list 390 · social front: nothing is cut at the top (0 px of —; content 52 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · social front: nothing is cut at the bottom (0 px of —; content 52 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · social front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · social front: this side holds no more than it shows, and does not scroll (content 52 px, side 339 px, scrollers: none)
+   ✓ list 390 · social front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · social front: …and draws no mark ({"up":"","down":""})
+   · list 390 · social back: content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · social back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 4)
+   ✓ list 390 · social back: nothing is cut at the top (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · social back: nothing is cut at the bottom (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · social back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · social back: this side holds no more than it shows, and does not scroll (content 211 px, side 339 px, scrollers: none)
+   ✓ list 390 · social back: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · social back: …and draws no mark ({"up":"","down":""})
+   ✓ list 390 · social: the tile turned over
+   · list 390 · social back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 14.1px
+   · list 390 · social back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 10.6px
+   ✓ list 390 · social back: it has words to measure
+   ✓ list 390 · social back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · social back: its words stand on a ground of the side's own
+   ✓ list 390 · social: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · tall-back front: content 33 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · tall-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 5)
+   ✓ list 390 · tall-back front: nothing is cut at the top (0 px of —; content 33 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · tall-back front: nothing is cut at the bottom (0 px of —; content 33 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · tall-back front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · tall-back front: this side holds no more than it shows, and does not scroll (content 33 px, side 339 px, scrollers: none)
+   ✓ list 390 · tall-back front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · tall-back front: …and draws no mark ({"up":"","down":""})
+   · list 390 · tall-back back: content 778 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 390 · tall-back back: the side has content to measure (37 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 5)
+   ✓ list 390 · tall-back back: nothing is cut at the top (0 px of —; content 778 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · tall-back back: nothing is cut at the bottom (0 px of —; content 778 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · tall-back back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · tall-back back: this side holds more than it shows, and scrolls (content 778 px, side 339 px, scrollers: div.deck-face.deck-back)
+   ✓ list 390 · tall-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 390 · tall-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 390 · tall-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 390 · tall-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ list 390 · tall-back: the tile turned over
+   · list 390 · tall-back back text "Eighteen tiles" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 17px
+   · list 390 · tall-back back text "Tile 1 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 2 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 3 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 4 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 5 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 6 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 7 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 8 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 9 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 10 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 11 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 12 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 13 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 14 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 15 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 16 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 17 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   · list 390 · tall-back back text "Tile 18 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 10.7px
+   ✓ list 390 · tall-back back: it has words to measure
+   ✓ list 390 · tall-back back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · tall-back back: its words stand on a ground of the side's own
+   ✓ list 390 · tall-back: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · long-back front: content 14 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · long-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 6)
+   ✓ list 390 · long-back front: nothing is cut at the top (0 px of —; content 14 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · long-back front: nothing is cut at the bottom (0 px of —; content 14 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · long-back front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · long-back front: this side holds no more than it shows, and does not scroll (content 14 px, side 339 px, scrollers: none)
+   ✓ list 390 · long-back front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · long-back front: …and draws no mark ({"up":"","down":""})
+   · list 390 · long-back back: content 1150 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 390 · long-back back: the side has content to measure (21 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 6)
+   ✓ list 390 · long-back back: nothing is cut at the top (0 px of —; content 1150 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · long-back back: nothing is cut at the bottom (0 px of —; content 1150 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · long-back back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · long-back back: this side holds more than it shows, and scrolls (content 1150 px, side 339 px, scrollers: div.deck-face.deck-back)
+   ✓ list 390 · long-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 390 · long-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 390 · long-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 390 · long-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ list 390 · long-back: the tile turned over
+   · list 390 · long-back back text "A long text" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 17px
+   · list 390 · long-back back text "Paragraph 1 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 2 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 3 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 4 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 5 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 6 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 7 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 8 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 9 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 10 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 11 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 12 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 13 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 14 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 15 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 16 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 17 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 18 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 19 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   · list 390 · long-back back text "Paragraph 20 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 11.3px
+   ✓ list 390 · long-back back: it has words to measure
+   ✓ list 390 · long-back back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · long-back back: its words stand on a ground of the side's own
+   ✓ list 390 · long-back: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · long-front front: content 1003 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 390 · long-front front: the side has content to measure (18 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 7)
+   ✓ list 390 · long-front front: nothing is cut at the top (0 px of —; content 1003 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · long-front front: nothing is cut at the bottom (0 px of —; content 1003 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · long-front front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · long-front front: this side holds more than it shows, and scrolls (content 1003 px, side 339 px, scrollers: div.deck-face.deck-front)
+   ✓ list 390 · long-front front: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 390 · long-front front: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 390 · long-front front: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 390 · long-front front: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   · list 390 · long-front back: content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · long-front back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 7)
+   ✓ list 390 · long-front back: nothing is cut at the top (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · long-front back: nothing is cut at the bottom (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · long-front back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · long-front back: this side holds no more than it shows, and does not scroll (content 211 px, side 339 px, scrollers: none)
+   ✓ list 390 · long-front back: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · long-front back: …and draws no mark ({"up":"","down":""})
+   ✓ list 390 · long-front: the tile turned over
+   · list 390 · long-front back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 14.1px
+   · list 390 · long-front back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 10.6px
+   ✓ list 390 · long-front back: it has words to measure
+   ✓ list 390 · long-front back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · long-front back: its words stand on a ground of the side's own
+   ✓ list 390 · long-front: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · tall-front front: content 663 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 390 · tall-front front: the side has content to measure (18 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 8)
+   ✓ list 390 · tall-front front: nothing is cut at the top (0 px of —; content 663 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · tall-front front: nothing is cut at the bottom (0 px of —; content 663 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 390 · tall-front front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · tall-front front: this side holds more than it shows, and scrolls (content 663 px, side 339 px, scrollers: div.deck-face.deck-front)
+   ✓ list 390 · tall-front front: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 390 · tall-front front: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 390 · tall-front front: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 390 · tall-front front: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   · list 390 · tall-front back: content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · tall-front back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 8)
+   ✓ list 390 · tall-front back: nothing is cut at the top (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · tall-front back: nothing is cut at the bottom (0 px of —; content 211 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · tall-front back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · tall-front back: this side holds no more than it shows, and does not scroll (content 211 px, side 339 px, scrollers: none)
+   ✓ list 390 · tall-front back: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · tall-front back: …and draws no mark ({"up":"","down":""})
+   ✓ list 390 · tall-front: the tile turned over
+   · list 390 · tall-front back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 14.1px
+   · list 390 · tall-front back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 10.6px
+   ✓ list 390 · tall-front back: it has words to measure
+   ✓ list 390 · tall-front back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · tall-front back: its words stand on a ground of the side's own
+   ✓ list 390 · tall-front: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · captioned front: content 213 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · captioned front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 9)
+   ✓ list 390 · captioned front: nothing is cut at the top (0 px of —; content 213 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · captioned front: nothing is cut at the bottom (0 px of —; content 213 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · captioned front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · captioned front: this side holds no more than it shows, and does not scroll (content 213 px, side 339 px, scrollers: none)
+   ✓ list 390 · captioned front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · captioned front: …and draws no mark ({"up":"","down":""})
+   · list 390 · captioned back: content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · captioned back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 9)
+   ✓ list 390 · captioned back: nothing is cut at the top (0 px of —; content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · captioned back: nothing is cut at the bottom (0 px of —; content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · captioned back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · captioned back: this side holds no more than it shows, and does not scroll (content 13 px, side 339 px, scrollers: none)
+   ✓ list 390 · captioned back: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · captioned back: …and draws no mark ({"up":"","down":""})
+   ✓ list 390 · captioned: the tile turned over
+   · list 390 · captioned back text "example.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 10.6px
+   · list 390 · captioned back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 10.6px
+   ✓ list 390 · captioned back: it has words to measure
+   ⚠ list 390 · captioned back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ list 390 · captioned back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · captioned back: its words stand on a ground of the side's own
+   ✓ list 390 · captioned: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 390 · link front: content 45 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · link front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 10)
+   ✓ list 390 · link front: nothing is cut at the top (0 px of —; content 45 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · link front: nothing is cut at the bottom (0 px of —; content 45 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · link front: nothing is cut sideways (0 px of —)
+   ✓ list 390 · link front: this side holds no more than it shows, and does not scroll (content 45 px, side 339 px, scrollers: none)
+   ✓ list 390 · link front: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · link front: …and draws no mark ({"up":"","down":""})
+   · list 390 · link back: content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 390 · link back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 10)
+   ✓ list 390 · link back: nothing is cut at the top (0 px of —; content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · link back: nothing is cut at the bottom (0 px of —; content 13 px on a 339 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 390 · link back: nothing is cut sideways (0 px of —)
+   ✓ list 390 · link back: this side holds no more than it shows, and does not scroll (content 13 px, side 339 px, scrollers: none)
+   ✓ list 390 · link back: a side that shows everything marks nothing (data-more="")
+   ✓ list 390 · link back: …and draws no mark ({"up":"","down":""})
+   ✓ list 390 · link: the tile turned over
+   · list 390 · link back text "example.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 10.6px
+   · list 390 · link back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 10.6px
+   ✓ list 390 · link back: it has words to measure
+   ⚠ list 390 · link back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ list 390 · link back: every run of text reaches its contrast (0 below: )
+   ✓ list 390 · link back: its words stand on a ground of the side's own
+   ✓ list 390 · link: nothing with edges of its own is drawn beside the held tile (0: )
+ stack at 1280
+   ✓ stack 1280: the pile has the specimen's 11 tiles (11)
+   ✓ stack 1280 · profile: the tile came up, front showing
+   ✓ stack 1280 · picture: the tile came up, front showing
+   ✓ stack 1280 · tall-picture: the tile came up, front showing
+   ✓ stack 1280 · video: the tile came up, front showing
+   ✓ stack 1280 · social: the tile came up, front showing
+   ✓ stack 1280 · tall-back: the tile came up, front showing
+   ✓ stack 1280 · long-back: the tile came up, front showing
+   ✓ stack 1280 · long-front: the tile came up, front showing
+   ✓ stack 1280 · tall-front: the tile came up, front showing
+   ✓ stack 1280 · captioned: the tile came up, front showing
+   ✓ stack 1280 · link: the tile came up, front showing
+   · stack 1280 · profile front: content 274 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · profile front: the side has content to measure (3 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 0)
+   ✓ stack 1280 · profile front: nothing is cut at the top (0 px of —; content 274 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · profile front: nothing is cut at the bottom (0 px of —; content 274 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · profile front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · profile front: this side holds no more than it shows, and does not scroll (content 274 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · profile front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · profile front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · profile back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · profile back: the side has content to measure (3 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 0)
+   ✓ stack 1280 · profile back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · profile back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · profile back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · profile back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · profile back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · profile back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 1280 · profile: the tile turned over
+   · stack 1280 · profile back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 1280 · profile back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 1280 · profile back: it has words to measure
+   ✓ stack 1280 · profile back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · profile back: its words stand on a ground of the side's own
+   ✓ stack 1280 · profile: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · picture front: content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · picture front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 1)
+   ✓ stack 1280 · picture front: nothing is cut at the top (0 px of —; content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · picture front: nothing is cut at the bottom (0 px of —; content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · picture front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · picture front: this side holds no more than it shows, and does not scroll (content 427 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · picture front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · picture front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · picture back: content 894 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 1280 · picture back: the side has content to measure (16 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 1)
+   ✓ stack 1280 · picture back: nothing is cut at the top (0 px of —; content 894 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · picture back: nothing is cut at the bottom (0 px of —; content 894 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · picture back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · picture back: this side holds more than it shows, and scrolls (content 894 px, side 652 px, scrollers: div.deck-face.deck-back)
+   ✓ stack 1280 · picture back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 1280 · picture back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 1280 · picture back: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 1280 · picture back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ stack 1280 · picture: the tile turned over
+   · stack 1280 · picture back text "A picture and more" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · stack 1280 · picture back text "A wide picture on a back." lies over a picture: not judged
+   · stack 1280 · picture back text "Paragraph 1 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · picture back text "Paragraph 2 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · picture back text "Paragraph 3 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · picture back text "Paragraph 4 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · picture back text "Paragraph 5 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · picture back text "Paragraph 6 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · picture back text "Paragraph 7 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · picture back text "More 1" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · picture back text "More 2" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · picture back text "More 3" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   ✓ stack 1280 · picture back: it has words to measure
+   ✓ stack 1280 · picture back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · picture back: its words stand on a ground of the side's own
+   ✓ stack 1280 · picture: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · tall-picture front: content 630 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · tall-picture front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 2)
+   ✓ stack 1280 · tall-picture front: nothing is cut at the top (0 px of —; content 630 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · tall-picture front: nothing is cut at the bottom (0 px of —; content 630 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · tall-picture front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · tall-picture front: this side holds no more than it shows, and does not scroll (content 630 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · tall-picture front: a picture taller than its side fits it whole, and the side does not scroll (content 630 px, side 652 px)
+   ✓ stack 1280 · tall-picture front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · tall-picture front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · tall-picture back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · tall-picture back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 2)
+   ✓ stack 1280 · tall-picture back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · tall-picture back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · tall-picture back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · tall-picture back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · tall-picture back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · tall-picture back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 1280 · tall-picture: the tile turned over
+   · stack 1280 · tall-picture back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 1280 · tall-picture back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 1280 · tall-picture back: it has words to measure
+   ✓ stack 1280 · tall-picture back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · tall-picture back: its words stand on a ground of the side's own
+   ✓ stack 1280 · tall-picture: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · video front: content 265 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · video front: the side has content to measure (4 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 3)
+   ✓ stack 1280 · video front: nothing is cut at the top (0 px of —; content 265 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · video front: nothing is cut at the bottom (0 px of —; content 265 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · video front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · video front: this side holds no more than it shows, and does not scroll (content 265 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · video front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · video front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · video back: content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · video back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 3)
+   ✓ stack 1280 · video back: nothing is cut at the top (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · video back: nothing is cut at the bottom (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · video back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · video back: this side holds no more than it shows, and does not scroll (content 18 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · video back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · video back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 1280 · video: the tile turned over
+   · stack 1280 · video back text "youtube.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · stack 1280 · video back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ stack 1280 · video back: it has words to measure
+   ⚠ stack 1280 · video back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ stack 1280 · video back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · video back: its words stand on a ground of the side's own
+   ✓ stack 1280 · video: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · social front: content 74 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · social front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 4)
+   ✓ stack 1280 · social front: nothing is cut at the top (0 px of —; content 74 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · social front: nothing is cut at the bottom (0 px of —; content 74 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · social front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · social front: this side holds no more than it shows, and does not scroll (content 74 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · social front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · social front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · social back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · social back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 4)
+   ✓ stack 1280 · social back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · social back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · social back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · social back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · social back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · social back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 1280 · social: the tile turned over
+   · stack 1280 · social back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 1280 · social back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 1280 · social back: it has words to measure
+   ✓ stack 1280 · social back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · social back: its words stand on a ground of the side's own
+   ✓ stack 1280 · social: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · tall-back front: content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · tall-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 5)
+   ✓ stack 1280 · tall-back front: nothing is cut at the top (0 px of —; content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · tall-back front: nothing is cut at the bottom (0 px of —; content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · tall-back front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · tall-back front: this side holds no more than it shows, and does not scroll (content 20 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · tall-back front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · tall-back front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · tall-back back: content 1281 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 1280 · tall-back back: the side has content to measure (37 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 5)
+   ✓ stack 1280 · tall-back back: nothing is cut at the top (0 px of —; content 1281 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · tall-back back: nothing is cut at the bottom (0 px of —; content 1281 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · tall-back back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · tall-back back: this side holds more than it shows, and scrolls (content 1281 px, side 652 px, scrollers: div.deck-face.deck-back)
+   ✓ stack 1280 · tall-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 1280 · tall-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 1280 · tall-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 1280 · tall-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ stack 1280 · tall-back: the tile turned over
+   · stack 1280 · tall-back back text "Eighteen tiles" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · stack 1280 · tall-back back text "Tile 1 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 2 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 3 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 4 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 5 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 6 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 7 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 8 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 9 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 10 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 11 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 12 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 13 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 14 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 15 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 16 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 17 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 1280 · tall-back back text "Tile 18 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   ✓ stack 1280 · tall-back back: it has words to measure
+   ✓ stack 1280 · tall-back back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · tall-back back: its words stand on a ground of the side's own
+   ✓ stack 1280 · tall-back: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · long-back front: content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · long-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 6)
+   ✓ stack 1280 · long-back front: nothing is cut at the top (0 px of —; content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · long-back front: nothing is cut at the bottom (0 px of —; content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · long-back front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · long-back front: this side holds no more than it shows, and does not scroll (content 20 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · long-back front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · long-back front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · long-back back: content 1098 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 1280 · long-back back: the side has content to measure (21 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 6)
+   ✓ stack 1280 · long-back back: nothing is cut at the top (0 px of —; content 1098 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · long-back back: nothing is cut at the bottom (0 px of —; content 1098 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · long-back back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · long-back back: this side holds more than it shows, and scrolls (content 1098 px, side 652 px, scrollers: div.deck-face.deck-back)
+   ✓ stack 1280 · long-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 1280 · long-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 1280 · long-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 1280 · long-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ stack 1280 · long-back: the tile turned over
+   · stack 1280 · long-back back text "A long text" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · stack 1280 · long-back back text "Paragraph 1 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 2 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 3 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 4 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 5 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 6 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 7 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 8 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 9 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 10 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 11 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 12 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 13 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 14 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 15 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 16 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 17 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 18 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 19 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · stack 1280 · long-back back text "Paragraph 20 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   ✓ stack 1280 · long-back back: it has words to measure
+   ✓ stack 1280 · long-back back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · long-back back: its words stand on a ground of the side's own
+   ✓ stack 1280 · long-back: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · long-front front: content 944 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 1280 · long-front front: the side has content to measure (18 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 7)
+   ✓ stack 1280 · long-front front: nothing is cut at the top (0 px of —; content 944 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · long-front front: nothing is cut at the bottom (0 px of —; content 944 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · long-front front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · long-front front: this side holds more than it shows, and scrolls (content 944 px, side 652 px, scrollers: div.deck-face.deck-front)
+   ✓ stack 1280 · long-front front: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 1280 · long-front front: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 1280 · long-front front: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 1280 · long-front front: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   · stack 1280 · long-front back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · long-front back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 7)
+   ✓ stack 1280 · long-front back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · long-front back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · long-front back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · long-front back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · long-front back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · long-front back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 1280 · long-front: the tile turned over
+   · stack 1280 · long-front back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 1280 · long-front back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 1280 · long-front back: it has words to measure
+   ✓ stack 1280 · long-front back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · long-front back: its words stand on a ground of the side's own
+   ✓ stack 1280 · long-front: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · tall-front front: content 938 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 1280 · tall-front front: the side has content to measure (18 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 8)
+   ✓ stack 1280 · tall-front front: nothing is cut at the top (0 px of —; content 938 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · tall-front front: nothing is cut at the bottom (0 px of —; content 938 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 1280 · tall-front front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · tall-front front: this side holds more than it shows, and scrolls (content 938 px, side 652 px, scrollers: div.deck-face.deck-front)
+   ✓ stack 1280 · tall-front front: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 1280 · tall-front front: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 1280 · tall-front front: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 1280 · tall-front front: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   · stack 1280 · tall-front back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · tall-front back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 8)
+   ✓ stack 1280 · tall-front back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · tall-front back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · tall-front back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · tall-front back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · tall-front back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · tall-front back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 1280 · tall-front: the tile turned over
+   · stack 1280 · tall-front back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 1280 · tall-front back text "x/sides-stack" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 1280 · tall-front back: it has words to measure
+   ✓ stack 1280 · tall-front back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · tall-front back: its words stand on a ground of the side's own
+   ✓ stack 1280 · tall-front: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · captioned front: content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · captioned front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 9)
+   ✓ stack 1280 · captioned front: nothing is cut at the top (0 px of —; content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · captioned front: nothing is cut at the bottom (0 px of —; content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · captioned front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · captioned front: this side holds no more than it shows, and does not scroll (content 427 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · captioned front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · captioned front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · captioned back: content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · captioned back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 9)
+   ✓ stack 1280 · captioned back: nothing is cut at the top (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · captioned back: nothing is cut at the bottom (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · captioned back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · captioned back: this side holds no more than it shows, and does not scroll (content 18 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · captioned back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · captioned back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 1280 · captioned: the tile turned over
+   · stack 1280 · captioned back text "example.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · stack 1280 · captioned back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ stack 1280 · captioned back: it has words to measure
+   ⚠ stack 1280 · captioned back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ stack 1280 · captioned back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · captioned back: its words stand on a ground of the side's own
+   ✓ stack 1280 · captioned: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 1280 · link front: content 65 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · link front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 10)
+   ✓ stack 1280 · link front: nothing is cut at the top (0 px of —; content 65 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · link front: nothing is cut at the bottom (0 px of —; content 65 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · link front: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · link front: this side holds no more than it shows, and does not scroll (content 65 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · link front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · link front: …and draws no mark ({"up":"","down":""})
+   · stack 1280 · link back: content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 1280 · link back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 10)
+   ✓ stack 1280 · link back: nothing is cut at the top (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · link back: nothing is cut at the bottom (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 1280 · link back: nothing is cut sideways (0 px of —)
+   ✓ stack 1280 · link back: this side holds no more than it shows, and does not scroll (content 18 px, side 652 px, scrollers: none)
+   ✓ stack 1280 · link back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 1280 · link back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 1280 · link: the tile turned over
+   · stack 1280 · link back text "example.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · stack 1280 · link back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ stack 1280 · link back: it has words to measure
+   ⚠ stack 1280 · link back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ stack 1280 · link back: every run of text reaches its contrast (0 below: )
+   ✓ stack 1280 · link back: its words stand on a ground of the side's own
+   ✓ stack 1280 · link: nothing with edges of its own is drawn beside the held tile (0: )
+ list at 1280
+   ✓ list 1280: the pile has the specimen's 11 tiles (11)
+   ✓ list 1280 · profile: the tile came up, front showing
+   ✓ list 1280 · picture: the tile came up, front showing
+   ✓ list 1280 · tall-picture: the tile came up, front showing
+   ✓ list 1280 · video: the tile came up, front showing
+   ✓ list 1280 · social: the tile came up, front showing
+   ✓ list 1280 · tall-back: the tile came up, front showing
+   ✓ list 1280 · long-back: the tile came up, front showing
+   ✓ list 1280 · long-front: the tile came up, front showing
+   ✓ list 1280 · tall-front: the tile came up, front showing
+   ✓ list 1280 · captioned: the tile came up, front showing
+   ✓ list 1280 · link: the tile came up, front showing
+   · list 1280 · profile front: content 274 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · profile front: the side has content to measure (3 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 0)
+   ✓ list 1280 · profile front: nothing is cut at the top (0 px of —; content 274 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · profile front: nothing is cut at the bottom (0 px of —; content 274 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · profile front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · profile front: this side holds no more than it shows, and does not scroll (content 274 px, side 652 px, scrollers: none)
+   ✓ list 1280 · profile front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · profile front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · profile back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · profile back: the side has content to measure (3 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 0)
+   ✓ list 1280 · profile back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · profile back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · profile back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · profile back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ list 1280 · profile back: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · profile back: …and draws no mark ({"up":"","down":""})
+   ✓ list 1280 · profile: the tile turned over
+   · list 1280 · profile back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · list 1280 · profile back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ list 1280 · profile back: it has words to measure
+   ✓ list 1280 · profile back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · profile back: its words stand on a ground of the side's own
+   ✓ list 1280 · profile: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · picture front: content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · picture front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 1)
+   ✓ list 1280 · picture front: nothing is cut at the top (0 px of —; content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · picture front: nothing is cut at the bottom (0 px of —; content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · picture front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · picture front: this side holds no more than it shows, and does not scroll (content 427 px, side 652 px, scrollers: none)
+   ✓ list 1280 · picture front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · picture front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · picture back: content 894 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 1280 · picture back: the side has content to measure (16 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 1)
+   ✓ list 1280 · picture back: nothing is cut at the top (0 px of —; content 894 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · picture back: nothing is cut at the bottom (0 px of —; content 894 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · picture back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · picture back: this side holds more than it shows, and scrolls (content 894 px, side 652 px, scrollers: div.deck-face.deck-back)
+   ✓ list 1280 · picture back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 1280 · picture back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 1280 · picture back: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 1280 · picture back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ list 1280 · picture: the tile turned over
+   · list 1280 · picture back text "A picture and more" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · list 1280 · picture back text "A wide picture on a back." lies over a picture: not judged
+   · list 1280 · picture back text "Paragraph 1 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · picture back text "Paragraph 2 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · picture back text "Paragraph 3 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · picture back text "Paragraph 4 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · picture back text "Paragraph 5 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · picture back text "Paragraph 6 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · picture back text "Paragraph 7 of 7: a side holds w" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · picture back text "More 1" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · picture back text "More 2" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · picture back text "More 3" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   ✓ list 1280 · picture back: it has words to measure
+   ✓ list 1280 · picture back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · picture back: its words stand on a ground of the side's own
+   ✓ list 1280 · picture: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · tall-picture front: content 630 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · tall-picture front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 2)
+   ✓ list 1280 · tall-picture front: nothing is cut at the top (0 px of —; content 630 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · tall-picture front: nothing is cut at the bottom (0 px of —; content 630 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · tall-picture front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · tall-picture front: this side holds no more than it shows, and does not scroll (content 630 px, side 652 px, scrollers: none)
+   ✓ list 1280 · tall-picture front: a picture taller than its side fits it whole, and the side does not scroll (content 630 px, side 652 px)
+   ✓ list 1280 · tall-picture front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · tall-picture front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · tall-picture back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · tall-picture back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 2)
+   ✓ list 1280 · tall-picture back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · tall-picture back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · tall-picture back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · tall-picture back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ list 1280 · tall-picture back: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · tall-picture back: …and draws no mark ({"up":"","down":""})
+   ✓ list 1280 · tall-picture: the tile turned over
+   · list 1280 · tall-picture back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · list 1280 · tall-picture back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ list 1280 · tall-picture back: it has words to measure
+   ✓ list 1280 · tall-picture back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · tall-picture back: its words stand on a ground of the side's own
+   ✓ list 1280 · tall-picture: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · video front: content 265 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · video front: the side has content to measure (4 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 3)
+   ✓ list 1280 · video front: nothing is cut at the top (0 px of —; content 265 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · video front: nothing is cut at the bottom (0 px of —; content 265 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · video front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · video front: this side holds no more than it shows, and does not scroll (content 265 px, side 652 px, scrollers: none)
+   ✓ list 1280 · video front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · video front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · video back: content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · video back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 3)
+   ✓ list 1280 · video back: nothing is cut at the top (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · video back: nothing is cut at the bottom (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · video back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · video back: this side holds no more than it shows, and does not scroll (content 18 px, side 652 px, scrollers: none)
+   ✓ list 1280 · video back: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · video back: …and draws no mark ({"up":"","down":""})
+   ✓ list 1280 · video: the tile turned over
+   · list 1280 · video back text "youtube.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · list 1280 · video back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ list 1280 · video back: it has words to measure
+   ⚠ list 1280 · video back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ list 1280 · video back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · video back: its words stand on a ground of the side's own
+   ✓ list 1280 · video: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · social front: content 74 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · social front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 4)
+   ✓ list 1280 · social front: nothing is cut at the top (0 px of —; content 74 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · social front: nothing is cut at the bottom (0 px of —; content 74 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · social front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · social front: this side holds no more than it shows, and does not scroll (content 74 px, side 652 px, scrollers: none)
+   ✓ list 1280 · social front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · social front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · social back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · social back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 4)
+   ✓ list 1280 · social back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · social back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · social back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · social back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ list 1280 · social back: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · social back: …and draws no mark ({"up":"","down":""})
+   ✓ list 1280 · social: the tile turned over
+   · list 1280 · social back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · list 1280 · social back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ list 1280 · social back: it has words to measure
+   ✓ list 1280 · social back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · social back: its words stand on a ground of the side's own
+   ✓ list 1280 · social: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · tall-back front: content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · tall-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 5)
+   ✓ list 1280 · tall-back front: nothing is cut at the top (0 px of —; content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · tall-back front: nothing is cut at the bottom (0 px of —; content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · tall-back front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · tall-back front: this side holds no more than it shows, and does not scroll (content 20 px, side 652 px, scrollers: none)
+   ✓ list 1280 · tall-back front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · tall-back front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · tall-back back: content 1281 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 1280 · tall-back back: the side has content to measure (37 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 5)
+   ✓ list 1280 · tall-back back: nothing is cut at the top (0 px of —; content 1281 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · tall-back back: nothing is cut at the bottom (0 px of —; content 1281 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · tall-back back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · tall-back back: this side holds more than it shows, and scrolls (content 1281 px, side 652 px, scrollers: div.deck-face.deck-back)
+   ✓ list 1280 · tall-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 1280 · tall-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 1280 · tall-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 1280 · tall-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ list 1280 · tall-back: the tile turned over
+   · list 1280 · tall-back back text "Eighteen tiles" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · list 1280 · tall-back back text "Tile 1 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 2 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 3 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 4 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 5 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 6 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 7 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 8 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 9 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 10 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 11 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 12 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 13 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 14 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 15 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 16 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 17 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · list 1280 · tall-back back text "Tile 18 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   ✓ list 1280 · tall-back back: it has words to measure
+   ✓ list 1280 · tall-back back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · tall-back back: its words stand on a ground of the side's own
+   ✓ list 1280 · tall-back: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · long-back front: content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · long-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 6)
+   ✓ list 1280 · long-back front: nothing is cut at the top (0 px of —; content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · long-back front: nothing is cut at the bottom (0 px of —; content 20 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · long-back front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · long-back front: this side holds no more than it shows, and does not scroll (content 20 px, side 652 px, scrollers: none)
+   ✓ list 1280 · long-back front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · long-back front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · long-back back: content 1098 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 1280 · long-back back: the side has content to measure (21 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 6)
+   ✓ list 1280 · long-back back: nothing is cut at the top (0 px of —; content 1098 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · long-back back: nothing is cut at the bottom (0 px of —; content 1098 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · long-back back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · long-back back: this side holds more than it shows, and scrolls (content 1098 px, side 652 px, scrollers: div.deck-face.deck-back)
+   ✓ list 1280 · long-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 1280 · long-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 1280 · long-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 1280 · long-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ list 1280 · long-back: the tile turned over
+   · list 1280 · long-back back text "A long text" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · list 1280 · long-back back text "Paragraph 1 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 2 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 3 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 4 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 5 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 6 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 7 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 8 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 9 of 20: a side holds " [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 10 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 11 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 12 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 13 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 14 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 15 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 16 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 17 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 18 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 19 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   · list 1280 · long-back back text "Paragraph 20 of 20: a side holds" [p in st-cell st-prose] 4.76:1 (needs 4.5) rgb(65, 110, 110) on rgb(228,236,236) 16px
+   ✓ list 1280 · long-back back: it has words to measure
+   ✓ list 1280 · long-back back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · long-back back: its words stand on a ground of the side's own
+   ✓ list 1280 · long-back: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · long-front front: content 944 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 1280 · long-front front: the side has content to measure (18 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 7)
+   ✓ list 1280 · long-front front: nothing is cut at the top (0 px of —; content 944 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · long-front front: nothing is cut at the bottom (0 px of —; content 944 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · long-front front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · long-front front: this side holds more than it shows, and scrolls (content 944 px, side 652 px, scrollers: div.deck-face.deck-front)
+   ✓ list 1280 · long-front front: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 1280 · long-front front: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 1280 · long-front front: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 1280 · long-front front: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   · list 1280 · long-front back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · long-front back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 7)
+   ✓ list 1280 · long-front back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · long-front back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · long-front back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · long-front back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ list 1280 · long-front back: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · long-front back: …and draws no mark ({"up":"","down":""})
+   ✓ list 1280 · long-front: the tile turned over
+   · list 1280 · long-front back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · list 1280 · long-front back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ list 1280 · long-front back: it has words to measure
+   ✓ list 1280 · long-front back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · long-front back: its words stand on a ground of the side's own
+   ✓ list 1280 · long-front: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · tall-front front: content 938 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ list 1280 · tall-front front: the side has content to measure (18 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 8)
+   ✓ list 1280 · tall-front front: nothing is cut at the top (0 px of —; content 938 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · tall-front front: nothing is cut at the bottom (0 px of —; content 938 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ list 1280 · tall-front front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · tall-front front: this side holds more than it shows, and scrolls (content 938 px, side 652 px, scrollers: div.deck-face.deck-front)
+   ✓ list 1280 · tall-front front: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ list 1280 · tall-front front: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ list 1280 · tall-front front: at the end it says there is more above (data-more="up", want "up")
+   ✓ list 1280 · tall-front front: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   · list 1280 · tall-front back: content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · tall-front back: the side has content to measure (4 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 8)
+   ✓ list 1280 · tall-front back: nothing is cut at the top (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · tall-front back: nothing is cut at the bottom (0 px of —; content 312 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · tall-front back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · tall-front back: this side holds no more than it shows, and does not scroll (content 312 px, side 652 px, scrollers: none)
+   ✓ list 1280 · tall-front back: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · tall-front back: …and draws no mark ({"up":"","down":""})
+   ✓ list 1280 · tall-front: the tile turned over
+   · list 1280 · tall-front back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · list 1280 · tall-front back text "x/sides-list" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ list 1280 · tall-front back: it has words to measure
+   ✓ list 1280 · tall-front back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · tall-front back: its words stand on a ground of the side's own
+   ✓ list 1280 · tall-front: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · captioned front: content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · captioned front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 9)
+   ✓ list 1280 · captioned front: nothing is cut at the top (0 px of —; content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · captioned front: nothing is cut at the bottom (0 px of —; content 427 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · captioned front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · captioned front: this side holds no more than it shows, and does not scroll (content 427 px, side 652 px, scrollers: none)
+   ✓ list 1280 · captioned front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · captioned front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · captioned back: content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · captioned back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 9)
+   ✓ list 1280 · captioned back: nothing is cut at the top (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · captioned back: nothing is cut at the bottom (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · captioned back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · captioned back: this side holds no more than it shows, and does not scroll (content 18 px, side 652 px, scrollers: none)
+   ✓ list 1280 · captioned back: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · captioned back: …and draws no mark ({"up":"","down":""})
+   ✓ list 1280 · captioned: the tile turned over
+   · list 1280 · captioned back text "example.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · list 1280 · captioned back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ list 1280 · captioned back: it has words to measure
+   ⚠ list 1280 · captioned back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ list 1280 · captioned back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · captioned back: its words stand on a ground of the side's own
+   ✓ list 1280 · captioned: nothing with edges of its own is drawn beside the held tile (0: )
+   · list 1280 · link front: content 65 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · link front: the side has content to measure (2 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 10)
+   ✓ list 1280 · link front: nothing is cut at the top (0 px of —; content 65 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · link front: nothing is cut at the bottom (0 px of —; content 65 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · link front: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · link front: this side holds no more than it shows, and does not scroll (content 65 px, side 652 px, scrollers: none)
+   ✓ list 1280 · link front: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · link front: …and draws no mark ({"up":"","down":""})
+   · list 1280 · link back: content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ list 1280 · link back: the side has content to measure (2 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 10)
+   ✓ list 1280 · link back: nothing is cut at the top (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · link back: nothing is cut at the bottom (0 px of —; content 18 px on a 652 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ list 1280 · link back: nothing is cut sideways (0 px of —)
+   ✓ list 1280 · link back: this side holds no more than it shows, and does not scroll (content 18 px, side 652 px, scrollers: none)
+   ✓ list 1280 · link back: a side that shows everything marks nothing (data-more="")
+   ✓ list 1280 · link back: …and draws no mark ({"up":"","down":""})
+   ✓ list 1280 · link: the tile turned over
+   · list 1280 · link back text "example.com" [btn in deck-go] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   · list 1280 · link back text "↗" [arr in btn] 4.07:1 (needs 3, on a control) rgb(255, 255, 255) on rgb(10,140,142) 15px
+   ✓ list 1280 · link back: it has words to measure
+   ⚠ list 1280 · link back: a control's label is 4.07:1 on its own ground (rgb(255, 255, 255) on rgb(10,140,142)) — above the floor of 3, below 4.5
+   ✓ list 1280 · link back: every run of text reaches its contrast (0 below: )
+   ✓ list 1280 · link back: its words stand on a ground of the side's own
+   ✓ list 1280 · link: nothing with edges of its own is drawn beside the held tile (0: )
+ stack at 390, theme: light (the profile's back)
+   ✓ stack 390: the pile has the specimen's 11 tiles (11)
+   ✓ stack 390 · profile: the tile came up, front showing
+   ✓ stack 390 · tall-back: the tile came up, front showing
+   · stack 390 · profile front: content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · profile front: the side has content to measure (3 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 0)
+   ✓ stack 390 · profile front: nothing is cut at the top (0 px of —; content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile front: nothing is cut at the bottom (0 px of —; content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · profile front: this side holds no more than it shows, and does not scroll (content 254 px, side 481 px, scrollers: none)
+   ✓ stack 390 · profile front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · profile front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · profile back: content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · profile back: the side has content to measure (3 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 0)
+   ✓ stack 390 · profile back: nothing is cut at the top (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile back: nothing is cut at the bottom (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · profile back: this side holds no more than it shows, and does not scroll (content 299 px, side 480 px, scrollers: none)
+   ✓ stack 390 · profile back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · profile back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · profile: the tile turned over
+   · stack 390 · profile back text "Specimen — the two sides of a ti" [nm in ] 13.32:1 (needs 3) color(srgb 0.0886275 0.139608 0.140392) on rgb(228,236,236) 20px
+   · stack 390 · profile back text "x/sides-stack-light" [hd in deck-bcard] 4.53:1 (needs 4.5) rgb(8, 118, 119) on rgb(228,236,236) 15px
+   ✓ stack 390 · profile back: it has words to measure
+   ✓ stack 390 · profile back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · profile back: its words stand on a ground of the side's own
+   ✓ stack 390 · profile: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · tall-back front: content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · tall-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 5)
+   ✓ stack 390 · tall-back front: nothing is cut at the top (0 px of —; content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-back front: nothing is cut at the bottom (0 px of —; content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-back front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-back front: this side holds no more than it shows, and does not scroll (content 46 px, side 481 px, scrollers: none)
+   ✓ stack 390 · tall-back front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · tall-back front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · tall-back back: content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 390 · tall-back back: the side has content to measure (37 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 5)
+   ✓ stack 390 · tall-back back: nothing is cut at the top (0 px of —; content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · tall-back back: nothing is cut at the bottom (0 px of —; content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · tall-back back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-back back: this side holds more than it shows, and scrolls (content 1101 px, side 480 px, scrollers: div.deck-face.deck-back)
+   ✓ stack 390 · tall-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 390 · tall-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 390 · tall-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 390 · tall-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ stack 390 · tall-back: the tile turned over
+   · stack 390 · tall-back back text "Eighteen tiles" [dc-drawer-title in dc-drawer-body] 4.53:1 (needs 3) rgb(8, 118, 119) on rgb(228,236,236) 24px
+   · stack 390 · tall-back back text "Tile 1 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 2 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 3 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 4 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 5 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 6 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 7 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 8 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 9 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 10 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 11 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 12 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 13 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 14 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 15 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 16 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 17 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   · stack 390 · tall-back back text "Tile 18 of 18" [st-cell-title in st-cell-body] 15.17:1 (needs 4.5) color(srgb 0.0886275 0.139608 0.140392) on rgb(245,250,250) 15.2px
+   ✓ stack 390 · tall-back back: it has words to measure
+   ✓ stack 390 · tall-back back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · tall-back back: its words stand on a ground of the side's own
+   ✓ stack 390 · tall-back: nothing with edges of its own is drawn beside the held tile (0: )
+ stack at 390, theme: dark (the profile's back)
+   ✓ stack 390: the pile has the specimen's 11 tiles (11)
+   ✓ stack 390 · profile: the tile came up, front showing
+   ✓ stack 390 · tall-back: the tile came up, front showing
+   · stack 390 · profile front: content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · profile front: the side has content to measure (3 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 0)
+   ✓ stack 390 · profile front: nothing is cut at the top (0 px of —; content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile front: nothing is cut at the bottom (0 px of —; content 254 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · profile front: this side holds no more than it shows, and does not scroll (content 254 px, side 481 px, scrollers: none)
+   ✓ stack 390 · profile front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · profile front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · profile back: content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · profile back: the side has content to measure (3 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 0)
+   ✓ stack 390 · profile back: nothing is cut at the top (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile back: nothing is cut at the bottom (0 px of —; content 299 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · profile back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · profile back: this side holds no more than it shows, and does not scroll (content 299 px, side 480 px, scrollers: none)
+   ✓ stack 390 · profile back: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · profile back: …and draws no mark ({"up":"","down":""})
+   ✓ stack 390 · profile: the tile turned over
+   · stack 390 · profile back text "Specimen — the two sides of a ti" [nm in ] 15.84:1 (needs 3) color(srgb 0.884706 0.945882 0.946824) on rgb(12,22,22) 20px
+   · stack 390 · profile back text "x/sides-stack-dark" [hd in deck-bcard] 5.72:1 (needs 4.5) rgb(49, 158, 160) on rgb(12,22,22) 15px
+   ✓ stack 390 · profile back: it has words to measure
+   ✓ stack 390 · profile back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · profile back: its words stand on a ground of the side's own
+   ✓ stack 390 · profile: nothing with edges of its own is drawn beside the held tile (0: )
+   · stack 390 · tall-back front: content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways
+   ✓ stack 390 · tall-back front: the side has content to measure (1 pieces; tile "deck-card can-flip is-top", side visibility visible, display flex, the tile up is 5)
+   ✓ stack 390 · tall-back front: nothing is cut at the top (0 px of —; content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-back front: nothing is cut at the bottom (0 px of —; content 46 px on a 481 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways)
+   ✓ stack 390 · tall-back front: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-back front: this side holds no more than it shows, and does not scroll (content 46 px, side 481 px, scrollers: none)
+   ✓ stack 390 · tall-back front: a side that shows everything marks nothing (data-more="")
+   ✓ stack 390 · tall-back front: …and draws no mark ({"up":"","down":""})
+   · stack 390 · tall-back back: content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up"
+   ✓ stack 390 · tall-back back: the side has content to measure (37 pieces; tile "deck-card can-flip is-top is-open flipped", side visibility visible, display flex, the tile up is 5)
+   ✓ stack 390 · tall-back back: nothing is cut at the top (0 px of —; content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · tall-back back: nothing is cut at the bottom (0 px of —; content 1101 px on a 480 px side · cut 0 px at the top, 0 px at the bottom, 0 px sideways · scrolls · more: "down" → "up")
+   ✓ stack 390 · tall-back back: nothing is cut sideways (0 px of —)
+   ✓ stack 390 · tall-back back: this side holds more than it shows, and scrolls (content 1101 px, side 480 px, scrollers: div.deck-face.deck-back)
+   ✓ stack 390 · tall-back back: a side that scrolls says there is more below, at the start (data-more="down", want "down")
+   ✓ stack 390 · tall-back back: …and draws that mark at its bottom edge, and no other ({"up":"","down":"bottom"})
+   ✓ stack 390 · tall-back back: at the end it says there is more above (data-more="up", want "up")
+   ✓ stack 390 · tall-back back: …and draws that mark at its top edge, and no other ({"up":"top","down":""})
+   ✓ stack 390 · tall-back: the tile turned over
+   · stack 390 · tall-back back text "Eighteen tiles" [dc-drawer-title in dc-drawer-body] 5.72:1 (needs 3) rgb(49, 158, 160) on rgb(12,22,22) 24px
+   · stack 390 · tall-back back text "Tile 1 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 2 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 3 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 4 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 5 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 6 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 7 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 8 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 9 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 10 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 11 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 12 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 13 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 14 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 15 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 16 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 17 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   · stack 390 · tall-back back text "Tile 18 of 18" [st-cell-title in st-cell-body] 14.09:1 (needs 4.5) color(srgb 0.884706 0.945882 0.946824) on rgb(21,34,34) 15.2px
+   ✓ stack 390 · tall-back back: it has words to measure
+   ✓ stack 390 · tall-back back: every run of text reaches its contrast (0 below: )
+   ✓ stack 390 · tall-back back: its words stand on a ground of the side's own
+   ✓ stack 390 · tall-back: nothing with edges of its own is drawn beside the held tile (0: )
+ CONTROL — a back centred on its side (must FAIL)
+   ✓ stack 390: the pile has the specimen's 11 tiles (11)
+   ✓ stack 390 · long-back: the tile came up, front showing
+   ✓ the control is seen: 586.5 px cut at the top (content 1626 px on a 480 px side · cut 586.5 px at the top, 0 px at the bottom, 0 px sideways · scrolls)
+
+✅ every side shows or reaches all it holds, its back can be read, and a held tile stands alone

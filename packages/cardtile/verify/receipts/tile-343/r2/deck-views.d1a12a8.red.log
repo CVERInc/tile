@@ -1,0 +1,92 @@
+TAP version 13
+# Subtest: tile\#343 each side carries two marks after what it holds, and says which edge has more beyond it
+ok 1 - tile\#343 each side carries two marks after what it holds, and says which edge has more beyond it
+  ---
+  duration_ms: 66.311658
+  type: 'test'
+  ...
+# Subtest: tile\#343 a wheel on a long last front scrolls the front: the tile turns over only when the front is at its end
+not ok 2 - tile\#343 a wheel on a long last front scrolls the front: the tile turns over only when the front is at its end
+  ---
+  duration_ms: 11.767649
+  type: 'test'
+  location: 'packages/cardtile/w3/deck-views.test.mjs:1147:1'
+  failureType: 'testCodeFailure'
+  error: 'a wheel down a front with more below turned the tile over'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file://packages/cardtile/w3/deck-views.test.mjs:1156:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: tile\#343 keys and an upward finger on a long last front are the front's: they do not turn the tile over
+ok 3 - tile\#343 keys and an upward finger on a long last front are the front's: they do not turn the tile over
+  ---
+  duration_ms: 9.44682
+  type: 'test'
+  ...
+# Subtest: tile\#343 a side that holds more than it shows can be reached by keyboard and is named; a side that fits is not in the Tab order
+not ok 4 - tile\#343 a side that holds more than it shows can be reached by keyboard and is named; a side that fits is not in the Tab order
+  ---
+  duration_ms: 10.638806
+  type: 'test'
+  location: 'packages/cardtile/w3/deck-views.test.mjs:1185:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    stack front: a side with more than it shows is not in the Tab order
+    
+    null !== '0'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: '0'
+  actual: ~
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://packages/cardtile/w3/deck-views.test.mjs:1193:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: tile\#343 a focused side shows the page's own focus ring: the deck adds none, and hides it only on a side out of the Tab order
+not ok 5 - tile\#343 a focused side shows the page's own focus ring: the deck adds none, and hides it only on a side out of the Tab order
+  ---
+  duration_ms: 13.458549
+  type: 'test'
+  location: 'packages/cardtile/w3/deck-views.test.mjs:1210:1'
+  failureType: 'testCodeFailure'
+  error: 'deck.css takes the focus ring off a side that can be tabbed to: html.deck .deck-back:focus{outline:none}'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file://packages/cardtile/w3/deck-views.test.mjs:1216:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 2
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 276.556649

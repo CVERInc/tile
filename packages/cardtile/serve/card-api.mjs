@@ -1294,6 +1294,16 @@ export async function liveCard(store, handle, { stop = false, pool = false, gen:
 }
 
 /**
+ * liveStop: the current lifetime and its stop, WITHOUT the body (tile#339: the picture route's cache,
+ * picture-cache.mjs). The same generation read and the same stop read liveCard makes — so a stop it
+ * honours is honoured here, legacy `stop:<handle>` in generation 0 included — and nothing else.
+ */
+export async function liveStop(store, handle, { gen: read } = {}) {
+  const gen = read != null ? read : await generationOf(store, handle);
+  return { gen, stopped: await readGen(store, stopKey(handle, gen), legacyStopKey(handle), gen) };
+}
+
+/**
  * The answer to a write whose lifetime ended while it was in flight — best effort, from a re-read of
  * `gen:` after the put. Correctness does not depend on it: what the write landed on is dead either way.
  */
@@ -1552,7 +1562,7 @@ async function deleteCard(env, handle, meant = null) {
  *
  * 🔴 A HANDLE SPELLED `cards` (or `card`) IS A HANDLE LIKE ANY OTHER. This Worker keeps no list of
  * reserved handles: which names may be registered is the registry's question (see the note above
- * NOT_FOUND_CARD in card-worker.mjs), and this API serves whatever handle it is handed. Such a
+ * notFound in card-worker.mjs), and this API serves whatever handle it is handed. Such a
  * card is `/_api/card/cards` or `/_api/cards/cards`: the first segment is the resource, the second
  * the handle, and only the first is ever rewritten.
  *
