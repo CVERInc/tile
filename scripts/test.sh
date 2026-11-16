@@ -153,7 +153,12 @@ SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs
              # tile#84: the paid completion page settling the basket once, before a tab closed on the
              # receipt can stop it, and a reload of the receipt leaving the basket alone; tile#328: a
              # shop tab that loaded the basket before the order does not write the paid lines back.
-             packages/dynamic-corals/square-shop/*.smoke.mjs)
+             packages/dynamic-corals/square-shop/*.smoke.mjs
+             # tile#342: the deck's view switcher in one place in stack, list and wall (every frame of every
+             # switch), and the switch to or from the wall as one view transition with no jump at either end.
+             # It takes the base URL like the rest and does not need it: its pages are the cardtile worker's
+             # own, answered in-process (the generated deck assets production serves).
+             packages/cardtile/w3/*.smoke.mjs)
 # 🔴 A SECOND browser list, because the two are invoked differently and merging them would break
 # one of them silently. Every SMOKE_GLOBS entry is called `node <smoke> <base URL>` against the
 # static python3 server the block further down starts. The real-render matrix takes no base URL —

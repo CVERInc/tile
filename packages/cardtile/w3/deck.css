@@ -10,7 +10,8 @@ html.deck main > .st-card > .st-grid,html.deck main > .st-card > .st-bleed{displ
 html.deck .st-back-door{display:none}
 /* the wall: the pile is still in the page, and none of it is drawn. Of the bar, the switcher alone shows. */
 html:not(.deck) .deck-table,html:not(.deck) .deck-veil,html:not(.deck) .deck-rail,html:not(.deck) .deck-bar > :not(.deck-seg){display:none}
-html:not(.deck) .deck-bar{display:contents}   /* no box of its own on the wall: the switcher is fixed, and an empty block at the end of <body> would be one more item in whatever layout the page gives its body */
+/* (the bar is fixed in every view — see "chrome" below — so on the wall too it is out of the body's flow, and is no item of
+   whatever layout the page gives its body) */
 /* a deck that did not come up (deck.js: fail): the page is the wall and none of the deck's own parts is drawn — not the
    switcher either, which would do nothing */
 html[data-deck-off] .deck-bar,html[data-deck-off] .deck-table,html[data-deck-off] .deck-veil,html[data-deck-off] .deck-rail{display:none!important}
@@ -126,8 +127,17 @@ html.deck .deck-go{height:100%;display:flex;flex-direction:column;align-items:ce
 html.deck .deck-go a.btn{display:inline-flex;align-items:center;gap:8px;max-width:100%;background:var(--cp-accent);color:#fff;text-decoration:none;border-radius:999px;padding:12px 22px;font:600 15px/1.4 -apple-system,system-ui,sans-serif;overflow-wrap:anywhere;text-align:center}
 html.deck .deck-go a.btn .arr{flex:none}
 /* chrome */
-html.deck .deck-bar{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;justify-content:space-between;align-items:center;padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;font:600 13px/1 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);pointer-events:none}
-html.deck .deck-bar > *{pointer-events:auto}
+/* 🔴 ONE SWITCHER, ONE PLACE (tile#342). The bar places the switcher, by one rule, in every view. It used to be placed twice:
+   by the bar in a pile (16 px from the right edge, below the safe area; 24 px and 18 px on a wide window) and by itself on the
+   wall (12 px from the corner) — so it jumped under the finger at every switch to or from the wall (4 px sideways on a phone,
+   12 px sideways and 6 px down on a wide window). Its top edge is the bar's padding alone (flex-start, not centred): the way
+   back on the draw page is 44 px tall and only drawn in a pile, and centred against it the switcher sat 4 px lower there than
+   on the wall. That way back is centred on the switcher instead (its margin, below). On the wall the bar's other children are
+   not drawn, so the switcher is pushed right by its own margin, not by a sibling. */
+.deck-bar{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;justify-content:space-between;align-items:flex-start;padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;font:600 13px/1 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);pointer-events:none}
+.deck-bar > *{pointer-events:auto}
+.deck-bar > .deck-seg{margin-left:auto}
+html.deck .deck-bar .deck-home{margin-block:-4px}   /* 44 px tall beside the 36 px switcher: the same middle line */
 html.deck .deck-close{display:none;position:fixed;top:1rem;left:1rem;z-index:402;width:44px;height:44px;border-radius:50%;border:1px solid color-mix(in srgb,var(--cp-accent) 35%,transparent);background:color-mix(in srgb,var(--cp-ground) 66%,transparent);color:var(--cp-accent);font-size:1.2rem;line-height:1;cursor:pointer;align-items:center;justify-content:center;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);transition:background .2s}
 html.deck .deck-close:hover{background:color-mix(in srgb,var(--cp-accent) 20%,transparent)}
 html.deck.open .deck-close{display:inline-flex}
@@ -135,8 +145,23 @@ html.deck.open .deck-close{display:inline-flex}
 .deck-seg button{border:0;background:transparent;color:var(--cp-muted,#666);width:40px;height:34px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
 .deck-seg button[aria-pressed="true"]{background:var(--cp-accent,#0556ff);color:#fff}
 .deck-seg svg{width:18px;height:18px}
-html:not(.deck) .deck-seg{position:fixed;top:12px;right:12px;z-index:50}
-@media (min-width:900px){html.deck .deck-bar{padding:18px 24px}}
+@media (min-width:900px){.deck-bar{padding:18px 24px}}
+/* ---- the wall's transition (tile#342; deck.js glide) ----
+   To or from the wall, when the visitor presses the switcher, in a browser with view transitions (and Element.moveBefore —
+   deck.js says why); html.deck-glide is on the
+   root while one plays. The card you are on and its tile on the wall carry one name (deck-up, on whichever of the two is
+   drawn): it flies from the one place to the other, position and size, in .5 s on the curve stack ⇄ list glide on, while
+   the rest of the page cross-fades in the same .5 s. The switcher is held still — a name of its own, no animation, and its
+   new state drawn at once: the pressed button changes, nothing moves. Taps go through to the page while it plays (the
+   switcher is where it was, and answers). Under prefers-reduced-motion deck.js starts no transition at all. */
+[data-deck-up]{view-transition-name:deck-up}
+html.deck-glide .deck-seg{view-transition-name:deck-seg}
+html.deck-glide::view-transition{pointer-events:none}
+html.deck-glide::view-transition-group(deck-up){animation-duration:.5s;animation-timing-function:cubic-bezier(.3,.7,.3,1)}
+html.deck-glide::view-transition-old(deck-up),html.deck-glide::view-transition-new(deck-up){height:100%;object-fit:contain;animation-duration:.5s}   /* a wide tile in a tall card's box: shrunk to fit, in the middle (as a card draws its tile), never spilt over the box */
+html.deck-glide::view-transition-old(root),html.deck-glide::view-transition-new(root){animation-duration:.5s}
+html.deck-glide::view-transition-group(deck-seg),html.deck-glide::view-transition-new(deck-seg){animation:none}
+html.deck-glide::view-transition-old(deck-seg){display:none}
 @media (prefers-reduced-motion:reduce){html.deck :is(.deck-card,.deck-card.flipping-open,.deck-card.flipping-close,.deck-stack.dealt .deck-card,.deck-stack.dealing .deck-card,.deck-veil,.deck-shade,.deck-seg){transition:none!important;animation:none!important}}
 
 /* deal-in: the pile lands on the table once; the top card settles last */
