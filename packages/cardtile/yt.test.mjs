@@ -340,6 +340,17 @@ const FETCH_CASES = (ref) => [
   ['quoted', CARD(VID(`channel="${ref}"`)), [ref]],
   ['on a back (drawer)', CARD(VID('yt=dQw4w9WgXcQ')) + `\n## back: more\n\n${VID(`channel=${ref}`)}\n`, [ref]],
   ['the real one beside a decoy', CARD(VID(`note="channel=${CH}x" channel=${ref}`)), [ref]],
+  // parseCard strips an archive home token (`%%tg-home:<lane>%%`, tugtile's stripHomeToken) from a
+  // cell's first line BEFORE parseParams reads it, joining the text on either side. So the param name
+  // the renderer reads need not appear anywhere in the raw markdown: `chan%%tg-home:grid%%nel=` is
+  // drawn as `channel=`. Every split of the word, and the review's own input verbatim (no body).
+  ...[...Array('channel'.length - 1).keys()].map((i) => [
+    `the name split by a home token after "${'channel'.slice(0, i + 1)}"`,
+    CARD(VID(`${'channel'.slice(0, i + 1)}%%tg-home:grid%%${'channel'.slice(i + 1)}=${ref}`)), [ref]]),
+  ['the name split by a home token, no body', CARD(`- [ ] %% card: video chan%%tg-home:grid%%nel=${ref} %%`), [ref]],
+  // CONTROL: the same split line with an unrelated line holding the word. Discovery must not depend
+  // on prose elsewhere in the Card — both this and the line above are drawn, so both are fetched.
+  ['the split name, and the word on an unrelated line', CARD(`- [ ] %% card: video chan%%tg-home:grid%%nel=${ref} %%\n- [ ] a note about my channel`), [ref]],
 ];
 
 test('🔴 tile#325: resolveChannels requests exactly the channels the rendered markup carries', async () => {
@@ -361,4 +372,19 @@ test('🔴 tile#325: resolveChannels requests exactly the channels the rendered 
   }
   assert.equal(walked, 2 * FETCH_CASES(CH).length);
   assert.deepEqual(wrong, [], `${wrong.length} of ${walked} lines are fetched ≠ drawn:\n  ${wrong.join('\n  ')}`);
+});
+
+test('🔴 tile#325 review: the review’s own Card, verbatim — a home token inside the name, and its control', async () => {
+  // No literal `channel` anywhere in this Card, yet its one video cell is drawn with that handle.
+  const md = '---\ncard-page: t\ntitle: T\n---\n## grid\n- [ ] %% card: video chan%%tg-home:grid%%nel=@a.b-c_d %%\n';
+  assert.equal(md.includes('channel'), false);
+  assert.deepEqual(drawnRefs(md), ['@a.b-c_d']);
+  // CONTROL: an unrelated trailing line that holds the word changes nothing about the cell.
+  const control = md + 'my channel\n';
+  assert.deepEqual(drawnRefs(control), ['@a.b-c_d']);
+  assert.deepEqual(channelsIn(control), ['@a.b-c_d']);
+  assert.deepEqual(await requested(control), ['@a.b-c_d']);
+  // and the Card without the word is fetched the same
+  assert.deepEqual(channelsIn(md), ['@a.b-c_d']);
+  assert.deepEqual(await requested(md), ['@a.b-c_d']);
 });

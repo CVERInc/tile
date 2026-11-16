@@ -23,9 +23,13 @@
 // `String(p.channel || '').trim()`. yt.test.mjs holds the two readers to one answer by rendering
 // each case and comparing what is requested with what the markup carries.
 //
-// The cost is one more parseCard per request for a Card whose text contains `channel` (measured on
-// the largest fixture, 350 KB: ~1 ms against ~13 ms for the render that follows); a Card without the
-// word does not parse here at all.
+// The cost is one more parseCard per request (measured on the largest fixture, 350 KB: ~1 ms against
+// ~13 ms for the render that follows). Every Card pays it. There is deliberately no "skip the parse
+// when the raw text lacks `channel`" shortcut: the name the renderer reads need not be a substring of
+// the markdown. parseCard removes an archive home token (`%%tg-home:<lane>%%`, tugtile's
+// stripHomeToken) from a cell's first line before parseParams reads it, so
+// `chan%%tg-home:grid%%nel=@x` is drawn as `channel=@x`, and a shortcut on the raw text skipped it
+// unless some unrelated line happened to hold the word. Any test on the raw text is a second reader.
 import { parseCard } from './card-core.js';
 import { isChannelRef, resolveChannel } from './yt.mjs';
 
@@ -36,10 +40,6 @@ import { isChannelRef, resolveChannel } from './yt.mjs';
  */
 export function channelsIn(cardMd) {
   const md = String(cardMd || '');
-  // A filter, not a reading: a cell's `channel` param is a substring of the markdown, so a Card
-  // without the word anywhere has none, and is spared a second parse (the renderer parses it again).
-  // A Card that has the word gets the full parse below and only its answer counts.
-  if (!md.includes('channel')) return [];
   let model;
   try { model = parseCard(md); } catch { return []; }
   const out = new Set();
