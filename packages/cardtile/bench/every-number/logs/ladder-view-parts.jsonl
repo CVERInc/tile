@@ -1,0 +1,6 @@
+{"oldSpaceMB":128,"exit":134,"load1":8.39,"loadWait":"ok","at":"2026-11-16T13:16:28Z","result":null,"diedIn":"view-parts: isTemplateOnly","outOfMemory":true}
+{"oldSpaceMB":256,"exit":134,"load1":8.39,"loadWait":"ok","at":"2026-11-16T13:16:32Z","result":null,"diedIn":"view-parts: isTemplateOnly","outOfMemory":true}
+{"oldSpaceMB":384,"exit":134,"load1":9.00,"loadWait":"ok","at":"2026-11-16T13:16:45Z","result":null,"diedIn":"view-parts: renderCardHTML","outOfMemory":true}
+{"oldSpaceMB":512,"exit":134,"load1":9.80,"loadWait":"ok","at":"2026-11-16T13:16:57Z","result":null,"diedIn":"view-parts: renderCardHTML","outOfMemory":true}
+{"oldSpaceMB":768,"exit":134,"load1":11.63,"loadWait":"ok","at":"2026-11-16T13:19:22Z","result":null,"diedIn":"view-parts: renderCardHTML","outOfMemory":true}
+{"oldSpaceMB":1024,"exit":0,"load1":11.68,"loadWait":"ok","at":"2026-11-16T13:19:31Z","result":{"stage":"view-parts","sample":{"bytes":26214400,"utf16Units":26210617,"newlines":867935},"viewParts":{"isTemplateOnly":{"wallMs":1462,"cpuMs":2059,"rssBeforeMB":186.7,"heapUsedAfterMB":360.2,"blank":false},"resolveChannels":{"wallMs":1495,"cpuMs":1841,"rssBeforeMB":454.5,"heapUsedAfterMB":371.7},"renderCardHTML":{"wallMs":5260,"cpuMs":7333,"rssBeforeMB":461.6,"heapUsedAfterMB":706.9,"htmlMB":152.9}},"peakRssMB":1740.3,"networkAttempts":0}}

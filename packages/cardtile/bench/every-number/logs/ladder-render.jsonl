@@ -1,0 +1,6 @@
+{"oldSpaceMB":128,"exit":134,"load1":8.83,"loadWait":"ok","at":"2026-11-16T13:12:33Z","result":null,"diedIn":"render: renderCardHTML","outOfMemory":true}
+{"oldSpaceMB":256,"exit":134,"load1":8.83,"loadWait":"ok","at":"2026-11-16T13:12:36Z","result":null,"diedIn":"render: renderCardHTML","outOfMemory":true}
+{"oldSpaceMB":384,"exit":134,"load1":8.61,"loadWait":"ok","at":"2026-11-16T13:12:42Z","result":null,"diedIn":"render: renderCardHTML","outOfMemory":true}
+{"oldSpaceMB":512,"exit":134,"load1":8.40,"loadWait":"ok","at":"2026-11-16T13:12:49Z","result":null,"diedIn":"render: renderCardHTML","outOfMemory":true}
+{"oldSpaceMB":768,"exit":134,"load1":8.40,"loadWait":"ok","at":"2026-11-16T13:12:56Z","result":null,"diedIn":"render: renderCardHTML","outOfMemory":true}
+{"oldSpaceMB":1024,"exit":0,"load1":8.53,"loadWait":"ok","at":"2026-11-16T13:13:02Z","result":{"stage":"render","sample":{"bytes":26214400,"utf16Units":26210617,"newlines":867935},"render":{"wallMs":4950,"cpuMs":6974,"rssBeforeMB":177.2,"heapUsedAfterMB":674.1,"htmlBytes":160336614,"htmlMB":152.9,"gzipBytes":3103484,"gzipMs":574,"bodyAtChar":20887,"firstTileAtChar":31830,"lastTileAtChar":160330737,"tileMarkupCount":838352,"firstTileAvailableAfterMs":4950},"peakRssMB":1695.8,"networkAttempts":0}}
