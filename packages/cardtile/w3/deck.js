@@ -289,7 +289,7 @@
   // a card that leaves the window: one built from the page (a tile, our own last card) goes to the bench and comes back as it
   // was; one built from a line of a card file is text and nothing else, so it is dropped and built again when it is needed
   // (a file can hold ~850,000 of them)
-  const away=c=>{ const i=idx(c); unput(c); if(i>=P&&i<P+M){ c.remove(); lazy.delete(i); } else mv(bench,c,null); };
+  const away=c=>{ const i=idx(c); unput(c); if(i>=P&&i<P+M){ unmark(c); c.remove(); lazy.delete(i); } else mv(bench,c,null); };
   let pushed=false; addEventListener('popstate',()=>{ if(openCard){pushed=false; close();} });
   const docksInert=on=>document.querySelectorAll('dc-dock').forEach(d=>{ d.inert=on; });   /* the dice was tappable through the frosted glass */
   // 🔴 ONE TURN AT A TIME. A card that is put back shows its back for the first half of deck-put, and a back two tiles name is
@@ -299,17 +299,36 @@
   // for again turns at once: its back never left it. With reduced motion there is no turn, so nothing waits.
   const PUT_MS=600; let putting=null, putT=0, wants=null;
   const putOver=c=>{ if(putting!==c)return; clearTimeout(putT); putting=null; const k=wants; wants=null; if(k&&ON&&!openCard&&!fanned&&k.isConnected&&idx(k)===cur&&k.querySelector('.deck-back')&&(LIST||k.classList.contains('is-top'))) open(k); };   /* only the card that is still up, and still has a back: anything else and the request is dropped */
-  const open=card=>{if(putting&&putting!==card){wants=card;return;}if(putting){clearTimeout(putT);putting=null;}wants=null;if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
+  const open=card=>{if(putting&&putting!==card){wants=card;return;}if(putting){clearTimeout(putT);putting=null;}wants=null;if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');if(bk){bk.scrollTop=0;tellMore(bk);}/* a back is read from its top each time it is turned up, and says at once whether it holds more (the back may have been lent to this tile a moment ago) */bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
   let lastFocus=null;
   const close=()=>{wants=null;/* putting back is also taking back a card that was asked for and has not turned yet */if(!openCard)return;const c=openCard;if(pushed){pushed=false;try{history.back();}catch(_){}}c.classList.remove('is-open');c.classList.remove('flipping-open');void c.offsetWidth;c.classList.add('flipping-close');c.addEventListener('animationend',function h(e){if(e.animationName!=='deck-put')return;c.removeEventListener('animationend',h);c.classList.remove('flipped');putOver(c);});if(!matchMedia('(prefers-reduced-motion: reduce)').matches){clearTimeout(putT);putting=c;putT=setTimeout(()=>putOver(c),PUT_MS);}else c.classList.remove('flipped');/* no animation, so no animationend: the face goes back now, or the card would show its back for good *//* flipping-close stays: its fill IS the rest pose, so nothing re-animates after the end; the next open() removes it */openCard=null;document.documentElement.classList.remove('open');docksInert(false);if(lastFocus&&lastFocus.focus){lastFocus.focus();lastFocus=null;}};
+  // ---- marks: a side that holds more than it shows says so, at the edge that has more beyond it (tile#343) ----
+  // A side is a window of a fixed size and scrolls when what it holds is longer (deck.css: "a side is a window"). Each side
+  // carries two marks, after what it holds (so a front's tile is still its first child): the stylesheet keeps them at the
+  // side's top and bottom edges and draws the one the side names in data-more ("up", "down", both, or no attribute at all:
+  // everything shows). It is told again when the side scrolls and when the side, or the box it holds, changes size — a
+  // picture that arrives, a back that is lent to this tile, the window. Decoration only: the marks say nothing to a reader
+  // (aria-hidden) and take no tap; the side is what scrolls, by finger, wheel or keys.
+  // Keys need a way in: a side that holds more than it shows is in the Tab order (tabindex 0), a region named for the side
+  // ("Front", "Back": the editor's words for it, in the page's language), and shows the page's own focus ring (card.css,
+  // [tabindex]:focus-visible). A side that shows everything is not a stop: a front has no tabindex, a back keeps -1, the
+  // place its turn sends focus to (open). Safari does not put a scrolling box in the Tab order of its own accord.
+  const CHEV='<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>';
+  const tellMore=side=>{ const up=side.scrollTop>1, down=side.scrollTop+side.clientHeight<side.scrollHeight-1; const v=up&&down?'up down':up?'up':down?'down':''; if(v){ if(side.getAttribute('data-more')!==v) side.setAttribute('data-more',v); } else if(side.hasAttribute('data-more')) side.removeAttribute('data-more');
+    const isBack=side.classList.contains('deck-back'), set=(k,val)=>{ if(val==null){ if(side.hasAttribute(k)) side.removeAttribute(k); } else if(side.getAttribute(k)!==val) side.setAttribute(k,val); };
+    if(up||down){ set('tabindex','0'); set('role','region'); set('aria-label',isBack?say('back'):say('front')); } else { set('tabindex',isBack?'-1':null); set('role',null); set('aria-label',null); } };
+  const sized=typeof ResizeObserver==='function'?new ResizeObserver(es=>{ const seen=new Set(); for(const e of es){ const f=e.target.closest&&e.target.closest('.deck-face'); if(f&&!seen.has(f)){ seen.add(f); tellMore(f); } } }):null;
+  const marks=(side,held)=>{ for(const to of ['up','down']){ const m=mk('span','tile-more',CHEV); m.dataset.to=to; m.setAttribute('aria-hidden','true'); side.appendChild(m); }
+    side.addEventListener('scroll',()=>tellMore(side),{passive:true}); if(sized){ sized.observe(side); if(held&&held.nodeType===1) sized.observe(held); } };
+  const unmark=card=>{ if(sized) for(const f of card.querySelectorAll('.deck-face')){ sized.unobserve(f); for(const c of f.children) sized.unobserve(c); } };   // a tile that is dropped for good (away) is not watched any longer
   const addCard=(frontNode,backNode,opts={})=>register(buildCard(frontNode,backNode,{...opts,seated:true}));
   // seated: the card goes on the bench BEFORE its faces are filled, so a tile moves from the page into a card that is already
   // in the page — it is never outside the document, not even while its card is being put together. With slots (pileOrder) it
   // goes straight into the stack instead, not drawn until it has a slot, so the tile's frame does not move a second time.
   function buildCard(frontNode,backNode,opts={}){
-    const card=mk('div','deck-card'); if(opts.seated) (SLOTS?stack:bench).appendChild(card); if(frontNode&&frontNode.dataset&&frontNode.dataset.theme) card.style.cssText=frontNode.dataset.theme; const front=mk('div','deck-face deck-front'); card.appendChild(front); if(opts.seated) mv(front,frontNode,null); else front.appendChild(frontNode);
+    const card=mk('div','deck-card'); if(opts.seated) (SLOTS?stack:bench).appendChild(card); if(frontNode&&frontNode.dataset&&frontNode.dataset.theme) card.style.cssText=frontNode.dataset.theme; const front=mk('div','deck-face deck-front'); card.appendChild(front); if(opts.seated) mv(front,frontNode,null); else front.appendChild(frontNode); marks(front,frontNode);
     if(opts.back) card.dataset.back=opts.back;   // the back is one a tile names (shared: see lend); its face is made even while another card has the node
-    if(backNode||opts.back){card.classList.add('can-flip'); const back=mk('div','deck-face deck-back'); back.tabIndex=-1; const sc=mk('div','deck-back-scroll'); back.appendChild(sc); card.appendChild(back); if(backNode){ if(opts.seated) mv(sc,backNode,null); else sc.appendChild(backNode); }
+    if(backNode||opts.back){card.classList.add('can-flip'); const back=mk('div','deck-face deck-back'); back.tabIndex=-1; const sc=mk('div','deck-back-scroll'); back.appendChild(sc); card.appendChild(back); if(backNode){ if(opts.seated) mv(sc,backNode,null); else sc.appendChild(backNode); } marks(back,sc);
       front.addEventListener('click',e=>{ if(e.target.closest('a,button,input,.cp-icon,#qr-holder'))return; if(String(getSelection()).length)return; if((LIST||card.classList.contains('is-top'))&&!openCard) open(card); });
       let hadSel=false; back.addEventListener('pointerdown',()=>{ hadSel=String(getSelection()).length>0; });   /* a drag that selects text, or the tap that clears a selection, is not a close */
       back.addEventListener('click',e=>{ if(e.target.closest('a,button,input,select,textarea,label'))return; if(hadSel||String(getSelection()).length){hadSel=false;return;} if(openCard===card) close(); });}
@@ -579,6 +598,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   function endFlip(via){ const c=card(N-1); if(cur!==N-1||!c||openCard)return; if(!c.querySelector('.deck-back')){bump(1);return;} open(c); }
   const GAP=180, HOLD=400, STEP=26, html=document.documentElement; let lastAct=0;
   const canScrollX=(el,dx)=>{ for(;el&&el!==document.body&&el!==html;el=el.parentElement){ const cs=getComputedStyle(el); if(/(auto|scroll)/.test(cs.overflowX)&&el.scrollWidth>el.clientWidth+1){ if(dx>0?el.scrollLeft+el.clientWidth<el.scrollWidth-1:el.scrollLeft>0)return true; } } return false; };
+  // the same question up and down: a side of a tile is a scroller (deck.css: "a side is a window"), and so is anything a tile
+  // scrolls inside it. While one under the wheel still has more in the wheel's direction, the wheel is its, not the pile's.
+  const canScrollY=(el,dy)=>{ for(;el&&el!==document.body&&el!==html;el=el.parentElement){ if(!(el.scrollHeight>el.clientHeight+1))continue; if(!(el.classList&&el.classList.contains('deck-face'))&&!/(auto|scroll)/.test(getComputedStyle(el).overflowY||''))continue; if(dy>0?el.scrollTop+el.clientHeight<el.scrollHeight-1:el.scrollTop>1)return true; } return false; };
   const settle2=()=>{ html.style.scrollSnapType=''; const ph=pageH(); scrollTo({top:Math.round(scrollY/ph)*ph,behavior:'smooth'}); };
   let G=null;
   addEventListener('wheel',e=>{
@@ -591,7 +613,11 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     G.t=now; clearTimeout(G.timer); const g=G; G.timer=setTimeout(()=>{ if(g.axis==='x'&&LIST)settle2(); },GAP);   /* the timer only settles list; it must not end the gesture, or it would bypass HOLD (caught in testing: a turn-back stalled 214 ms, the timer fired, and the same swipe stepped back a card) */
     if(!G.axis){ if(Math.abs(dx)>Math.abs(dy)){ if(canScrollX(e.target,dx)){G.axis='inner';return;} G.axis=(dx<0&&G.atTop&&!openCard)?'release':'x'; } else if(dy!==0) G.axis='y'; else return; }
     if(G.axis==='inner'||G.axis==='release')return;                     // an inner scroller's, or the browser's
-    if(G.axis==='y'){ if(!LIST&&!openCard&&G.startCur===N-1&&dy>0&&scrollY>=html.scrollHeight-innerHeight-2){ G.acc+=dy; if(!G.fired&&G.acc>STEP*2){G.fired=true;lastAct=now;endFlip('wheel-y');} } return; }
+    // a long last tile: the document is at its end while the side still has words below. The side takes the wheel, and a
+    // gesture it took is its own to the end, momentum included: only a NEW gesture, on a side at its end, turns the tile over
+    // (tile#343: the back opened while the visitor was still reading the front)
+    if(G.axis==='y'&&dy&&!G.inner&&canScrollY(e.target,dy)) G.inner=true;
+    if(G.axis==='y'){ if(!G.inner&&!LIST&&!openCard&&G.startCur===N-1&&dy>0&&scrollY>=html.scrollHeight-innerHeight-2){ G.acc+=dy; if(!G.fired&&G.acc>STEP*2){G.fired=true;lastAct=now;endFlip('wheel-y');} } return; }
     e.preventDefault();                                                 // ours, from the first event: no history swipe
     if(LIST){ if(openCard)return; html.style.scrollSnapType='none'; scrollBy({top:dx,behavior:'instant'}); return; }
     // a new swipe can start while the last one's momentum is still arriving: macOS keeps the stream going with no gap, so it
