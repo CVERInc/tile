@@ -114,6 +114,17 @@ export const oembedUrl = (pageUrl) =>
   `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(pageUrl)}`;
 
 /**
+ * How long the edge keeps a YouTube answer, in seconds (the cardtile worker's `cf.cacheTtl`, which
+ * re-exports this). The uploads-playlist oEmbed: 30 minutes — that TTL is what bounds how old "latest"
+ * can be. A handle page (`youtube.com/@name`, resolved to the UC id): a day — it is a couple of MB, and a
+ * handle's id does not change. A video's own oEmbed (its title): a day — one video, one answer.
+ * tile#355: yt-channels.mjs keptChannels reads the same rule, so a channel the isolate remembers never
+ * outlives the edge copies its answer was built from.
+ */
+export const ytCacheTtl = (u) =>
+  (/^https:\/\/www\.youtube\.com\/@/.test(u) || /[?&]url=https%3A%2F%2Fwww\.youtube\.com%2Fwatch%3F/.test(u) ? 86400 : 1800);
+
+/**
  * The most an oEmbed answer may be, in bytes, before it is parsed. Recorded answers are 716–830
  * bytes. A title is at most 100 characters and appears twice (`title`, and the `html` iframe's
  * title); even written as \u-escaped surrogate pairs (12 bytes a character) that is 2.4 KB, and a
