@@ -108,12 +108,16 @@ test('lang: declared — every visitor gets the same bytes and the same headers 
   }
 });
 
-test('the no-card page is not touched: English, and no Accept-Language in Vary', async () => {
+// tile#340: the nothing-here page follows the visitor too — the whole page, not only its chrome, because
+// it is ours and has no owner whose language to keep (serve/not-found-page.test.mjs holds the rest).
+test('the nothing-here page speaks the visitor’s language as one page: its sentence, <html lang> and the deck’s words', async () => {
   const res = await worker.fetch(new Request('https://card.feelreef.com/nobody', { headers: { 'accept-language': 'ja' } }),
     { PREVIEW: 'false', CARDS: store(null) });
   assert.equal(res.status, 404);
-  assert.equal(res.headers.get('vary'), 'Accept');
-  assert.equal(deckWords(await res.text()).viewStack, 'Stack');
+  assert.equal(res.headers.get('vary'), 'Accept, Accept-Language');
+  const body = await res.text();
+  assert.equal(deckWords(body).viewStack, '重ね');
+  assert.equal(htmlLang(body), 'ja-JP');
 });
 
 test('the markdown exit does not vary by language (it is the owner’s file)', async () => {
