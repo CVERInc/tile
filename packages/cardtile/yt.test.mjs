@@ -3,48 +3,236 @@
 //   node --test packages/cardtile/yt.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { latestFromFeed, resolveChannel, resolveHandle, channelIdFromPage, posterPath, CHANNEL_RE, VIDEO_RE, HANDLE_RE, isChannelRef } from './yt.mjs';
+import { readFileSync } from 'node:fs';
+import * as yt from './yt.mjs';
+import { resolveChannel, resolveHandle, channelIdFromPage, posterPath, CHANNEL_RE, VIDEO_RE, HANDLE_RE, isChannelRef } from './yt.mjs';
 import { channelsIn, resolveChannels } from './yt-channels.mjs';
-import { renderCardHTML } from './serve/card-worker.mjs';
+import * as worker from './serve/card-worker.mjs';
 import { parseParams } from '../sitetile/site-core.js';
 
+const { renderCardHTML } = worker;
 const CH = 'UCabcdefghijklmnopqrstuv';          // UC + 22
 // A whole Card around some lines. channelsIn reads the Card as the renderer does (parseCard), and a
 // line outside any `## lane` is not a cell, so every channelsIn input below is a real Card.
 const CARD = (block) => `---\ncard-page: t\ntitle: T\naccent: #0556ff\n---\n\n## grid\n\n${block}\n`;
-const FEED = (id, title) => `<?xml version="1.0"?>
-<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
-  <title>The Channel Itself</title>
-  <link rel="alternate" href="https://www.youtube.com/channel/${CH}"/>
-  <entry>
-    <yt:videoId>${id}</yt:videoId>
-    <title>${title}</title>
-  </entry>
-  <entry><yt:videoId>OLDER123456</yt:videoId><title>An older one</title></entry>
-</feed>`;
-const ok = (body) => ({ ok: true, text: async () => body });
+const ok = (body) => ({ ok: true, status: 200, text: async () => body });
+const notOk = (status, body = '') => ({ ok: false, status, text: async () => body });
 
-test('the newest entry wins, and its title is the ENTRY’s not the CHANNEL’s', () => {
-  const got = latestFromFeed(FEED('dQw4w9WgXcQ', 'The Newest One'));
-  assert.deepEqual(got, { id: 'dQw4w9WgXcQ', title: 'The Newest One' });
+// ── tile#341: YouTube's own answers, recorded ────────────────────────────────────────────────────
+// fixtures/yt/ holds responses recorded 2026-11-16 with plain curl (no credentials) from
+// https://www.youtube.com/oembed?format=json&url=<encoded youtube.com address>, byte for byte:
+//   oembed-uploads-<UC id>.json   the uploads playlist (UU…) of YouTube's own channel and of Google
+//                                 for Developers — the two channels the public issue names
+//   oembed-video-vLAegkGGWrM.json the newest upload of the second one
+//   oembed-uploads-unknown.404.txt / oembed-video-unknown.400.txt   what oEmbed says to an id it
+//                                 does not know (404 "Not Found" / 400 "Bad Request")
+// The same day, /feeds/videos.xml answered 404 for every channel tried, in every form
+// (channel_id=, playlist_id=, user=). No test here touches the network.
+const FIX = (name) => readFileSync(new URL(`./fixtures/yt/${name}`, import.meta.url), 'utf8');
+const YT = 'UCBR8-60-B28hp2BmDPdntcQ';          // YouTube's own channel
+const GD = 'UC_x5XG1OV2P6uZZ5FSM9Ttw';          // Google for Developers
+const OE = (page) => `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(page)}`;
+const UPLOADS_OE = (uc) => OE(`https://www.youtube.com/playlist?list=UU${uc.slice(2)}`);
+const VIDEO_OE = (id) => OE(`https://www.youtube.com/watch?v=${id}`);
+/**
+ * YouTube as recorded: each recorded address answers its recorded body, the feed answers 404 (as it
+ * does for every channel today), an unknown playlist 404 and an unknown video 400 — oEmbed's own
+ * answers. `extra` maps more addresses to responses. Every request is logged.
+ */
+const recorded = (extra = {}) => {
+  const urls = [];
+  const table = {
+    [UPLOADS_OE(YT)]: ok(FIX(`oembed-uploads-${YT}.json`)),
+    [UPLOADS_OE(GD)]: ok(FIX(`oembed-uploads-${GD}.json`)),
+    [VIDEO_OE('vLAegkGGWrM')]: ok(FIX('oembed-video-vLAegkGGWrM.json')),
+    ...extra,
+  };
+  const doFetch = async (u) => {
+    urls.push(u);
+    if (u in table) return typeof table[u] === 'function' ? table[u]() : table[u];
+    if (u.startsWith('https://www.youtube.com/feeds/videos.xml?')) return notOk(404, '<title>Error 404 (Not Found)!!1</title>');
+    if (u.includes('watch%3Fv%3D')) return notOk(400, FIX('oembed-video-unknown.400.txt'));
+    return notOk(404, FIX('oembed-uploads-unknown.404.txt'));
+  };
+  return { doFetch, urls };
+};
+/** a channel's recorded answer, built for a made-up channel id: the uploads oEmbed names `id` */
+const UPLOADS_OF = (id, thumb = `https://i.ytimg.com/vi/${id}/hqdefault.jpg`) =>
+  FIX(`oembed-uploads-${GD}.json`).replace('https://i.ytimg.com/vi/vLAegkGGWrM/hqdefault.jpg', thumb);
+const VIDEO_OF = (title) =>
+  JSON.stringify({ ...JSON.parse(FIX('oembed-video-vLAegkGGWrM.json')), title });
+
+test('🔴 tile#341: a channel resolves to its newest upload from YouTube’s answers as recorded today (the feed is 404)', async () => {
+  const { doFetch } = recorded();
+  assert.deepEqual(await resolveChannel(GD, doFetch),
+    { id: 'vLAegkGGWrM', title: 'Building with Gemini in Google Antigravity', channelId: GD });
+  // YouTube's own channel: the video's title is not recorded, so its oEmbed answers 400 here — the
+  // poster stays, the title is empty, and the renderer falls back to the cell's own label.
+  assert.deepEqual(await resolveChannel(YT, doFetch), { id: 'bkSNwyl7iHE', title: '', channelId: YT });
 });
 
-test('🔴 a document-wide search would return the channel name — the entry is read within its bounds', () => {
-  // The channel's <title> and <link> come FIRST in the document. A regex that is not scoped to the
-  // entry returns "The Channel Itself", which is a card that says it is showing a video and is not.
-  const xml = FEED('dQw4w9WgXcQ', 'The Newest One');
-  assert.ok(xml.indexOf('The Channel Itself') < xml.indexOf('<entry>'));
-  assert.equal(latestFromFeed(xml).title, 'The Newest One');
+test('tile#341: exactly two requests, both to the public keyless oEmbed — never the dead feed', async () => {
+  const { doFetch, urls } = recorded();
+  await resolveChannel(GD, doFetch);
+  assert.deepEqual(urls, [
+    'https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fplaylist%3Flist%3DUU_x5XG1OV2P6uZZ5FSM9Ttw',
+    'https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DvLAegkGGWrM',
+  ]);
+  for (const u of urls) assert.ok(!/key=|token=|access|Authorization|feeds\//i.test(u), u);
+  assert.equal(yt.uploadsOf(GD), 'UU_x5XG1OV2P6uZZ5FSM9Ttw');
+  assert.equal(yt.uploadsOf('UUnot-a-channel-id'), null);
 });
 
-test('entities in a title are unescaped once, and & survives', () => {
-  assert.equal(latestFromFeed(FEED('dQw4w9WgXcQ', 'Q&amp;A: &quot;live&quot; &lt;3')).title, 'Q&A: "live" <3');
+test('tile#341: the video id is read ONLY from an i.ytimg.com/vi/<id>/ thumbnail — anything else is no video', () => {
+  const read = yt.latestFromUploadsOEmbed;
+  assert.equal(read(FIX(`oembed-uploads-${YT}.json`)), 'bkSNwyl7iHE');
+  assert.equal(read(FIX(`oembed-uploads-${GD}.json`)), 'vLAegkGGWrM');
+  // a live stream's thumbnail and the webp path are the same video
+  assert.equal(read(UPLOADS_OF('x', 'https://i.ytimg.com/vi/vLAegkGGWrM/hqdefault_live.jpg')), 'vLAegkGGWrM');
+  assert.equal(read(UPLOADS_OF('x', 'https://i.ytimg.com/vi_webp/vLAegkGGWrM/hqdefault.webp')), 'vLAegkGGWrM');
+  // 🔴 the playlist's `title` ("Uploads from …") and `html` (videoseries) never stand in for a video
+  for (const thumb of [
+    'https://example.com/vi/vLAegkGGWrM/hqdefault.jpg',          // another host
+    'https://i.ytimg.com/pl_c/UU_x5XG1OV2P6uZZ5FSM9Ttw/cover.jpg', // a playlist cover, not a video
+    'https://i.ytimg.com/vi/short/hqdefault.jpg',                 // not a video id
+    'https://i.ytimg.com/vi/vLAegkGGWrM/../../x.jpg',             // a path that climbs
+    'http://i.ytimg.com/vi/vLAegkGGWrM/hqdefault.jpg',            // not https
+    '',
+  ]) assert.equal(read(UPLOADS_OF('x', thumb)), null, thumb);
+  for (const junk of [FIX('oembed-uploads-unknown.404.txt'), '', 'null', '[]', '{"thumbnail_url":7}', '<html>']) {
+    assert.equal(read(junk), null, junk);
+  }
+  assert.equal(yt.titleFromOEmbed(FIX('oembed-video-vLAegkGGWrM.json')), 'Building with Gemini in Google Antigravity');
+  assert.equal(yt.titleFromOEmbed(FIX('oembed-video-unknown.400.txt')), '');
 });
 
-test('a feed with no entries, or a junk id, resolves to null rather than a broken video', () => {
-  assert.equal(latestFromFeed('<feed><title>Empty</title></feed>'), null);
-  assert.equal(latestFromFeed(''), null);
-  assert.equal(latestFromFeed(FEED('tooshort', 'x')), null);
+test('tile#341: no uploads (or no such channel) is oEmbed’s 404 — null, the designed noposter state, no second request', async () => {
+  const { doFetch, urls } = recorded();
+  assert.equal(await resolveChannel(CH, doFetch), null);
+  assert.deepEqual(urls, [UPLOADS_OE(CH)]);
+});
+
+test('tile#341: a title that fails or hangs costs the label, never the poster', async () => {
+  const id = 'dQw4w9WgXcQ';
+  const base = { [UPLOADS_OE(CH)]: ok(UPLOADS_OF(id)) };
+  const thrown = recorded({ ...base, [VIDEO_OE(id)]: () => { throw new Error('network'); } });
+  assert.deepEqual(await resolveChannel(CH, thrown.doFetch), { id, title: '', channelId: CH });
+  const t0 = Date.now();
+  const hung = recorded({ ...base, [VIDEO_OE(id)]: () => new Promise(() => {}) });
+  assert.deepEqual(await resolveChannel(CH, hung.doFetch, 60), { id, title: '', channelId: CH });
+  assert.ok(Date.now() - t0 < 1000, `waited ${Date.now() - t0}ms on a title that never arrives`);
+  // a title is JSON: it arrives unescaped, and is used verbatim
+  const amp = recorded({ ...base, [VIDEO_OE(id)]: ok(VIDEO_OF('Q&A: "live" <3')) });
+  assert.equal((await resolveChannel(CH, amp.doFetch)).title, 'Q&A: "live" <3');
+});
+
+// ── tile#346 review P2: an oEmbed answer is bounded before it is parsed ────────────────────────────
+// Written out rather than read from yt.OEMBED_MAX_BYTES, so these tests stay meaningful against code
+// that has no ceiling at all.
+const OEMBED_MAX = 8 * 1024;
+/**
+ * A real Response over a stream that serves `text` in `chunk`-byte pieces, and logs how many bytes
+ * were pulled and whether it was cancelled. `length` sets a content-length header (none by default:
+ * the body is chunked).
+ */
+const streamed = (text, { chunk = 1024, length } = {}) => {
+  const bytes = new TextEncoder().encode(text);
+  const log = { pulled: 0, cancelled: false };
+  let at = 0;
+  const body = new ReadableStream({
+    pull(c) {
+      if (at >= bytes.length) { c.close(); return; }
+      const piece = bytes.slice(at, at + chunk);
+      at += piece.length; log.pulled += piece.length;
+      c.enqueue(piece);
+    },
+    cancel() { log.cancelled = true; },
+  }, { highWaterMark: 0 });
+  const headers = length == null ? {} : { 'content-length': String(length) };
+  return { res: new Response(body, { status: 200, headers }), log };
+};
+/** `json` with an unused field padding it to exactly `size` bytes */
+const padTo = (json, size) => {
+  const bare = Buffer.byteLength(JSON.stringify({ ...JSON.parse(json), unused: '' }));
+  return JSON.stringify({ ...JSON.parse(json), unused: '0'.repeat(size - bare) });
+};
+
+test('🔴 tile#346: an oversized chunked uploads answer is cancelled while reading — null, the noposter state', async () => {
+  const id = 'dQw4w9WgXcQ';
+  // the review's input: the right thumbnail, plus an unused field of 4 MB, no content-length
+  const big = streamed(padTo(UPLOADS_OF(id), 4 * 1024 * 1024));
+  const { doFetch } = recorded({ [UPLOADS_OE(CH)]: big.res, [VIDEO_OE(id)]: ok(VIDEO_OF('x')) });
+  assert.equal(await resolveChannel(CH, doFetch), null);
+  assert.ok(big.log.cancelled, 'the oversized stream was not cancelled');
+  assert.ok(big.log.pulled <= OEMBED_MAX + 1024, `read ${big.log.pulled} bytes of an oversized answer`);
+});
+
+test('🔴 tile#346: an oversized chunked title answer costs the title, never the poster', async () => {
+  const id = 'dQw4w9WgXcQ';
+  const big = streamed(padTo(VIDEO_OF('Too big'), 4 * 1024 * 1024));
+  const { doFetch } = recorded({ [UPLOADS_OE(CH)]: ok(UPLOADS_OF(id)), [VIDEO_OE(id)]: big.res });
+  assert.deepEqual(await resolveChannel(CH, doFetch), { id, title: '', channelId: CH });
+  assert.ok(big.log.cancelled, 'the oversized stream was not cancelled');
+  assert.ok(big.log.pulled <= OEMBED_MAX + 1024, `read ${big.log.pulled} bytes of an oversized answer`);
+});
+
+test('🔴 tile#346: an honest content-length over the ceiling is refused without reading the body', async () => {
+  const id = 'dQw4w9WgXcQ';
+  const text = padTo(UPLOADS_OF(id), 64 * 1024);
+  const big = streamed(text, { length: Buffer.byteLength(text) });
+  const { doFetch } = recorded({ [UPLOADS_OE(CH)]: big.res, [VIDEO_OE(id)]: ok(VIDEO_OF('x')) });
+  assert.equal(await resolveChannel(CH, doFetch), null);
+  assert.equal(big.log.pulled, 0, 'the body was read although its length was already over the ceiling');
+  // and the same for the title: the poster stays, the title is empty
+  const title = padTo(VIDEO_OF('Too big'), 64 * 1024);
+  const bigTitle = streamed(title, { length: Buffer.byteLength(title) });
+  const t = recorded({ [UPLOADS_OE(CH)]: ok(UPLOADS_OF(id)), [VIDEO_OE(id)]: bigTitle.res });
+  assert.deepEqual(await resolveChannel(CH, t.doFetch), { id, title: '', channelId: CH });
+  assert.equal(bigTitle.log.pulled, 0);
+});
+
+test('🔴 tile#346: exactly at the ceiling resolves; one byte over does not — streamed, unstreamed, and lying about its length', async () => {
+  const id = 'dQw4w9WgXcQ';
+  // a title with multi-byte characters, so the ceiling is counted in bytes, not characters
+  const title = 'Ünïcödé — 🎬';
+  const run = async (uploads, video) => resolveChannel(CH, recorded({ [UPLOADS_OE(CH)]: uploads, [VIDEO_OE(id)]: video }).doFetch);
+  const atU = padTo(UPLOADS_OF(id), OEMBED_MAX), overU = padTo(UPLOADS_OF(id), OEMBED_MAX + 1);
+  const atV = padTo(VIDEO_OF(title), OEMBED_MAX), overV = padTo(VIDEO_OF(title), OEMBED_MAX + 1);
+  assert.equal(Buffer.byteLength(atV), OEMBED_MAX);
+  assert.equal(Buffer.byteLength(overV), OEMBED_MAX + 1);
+  const want = { id, title, channelId: CH };
+  // at the ceiling: chunked, with an honest length, and as a plain text() answer
+  assert.deepEqual(await run(streamed(atU, { chunk: 777 }).res, streamed(atV, { chunk: 777 }).res), want);
+  assert.deepEqual(await run(streamed(atU, { length: OEMBED_MAX }).res, streamed(atV, { length: OEMBED_MAX }).res), want);
+  assert.deepEqual(await run(ok(atU), ok(atV)), want);
+  // one byte over: chunked, with a content-length that claims it fits, and as a plain text() answer
+  assert.equal(await run(streamed(overU, { chunk: 777 }).res, ok(atV)), null);
+  assert.equal(await run(streamed(overU, { length: 100 }).res, ok(atV)), null);
+  assert.equal(await run(ok(overU), ok(atV)), null);
+  for (const v of [streamed(overV, { chunk: 777 }).res, streamed(overV, { length: 100 }).res, ok(overV)]) {
+    assert.deepEqual(await run(ok(atU), v), { id, title: '', channelId: CH });
+  }
+  assert.equal(yt.OEMBED_MAX_BYTES, OEMBED_MAX);
+});
+
+test('tile#341: the cardtile worker caches "latest" for 30 minutes, a video’s title and a handle page for a day', () => {
+  assert.equal(typeof worker.ytCacheTtl, 'function');
+  assert.equal(worker.ytCacheTtl(UPLOADS_OE(GD)), 1800);
+  assert.equal(worker.ytCacheTtl(VIDEO_OE('vLAegkGGWrM')), 86400);
+  assert.equal(worker.ytCacheTtl('https://www.youtube.com/@some.body'), 86400);
+});
+
+test('🔴 tile#341 end to end: recorded answers → the rendered page plays and shows that video through our own path', async () => {
+  const { doFetch } = recorded();
+  const md = CARD(`- [ ] %% card: video channel="${GD}" %%`);
+  const videos = await resolveChannels(md, doFetch);
+  const html = renderCardHTML(md, { handle: 't', videos }).replace(/<style[\s\S]*?<\/style>/g, '');
+  assert.ok(html.includes('data-yt="vLAegkGGWrM"'), 'playback does not name the newest upload');
+  assert.ok(html.includes(posterPath('vLAegkGGWrM')), 'no poster through /_yt/');
+  assert.ok(html.includes('Building with Gemini in Google Antigravity'), 'the video title is not the label');
+  assert.ok(!html.includes('st-embed-video-noposter'), 'still the noposter state');
+  // condition 4: the oEmbed answer names i.ytimg.com — that address must never reach the markup
+  assert.ok(!/i\.ytimg\.com/.test(html), 'a Google-hosted image in the page');
 });
 
 test('channelsIn reads the video cells, quoted or bare, and de-duplicates', () => {
@@ -68,12 +256,14 @@ test('🔴 a channel id that is not a channel id never reaches a URL', async () 
 test('🔴 condition 2: the cache key is the CHANNEL, so one channel is fetched once for N cards', async () => {
   const urls = [];
   const md = CARD(Array(3).fill(`- [ ] %% card: video channel="${CH}" %%`).join('\n'));
-  await resolveChannels(md, async (u) => { urls.push(u); return ok(FEED('dQw4w9WgXcQ', 'x')); });
-  assert.equal(urls.length, 1, 'the same channel was fetched more than once');
-  assert.ok(urls[0].includes(`channel_id=${CH}`));
-  // and it is the public, keyless feed — no api key, no token, nothing of the creator's (condition 1)
-  assert.ok(urls[0].startsWith('https://www.youtube.com/feeds/videos.xml?'));
-  assert.ok(!/key=|token=|access|Authorization/i.test(urls[0]));
+  await resolveChannels(md, async (u) => { urls.push(u); return u === UPLOADS_OE(CH) ? ok(UPLOADS_OF('dQw4w9WgXcQ')) : ok(VIDEO_OF('x')); });
+  // one channel: its uploads oEmbed once, and its newest video's oEmbed once
+  assert.deepEqual(urls, [UPLOADS_OE(CH), VIDEO_OE('dQw4w9WgXcQ')], 'the same channel was fetched more than once');
+  // and it is the public, keyless oEmbed — no api key, no token, nothing of the creator's (condition 1)
+  for (const u of urls) {
+    assert.ok(u.startsWith('https://www.youtube.com/oembed?'), u);
+    assert.ok(!/key=|token=|access|Authorization/i.test(u), u);
+  }
 });
 
 test('🔴 condition 3: YouTube being down or slow never throws, it just resolves to nothing', async () => {
@@ -83,7 +273,7 @@ test('🔴 condition 3: YouTube being down or slow never throws, it just resolve
 });
 
 test('🔴 a hanging YouTube gives up the poster, not the card', async () => {
-  // This now sits on the render path. Without a deadline a hung feed does not degrade the video
+  // This now sits on the render path. Without a deadline a hung YouTube does not degrade the video
   // block — it holds the creator's whole page hostage, and every other condition stays satisfied
   // right up until the card never arrives.
   const t0 = Date.now();
@@ -93,7 +283,7 @@ test('🔴 a hanging YouTube gives up the poster, not the card', async () => {
   // CONTROL: the same call with a fetch that DOES answer must return the video, or this test would
   // pass just as well against a resolver that always gives up.
   assert.deepEqual(
-    await resolveChannel(CH, async () => ok(FEED('dQw4w9WgXcQ', 'x')), 60),
+    await resolveChannel(CH, async (u) => (u === UPLOADS_OE(CH) ? ok(UPLOADS_OF('dQw4w9WgXcQ')) : ok(VIDEO_OF('x'))), 60),
     { id: 'dQw4w9WgXcQ', title: 'x', channelId: CH },
   );
 });
@@ -185,17 +375,19 @@ test('resolveHandle: the handle page, and only that page; 404 (no such handle) i
   assert.equal(called, false, 'a non-handle never reaches a URL');
 });
 
-test('resolveChannel with a handle: page then feed, keyed by the handle the card wrote, carrying the UC id', async () => {
+test('resolveChannel with a handle: page then oEmbeds, keyed by the handle the card wrote, carrying the UC id', async () => {
   const urls = [];
   const doFetch = async (u) => {
     urls.push(u);
-    return u.includes('/feeds/') ? ok(FEED('dQw4w9WgXcQ', 'The Newest One')) : ok(PAGE(CH));
+    if (u === UPLOADS_OE(CH)) return ok(UPLOADS_OF('dQw4w9WgXcQ'));
+    if (u === VIDEO_OE('dQw4w9WgXcQ')) return ok(VIDEO_OF('The Newest One'));
+    return ok(PAGE(CH));
   };
   assert.deepEqual(await resolveChannel(HANDLE, doFetch), { id: 'dQw4w9WgXcQ', title: 'The Newest One', channelId: CH });
-  assert.deepEqual(urls, [`https://www.youtube.com/${HANDLE}`, `https://www.youtube.com/feeds/videos.xml?channel_id=${CH}`]);
+  assert.deepEqual(urls, [`https://www.youtube.com/${HANDLE}`, UPLOADS_OE(CH), VIDEO_OE('dQw4w9WgXcQ')]);
   // the UC form carries channelId too, so the renderer has one shape to read
-  assert.deepEqual(await resolveChannel(CH, async () => ok(FEED('dQw4w9WgXcQ', 'x'))), { id: 'dQw4w9WgXcQ', title: 'x', channelId: CH });
-  // a handle that does not resolve is the degraded state — the feed is never asked
+  assert.deepEqual(await resolveChannel(CH, doFetch), { id: 'dQw4w9WgXcQ', title: 'The Newest One', channelId: CH });
+  // a handle that does not resolve is the degraded state — oEmbed is never asked
   const asked = [];
   assert.equal(await resolveChannel(HANDLE, async (u) => { asked.push(u); return { ok: false, text: async () => '' }; }), null);
   assert.equal(asked.length, 1);
@@ -264,7 +456,7 @@ test('🔴 channelsIn: `channel = x` is not an assignment — no upstream reques
   assert.deepEqual(channelsIn(CARD(LINE(`channel = ${CH} channel=${HANDLE}`))), [HANDLE], 'the real one beside the spaced one');
   // and nothing is fetched for it
   let calls = 0;
-  const got = await resolveChannels(CARD(LINE(`channel = ${CH}`)), async () => { calls++; return ok(FEED('dQw4w9WgXcQ', 't')); });
+  const got = await resolveChannels(CARD(LINE(`channel = ${CH}`)), async () => { calls++; return ok(UPLOADS_OF('dQw4w9WgXcQ')); });
   assert.deepEqual(got, {});
   assert.equal(calls, 0, 'no request');
 });
@@ -300,10 +492,10 @@ const requested = async (md) => {
   // reference exactly as the card wrote it
   await resolveChannels(md, async (u) => { urls.push(u); return { ok: false, text: async () => '' }; });
   return urls.map((u) => {
-    const feed = /[?&]channel_id=([^&]+)$/.exec(u);
-    if (feed) return feed[1];
+    const uploads = /^https:\/\/www\.youtube\.com\/oembed\?format=json&url=https%3A%2F%2Fwww\.youtube\.com%2Fplaylist%3Flist%3DUU([\w-]{22})$/.exec(u);
+    if (uploads) return `UC${uploads[1]}`;
     const page = /^https:\/\/www\.youtube\.com\/(@[^/?#]+)$/.exec(u);
-    assert.ok(page, `an upstream request that is neither a feed nor a handle page: ${u}`);
+    assert.ok(page, `an upstream request that is neither an uploads oEmbed nor a handle page: ${u}`);
     return page[1];
   }).sort();
 };
