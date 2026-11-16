@@ -10,7 +10,8 @@ html.deck main > .st-card > .st-grid,html.deck main > .st-card > .st-bleed{displ
 html.deck .st-back-door{display:none}
 /* the wall: the pile is still in the page, and none of it is drawn. Of the bar, the switcher alone shows. */
 html:not(.deck) .deck-table,html:not(.deck) .deck-veil,html:not(.deck) .deck-rail,html:not(.deck) .deck-bar > :not(.deck-seg){display:none}
-html:not(.deck) .deck-bar{display:contents}   /* no box of its own on the wall: the switcher is fixed, and an empty block at the end of <body> would be one more item in whatever layout the page gives its body */
+/* (the bar is fixed in every view — see "chrome" below — so on the wall too it is out of the body's flow, and is no item of
+   whatever layout the page gives its body) */
 /* a deck that did not come up (deck.js: fail): the page is the wall and none of the deck's own parts is drawn — not the
    switcher either, which would do nothing */
 html[data-deck-off] .deck-bar,html[data-deck-off] .deck-table,html[data-deck-off] .deck-veil,html[data-deck-off] .deck-rail{display:none!important}
@@ -45,10 +46,30 @@ html.deck .deck-face > *{zoom:var(--deck-k,1)}
    by a transform, like a picture. The same in every engine: its document sees the same window, in the same box. */
 html.deck .deck-face .st-embed-html iframe{zoom:calc(1 / var(--deck-k,1));width:calc(100% / var(--deck-k,1));height:calc(100% / var(--deck-k,1));transform:scale(var(--deck-k,1));transform-origin:0 0}
 html.deck .deck-card{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .5s cubic-bezier(.45,0,.55,1),opacity .4s,visibility 0s 0s;will-change:transform;pointer-events:auto;visibility:visible}
-html.deck .deck-face{position:absolute;inset:0;border-radius:28px;background:var(--cp-ground);border:1px solid var(--cp-line);backface-visibility:hidden;-webkit-backface-visibility:hidden;overflow:hidden;display:flex;flex-direction:column}
+/* A SIDE IS A WINDOW OF A FIXED SIZE ONTO WHAT IT HOLDS (tile#343). The tile's proportions do not follow its content, so a
+   side that holds more than it shows scrolls — the side itself, front and back alike — and what it holds is never shorter than
+   its own content (a front's tile: flex 1 with no min-height:0; a back's box: min-height 100%, no shrink). That second
+   half is what keeps everything reachable: content that fits is centred inside a box as tall as the side, and content
+   that does not starts at the top of a box as tall as itself. Centring a box on a side shorter than it puts its top
+   above the scroll's start, where no scroll goes — a back's title and the top of its picture were cut that way, and a
+   long front at both ends.
+   The side sets its ink with its ground: a back's words that named no colour took the page's (made for a dark page)
+   and were near-white on a light side. */
+html.deck .deck-face{position:absolute;inset:0;border-radius:28px;background:var(--cp-ground);color:var(--cp-ink);border:1px solid var(--cp-line);backface-visibility:hidden;-webkit-backface-visibility:hidden;overflow-x:hidden;overflow-y:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column}
 html.deck .deck-front{transform:rotateY(0deg) translateZ(1px);padding:10px}
-html.deck .deck-back{transform:rotateY(180deg) translateZ(1px)}
-html.deck .deck-back-scroll{height:100%;overflow:auto;padding:26px 24px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+html.deck .deck-back{transform:rotateY(180deg) translateZ(1px);overscroll-behavior:contain}   /* a held tile's back keeps its scroll to itself; a front at its end hands the scroll on to the pile */
+/* the box a back's content sits in (the name is from when this box was the scroller): at least the side, centred in it */
+html.deck .deck-back-scroll{flex:none;min-height:100%;box-sizing:border-box;padding:30px 28px;display:flex;flex-direction:column;justify-content:center}
+/* …and the mark at the edge that has more beyond it (deck.js: marks). Two per side, of no height, held at the side's
+   top and bottom edges while it scrolls; the side says which is on (data-more="up", "down" or both). */
+html.deck .tile-more{position:sticky;z-index:3;flex:none;align-self:center;width:0;height:0;pointer-events:none;opacity:0;visibility:hidden;transition:opacity .2s,visibility 0s .2s}
+html.deck .tile-more[data-to="up"]{top:0;order:-1}
+html.deck .tile-more[data-to="down"]{bottom:0}
+html.deck .tile-more > span{position:absolute;left:-17px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:var(--cp-accent);background:color-mix(in srgb,var(--cp-ground) 88%,transparent);border:1px solid color-mix(in srgb,var(--cp-accent) 35%,transparent);box-shadow:0 2px 8px rgba(0,0,0,.14)}
+html.deck .tile-more[data-to="up"] > span{top:10px;transform:rotate(180deg)}
+html.deck .tile-more[data-to="down"] > span{bottom:10px}
+html.deck .tile-more svg{width:18px;height:18px}
+html.deck .deck-face[data-more~="up"] > .tile-more[data-to="up"],html.deck .deck-face[data-more~="down"] > .tile-more[data-to="down"]{opacity:1;visibility:visible;transition:opacity .2s,visibility 0s 0s}
 html.deck .deck-card.flipped{transform:rotateY(180deg) translateZ(2px)}
 html.deck .deck-card.flipping-open{animation:deck-pick .62s linear both;transition:none}
 html.deck .deck-card.flipping-close{animation:deck-put .56s linear forwards;transition:none}
@@ -93,15 +114,17 @@ html.deck:not(.open):not(.fan) .deck-stack:hover .deck-edge{opacity:1}
 }
 html.deck .st-gal-cell:hover .st-gal-img,html.deck .st-gal-cell-bare:hover .st-gal-img{transform:none}
 html.deck .st-gal-cell:hover{transform:none;border-color:var(--cp-line);background:inherit;box-shadow:none}
-/* cell fills the front face */
-html.deck .deck-front > .st-cell{flex:1;margin:0;width:100%;min-height:0;border-radius:18px}
+/* the tile fills its front — and is never shorter than its own content (no min-height:0: see "a side is a window", above).
+   A tile that fits its content to its box by scaling — a bare picture, a frame, a video's poster — clips its own overflow,
+   and a flex item that clips has no content minimum: it still takes the side's height and no more. */
+html.deck .deck-front > .st-cell{flex:1;margin:0;width:100%;border-radius:18px}
 html.deck .deck-front > .st-gal-cell .st-gal-link{width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none}
 html.deck .deck-front > .st-gal-cell .st-gal-img{width:100%;height:100%;object-fit:contain;display:block;transform:none}
 html.deck .deck-front > .st-hero{padding:28px 24px;justify-content:center;gap:22px;display:flex;flex-direction:column;align-items:center;text-align:center}
 html.deck .deck-front > .st-hero .st-figure,html.deck .deck-front > .st-hero #qr-holder{position:relative;width:140px;height:140px;margin:0 auto;flex:0 0 auto}
 html.deck .deck-front > .st-hero .cp-icon{width:140px;height:140px}
 html.deck .deck-front > .st-hero .st-hero-text{margin:0}
-html.deck .deck-front > .st-social{display:flex;flex-direction:column;justify-content:center;gap:14px;padding:28px}
+html.deck .deck-front > .st-social{display:flex;flex-direction:column;flex-wrap:nowrap;justify-content:center;gap:14px;padding:28px}   /* nowrap: the wall wraps its buttons into rows; turned into a column, more rows than the side is tall wrapped into a second column, cut off at the side's right edge */
 html.deck .deck-front > .st-social .st-social-btn{width:100%;justify-content:flex-start;gap:14px;padding:14px 18px;border-radius:14px;font-size:17px}
 html.deck .deck-front > .st-social .st-social-btn::after{content:attr(aria-label);font:500 17px -apple-system,"PingFang TC",system-ui,sans-serif;color:inherit}
 html.deck .deck-front > .st-social .st-social-btn svg{width:26px;height:26px;flex:0 0 auto}
@@ -118,16 +141,25 @@ html.deck .deck-back .dc-drawer-title{font-size:18px;margin:0 0 12px}
 html.deck .deck-back .st-card{box-shadow:none;border:0;padding:0;background:transparent}
 html.deck .deck-back .st-cells{display:block}
 html.deck .deck-back .st-cell{border:0;box-shadow:none;padding:0;margin:0 0 14px;font-size:14px}
-html.deck .deck-bcard{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center;font:15px/1.5 -apple-system,"PingFang TC",system-ui,sans-serif}
+html.deck .deck-bcard{display:flex;flex-direction:column;align-items:center;gap:22px;text-align:center;font:15px/1.5 -apple-system,"PingFang TC",system-ui,sans-serif}
 html.deck .deck-bcard img.av{width:72px;height:72px;cursor:pointer;border-radius:50%;object-fit:cover;border:2px solid var(--cp-line-hi)}
 html.deck .deck-bcard .nm{font-size:20px;font-weight:700}
 html.deck .deck-bcard .hd{color:var(--cp-accent-bright);font-weight:600}
-html.deck .deck-go{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;font:15px/1.55 -apple-system,"PingFang TC",system-ui,sans-serif;padding:8px}
+html.deck .deck-go{display:flex;flex-direction:column;align-items:center;gap:18px;text-align:center;font:15px/1.55 -apple-system,"PingFang TC",system-ui,sans-serif;padding:8px}
 html.deck .deck-go a.btn{display:inline-flex;align-items:center;gap:8px;max-width:100%;background:var(--cp-accent);color:#fff;text-decoration:none;border-radius:999px;padding:12px 22px;font:600 15px/1.4 -apple-system,system-ui,sans-serif;overflow-wrap:anywhere;text-align:center}
 html.deck .deck-go a.btn .arr{flex:none}
 /* chrome */
-html.deck .deck-bar{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;justify-content:space-between;align-items:center;padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;font:600 13px/1 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);pointer-events:none}
-html.deck .deck-bar > *{pointer-events:auto}
+/* 🔴 ONE SWITCHER, ONE PLACE (tile#342). The bar places the switcher, by one rule, in every view. It used to be placed twice:
+   by the bar in a pile (16 px from the right edge, below the safe area; 24 px and 18 px on a wide window) and by itself on the
+   wall (12 px from the corner) — so it jumped under the finger at every switch to or from the wall (4 px sideways on a phone,
+   12 px sideways and 6 px down on a wide window). Its top edge is the bar's padding alone (flex-start, not centred): the way
+   back on the draw page is 44 px tall and only drawn in a pile, and centred against it the switcher sat 4 px lower there than
+   on the wall. That way back is centred on the switcher instead (its margin, below). On the wall the bar's other children are
+   not drawn, so the switcher is pushed right by its own margin, not by a sibling. */
+.deck-bar{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;justify-content:space-between;align-items:flex-start;padding:calc(env(safe-area-inset-top) + 12px) 16px 8px;font:600 13px/1 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);pointer-events:none}
+.deck-bar > *{pointer-events:auto}
+.deck-bar > .deck-seg{margin-left:auto}
+html.deck .deck-bar .deck-home{margin-block:-4px}   /* 44 px tall beside the 36 px switcher: the same middle line */
 html.deck .deck-close{display:none;position:fixed;top:1rem;left:1rem;z-index:402;width:44px;height:44px;border-radius:50%;border:1px solid color-mix(in srgb,var(--cp-accent) 35%,transparent);background:color-mix(in srgb,var(--cp-ground) 66%,transparent);color:var(--cp-accent);font-size:1.2rem;line-height:1;cursor:pointer;align-items:center;justify-content:center;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);transition:background .2s}
 html.deck .deck-close:hover{background:color-mix(in srgb,var(--cp-accent) 20%,transparent)}
 html.deck.open .deck-close{display:inline-flex}
@@ -135,8 +167,23 @@ html.deck.open .deck-close{display:inline-flex}
 .deck-seg button{border:0;background:transparent;color:var(--cp-muted,#666);width:40px;height:34px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
 .deck-seg button[aria-pressed="true"]{background:var(--cp-accent,#0556ff);color:#fff}
 .deck-seg svg{width:18px;height:18px}
-html:not(.deck) .deck-seg{position:fixed;top:12px;right:12px;z-index:50}
-@media (min-width:900px){html.deck .deck-bar{padding:18px 24px}}
+@media (min-width:900px){.deck-bar{padding:18px 24px}}
+/* ---- the wall's transition (tile#342; deck.js glide) ----
+   To or from the wall, when the visitor presses the switcher, in a browser with view transitions (and Element.moveBefore —
+   deck.js says why); html.deck-glide is on the
+   root while one plays. The card you are on and its tile on the wall carry one name (deck-up, on whichever of the two is
+   drawn): it flies from the one place to the other, position and size, in .5 s on the curve stack ⇄ list glide on, while
+   the rest of the page cross-fades in the same .5 s. The switcher is held still — a name of its own, no animation, and its
+   new state drawn at once: the pressed button changes, nothing moves. Taps go through to the page while it plays (the
+   switcher is where it was, and answers). Under prefers-reduced-motion deck.js starts no transition at all. */
+[data-deck-up]{view-transition-name:deck-up}
+html.deck-glide .deck-seg{view-transition-name:deck-seg}
+html.deck-glide::view-transition{pointer-events:none}
+html.deck-glide::view-transition-group(deck-up){animation-duration:.5s;animation-timing-function:cubic-bezier(.3,.7,.3,1)}
+html.deck-glide::view-transition-old(deck-up),html.deck-glide::view-transition-new(deck-up){height:100%;object-fit:contain;animation-duration:.5s}   /* a wide tile in a tall card's box: shrunk to fit, in the middle (as a card draws its tile), never spilt over the box */
+html.deck-glide::view-transition-old(root),html.deck-glide::view-transition-new(root){animation-duration:.5s}
+html.deck-glide::view-transition-group(deck-seg),html.deck-glide::view-transition-new(deck-seg){animation:none}
+html.deck-glide::view-transition-old(deck-seg){display:none}
 @media (prefers-reduced-motion:reduce){html.deck :is(.deck-card,.deck-card.flipping-open,.deck-card.flipping-close,.deck-stack.dealt .deck-card,.deck-stack.dealing .deck-card,.deck-veil,.deck-shade,.deck-seg){transition:none!important;animation:none!important}}
 
 /* deal-in: the pile lands on the table once; the top card settles last */
@@ -163,7 +210,7 @@ html.deck .deck-reef{flex:1;display:grid;place-items:center;color:var(--cp-accen
 html.deck .deck-reef .mark{padding:6px;line-height:0}
 html.deck .deck-reef .wm{font:600 15px/1 -apple-system,"PingFang TC",system-ui,sans-serif;letter-spacing:.08em;color:var(--cp-muted)}
 
-html.deck .deck-back:focus{outline:none}
+html.deck .deck-back:not([tabindex="0"]):focus{outline:none}   /* the turn sends focus to a back; a back that scrolls is a Tab stop and keeps the page's ring (card.css [tabindex]:focus-visible) */
 html.deck.fan .deck-card{transition:transform .32s cubic-bezier(.2,.8,.3,1),opacity .25s,visibility 0s 0s;cursor:pointer}
 html.deck.fan .deck-card.fan-hot{transition-duration:.14s}
 html.deck.fan .deck-gshadow{opacity:0;transition:opacity .2s 0s}
@@ -473,7 +520,7 @@ html.deck.list .deck-card.flipped{transform:rotateY(180deg) translateZ(2px)}
 html.deck.swipe.list .deck-stack{touch-action:pan-y}
 html.deck.swipe:not(.list) .deck-card.is-top{touch-action:pan-y}   /* without it Chrome takes a sideways drag over as a page pan and sends pointercancel, so the card never follows the finger (seen in Chromium touch emulation; iOS Safari did not cancel, which is why it looked fine). Not yet tried on a real Android */   /* sideways touch moves go to deck.js (the row follows the finger); up/down stay native */
 html.deck.list .deck-gshadow{opacity:0;transition:opacity .2s 0s}   /* fades, not display:none — so it can fade back in when the pile returns */
-html.deck.list .deck-shade{position:absolute;inset:0;transform:none;z-index:10;pointer-events:none}
+html.deck.list .deck-shade{position:fixed;inset:0;transform:none;z-index:10;pointer-events:none}   /* fixed: the film lies over the whole table, as in the stack. Laid over the row of tiles alone (absolute, inset 0) it was a band as tall as a tile with square corners, beside the held tile, to the window's edge (tile#343). The table is the film's containing block either way (its perspective), and the table is the window */
 html.deck.list.open .deck-shade{pointer-events:auto;cursor:pointer}
 
 /* the fan button: under the pile, above the footer; deck mode only */
@@ -501,8 +548,7 @@ html.deck.list .st-cell a.st-gal-cta{width:auto;align-self:center}
 .deck-seg button[data-m="list"] .ic-b svg{transform:scaleX(-1)}   /* the big card on the LEFT = the first one, where the press takes you */
 
 /* ---- backs, to a product page's standard: a title, air, one voice ---- */
-html.deck .deck-back-scroll{padding:30px 28px;display:flex;flex-direction:column;justify-content:center;min-height:100%;box-sizing:border-box}
-html.deck .deck-back .dc-drawer-body{display:flex;flex-direction:column;justify-content:center;gap:14px;min-height:100%}
+html.deck .deck-back .dc-drawer-body{display:flex;flex-direction:column;gap:14px}   /* as tall as what it holds; the box it sits in centres it (.deck-back-scroll, above) */
 html.deck .deck-back .dc-drawer-title{font:600 24px/1.25 var(--cp-serif);color:var(--cp-accent-bright);margin:0 0 4px;text-wrap:balance}
 html.deck .deck-back .dc-drawer-body > p{margin:0;font:17px/1.7 -apple-system,"PingFang TC",system-ui,sans-serif;color:var(--cp-ink);text-wrap:pretty}
 html.deck .deck-back .dc-drawer-body > p + p{margin-top:2px}

@@ -46,7 +46,7 @@ export const PICTURE_CACHE_SECONDS = 3600;
 // Workers Free plan allows 50 per invocation, `fetch()` and the Cache API together (developers.cloudflare.com
 // /workers/platform/limits/, as cited in the review of tile PR #354). A page that kept all of a rich
 // page's pictures at once — 40 puts, a marker read and a marker write — spent 42 on that alone, after the
-// page path had already fetched one or two YouTube URLs per channel it names (yt-channels.mjs; capped
+// page path had already fetched two or three YouTube URLs per channel it names (yt-channels.mjs; capped
 // since tile#355 at CHANNEL_SUBREQUESTS, below).
 // Past the limit the put fails, the marker is never written, and every later view tries the same
 // oversized batch again. The Paid plan's limit is larger (its number was not re-checked for this); a
@@ -67,8 +67,8 @@ export const PAGE_SUBREQUESTS_HELD = 8;
 export const PICTURE_PREFILL_CALLS = 12;
 /**
  * tile#355 — YouTube channel resolution's share of the same budget: what is left once the held reads and
- * a whole prefill are set aside (50 − 8 − 12 = 30 fetches: 30 channels written as UC ids, 15 written as
- * @handles). Before this the resolution was uncapped, and a page naming more channels than the budget
+ * a whole prefill are set aside (50 − 8 − 12 = 30 fetches: 15 channels written as UC ids, 10 written as
+ * @handles, at yt-channels.mjs channelFetches' 2 and 3 since tile#341). Before this the resolution was uncapped, and a page naming more channels than the budget
  * failed its later fetches by itself, with nothing left for the prefill. A page view that spends all of
  * it still leaves prefillCalls() a whole PICTURE_PREFILL_CALLS. Channels past it are served from what the
  * isolate already resolved, or drawn in the video cell's degraded state (yt-channels.mjs resolveChannels).

@@ -777,7 +777,7 @@ function renderCellBody(cell, place, ctx) {
 
 // cardtile-native widget styling — carried WITH the renderer so a card needs no CSS beyond the
 // shared card stylesheet. Themed off the same --cp-* tokens.
-const NATIVE_CSS = [
+export const NATIVE_CSS = [
   // a door over a tile that turns over to its back: the whole tile is the target, the avatar and any link in it stay on top
   '.st-card .st-cell:has(>.st-back-door){position:relative;cursor:pointer}',
   '.st-card .st-back-door{position:absolute;inset:0;z-index:1;border-radius:inherit}',
@@ -1493,7 +1493,17 @@ export function renderGrid(model, ctx = {}) {
   const editCss = ctx.editIndex ? `<style>${EDIT_ONLY_CSS}</style>` : '';
   // The card pool's closing card: last thing on the card, never inside a drawer.
   if (!ctx.inDrawer && poolOf(ctx) === true) parts.push(poolTileHtml(ctx.handle));
-  return `<div class="st-card${skin}${head}${marks}"><style>${NATIVE_CSS}</style>${editCss}${parts.join('')}</div>`;
+  // 🔴 NATIVE_CSS ONCE PER PAGE, in the front grid only (tile#359). renderDrawers draws every back
+  // through this function, and each back used to open with its own copy: 10,852 bytes per back,
+  // 89% of a 1,000-tile page. A back is not a separate scope. It is in the same document as the
+  // front, in the light DOM (the deck moves a back's body onto a deck card and slots it, never into
+  // a shadow tree), so the front's copy already reaches every `.st-card` rule inside it. The later
+  // copies only re-declared the same rules. Dropping them can move a rule's cascade position only
+  // relative to stylesheets between the first and last copy: the drawer coral's DRAWER_CSS (all
+  // `.dc-*`), the per-cell slides/embed sheets and EDIT_ONLY_CSS. None of them sets a property at the
+  // same specificity on an element a NATIVE_CSS rule also matches; native-css-once.test.mjs pins the count.
+  const native = ctx.inDrawer ? '' : `<style>${NATIVE_CSS}</style>`;
+  return `<div class="st-card${skin}${head}${marks}">${native}${editCss}${parts.join('')}</div>`;
 }
 
 /** renderDrawers: model.drawers → the overlay markup. Behaviour comes from the `drawer` coral.
@@ -1505,6 +1515,10 @@ export function renderGrid(model, ctx = {}) {
  *
  * This used to be ~60 lines of inlined CSS plus a whole client stapled into every card that had a
  * drawer. As a coral it has one home, and a Site can install it too.
+ *
+ * ctx.styled: the caller has already put NATIVE_CSS on the page (renderPage does, in the front grid).
+ * Without it, the fragment opens with its own single copy, so a caller that inserts the backs on their
+ * own still gets the rules every `.st-card` inside them relies on (tile#360 review).
  */
 export function renderDrawers(model, ctx = {}) {
   const drawers = model.drawers || [];
@@ -1534,7 +1548,9 @@ export function renderDrawers(model, ctx = {}) {
   // LINK: what it does is leave the fragment, which is navigation, and navigation is the one thing
   // that still works when the script never arrives.
   const close = `<a href="#" class="dc-drawer-close" role="button" aria-label="${esc(label(ctx, 'close'))}">✕</a>`;
-  return `<style>${DRAWER_CSS}</style><div class="dc-drawer-layer" data-dynamic-coral="drawer"><a href="#" class="dc-drawer-scrim" aria-hidden="true" tabindex="-1"></a>${panels}${close}</div>`;
+  // One copy for the whole fragment, never one per back: renderGrid leaves it out of every back.
+  const native = ctx.styled ? '' : `<style>${NATIVE_CSS}</style>`;
+  return `${native}<style>${DRAWER_CSS}</style><div class="dc-drawer-layer" data-dynamic-coral="drawer"><a href="#" class="dc-drawer-scrim" aria-hidden="true" tabindex="-1"></a>${panels}${close}</div>`;
 }
 
 /** renderPage: full standalone HTML (reuses the live CSS + QR-on-avatar-click). */
@@ -1555,7 +1571,7 @@ export function renderPage(model, ctx = {}) {
     const backdrop = backdropUrl
       ? `<div class="st-backdrop" aria-hidden="true"></div><style>${BACKDROP_CSS(cssAttrUrl(ctx, backdropUrl), resolveBackdropDim(ctx.backdropDim, accentC))}</style>`
       : '';
-    return { front: backdrop + renderGrid(model, ctx), backs: renderDrawers(model, ctx) };
+    return { front: backdrop + renderGrid(model, ctx), backs: renderDrawers(model, { ...ctx, styled: true }) };
   };
   const { grid, pics: picPlan } = firstScreenPictures(body, ctx);
   const css = ctx.css || '';

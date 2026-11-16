@@ -8,8 +8,19 @@
 //
 // (3) shipped already (924eed1). This is (1), (2) and (4).
 //
-// The endpoint is YouTube's channel RSS feed. Public, no key, no quota, cacheable, and it has been
-// the same URL for fifteen years:  /feeds/videos.xml?channel_id=UC…
+// The endpoint is YouTube's oEmbed, asked about the channel's UPLOADS playlist (`UC…` → `UU…`):
+//   /oembed?format=json&url=https://www.youtube.com/playlist?list=UU…
+// Public, no key, no quota, cacheable, ~700 bytes of JSON. oEmbed is a published protocol that every
+// site embedding YouTube links depends on, so it is the most stable keyless contract YouTube offers.
+// The answer names the playlist's first video only in `thumbnail_url` (`i.ytimg.com/vi/<id>/…`), and
+// the uploads playlist is newest-first, videos, Shorts and streams together — the same set the old
+// feed listed. A second oEmbed, for that video, gives its title.
+//
+// 🩸 tile#341: until 2026-11 this was the channel RSS feed, /feeds/videos.xml?channel_id=UC…, the same
+// URL for fifteen years. Measured 2026-11-16 it answers 404 for every channel, and so do its
+// `playlist_id=` and `user=` forms; the feed path is gone, not kept as a first try. What breaks the
+// oEmbed path: YouTube refusing oEmbed for playlists, or a playlist thumbnail that stops being the
+// first video's. Either one yields no video id, and the cell lands on the designed noposter state.
 //
 // 🔴 Condition 4 is why this file also proxies the THUMBNAIL, which looks like scope creep and is
 // not. The poster URL is `i.ytimg.com`, i.e. Google. Putting it in the markup means every visitor's
@@ -38,8 +49,9 @@ export const isChannelRef = (s) => CHANNEL_RE.test(s) || HANDLE_RE.test(s);
 export const VIDEO_RE = /^[\w-]{11}$/;
 
 /**
- * How long the render path will wait for YouTube. Measured against the real feed: 206ms warm. This
- * is generous for that and still short of anything a reader would call a slow card.
+ * How long the render path will wait for YouTube: once for a handle page, once for the latest video
+ * (its two oEmbeds share the one deadline). Measured 2026-11-16: an oEmbed answers in 40–75 ms. This
+ * is generous for that and still short of anything a reader would call a slow page.
  */
 export const TIMEOUT_MS = 1500;
 
@@ -94,23 +106,96 @@ export function youtubeVideoOf(href) {
 // Which channels a CARD names — `channelsIn` / `resolveChannels` — is yt-channels.mjs (tile#325): the
 // answer is read off the Card parse, and this file may import nothing.
 
+/** A channel's uploads playlist: the same 22 characters after `UU`. Only for a valid UC id. */
+export const uploadsOf = (channelId) => (CHANNEL_RE.test(channelId) ? `UU${channelId.slice(2)}` : null);
+
+/** YouTube's public oEmbed for a youtube.com page address. JSON, keyless. */
+export const oembedUrl = (pageUrl) =>
+  `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(pageUrl)}`;
+
 /**
- * The newest video on a channel, or null.
- *
- * 🔴 The first `<entry>` is taken and then read WITHIN its own bounds. The feed carries a
- * channel-level `<title>` and `<link>` before any entry, so a document-wide search for `<title>`
- * returns the channel's name and a document-wide search for a video id can outrun its entry. Scoping
- * to the entry is the difference between "her latest video" and "her channel, mislabelled".
+ * How long the edge keeps a YouTube answer, in seconds (the cardtile worker's `cf.cacheTtl`, which
+ * re-exports this). The uploads-playlist oEmbed: 30 minutes — that TTL is what bounds how old "latest"
+ * can be. A handle page (`youtube.com/@name`, resolved to the UC id): a day — it is a couple of MB, and a
+ * handle's id does not change. A video's own oEmbed (its title): a day — one video, one answer.
+ * tile#355: yt-channels.mjs keptChannels reads the same rule, so a channel the isolate remembers never
+ * outlives the edge copies its answer was built from.
  */
-export function latestFromFeed(xml) {
-  const entry = /<entry\b[^>]*>([\s\S]*?)<\/entry>/.exec(String(xml || ''));
-  if (!entry) return null;
-  const id = /<yt:videoId>\s*([A-Za-z0-9_-]+)\s*<\/yt:videoId>/.exec(entry[1]);
-  if (!id || !VIDEO_RE.test(id[1])) return null;
-  const title = /<title[^>]*>([\s\S]*?)<\/title>/.exec(entry[1]);
-  const unescape = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'").replace(/&amp;/g, '&').trim();
-  return { id: id[1], title: title ? unescape(title[1]) : '' };
+export const ytCacheTtl = (u) =>
+  (/^https:\/\/www\.youtube\.com\/@/.test(u) || /[?&]url=https%3A%2F%2Fwww\.youtube\.com%2Fwatch%3F/.test(u) ? 86400 : 1800);
+
+/**
+ * The most an oEmbed answer may be, in bytes, before it is parsed. Recorded answers are 716–830
+ * bytes. A title is at most 100 characters and appears twice (`title`, and the `html` iframe's
+ * title); even written as \u-escaped surrogate pairs (12 bytes a character) that is 2.4 KB, and a
+ * long `author_name` about 1.2 KB more — under 5 KB in all. 8 KiB leaves room above that.
+ */
+export const OEMBED_MAX_BYTES = 8 * 1024;
+
+/**
+ * An oEmbed body as text, or null when it is over `max` bytes. 🔴 Counted while READING, and the
+ * stream is cancelled the moment the count passes the ceiling: a body that is chunked, or whose
+ * content-length is missing or wrong, is still never held whole, and no oversized JSON ever reaches
+ * JSON.parse (tile#346 review P2: a 4 MB answer parsed synchronously cost ~17 MB and ~75 ms of the
+ * shared cardtile worker). A content-length already over the ceiling is refused without reading.
+ * A response with no stream (the injected fakes in the tests) is measured after text().
+ */
+export async function oembedText(r, max = OEMBED_MAX_BYTES) {
+  const body = r && r.body;
+  const declared = r && r.headers && typeof r.headers.get === 'function' ? Number(r.headers.get('content-length')) : 0;
+  if (declared > max) {
+    if (body && typeof body.cancel === 'function') await body.cancel().catch(() => {});
+    return null;
+  }
+  if (!body || typeof body.getReader !== 'function') {
+    const t = String(await r.text());
+    return new TextEncoder().encode(t).byteLength <= max ? t : null;
+  }
+  const reader = body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) { await reader.cancel().catch(() => {}); return null; }
+      chunks.push(value);
+    }
+  } catch {
+    await reader.cancel().catch(() => {});
+    return null;
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { bytes.set(c, at); at += c.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
+
+const parseJson = (text) => {
+  try { const v = JSON.parse(String(text || '')); return v && typeof v === 'object' ? v : null; } catch { return null; }
+};
+
+/**
+ * The newest upload a channel's uploads-playlist oEmbed names, or null.
+ *
+ * 🔴 The id is read from `thumbnail_url` and ONLY in the exact `i.ytimg.com/vi/<id>/<file>` shape. That
+ * thumbnail is the one place the answer names a video; the `title` is the playlist's ("Uploads from
+ * …"), never the video's, and the `html` names the playlist, not a video. A thumbnail in any other
+ * shape (a custom cover, another host, a changed path) is not guessed at: it is null, and the cell
+ * lands on the designed noposter state rather than on a poster for the wrong video.
+ */
+export function latestFromUploadsOEmbed(text) {
+  const o = parseJson(text);
+  const thumb = o && typeof o.thumbnail_url === 'string' ? o.thumbnail_url : '';
+  const m = /^https:\/\/i\d?\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\/[\w.-]+$/.exec(thumb);
+  return m && VIDEO_RE.test(m[1]) ? m[1] : null;
+}
+
+/** A video's own title from its oEmbed, or '' — JSON strings arrive already unescaped. */
+export function titleFromOEmbed(text) {
+  const o = parseJson(text);
+  return o && typeof o.title === 'string' ? o.title.trim() : '';
 }
 
 /**
@@ -167,20 +252,33 @@ export async function resolveChannel(ref, doFetch, timeoutMs = TIMEOUT_MS) {
     channelId = await resolveHandle(ref, doFetch, timeoutMs);
     if (!channelId) return null;
   }
-  if (!CHANNEL_RE.test(channelId)) return null;
+  const uploads = uploadsOf(channelId);
+  if (!uploads) return null;
   let timer;
+  // The video once it is known, so a deadline that lands during the TITLE fetch keeps the poster.
+  let found = null;
   try {
-    const feed = doFetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`)
-      .then(async (r) => (r && r.ok ? latestFromFeed(await r.text()) : null))
-      .then((hit) => (hit ? { ...hit, channelId } : null));
+    const latest = (async () => {
+      const r = await doFetch(oembedUrl(`https://www.youtube.com/playlist?list=${uploads}`));
+      const id = r && r.ok ? latestFromUploadsOEmbed(await oembedText(r)) : null;
+      if (!id) return null;
+      found = { id, title: '', channelId };
+      // The title is the label's last resort (an author's own label wins in the renderer). Losing it
+      // costs a word, never the poster: any failure here keeps the video with an empty title.
+      try {
+        const v = await doFetch(oembedUrl(`https://www.youtube.com/watch?v=${id}`));
+        if (v && v.ok) found = { ...found, title: titleFromOEmbed(await oembedText(v)) };
+      } catch { /* the video stands without a title */ }
+      return found;
+    })().catch(() => null);   // a rejection after the deadline won must not surface as unhandled
     // 🔴 A DEADLINE, because this now sits on the render path. Without it a slow or hanging YouTube
-    // does not degrade the video block — it holds up the creator's entire card, and the four
+    // does not degrade the video block — it holds up the creator's entire page, and the four
     // conditions are satisfied right up until the page never arrives. Losing the poster is the
-    // designed failure; losing the card is not. Raced rather than passed as an AbortSignal so it
+    // designed failure; losing the page is not. Raced rather than passed as an AbortSignal so it
     // holds for ANY injected fetch, including the fakes in the tests.
     return await Promise.race([
-      feed,
-      new Promise((ok) => { timer = setTimeout(() => ok(null), timeoutMs); }),
+      latest,
+      new Promise((ok) => { timer = setTimeout(() => ok(found), timeoutMs); }),
     ]);
   } catch {
     return null;

@@ -16,7 +16,7 @@
 import { parseCard, serializeCard } from '../card-core.js';
 import { renderPage, poolOf, picturesInRenderOrder } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
-import { VIDEO_RE } from '../yt.mjs';
+import { VIDEO_RE, ytCacheTtl } from '../yt.mjs';
 import { keptChannels, resolveChannels } from '../yt-channels.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
@@ -24,12 +24,11 @@ import { isTemplateOnly } from '../card-blank.mjs';
 import { picturePlan, pictureStrategy, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
 import { CHANNEL_SUBREQUESTS, cachedPicture, keepPicture, keepPictures, prefillCalls } from './picture-cache.mjs';
 
-// One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
-// minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
-// resolved to the UC id) is cached for a day: it is a couple of MB, and a handle's id does not change.
-const ytFetch = (u) => fetch(u, {
-  cf: { cacheTtl: /youtube\.com\/@/.test(u) ? 86400 : 1800, cacheEverything: true },
-});
+// One fetch per channel, not per card or visitor (yt.mjs, condition 2). How long the edge keeps each
+// YouTube answer is yt.mjs ytCacheTtl (re-exported here): the uploads-playlist oEmbed 30 minutes — that
+// TTL is what bounds how old "latest" can be — a handle page and a video's own oEmbed a day.
+export { ytCacheTtl };
+const ytFetch = (u) => fetch(u, { cf: { cacheTtl: ytCacheTtl(u), cacheEverything: true } });
 // tile#355 — the channels this isolate has resolved, in memory (no subrequest to read). Read only by a page
 // that names more channels than CHANNEL_SUBREQUESTS can fetch, for the ones past its share.
 const CHANNELS_KEPT = keptChannels();
@@ -664,18 +663,65 @@ const cardHandleHeader = (vanityHandle) => (vanityHandle && VALID_HANDLE.test(va
 // ledger (a retired name stays its owner's) live in RSP (`shared/reserved-slugs.ts`,
 // `platform-registry-cards.ts`), whose own rule is that nobody keeps a second copy of the list.
 // A button decided from half the facts would invite people to names that then refuse them.
-const NOT_FOUND_CARD = [
-  '---', 'title: feelreef', 'generator: off', '---', '', '## grid', '',
-  "- [ ] %% card: text %% There's no card here.",
-  '- [ ] %% card: link w=6 %% [feelreef](https://feelreef.com/)',
-  '',
-].join('\n');
+//
+// tile#340 — three things that page did not do, each written so the rule above still holds. The page
+// is a function of exactly two things, and neither is the handle or the reason nothing is there:
+//
+//   · the visitor's LANGUAGE (visitorLocale — the rule a page's chrome already follows, tile#298).
+//     The sentence, `<html lang>` and the deck's own words are one language: a locale with no
+//     sentence of its own (NOT_FOUND_WORDS) gets the English page whole, never a page in two
+//     languages. Every answer says `Vary: Accept, Accept-Language`, the English one included: a
+//     shared cache holding the English page must not hand it to the next visitor, and a header set
+//     on some answers only would be one more thing to tell two answers apart by.
+//   · the host the visitor ASKED (`face`). On reef.cards the page names and links reef.cards and
+//     nothing else; on the older hosts it keeps the name it had. `face` is the visitor's host in the
+//     open stage too (tile#299), where the request itself is re-addressed to the old host.
+//
+// `views: stack` — one view, so the deck draws no switcher (deck.js: "one view = nothing to switch")
+// and a visitor's stored pick of another view is not offered: there is nothing here to see three ways.
+// The sentence names no product: "Cards" is a name, never a count, so it says only that nothing is here.
+export const NOT_FOUND_WORDS = {
+  en: 'Nothing here.',
+  zh: '這裡什麼都沒有。',
+  ja: 'ここには何もありません。',
+  ko: '여기에는 아무것도 없습니다.',
+  'zh-Hans': '这里什么都没有。',
+  de: 'Hier ist nichts.',
+  fr: "Il n'y a rien ici.",
+  es: 'Aquí no hay nada.',
+  pt: 'Não há nada aqui.',
+};
+const notFoundHome = (face) => (face === CARDS_HOST
+  ? { name: CARDS_HOST, url: `https://${CARDS_HOST}/` }
+  : { name: 'feelreef', url: `https://${APEX_HOST}/` });
+const notFoundSource = (locale, face) => {
+  const key = Object.hasOwn(NOT_FOUND_WORDS, locale) ? locale : 'en';
+  const home = notFoundHome(face);
+  return [
+    '---', `title: ${home.name}`, `lang: ${SANDBOX_LOCALES[key].lang}`, 'views: stack', 'generator: off', '---', '', '## grid', '',
+    `- [ ] %% card: text %% ${NOT_FOUND_WORDS[key]}`,
+    `- [ ] %% card: link w=6 %% [${home.name}](${home.url})`,
+    '',
+  ].join('\n');
+};
 // 🔴 …except on a creator's OWN domain, where an unknown path (`/wp-login.php`, `/robots.txt`) stays
 // the small 404 it was (card-icon.test.mjs catch-all, reef#1090): bots probe those all day, and a
 // feelreef page is not ours to put on somebody's domain. It names nothing, so it leaks nothing.
 const SMALL_404 = '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>';
-const notFound = (env, handle = '', at = {}) =>
-  html(renderCardHTML(NOT_FOUND_CARD, { handle: '', cardUrl: '' }), 404, env, handle, at);
+// `who` = { locale, face }: the visitor's language and the host they asked. `handle` and `at` reach
+// the robots header only (robotsTag), never the body.
+const notFound = (env, handle = '', at = {}, who = {}) =>
+  html(renderCardHTML(notFoundSource(who.locale, who.face), { handle: '', cardUrl: '' }), 404, env, handle, at, false, VARY_VISITOR_LANG);
+
+// tile#340 — the reef.cards origin's own icon files, for when the platform's page is not there to
+// lend its picture (not saved yet, or stopped). `/favicon.ico` and `/apple-touch-icon.png` are asked
+// of an origin by every tab, bookmark and home-screen shortcut whether or not a page links them, and
+// every page on the origin shares them — so they answer an image, drawn by the one badge every other
+// icon here comes from (card-icon.mjs iconFile → icon-core), from the origin's name and nothing a
+// guest wrote. Only the reef.cards face, and only the three origin-level paths: a handle's own
+// `/<handle>/favicon.ico` with nothing behind it stays the bare 404.
+const ORIGIN_MARK = { name: CARDS_HOST, accent: '' };
+const NO_TILES = { cells: [], assets: {} };
 
 // A card's own markdown, served as itself. See docs/SPEC-card-mcp.md §4.
 //
@@ -820,6 +866,10 @@ async function reportedHandle(u, env) {
 // first. Every address that answer carries (canonical, og:url, the QR's data-url, the icon links, the
 // download link, a redirect's Location) is therefore the old one: a QR printed from a page seen on
 // reef.cards in this stage carries card.feelreef.com. The one thing added is the robots header.
+// tile#340 — and two things are the visitor's host's, not the old one's, because they are about the
+// origin and not about any handle: the name on the nothing-here page, and the origin's own icon files when
+// the platform's page is not there (`askedOn` below; see notFound and ORIGIN_MARK). No handle's address
+// is among them, so the sentence above about a printed QR still holds.
 //
 // 🔴 An ALLOWLIST, so a route added to this router later is dark here until somebody decides
 // otherwise: a page that fails to load during the comparison is visible, a write door that quietly
@@ -864,19 +914,24 @@ async function openStageAnswer(request, url, env, ctx) {
   const at = new URL(url.href);
   at.hostname = CANON_HOST;
   // GET/HEAD only (openStageMirrors), so there is no body to carry
-  const res = await router.fetch(new Request(at.href, { method: request.method, headers: request.headers }), env, ctx);
+  const res = await router.fetch(new Request(at.href, { method: request.method, headers: request.headers }), env, ctx, url.hostname);
   const headers = new Headers(res.headers);
   headers.set('X-Robots-Tag', OPEN_STAGE_ROBOTS);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 const router = {
-  async fetch(request, env, ctx) {
+  // `askedOn` is set by openStageAnswer alone: the host the visitor asked, when this request is its
+  // re-addressed twin. The Worker's own entry (the default export) never passes it.
+  async fetch(request, env, ctx, askedOn) {
     const url = new URL(request.url);
     // 🔴 The domain asked for is the request URL's, never a `Host` header that disagrees with it. On
     // Cloudflare the two are the same; but X-Card-Handle is a promise about WHICH domain serves which
     // card, so its identity comes from one authority. (`hostname` is lowercase and port-free.)
     const reqHost = url.hostname;
+    // tile#340 — the host whose name the nothing-here page and the origin's icon files wear. It decides
+    // those words and nothing else: routing, the store and every address a page carries read reqHost.
+    const face = askedOn || reqHost;
     // A route can be installed before cutover. Before it, reef.cards is dark (cardsHostStage 'dark'),
     // or (tile#299, 'open') a read-only mirror of the old host for the routes a Card page needs, and
     // dark for every other route. Nothing below this line ever sees reef.cards outside the cutover.
@@ -1161,6 +1216,8 @@ const router = {
     // is 99.7% missing on a real card, and what is missing is the pictures — the part nobody can
     // retype. A parameter with a default is a thing somebody forgets; two paths are not.
     const host = reqHost; // the URL's (see the top of fetch)
+    // who is asking, for the nothing-here page: their language and the host they asked (see notFound)
+    const who = { locale: visitorLocale(url.searchParams, request), face };
     const md = /^(.*)\.md$/.exec(url.pathname);
 
     // CARDS store: card:<handle>:<gen> → card.md (card-api genKey), plus the vanity bindings. Missing
@@ -1187,9 +1244,9 @@ const router = {
     const vanityHandle = boundGen != null && (await isBound(store, pointer, boundGen, host)) ? pointer : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
       vanityHandle ? { [host]: vanityHandle } : {});
-    // a host of ours with no root card and no handle in the path: the no-card page. An unbound
+    // a host of ours with no root card and no handle in the path: the nothing-here page. An unbound
     // creator's domain keeps the small 404 (see SMALL_404) — it is not our door to put our page on.
-    if (!resolved) return routesByPath(host) ? notFound(env) : html(SMALL_404, 404, env);
+    if (!resolved) return routesByPath(host) ? notFound(env, '', {}, who) : html(SMALL_404, 404, env);
 
     // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
     // Card exits read the body and stop marker in parallel before any exit or redirect.
@@ -1200,7 +1257,7 @@ const router = {
     // tile#339: the picture route exists only while the local switch is set (asset-urls.mjs
     // pictureStrategy). Unset — every deployment today — its paths are unknown paths, as they always were.
     const pictures = pictureStrategy(env);
-    if (!want || (want === 'asset' && pictures === 'inline')) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
+    if (!want || (want === 'asset' && pictures === 'inline')) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
@@ -1280,9 +1337,11 @@ const router = {
     // The card's icon files. Before the canonical→vanity 301 below: that redirect is for the PAGE,
     // and a browser asking `/<handle>/favicon.ico` for an image must get an image, not a home page.
     if (want === 'ico' || want === 'svg' || want === 'apple') {
-      if (!cardMd) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60', ...ROBOTS_HEADERS(env, resolved.handle, at) } });
-      const file = await iconFile(want, parseCard(cardMd),
-        { name: cardName(cardMd, resolved.handle), accent: frontmatter(cardMd, 'accent') });
+      // tile#340: the reef.cards origin answers its own mark when the platform's page is not there (ORIGIN_MARK)
+      const originMark = !cardMd && !!resolved.root && face === CARDS_HOST;
+      if (!cardMd && !originMark) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60', ...ROBOTS_HEADERS(env, resolved.handle, at) } });
+      const file = originMark ? await iconFile(want, NO_TILES, ORIGIN_MARK)
+        : await iconFile(want, parseCard(cardMd), { name: cardName(cardMd, resolved.handle), accent: frontmatter(cardMd, 'accent') });
       return new Response(file.body, {
         headers: {
           'Content-Type': file.type,
@@ -1313,7 +1372,7 @@ const router = {
       return Response.redirect(`https://${ownHost}${url.search}`, 301);
     }
 
-    if (!cardMd) return notFound(env, resolved.handle, at);
+    if (!cardMd) return notFound(env, resolved.handle, at, who);
 
     // the download link, in the form this host actually uses
     // (the root card keeps the canonical form: `/index.md` on reef.cards would name the handle `index`)
@@ -1334,8 +1393,8 @@ const router = {
 
     // 🔴 Resolution happens HERE, not in a coral. A coral runs in the browser, so it would cost a
     // round trip for something the renderer can do server-side — and it would be the visitor's
-    // browser making it, which is condition 4 again. The cache key is the feed URL, i.e. the
-    // CHANNEL: a thousand cards pointing at one channel share one fetch, so cost does not scale with
+    // browser making it, which is condition 4 again. The cache key is the uploads-playlist oEmbed URL, i.e.
+    // the CHANNEL: a thousand cards pointing at one channel share one fetch, so cost does not scale with
     // cards (condition 2). renderCardHTML stays pure and synchronous; it receives the answer.
     //
     // Failure is not propagated. resolveChannels never throws and returns {} when YouTube is
