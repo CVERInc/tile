@@ -94,6 +94,15 @@ const WRITTEN = {
   },
 };
 
+// The name a side of a tile has when it scrolls and is a Tab stop (deck.js tellMore): the editor's own word for that
+// side, in every locale (w3/edit3-i18n.mjs `front` / `back`), copied rather than imported because the editor's table
+// imports this one. deck-views.test.mjs holds the two tables to the same words.
+const SIDES = {
+  en: ['Front', 'Back'], zh: ['正面', '背面'], ja: ['表面', '裏面'], 'zh-Hans': ['正面', '背面'], ko: ['앞면', '뒷면'],
+  de: ['Vorderseite', 'Rückseite'], fr: ['Recto', 'Verso'], es: ['Frente', 'Reverso'], pt: ['Frente', 'Verso'],
+};
+for (const [k, [front, back]] of Object.entries(SIDES)) WRITTEN[k] = { ...(WRITTEN[k] || {}), front, back };
+
 // The words a translator supplied, one object per locale, keys in English's order. Strict JSON between
 // the two marker lines, so the translation step can read the block and rewrite it whole; a key here
 // never replaces one in WRITTEN (the merge below lets WRITTEN win), so hand-written words stay.

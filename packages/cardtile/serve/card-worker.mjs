@@ -22,12 +22,13 @@ import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
 
-// One fetch per channel, not per card or visitor (yt.mjs, condition 2). A feed is cached for 30
-// minutes — that TTL is what bounds how old "latest" can be. A handle page (`youtube.com/@name`,
-// resolved to the UC id) is cached for a day: it is a couple of MB, and a handle's id does not change.
-const ytFetch = (u) => fetch(u, {
-  cf: { cacheTtl: /youtube\.com\/@/.test(u) ? 86400 : 1800, cacheEverything: true },
-});
+// One fetch per channel, not per card or visitor (yt.mjs, condition 2). The uploads-playlist oEmbed
+// is cached for 30 minutes — that TTL is what bounds how old "latest" can be. A handle page
+// (`youtube.com/@name`, resolved to the UC id) is cached for a day: it is a couple of MB, and a
+// handle's id does not change. So is a video's own oEmbed (its title): one video, one answer.
+export const ytCacheTtl = (u) =>
+  (/^https:\/\/www\.youtube\.com\/@/.test(u) || /[?&]url=https%3A%2F%2Fwww\.youtube\.com%2Fwatch%3F/.test(u) ? 86400 : 1800);
+const ytFetch = (u) => fetch(u, { cf: { cacheTtl: ytCacheTtl(u), cacheEverything: true } });
 import { ICON_DOMAIN_RE, iconUpstreams } from '../marks.mjs';
 // Image types the /_icon/ and /_yt/ proxies will relay. SVG is deliberately absent (it can carry script).
 const PROXY_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon']);
