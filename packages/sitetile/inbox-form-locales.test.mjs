@@ -57,6 +57,10 @@ test('every row carries every key the English row carries, as a non-empty string
     assert.deepEqual(Object.keys(c).sort(), [...KEYS].sort(), `${row} has keys the English row does not`);
     assert.ok(c.sentWithEmail.includes('{email}'), `${row}.sentWithEmail has no {email} placeholder`);
     assert.ok(!c.sentWithEmailGeneric.includes('{email}'), `${row}.sentWithEmailGeneric leaks {email}`);
+    for (const [key, text] of Object.entries(c)) {
+      if (key === 'sentWithEmail') continue;
+      assert.ok(!String(text).includes('{email}'), `${row}.${key} leaks {email}; only sentWithEmail substitutes it`);
+    }
   }
 });
 
