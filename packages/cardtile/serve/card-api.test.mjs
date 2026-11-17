@@ -325,9 +325,16 @@ test('full owner read refuses bad handles before touching the store', async () =
   const res = await call(env, 'GET', '/_api/card/%54/full');
   assert.equal(res.status, 200);
   assert.equal(await res.text(), CARD);
-  // the generation, that generation's body and serving stop, and — generation 0 only — the pre-r3 bare
-  // keys (reef#2618 r3); the stop is reported, never decides the answer (tile#338)
-  assert.deepEqual(reads.sort(), ['card:t:0', 'gen:t', 'stop:t', 'stop:t:0', 't']);
+  // the body and its generation come from the handle's object, which holds this card; KV is read for
+  // the serving stop only — that generation's and, generation 0 only, the pre-r3 bare key (reef#2618
+  // r3). The stop is reported, never decides the answer (tile#338)
+  assert.deepEqual(reads.sort(), ['stop:t', 'stop:t:0']);
+  // CONTROL: at first contact the object does not speak for the card, and every key is KV's as before
+  const first = envWith({ t: CARD }, { firstContact: true }), firstReads = [];
+  const firstGet = first.CARDS.get.bind(first.CARDS);
+  first.CARDS.get = async (k) => { firstReads.push(k); return firstGet(k); };
+  assert.equal(await (await call(first, 'GET', '/_api/card/t/full')).text(), CARD);
+  assert.deepEqual(firstReads.sort(), ['card:t:0', 'gen:t', 'stop:t', 'stop:t:0', 't']);
 });
 
 // ── serving stop ─────────────────────────────────────────────────────────────────────────────────
@@ -2911,6 +2918,86 @@ test('🔴 r2 a save under a stale KV read re-attaches the OBJECT\'s assets lane
   const md = await bodyOf(env);
   assert.ok(md.includes('edited'));
   assert.equal(parseCard(md).assets.extra?.b64, AVATAR_NEW, 'the save re-attached the stale KV lane and erased `extra`');
+});
+
+// ── the authenticated reads answer the object's card ─────────────────────────────────────────────────
+//
+// r2 moved every WRITE onto the card the handle's object holds, and left the reads on KV. So an agent
+// that put a picture and read the card straight back was answered the card from before the put: no
+// such asset, the old version, and a preview assembled without the picture — for as long as this
+// location's KV lagged. Nothing in the answers said to wait, and "the upload did not work" is what
+// that looks like from outside. These make the KV read lag and nothing else.
+
+test('🔴 a read right after put_asset lists the new picture and its version while KV still answers the older card', async () => {
+  const env = envWith({ t: CARD });
+  const before = (await liveCard(env.CARDS, 't')).md;
+  const put = await (await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).json();
+  const restore = lagKv(env, keyT(), before);
+  const got = await (await call(env, 'GET', '/_api/card/t')).json();
+  restore();
+  assert.equal(got.version, put.version, 'the read answered the version from before the put');
+  assert.ok(got.assets.some((a) => a.id === 'extra'), 'the read did not list the picture that was just put');
+  // CONTROL: with KV caught up the answer is the same one
+  const fresh = await (await call(env, 'GET', '/_api/card/t')).json();
+  assert.deepEqual(fresh, got);
+});
+
+test('🔴 a preview right after put_asset is assembled on the picture KV has not caught up on', async () => {
+  const env = envWith({ t: CARD });
+  const before = (await liveCard(env.CARDS, 't')).md;
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
+  const restore = lagKv(env, keyT(), before);
+  const res = await call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) });
+  restore();
+  assert.equal(res.status, 200);
+  const parked = env.CARDS._m.get(previewKey((await res.json()).url.split('/').pop()));
+  assert.equal(parseCard(parked).assets.extra?.b64, AVATAR_NEW, 'the preview was assembled on the stale KV lane');
+});
+
+test('🔴 the full owner read right after put_asset carries the new picture while KV lags', async () => {
+  const env = envWith({ t: CARD });
+  const before = (await liveCard(env.CARDS, 't')).md;
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).status, 200);
+  const restore = lagKv(env, keyT(), before);
+  const res = await call(env, 'GET', '/_api/card/t/full');
+  restore();
+  assert.equal(res.status, 200);
+  assert.equal(parseCard(await res.text()).assets.extra?.b64, AVATAR_NEW, 'the full read answered the stale KV body');
+});
+
+test('🔴 the read asks the object and changes nothing in it: no key written, no alarm armed — settled or at first contact', async () => {
+  for (const firstContact of [false, true]) {
+    const env = envWith({ t: CARD }, { firstContact });
+    if (!firstContact) await call(env, 'GET', '/_api/card/t'); // the fixture settles the object on its first request
+    const storage = env.CARD_LIFETIMES.storageOf('t');
+    const before = structuredClone([...storage._m]), kv = structuredClone([...env.CARDS._m]), alarm = storage._alarm;
+    const res = await call(env, 'GET', '/_api/card/t');
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).version, await cardVersion(CARD));
+    assert.deepEqual([...storage._m], before, `firstContact=${firstContact}: the read wrote to the object`);
+    assert.equal(storage._alarm, alarm, `firstContact=${firstContact}: the read armed an alarm`);
+    assert.deepEqual([...env.CARDS._m], kv, `firstContact=${firstContact}: the read wrote to KV`);
+  }
+});
+
+test('a Worker with no object bound, or whose object does not answer, reads KV as before', async () => {
+  const unbound = { CARDS: fakeKv({ t: CARD }), MCP_TOKEN_HASH: TOKEN_HASH };
+  assert.equal((await (await call(unbound, 'GET', '/_api/card/t')).json()).version, await cardVersion(CARD));
+  assert.equal(await (await call(unbound, 'GET', '/_api/card/t/full')).text(), CARD);
+  assert.equal((await call(unbound, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) })).status, 200);
+  const broken = envWith({ t: CARD });
+  broken.CARD_LIFETIMES = { idFromName: (name) => ({ name }), get: () => ({ fetch: async () => { throw new Error('object unreachable'); } }) };
+  assert.equal((await (await call(broken, 'GET', '/_api/card/t')).json()).version, await cardVersion(CARD));
+});
+
+test('🔴 a card adopted from KV and not yet settled is not answered from the object: the read stays on KV', async () => {
+  const env = envWith({ t: CARD }, { firstContact: true });
+  // first contact: the put is refused (unsettled) and leaves the KV body ADOPTED in the object
+  assert.equal((await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).status === 200, false);
+  const newer = CARD.replace('hello', 'newer in KV');
+  env.CARDS._m.set('t', newer); // another location wrote; the adopted copy is now the stale one
+  const got = await (await call(env, 'GET', '/_api/card/t')).json();
+  assert.ok(got.markdown.includes('newer in KV'), 'an unsettled adopted copy was answered instead of KV');
 });
 
 test('r2 migration: a handle the object has never written takes its card from KV ONCE; after that a KV body is not consulted', async () => {

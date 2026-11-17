@@ -615,6 +615,8 @@ export class HostBindings {
  *                                        ticket (KV key deleted; in gen 0 written empty), and the bare one
  *   POST /current  { handle }            → { gen } (reads only: no flush, no write, no alarm — r15)
  *   POST /binding  { handle }            → { gen, hosts, inverse, adopted } (reads only, like /current)
+ *   POST /held     { handle }            → { gen, held: true, md, version } | { gen, held: false } (reads
+ *                                        only, like /current): the card held here, for the authenticated reads
  *   POST /end      { handle, gen? }      refused (`stale_generation`) when `gen` is given and is not the
  *                                        current one (r4, DELETE's If-Generation; r15: before
  *                                        any write, its flush included); otherwise
@@ -678,7 +680,7 @@ export class CardLifetime {
     const { handle, host, gen, delivered, order, ticket } = body;
     const hostList = (v) => Array.isArray(v) && v.every((h) => typeof h === 'string' && h);
     const hostGen = typeof host === 'string' && host && typeof gen === 'string' && gen;
-    if (!['/register', '/confirm', '/lost', '/end', '/settle', '/current', '/binding'].includes(op) || !VALID_HANDLE.test(String(handle))
+    if (!['/register', '/confirm', '/lost', '/end', '/settle', '/current', '/binding', '/held'].includes(op) || !VALID_HANDLE.test(String(handle))
       || (['/register', '/confirm', '/lost'].includes(op) && !hostGen)
       || (op === '/confirm' && !(Number.isSafeInteger(order) && Number.isSafeInteger(ticket)))
       || (op === '/lost' && !Number.isSafeInteger(ticket))
@@ -692,7 +694,8 @@ export class CardLifetime {
         : op === '/lost' ? () => this.lost(handle, host, gen, ticket)
           : op === '/end' ? () => this.end(handle, gen)
             : op === '/current' ? async () => ({ gen: (await this.read(handle)).gen })
-              : op === '/binding' ? () => this.binding(handle) : () => this.settle(handle, delivered));
+              : op === '/binding' ? () => this.binding(handle)
+                : op === '/held' ? () => this.held(handle) : () => this.settle(handle, delivered));
   }
   /** the runtime's call when the retry alarm comes due */
   async alarm() {
@@ -918,6 +921,32 @@ export class CardLifetime {
     await this.storage.put(cardMetaKey(gen), unknown);
     await this.armAlarm(unknown.settleAt);
     return { unknown: true, meta: unknown };
+  }
+  /**
+   * the current generation's card as this object holds it, for the authenticated reads (the thin read,
+   * /full, a preview's assembly): `{ gen, held: true, md, version }`. Reads only, like /current (r15):
+   * no adoption, no flush, no write, no alarm — so it is not `cardOf`, which adopts at first contact.
+   *
+   * `held: false` is "ask KV, as before", and it is the answer whenever this object cannot speak for
+   * the card: nothing kept here yet, an UNKNOWN card, and a card ADOPTED from KV whose window is still
+   * open (that copy is itself one KV read, and may be the stale one — see heldCard). A card written
+   * here, or adopted and settled, is the truth every write starts from, so it is the truth a read
+   * right after a write has to see: KV is the pages' copy and may answer the card from before it.
+   *
+   * Not in the write queue: a write lands its chunks under a fresh serial, then the record, then sweeps
+   * the serial it replaced — so a read that took the record just before may find its chunks gone. It
+   * reads the record again; three replacements inside one read is answered `held: false`.
+   */
+  async held(handle) {
+    const { gen } = await this.read(handle);
+    for (let i = 0; i < 3; i++) {
+      const meta = await this.storage.get(cardMetaKey(gen));
+      if (!meta || (meta.from !== 'object' && meta.from !== 'kv-settled')) return { gen, held: false };
+      const parts = [];
+      for (let c = 0; c < meta.n; c++) parts.push(await this.storage.get(cardChunkKey(gen, meta.serial, c)));
+      if (parts.every((part) => typeof part === 'string')) return { gen, held: true, md: parts.join(''), version: meta.version };
+    }
+    return { gen, held: false };
   }
   /** keep a KV body as the ADOPTED card of `gen`, and arm the alarm that will try to settle it */
   async adoptCard(handle, gen, md, prev) {
@@ -1427,6 +1456,38 @@ async function readCard(store, handle) {
   return { md, version: await cardVersion(md), gen, stopped: stopped != null };
 }
 
+/**
+ * the card the handle's object holds, or null when it does not speak for it (CardLifetime.held), did
+ * not answer, or is not bound — and then the caller reads KV, which is what every read did before.
+ * Unlike a write, a read has that second source: without the object nothing can have been written
+ * that KV has not been handed, so a Worker with no binding answers its reads as it always did.
+ */
+async function objectCard(env, handle) {
+  if (!env.CARD_LIFETIMES) return null;
+  let res;
+  try {
+    res = await lifetimeOf(env, handle).fetch('https://card-lifetime/held', { method: 'POST', body: JSON.stringify({ handle }) });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const held = await res.json().catch(() => null);
+  return held && held.held === true && typeof held.md === 'string' ? held : null;
+}
+
+/**
+ * the card for an AUTHENTICATED read: `{ md, gen, stopped }` with `md` null for no card. The object's
+ * card when it holds one (so a read right after a write sees that write), else KV's. The public pages
+ * do not come here: they read KV (liveCard), which is what KV is for. The stop is KV's either way —
+ * it is not a card write and the object does not hold it.
+ */
+async function currentCard(env, store, handle) {
+  const held = await objectCard(env, handle);
+  if (!held) return liveCard(store, handle, { stop: true });
+  const stopped = await readGen(store, stopKey(handle, held.gen), legacyStopKey(handle), held.gen);
+  return { md: held.md, gen: held.gen, stopped, version: held.version };
+}
+
 /** what an authenticated read says about the public door: the JSON answers' `serving` field */
 const servingOf = (row) => ({ stopped: row.stopped });
 /** the same, for /full, which answers raw markdown and so carries it as a header */
@@ -1667,7 +1728,9 @@ export async function handleApi(request, env, url) {
     const handle = typeof body.handle === 'string' ? body.handle.trim().toLowerCase() : '';
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(body.handle)}.` }, 400);
     if (typeof body.markdown !== 'string' || !body.markdown.length) return json({ error: 'preview needs `markdown`.' }, 400);
-    const { md: currentMd, gen } = await liveCard(store, handle);
+    // the object's card when it holds one: a preview asked for right after put_asset must carry that
+    // picture, and this location's KV may still answer the card from before it
+    const { md: currentMd, gen } = await currentCard(env, store, handle);
     const { md } = assembleSave(body.markdown, currentMd);
     const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
     // The handle rides as METADATA so delete_card can find this draft from `list()` alone, without
@@ -1742,7 +1805,7 @@ export async function handleApi(request, env, url) {
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(full[1])}.` }, 400);
     if (method !== 'GET') return json({ error: `${method} not allowed here.` }, 405);
     // liveCard, not readCard: /full answers no version, so it does not hash the whole body for one
-    const { md, stopped } = await liveCard(store, handle, { stop: true });
+    const { md, stopped } = await currentCard(env, store, handle);
     if (md == null) return json({ error: `No card at "${handle}".` }, 404);
     return new Response(md, {
       headers: {
@@ -1863,8 +1926,9 @@ export async function handleApi(request, env, url) {
     // exits (`/<handle>.md` publicly while serving, `/_api/card/<handle>/full` for the owner even while
     // stopped), and a backup over a forgotten flag is 99.7% missing on the heaviest real card.
     if (method === 'GET') {
-      const row = await readCard(store, handle);
-      if (!row) return json({ error: `No card at "${handle}".` }, 404);
+      const cur = await currentCard(env, store, handle);
+      if (cur.md == null) return json({ error: `No card at "${handle}".` }, 404);
+      const row = { md: cur.md, version: cur.version || await cardVersion(cur.md), stopped: cur.stopped != null };
       return json({
         handle,
         version: row.version,
