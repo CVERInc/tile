@@ -8,9 +8,9 @@
 //           frontmatter: `book: false`.
 //   order = the site's navigation (the `nav:` menu), read depth-first, the way the menu reads:
 //           a parent, then its children in menu order. The home page is the root the menu hangs
-//           from, so it opens the book even when the menu does not name it. Pages the menu does
-//           not name follow, sorted by path, so the book is the same whatever order the caller
-//           listed the pages in.
+//           from, so it opens the book wherever the menu names it, or whether it does (with the
+//           menu's label when it has one). Pages the menu does not name follow, sorted by path, so
+//           the book is the same whatever order the caller listed the pages in.
 //
 // Inputs are what sitetile already produces, passed in rather than imported, so this file stays
 // importable from any host:
@@ -27,7 +27,14 @@
 //   excluded = the pages whose owner unchecked them, in the place they would have had, so an
 //              editor can list them as unchecked rather than make them vanish.
 //
-// One spine is one locale's book: the caller passes that locale's pages and that locale's nav.
+//   home  = (optional, `{ home }`) this book's home page path; default '/'. For a translated book
+//           it is that locale's home as the site spells it ('/fr/'): compute it with
+//           localeHomePath({ locales, pathname, contentRels }) in sitetile/locale.mjs, the function
+//           the logo and footer read. It is passed in, not derived here, because deriving it needs
+//           the site's locales and content files, which this file is not given. Returned paths are
+//           never rewritten: the French home stays '/fr/'.
+//
+// One spine is one locale's book: the caller passes that locale's pages, nav and home.
 
 const OPT_OUT_KEY = 'book';
 const HOME = '/';
@@ -55,8 +62,8 @@ function spinePath(href) {
   return p + '/';
 }
 
-// buildSiteSpine: pages + nav → the whole-site spine. Pure.
-function buildSiteSpine(pages, nav) {
+// buildSiteSpine: pages + nav (+ this book's home path) → the whole-site spine. Pure.
+function buildSiteSpine(pages, nav, { home = HOME } = {}) {
   const byPath = new Map();
   for (const pg of pages || []) {
     const path = spinePath(pg && pg.path);
@@ -74,12 +81,21 @@ function buildSiteSpine(pages, nav) {
     entries.push({ path, depth, navLabel, title: meta.title == null ? '' : String(meta.title) });
   };
 
-  // the root first, unless the menu names it (then it takes the menu's place and label)
-  const named = new Set();
-  (function collect(items) {
-    for (const it of items || []) { named.add(spinePath(it && it.href)); collect(it && it.children); }
+  // The home page opens the book wherever the menu names it, or whether it does: it is the root
+  // the menu hangs from, not one of its items. It keeps the label of the first menu item that
+  // names it, and that item's later place in the walk is skipped (place() places a path once).
+  // An unchecked home page goes to `excluded` here, so nothing else is pulled to the front.
+  const homePath = spinePath(home);
+  let homeLabel = '';
+  (function findHome(items) {
+    for (const it of items || []) {
+      if (!it) continue;
+      if (spinePath(it.href) === homePath) { homeLabel = it.label == null ? '' : String(it.label); return true; }
+      if (findHome(it.children)) return true;
+    }
+    return false;
   })(nav);
-  if (!named.has(HOME)) place(HOME, 0, '');
+  if (homePath) place(homePath, 0, homeLabel);
 
   (function walk(items, depth) {
     for (const it of items || []) {

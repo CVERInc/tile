@@ -11,11 +11,14 @@
 //      caller listed them in.
 //   5. A nav href is matched to a page the way the sitemap spells a page's URL (canonicalPath),
 //      so `/about`, `/about/` and `/about/#team` are the same page.
+//   6. The home page always opens the book, wherever the menu names it (or whether it does), and
+//      for a translated book that is the locale's home (`/fr/`), passed in by the caller.
 //
 // Run: node test/pagetile-spine.test.mjs
 import { buildSiteSpine, bookFlag, spinePath } from '../packages/pagetile/spine-core.js';
 import { navMenuOf } from '../packages/sitetile/chrome-links.mjs';
-import { canonicalPath } from '../packages/sitetile/astro/src/lib/sitemap.mjs';
+import { canonicalPath, contentUrls } from '../packages/sitetile/astro/src/lib/sitemap.mjs';
+import { localeHomePath } from '../packages/sitetile/locale.mjs';
 
 let pass = 0, fail = 0;
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); if (ok) pass++; else { fail++; console.error('FAIL:', msg, '\n  got:', JSON.stringify(a), '\n  exp:', JSON.stringify(b)); } };
@@ -74,9 +77,9 @@ const PAGES = [
     '3: the menu order, depth-first — a parent, then its children in the order the menu lists them');
   eq(s.entries.slice(0, 5).map((e) => e.depth), [0, 0, 1, 1, 1], '3: depth is the menu depth (a label-only group still nests its children)');
   eq(s.entries.slice(0, 5).map((e) => e.navLabel), ['Home', 'About', 'Team', 'History', 'Shop'], '3: a nav entry keeps the label the menu shows');
-  // reorder the menu → the book reorders with it
+  // reorder the menu → the book reorders with it (the home page still opens it: see 6)
   const nav2 = navMenuOf('Shop /shop | About /about | Home /');
-  eq(paths(buildSiteSpine(PAGES, nav2)).slice(0, 3), ['/shop/', '/about/', '/'], '3: reordering the menu reorders the book');
+  eq(paths(buildSiteSpine(PAGES, nav2)).slice(0, 3), ['/', '/shop/', '/about/'], '3: reordering the menu reorders the book after its home page');
   // nav items that are not pages of this site are not pages of the book
   eq(paths(s).some((p) => /example\.com|#/.test(p)), false, '3: an external link or a label-only item is not a page');
   const navOff = navMenuOf('Blog /blog | About /about');
@@ -109,6 +112,40 @@ const PAGES = [
   eq(paths(buildSiteSpine([page('/about'), page('/about/')], [])), ['/about/'], '5: one page, two spellings → one entry');
   eq(buildSiteSpine([page('/x/', { title: 'X' })], []).entries[0], { path: '/x/', depth: 0, navLabel: '', title: 'X' }, '5: an entry\'s whole shape');
   eq(buildSiteSpine(null, null), { entries: [], excluded: [] }, '5: no pages, no nav → an empty book, not a throw');
+}
+
+// ── 6. the home page always opens the book ────────────────────────────────────────────────────
+{
+  // the menu names the home page last: it still opens the book, once, with the menu's label
+  const s = buildSiteSpine([page('/'), page('/about/')], navMenuOf('About /about | Home /'));
+  eq(paths(s), ['/', '/about/'], '6: a home page the menu names last still opens the book');
+  eq(s.entries[0], { path: '/', depth: 0, navLabel: 'Home', title: '' }, '6: it keeps the label the menu gives it, at depth 0');
+  eq(paths(s).filter((p) => p === '/').length, 1, '6: its later menu place is not a second entry');
+  // nested under another item: still first, still at depth 0, and the item it sat under keeps its place
+  const nested = buildSiteSpine([page('/'), page('/about/'), page('/shop/')], navMenuOf(['- About /about', '  - Start /', '- Shop /shop'].join('\n')));
+  eq(nested.entries.map((e) => [e.path, e.depth, e.navLabel]), [['/', 0, 'Start'], ['/about/', 0, 'About'], ['/shop/', 0, 'Shop']],
+    '6: a home page nested in the menu opens the book at depth 0, with its menu label');
+
+  // a translated book: the caller says which page is this book's home; URLs are not rewritten
+  const frPages = [page('/fr/'), page('/fr/about/')];
+  const frNav = navMenuOf('About /fr/about');
+  eq(paths(buildSiteSpine(frPages, frNav, { home: '/fr/' })), ['/fr/', '/fr/about/'], '6: a locale home opens that locale\'s book');
+  eq(paths(buildSiteSpine(frPages, navMenuOf('About /fr/about | Accueil /fr/'), { home: '/fr' })), ['/fr/', '/fr/about/'],
+    '6: a locale home named last by the menu, passed in either spelling, still opens the book');
+  // end to end with sitetile's own derivations: the sitemap's page URLs and the logo's home link
+  const site = { locales: 'en, fr' };
+  const urls = contentUrls({ '/content/home.md': '', '/content/about.md': '', '/content/fr/home.md': '', '/content/fr/about.md': '' }, site);
+  const fr = urls.filter((u) => u.startsWith('/fr/')).map((u) => page(u));
+  const home = localeHomePath({ locales: site.locales, pathname: '/fr/about/' });
+  eq([fr.map((p) => p.path), home], [['/fr/', '/fr/about/'], '/fr/'], '6: the sitemap spells the French pages, localeHomePath names their home');
+  eq(paths(buildSiteSpine(fr, frNav, { home })), ['/fr/', '/fr/about/'], '6: those two derivations together give the French book its opening page');
+  eq(paths(buildSiteSpine(urls.filter((u) => !u.startsWith('/fr/')).map((u) => page(u)), navMenuOf('About /about'),
+    { home: localeHomePath({ locales: site.locales, pathname: '/about/' }) })), ['/', '/about/'], '6: the default locale\'s home is `/`');
+
+  // the owner unchecked the home page: it is left out like any page, and nothing else is forced first
+  const off = buildSiteSpine([page('/', { book: 'false' }), page('/about/'), page('/shop/')], navMenuOf('Shop /shop | About /about | Home /'));
+  eq(paths(off), ['/shop/', '/about/'], '6: an unchecked home page leaves the book; the menu order opens it instead');
+  eq(off.excluded, ['/'], '6: the unchecked home page is reported once');
 }
 
 console.log(`\npagetile spine: ${pass} passed, ${fail} failed`);
