@@ -6,7 +6,9 @@
 //
 //   card.feelreef.com/<handle>   → handle = first path segment (canonical)
 //   reef.cards/<handle>          → the same; reef.cards/ is the root card (reef#2725, CARD_CANONICAL_HOST;
-//                                  before it, dark or a noindex mirror of the old host — cardsHostStage)
+//                                  before it, dark or a noindex mirror of the old host — cardsHostStage),
+//                                  or, behind CARDS_HOME_DECK, the home deck, and `/?ref=<handle>` the
+//                                  referral deck (homeDeckAnswer, serve/home-deck.mjs)
 //   <creator's own domain>/      → handle via the store's vanity: binding (one domain = one card)
 //   reef.cards/report            → the report door, reef.cards only (reef#2758, card-report.mjs)
 //   /_coral/<coral>-<ver>.js     → a coral client (served here so the page can <script src> it)
@@ -139,6 +141,7 @@ import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES } from '../w/s
 import { validHostOrigin } from '../w3/host-bridge.mjs';
 import { withDeck, DECK_CSS_PATH, DECK_JS_PATH } from '../w3/deck-page.mjs';
 import { handleReport, REPORT_PATH } from './card-report.mjs';
+import { homeDeckOn, homeDeckSource, referralDeckSource, homeDeckPage } from './home-deck.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -454,7 +457,9 @@ function renderSource(src, ctx) {
   const flat = renderFlat(src, ctx.editIndex && ctx.pool !== undefined ? { ...ctx, pool: undefined } : ctx);
   if (ctx.deck === false || ctx.editIndex) return flat;
   const deck = ctx.deck && typeof ctx.deck === 'object' ? ctx.deck : {};
-  return withDeck(flat, src.deckMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: src.fm('lang') || ctx.chromeLang || '' });
+  // 🔴 `ctx.ours` is CALLER-supplied and only homeDeckAnswer sets it: the Cards host's own root. No
+  // frontmatter key, query or header maps here, so no guest's page can call itself ours.
+  return withDeck(flat, src.deckMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: src.fm('lang') || ctx.chromeLang || '', ...(ctx.ours ? { ours: ctx.ours } : {}) });
 }
 
 // a window's share tags: the Cards' own, with the canonical moved to the window's address (none where the page has no canonical at all)
@@ -945,6 +950,61 @@ async function openStageAnswer(request, url, env, ctx) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+// ── the root of the Cards host: the home deck and the referral deck (serve/home-deck.mjs) ──────────
+//
+// Behind `CARDS_HOME_DECK = "on"` (homeDeckOn), and only where reef.cards answers at all (the open
+// stage and the cutover): `reef.cards/` is the home deck — a constant, made by the same renderer and
+// deck as any Cards — instead of the stored page of ROOT_HANDLE (or, with none stored, the 404 that
+// every guest's `reef.cards/?ref=<handle>` footer link landed on). Off, nothing here runs.
+//
+//   GET/HEAD `/` only, HTML only    every other path, method and a markdown request are answered as
+//                                   they were (the stored root page keeps `/<ROOT_HANDLE>` and its `.md`)
+//   `?ref=<handle>`                 lower-cased, then the handle grammar — or it is no ref at all: the
+//                                   raw value reaches nothing (not the page, not the store, not the
+//                                   visitor's sessionStorage). A ref is kept for the tab (deck-page).
+//   the referral deck               only for a handle that is live, not stopped, and IN the exchange:
+//                                   that one switch is what lets the platform quote a name and a
+//                                   picture on a page of its own. Missing, stopped, out and never-said
+//                                   all get the home deck, the same one — nothing here tells them apart.
+//   robots                          the home is indexable (it is ours; robotsTag's root rule) and its
+//                                   canonical is the bare origin under any query. The referral deck is
+//                                   one page per referrer and `noindex`. Open stage: `noindex, nofollow`
+//                                   like every answer of that stage. A stricter header is never weakened.
+//
+// 🔴 A store that is not bound, or that throws, is the home deck — never a 500 on the front door.
+const homeDeckAsked = (env, url, request) => homeDeckOn(env) && url.pathname === '/'
+  && (request.method === 'GET' || request.method === 'HEAD') && !wantsMarkdown(request);
+
+async function homeDeckAnswer(request, url, env, stage) {
+  const locale = visitorLocale(url.searchParams, request);
+  const asked = String(url.searchParams.get('ref') ?? '').toLowerCase();
+  // the platform's own page is not a referrer: it is where the visitor already is
+  const ref = VALID_HANDLE.test(asked) && asked !== ROOT_HANDLE ? asked : '';
+  let referrer = null;
+  const store = env && env.CARDS;
+  if (ref && store) {
+    try {
+      const { md, stopped, pooled } = await liveCard(store, ref, { stop: true, pool: true });
+      if (md != null && stopped == null && pooled === POOL_IN) {
+        // the first profile tile is all that is read: above the size tier, through the index (as the avatar exit does)
+        const model = scanCard(md, { limit: ON_DEMAND_TILES }).above ? headModel(md, scanCard(md)) : parseCard(md);
+        referrer = { handle: ref, name: cardName(md, ref), avatar: !!cardAvatar(model) };
+      }
+    } catch { referrer = null; }
+  }
+  const origin = `https://${CARDS_HOST}`;
+  // the sandbox is where this stage serves it: on reef.cards after the cutover, on the old host before
+  const tryUrl = `https://${canonicalHost(env)}${SANDBOX_PATH}`;
+  const source = referrer ? referralDeckSource(locale, { tryUrl }) : homeDeckSource(locale);
+  const page = homeDeckPage(
+    renderCardHTML(source, { handle: '', cardUrl: origin, canonicalUrl: origin, ours: { kind: referrer ? 'ref' : 'home', ref, tryUrl } }),
+    { ref, referrer },
+  );
+  const own = robotsTag({ env, host: CARDS_HOST, handle: ROOT_HANDLE });
+  const robots = stage === 'open' ? OPEN_STAGE_ROBOTS : own || (referrer ? 'noindex' : null);
+  return html(page, 200, env, ROOT_HANDLE, { host: CARDS_HOST, vanity: false }, false, { ...VARY_VISITOR_LANG, ...(robots ? { 'X-Robots-Tag': robots } : {}) });
+}
+
 const router = {
   // `askedOn` is set by openStageAnswer alone: the host the visitor asked, when this request is its
   // re-addressed twin. The Worker's own entry (the default export) never passes it.
@@ -963,6 +1023,7 @@ const router = {
     if (reqHost === CARDS_HOST) {
       const stage = cardsHostStage(env);
       if (stage === 'dark') return NOT_RELAYED();
+      if (homeDeckAsked(env, url, request)) return homeDeckAnswer(request, url, env, stage);
       if (stage === 'open') return openStageMirrors(url.pathname, request.method) ? openStageAnswer(request, url, env, ctx) : NOT_RELAYED();
     }
 

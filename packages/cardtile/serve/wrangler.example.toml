@@ -133,6 +133,22 @@ PREVIEW = "false"
 # mirror, but a moved /try/edit, /report or security.txt gets the open stage's 404 until that day is up.
 # CARDS_HOST_OPEN = "reef.cards"
 # CARD_CANONICAL_HOST = "reef.cards"
+#
+# The root of reef.cards (serve/home-deck.mjs, card-worker.mjs `homeDeckAnswer`). Exactly "on" is on;
+# unset or any other value is off, and off is the Worker as it was: `reef.cards/` is the stored page of
+# the handle `feelreef`, or the nothing-here 404 when none is stored.
+#
+#   on, open stage   reef.cards/               → the home deck, X-Robots-Tag: noindex, nofollow
+#                    reef.cards/?ref=<handle>  → the referral deck when that handle is live and in the
+#                                                exchange, else the home deck; the ref is kept in the
+#                                                visitor's sessionStorage (`cards-ref`)
+#   on, canonical    the same two, and the home deck is indexable (canonical https://reef.cards);
+#                    the referral deck is `noindex`
+#   on, dark         nothing: reef.cards answers 404 to everything, as without it
+#
+# Only GET/HEAD of the bare root changes. Every other path, every other host, POST and a markdown
+# request (`Accept: text/markdown`) are answered as with the setting off.
+# CARDS_HOME_DECK = "on"
 
 [[env.production.kv_namespaces]]
 binding = "CARDS"

@@ -28,6 +28,13 @@
 //                                   anything else means out — "draw no reef.cards card or footer link":
 //                                   renderCardHTML also passes false when the PLATFORM's ctx.pool is
 //                                   set, because the renderer has then drawn them itself (or not).
+//           …and, only for the Cards host's own root (the caller's `ours`, serve/home-deck.mjs — never a
+//           guest's page, never a file key):
+//             <html data-reef-home>  the home deck: deck.js closes the pile with its own last card
+//             <html data-reef-ref data-back-href="/<handle>">  the referral deck: no closing card, and
+//                                   the way back to the page the visitor came from
+//             sessionStorage[REF_STORAGE_KEY] = <handle>   the ref the visitor arrived with, kept for
+//                                   the tab; written before deck.js so a deck that fails still keeps it
 //           then deck.js itself (versioned, immutable — see DECK_JS_PATH). If it fails to load,
 //           throws, or has said nothing by the time the page is parsed, the head script's
 //           __deckFail takes the deck's classes off again, for the same reason as above (deck.js
@@ -102,21 +109,31 @@ export const DECK_WAIT_MS = 3000;
 /** deck.js did not load: there is no deck, so the page is the wall */
 const DECK_ONERROR = "__deckFail()";
 
+// the Cards host's own root (see the header): the sessionStorage key, and the handle grammar a ref
+// must pass HERE, at the sink, whatever the caller checked (card-api VALID_HANDLE's rule)
+export const REF_STORAGE_KEY = 'cards-ref';
+const REF_HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const OURS_KINDS = { home: 'data-reef-home', ref: 'data-reef-ref' };
+
 // JSON that is safe inside an inline <script>: no `</script>`, no `<!--`
 const scriptJson = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
 
 /**
  * html (renderCardHTML's page) + the card file it was made from → the same page as a deck.
- * opts: { view?: 'stack'|'list'|'wall', pool?: boolean, handle?: string, lang?: string }
+ * opts: { view?: 'stack'|'list'|'wall', pool?: boolean, handle?: string, lang?: string,
+ *         ours?: { kind: 'home'|'ref', ref?: handle, tryUrl?: string } — the Cards host's own root only }
  */
-export function withDeck(html, md, { view = '', pool, handle = '', lang = '' } = {}) {
+export function withDeck(html, md, { view = '', pool, handle = '', lang = '', ours = null } = {}) {
   const v = DECK_VIEWS.includes(view) ? view : '';
   let front = frontOf(md);
   if (v) front = frontWithView(front, v);
-  const cfg = { __cardFront: front, __deckStrings: deckStrings(lang), __deckTry: DECK_TRY_URL };
+  const kind = ours && Object.hasOwn(OURS_KINDS, ours.kind) ? ours.kind : '';
+  const ref = kind && REF_HANDLE.test(String(ours.ref ?? '')) ? String(ours.ref) : '';
+  const cfg = { __cardFront: front, __deckStrings: deckStrings(lang), __deckTry: (kind && ours.tryUrl) || DECK_TRY_URL };
   if (handle) cfg.__deckRef = String(handle);
   if (typeof pool === 'boolean') cfg.__pool = pool;
-  const boot = Object.entries(cfg).map(([k, val]) => `window.${k}=${scriptJson(val)};`).join('');
+  const keep = ref ? `try{sessionStorage.setItem(${scriptJson(REF_STORAGE_KEY)},${scriptJson(ref)});}catch(e){}` : '';
+  const boot = keep + Object.entries(cfg).map(([k, val]) => `window.${k}=${scriptJson(val)};`).join('');
   const head = `<link rel="stylesheet" href="${DECK_CSS_PATH}">${v ? '<style id="deck-view">.deck-seg{display:none!important}</style>' : ''}<script>${DECK_HEAD_JS}</script>`;
   const tail = `<script>${boot}</script><script src="${DECK_JS_PATH}" onerror="${DECK_ONERROR}"></script>`;
   // <html is the renderer's own first tag; </head> is its own too and comes before any card content;
@@ -126,6 +143,7 @@ export function withDeck(html, md, { view = '', pool, handle = '', lang = '' } =
   const b = html.lastIndexOf('</body>');
   if (r < 0 || h < r || b < h) return html;
   const o = openingView(front);
-  const root = ` data-view="${o.view}" data-views="${o.views.join(' ')}"${v ? ' data-view-pin' : ''}`;
+  const mine = kind ? ` ${OURS_KINDS[kind]}${kind === 'ref' && ref ? ` data-back-href="/${ref}"` : ''}` : '';
+  const root = ` data-view="${o.view}" data-views="${o.views.join(' ')}"${v ? ' data-view-pin' : ''}${mine}`;
   return html.slice(0, r + 5) + root + html.slice(r + 5, h) + head + html.slice(h, b) + tail + html.slice(b);
 }
