@@ -29,6 +29,11 @@ html.deck main.st-wrap{max-width:none}
 html.deck .st-card{background:transparent;box-shadow:none;border:0;max-width:none}
 html.deck .st-cells{display:block}
 html.deck .dc-drawer-layer{display:none}
+/* Cards served in windows: the pager (the engine's <nav class="st-pager">, hidden in a pile by its own rule) is drawn in a
+   pile when the next window could not be joined to this page (deck.js: data-deck-pager) — a fetch that failed, or Cards that
+   changed since the page was served. One line above the footer, over the table; not while a card is open or the pile fanned. */
+html.deck[data-deck-pager] main > .st-pager{display:flex;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 40px);z-index:12;margin:0;padding:6px 14px;border-radius:999px;background:var(--cp-ground);white-space:nowrap}
+html.deck.open[data-deck-pager] main > .st-pager,html.deck.fan[data-deck-pager] main > .st-pager{display:none}
 html.deck footer.st-footer{position:fixed;left:0;right:0;bottom:0;z-index:5;margin:0;padding:0 16px calc(env(safe-area-inset-bottom) + 14px);pointer-events:auto}
 html.deck.open footer.st-footer{opacity:0;transition:opacity .25s}
 

@@ -42,6 +42,11 @@ export function channelsIn(cardMd) {
   const md = String(cardMd || '');
   let model;
   try { model = parseCard(md); } catch { return []; }
+  return channelsOf(model);
+}
+
+/** channelsIn's answer for a model already parsed (serve/size-tier.mjs: one window of long Cards) */
+export function channelsOf(model) {
   const out = new Set();
   const cells = [...(model.cells || []), ...(model.drawers || []).flatMap((d) => d.cells || [])];
   for (const cell of cells) {
@@ -155,8 +160,21 @@ export function keptChannels({ ttl = ytCacheTtl, most = CHANNEL_KEPT_MOST, now =
  * `kept` remembers every answer this call resolves, until the first edge copy it was built from expires
  * (keptChannels). Never throws.
  */
-export async function resolveChannels(cardMd, doFetch, { subrequests = Infinity, kept = null } = {}) {
-  const ids = channelsIn(cardMd);
+export async function resolveChannels(cardMd, doFetch, share) {
+  return resolveChannelIds(channelsIn(cardMd), doFetch, share);
+}
+
+/**
+ * resolveChannels for a model already parsed: one window of long Cards (serve/size-tier.mjs windowOf),
+ * so only the channels that window's own video tiles name. The same share and the same memory as a
+ * whole page, counted the same way: a window is one page view, and what it resolves is remembered for
+ * every later page view of this isolate (another window, or any page naming the same channel).
+ */
+export async function resolveChannelsOf(model, doFetch, share) {
+  return resolveChannelIds(channelsOf(model), doFetch, share);
+}
+
+async function resolveChannelIds(ids, doFetch, { subrequests = Infinity, kept = null } = {}) {
   if (!ids.length) return {};
   const over = ids.reduce((n, c) => n + channelFetches(c), 0) > subrequests;
   const out = {};

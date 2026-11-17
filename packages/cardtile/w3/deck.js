@@ -85,11 +85,14 @@
   // ---- items from a card file: one per `- [ ] %% card: … %% text` line. Kept as text; a card is built only when it is near view ----
   // The marker has two spellings, `%% card:` and `%% cardtile:` (card-core.js RE_CARD_MARKER); k is the length of the one this line uses.
   // `## back: id` lanes are the backs: an item names one with `back=#id`. Items are only read from the first lane.
+  // The `## assets` lane holds the file's pictures (card-core.js RE_ASSET_LANE): its lines are never items (a file read
+  // whole, from data-card-src or window.__cardMd, has them too).
   const mdTexts=[], backAt=new Map(), backs=new Map(); { const MD=window.__cardMd; if(MD){ let a=0; const L=MD.length; if(MD.startsWith('---\n')){ const e=MD.indexOf('\n---\n',4); a=e<0?0:e+5; }
       // one id rule for both ends (`back=#x%y` and `## back: a|b` used to be cut differently and never matched)
-      let cur=null, k=0; const ID=/^[^\s%|]+/, BK=/(?:^|\s)back=#([^\s%|]+)/;
+      let cur=null, pics=false, k=0; const ID=/^[^\s%|]+/, BK=/(?:^|\s)back=#([^\s%|]+)/;
       while(a<L){ let b=MD.indexOf('\n',a); if(b<0)b=L; const e=MD.charCodeAt(b-1)===13?b-1:b;   // CRLF: drop the \r
-        if(MD.startsWith('## ',a)){ const m=/^back:\s*(.*)$/.exec(MD.slice(a+3,e)); const id=m&&ID.exec(m[1]); cur=id?[]:null; if(id)backs.set(id[0],cur); }
+        if(MD.startsWith('## ',a)){ const h=MD.slice(a+3,e); pics=/^assets$/i.test(h.trim()); const m=/^back:\s*(.*)$/.exec(h); const id=m&&ID.exec(m[1]); cur=id?[]:null; if(id)backs.set(id[0],cur); }
+        else if(pics){}
         else if(MD.startsWith('- [ ] %% card',a)&&(k=MD.charCodeAt(a+13)===58?14:MD.startsWith('tile:',a+13)?18:0)){ const t=MD.indexOf('%% ',a+k); const txt=t>=0&&t<e?MD.slice(t+3,e):'';
           if(cur){ if(txt)cur.push(txt); } else { const m=BK.exec(MD.slice(a+k,t>=0&&t<e?t:e)); if(m)backAt.set(mdTexts.length,m[1]); mdTexts.push(txt); } }   // items from every lane that is not a back
         else if(cur&&MD.charCodeAt(a)===9){ cur.push(MD.slice(a+1,e)); }
@@ -149,7 +152,7 @@
     if(!PIN&&!(o&&o.quiet)){ try{localStorage.setItem(LS,m);}catch(_){} }
     const held=seg.contains(document.activeElement)?document.activeElement:null;
     if(mode==='spread'){ const at=up?up.at:vb?vb.at():wallAt(); mode=m; paintRoot(); if(deck) deck.enter(at,up); else deck=buildDeck(at,up); }
-    else if(m==='spread'){ const at=deck.leave(); mode=m; paintRoot(); wallEnter(at); }
+    else if(m==='spread'){ const at=deck.leave(); mode=m; paintRoot(); wallEnter(at); nearEnd(); }
     else { deck.layout(m); mode=m; paintRoot(); }
     seg.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.m===mode)));
     if(held&&document.activeElement!==held) held.focus({preventScroll:true});
@@ -217,7 +220,86 @@
   // wall: a back opens as the engine's own flipped card (st-back-door / data-back-url);
   // nothing here turns a tile over, and a link with no back= is just a link.
   let vb=null;   // the file wall, once it is set up (virtualBrick)
-  if(mode==='spread'){ if(mdTexts.length) virtualBrick(); } else deck=buildDeck(null);
+  // ---- Cards served in windows (the cardtile worker past its size tier, serve/size-tier.mjs) ----
+  // The page holds the first window of tiles and names the next in its pager (<nav class="st-pager">, a[rel=next]); a reader
+  // with no script follows that link. Here the next window is fetched when the visitor nears the end of what is loaded (the
+  // wall's last rows, a pile's last tiles), and its tiles join the page after the ones already there: the wall shows them in
+  // place, a pile deals them after the tiles it holds (deck.grow).
+  // 🔴 `fetching` is true only while one request is out, and every way a request can end clears it:
+  //   it arrived, same revision      its tiles join the page
+  //   it failed (network, HTTP, a broken page, 20 s with no answer)
+  //                                  the pager is drawn in the pile too (data-deck-pager; on the wall it always is), and the
+  //                                  window is asked for again: by itself after 1, 2, 4, 8 and 16 s while the visitor is still
+  //                                  near the end, and after that whenever they move on or press the pager's link, which
+  //                                  asks at once and keeps them on this page
+  //   it arrived, another revision   (data-cardtile-rev on both roots) the Cards changed since this page was served, and one
+  //                                  page never holds two revisions. In a pile the page is loaded again at the window the
+  //                                  visitor is reading, in the revision that answered, and opens on the tile they were on
+  //                                  (sessionStorage carries the place across the load). That is done once: where there is
+  //                                  no sessionStorage, or the load it caused came back in some other revision (a cached
+  //                                  page, a store that has not caught up), or on the wall, nothing more is fetched and the
+  //                                  pager is drawn in every view — its link is a plain one, and the cardtile worker sends
+  //                                  it to the current revision.
+  const REV=root.getAttribute('data-cardtile-rev');
+  const SS='reef-card-window';
+  const W0=(()=>{ try{ const w=new URL(location.href).searchParams.get('w'); return w&&/^[1-9]\d{0,8}$/.test(w)?Number(w):1; }catch(_){ return 1; } })();   // which window this page is
+  // the place a reload for a changed revision left (read once, and gone): { p: this path, rev: the revision it went to, w, i }
+  let resume=null, reloaded=false;
+  try{ const raw=sessionStorage.getItem(SS); if(raw!=null){ sessionStorage.removeItem(SS); const r=JSON.parse(raw);
+    if(r&&r.p===location.pathname){ reloaded=true; if((r.rev==null?REV==null:r.rev===REV)&&(REV==null||r.w===W0)&&r.i>=0) resume=r; } } }catch(_){}
+  let fetching=false, stale=false, fails=0, held=0, asks=0;
+  const wins=[0];   // the loaded tile each window on this page starts at: the page's own, then one per window taken
+  const pagerNext=()=>document.querySelector('main > .st-pager a[rel="next"]');
+  const showPager=on=>root.toggleAttribute('data-deck-pager',!!on);
+  function more(now){ if(REV==null||fetching||stale||(held&&!now))return; const a=pagerNext(); const href=a&&a.getAttribute('href'); if(!href)return;
+    fetching=true; const n=++asks; let ac=null; try{ ac=new AbortController(); }catch(_){}
+    const mine=()=>fetching&&n===asks;
+    const failed=e=>{ if(!mine())return; fetching=false; clearTimeout(timer); if(ac){ try{ac.abort();}catch(_){} }
+      fails++; showPager(true); try{console.warn('deck: the next window did not arrive',e);}catch(_){}
+      const again=fails<=5; clearTimeout(held); held=setTimeout(()=>{ held=0; if(again) nearEnd(); },Math.min(30000,500*Math.pow(2,fails))); };
+    const timer=setTimeout(()=>failed(new Error('no answer in 20 s')),20000);
+    Promise.resolve().then(()=>fetch(href,ac?{signal:ac.signal}:undefined)).then(r=>{ if(!r.ok)throw new Error('HTTP '+r.status); return r.text(); }).then(t=>{
+      if(!mine())return;
+      const d=new DOMParser().parseFromString(t,'text/html'); const rev=d.documentElement.getAttribute('data-cardtile-rev');
+      if(rev!==REV){ fetching=false; clearTimeout(timer); changed(rev); return; }
+      const from=deck?deck.size():tiles().length;
+      takeWindow(d); wins.push(from); fetching=false; clearTimeout(timer); clearTimeout(held); held=0; fails=0; showPager(false); if(deck) deck.grow(); nearEnd();
+    }).catch(failed); }
+  // another revision answered (null: the Cards are one page again, no windows)
+  function changed(rev){ stale=true; clearTimeout(held); held=0; showPager(true);
+    try{console.warn('deck: the Cards changed since this page was served');}catch(_){}
+    if(mode==='spread'||!deck||reloaded)return;
+    try{ const i=deck.at(); let j=0; for(let k=0;k<wins.length;k++) if(wins[k]<=i) j=k;
+      const w=rev==null?1:W0+j, at=rev==null?i:i-wins[j];
+      sessionStorage.setItem(SS,JSON.stringify({p:location.pathname,rev:rev,w:w,i:at}));
+      location.replace(location.pathname+(rev==null?'':'?w='+w+'&r='+encodeURIComponent(rev))); }catch(_){} }
+  // the pager's next link, pressed where this page can fetch: the window is asked for now and joins this page (the visitor keeps
+  // what they have read). After a changed revision it is a plain link again.
+  if(REV!=null) document.addEventListener('click',e=>{ const a=pagerNext(); if(!a||stale||!e.target||!(e.target===a||a.contains(e.target)))return; e.preventDefault(); more(true); });
+  // the window's tiles after this page's (before the closing reef.cards section and the pile's own parts), the backs they turn
+  // over to that this page does not hold yet, the scripts its tiles need that this page has not run (the drawer coral, the video
+  // swap; never the deck's own), and the pager's next link moved on. Its other parts (head, footer, the stylesheet of the grid) are
+  // this page's already: every window of one revision is made from the same file by the same renderer.
+  function takeWindow(d){
+    const card=document.querySelector('main > .st-card'), src=d.querySelector('main > .st-card'); if(!card||!src)return;
+    const at=[...card.children].find(c=>c.matches('.st-pool,.deck-veil,.deck-table'))||null;
+    for(const n of [...src.children]) if(n.tagName!=='STYLE') card.insertBefore(n,at);
+    const main=document.querySelector('main'), pg=document.querySelector('main > .st-pager'), mine=document.querySelector('main > .dc-drawer-layer'), theirs=d.querySelector('main > .dc-drawer-layer');
+    if(theirs&&!mine){ const css=theirs.previousElementSibling; if(css&&css.tagName==='STYLE') main.insertBefore(css,pg); main.insertBefore(theirs,pg); }
+    else if(theirs){ const close=mine.querySelector('.dc-drawer-close'); for(const p of [...theirs.children]) if(p.classList.contains('dc-drawer')&&!document.getElementById(p.id)) mine.insertBefore(p,close&&close.parentNode===mine?close:null); }
+    const have=[...document.querySelectorAll('script')];
+    for(const s of d.querySelectorAll('body > script')){ const u=s.getAttribute('src');
+      if(u?(u.startsWith('/_deck/')||have.some(x=>x.getAttribute('src')===u)):(!/st-embed-video-btn/.test(s.textContent)||have.some(x=>!x.getAttribute('src')&&x.textContent===s.textContent)))continue;
+      const n=document.createElement('script'); if(u)n.src=u; else n.textContent=s.textContent; document.body.appendChild(n); }
+    const mineNext=pg&&pg.querySelector('a[rel="next"]'), theirNext=d.querySelector('main > .st-pager a[rel="next"]');
+    if(mineNext){ if(theirNext) mineNext.setAttribute('href',theirNext.getAttribute('href')); else mineNext.remove(); }
+  }
+  // near the end of what is loaded: on the wall, the pager within three screens; in a pile, fewer than 48 loaded tiles ahead
+  function nearEnd(){ if(REV==null||fetching||stale||held||!pagerNext())return;
+    if(mode==='spread'){ const pg=document.querySelector('main > .st-pager'); if(pg&&pg.getBoundingClientRect().top<innerHeight*3) more(); }
+    else if(deck&&deck.ahead()<48) more(); }
+  if(REV!=null) addEventListener('scroll',()=>{ if(mode==='spread') nearEnd(); },{passive:true});
+  if(mode==='spread'){ if(mdTexts.length) virtualBrick(); nearEnd(); } else { const tl=resume?tiles():null; deck=buildDeck(tl&&tl.length?tl[Math.min(resume.i,tl.length-1)]:null); }
   // wall over a card file: only the rows on screen exist. The scroll range is capped (CAP) and mapped to rows, so ~850,000 items are one page.
   // Set up once; the tiles it stands in for stay in the page (the stylesheet hides them under .vb), so a pile can still deal them.
   function virtualBrick(){
@@ -484,6 +566,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     order();
     const top=card(cur); if(above(shade)!==top)put(shade,top,true);
     stack.toggleAttribute('data-first',cur===0); stack.toggleAttribute('data-last',cur===N-1);
+    if(P-1-cur<48) more();   // Cards served in windows: the next one is fetched before the pile reaches its last loaded tile
   }
   const settleHidden=c=>{ if(c.classList.contains('is-deep')){ c.style.visibility='hidden'; c.style.transition='none'; void c.offsetWidth; c.style.visibility=''; c.style.transition=''; } };
   // flight: over the top of the pile in two halves. Half 1 plays where the card is; at the apex the node moves to its new place in the pile
@@ -598,8 +681,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // thumb-drag / space / PageDown / Home / End all work natively, and iOS swipes are real scrolls. The pile only changes when the
   // snap index changes (never scrubbed by scroll offset): sync() queues exactly the steps that bring cur to the snapped page.
   // up to SNAPMAX cards: one snap point per card, exactly as before. Beyond: one tall rail (capped), no snaps; scroll offset → index.
-  const rail=mk('div','deck-rail'); const railSize=()=>{ if(N>SNAPMAX) rail.style.height=Math.round(innerHeight+(N-1)*Math.min(innerHeight,CAP/(N-1)))+'px'; };
-  if(N<=SNAPMAX){ for(let i=0;i<N;i++) rail.appendChild(mk('div','deck-snap')); } else { railSize(); addEventListener('resize',railSize); } document.body.appendChild(rail);
+  // (railSize also follows a pile that grows: Cards served in windows add tiles as they arrive — grow, below)
+  const rail=mk('div','deck-rail'); const railSize=()=>{ if(N>SNAPMAX){ if(rail.firstChild) rail.textContent=''; rail.style.height=Math.round(innerHeight+(N-1)*Math.min(innerHeight,CAP/(N-1)))+'px'; } else while(rail.children.length<N) rail.appendChild(mk('div','deck-snap')); };
+  railSize(); addEventListener('resize',railSize); document.body.appendChild(rail);
   try{history.scrollRestoration='manual';}catch(_){}
   const pageH=()=>Math.max(1e-6,(document.scrollingElement.scrollHeight-innerHeight)/Math.max(1,N-1));
   const goTo=i=>scrollTo({top:i*pageH(),left:0,behavior:'instant'});
@@ -706,7 +790,17 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     fit(); railSize(); queue=0; cur=seatOf(c); unask(); dealIn(up&&up.deal===false); goTo(cur); listTx(); };
   if(at!=null){ cur=seatOf(at); unask(); paint(); goTo(cur); listTx(); }
   // up(): the card that is up; tileFor(c): the tile whose card a pile entered with `c` opens on (glide names it)
-  return {enter,leave,close,layout:window.__deckLayout,up:()=>card(cur),tileFor:c=>cells[seatOf(c)]||null};
+  // grow: the tiles a window brought (takeWindow, above) are dealt after the tiles the pile holds; our own closing ones
+  // (post) stay last. The tile that is up stays up, at the same place on the rail.
+  const known=new Set(cells);
+  const grow=()=>{ if(M)return; const fresh=tiles().filter(c=>!known.has(c)); if(!fresh.length)return;
+    document.querySelectorAll('.dc-drawer').forEach(d=>{ if(!drawers[d.id]) drawers[d.id]=d.querySelector('.dc-drawer-body'); });
+    const k=ON?scrollY/pageH():null;
+    for(const c of fresh){ known.add(c); cells.push(c); pre.push(null); }
+    P=pre.length; post.forEach((c,j)=>{ c.dataset.i=String(P+M+j); }); N=P+M+post.length;
+    railSize(); if(ON){ const y=k*pageH(); if(Math.abs(scrollY-y)>0.5) scrollTo({top:y,left:0,behavior:'instant'}); paint(); if(LIST) listTx(); } };
+  // at(): the loaded tile that is up, by its place among the tiles (a card after the last tile counts as the last); size(): how many tiles the pile holds
+  return {enter,leave,close,grow,ahead:()=>P-1-cur,at:()=>Math.max(0,Math.min(cur,P-1)),size:()=>P,layout:window.__deckLayout,up:()=>card(cur),tileFor:c=>cells[seatOf(c)]||null};
   }
   }
 })();

@@ -17,10 +17,11 @@ import { parseCard, serializeCard } from '../card-core.js';
 import { renderPage, poolOf, picturesInRenderOrder } from '../card-render.mjs';
 import { CSS, ICONS, QR_JS, QR_VERSION, DRAWER_JS, DRAWER_VERSION, ARROW } from './card-assets.mjs';
 import { VIDEO_RE, ytCacheTtl } from '../yt.mjs';
-import { keptChannels, resolveChannels } from '../yt-channels.mjs';
+import { keptChannels, resolveChannels, resolveChannelsOf } from '../yt-channels.mjs';
 import { cardAvatar, iconLinks, iconKind, iconFile } from '../card-icon.mjs';
 import { shareTags } from '../card-share.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
+import { ON_DEMAND_TILES, scanCard, headModel, blankAbove, allAssets, deckFront, windowsOf, windowOf, windowPicturesText, revisionOf } from './size-tier.mjs';
 import { picturePlan, pictureStrategy, findAsset, ASSET_TAIL_RE, ASSET_CACHE } from './asset-urls.mjs';
 import { CHANNEL_SUBREQUESTS, cachedPicture, keepPicture, keepPictures, prefillCalls } from './picture-cache.mjs';
 
@@ -438,17 +439,34 @@ const cardName = (cardMd, handle) => /^title:\s*(.+)$/m.exec(cardMd)?.[1]?.trim(
  * only) and never the owner's content: the deck's words are all it reaches.
  */
 export function renderCardHTML(cardMd, ctx = {}) {
-  const pool = ctx.editIndex ? undefined : poolOf(ctx);
-  const flat = renderFlat(cardMd, ctx.editIndex && ctx.pool !== undefined ? { ...ctx, pool: undefined } : ctx);
-  if (ctx.deck === false || ctx.editIndex) return flat;
-  const deck = ctx.deck && typeof ctx.deck === 'object' ? ctx.deck : {};
-  return withDeck(flat, cardMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: frontmatter(cardMd, 'lang') || ctx.chromeLang || '' });
+  return renderSource({ model: parseCard(cardMd), fm: (k) => frontmatter(cardMd, k), name: cardName(cardMd, ctx.handle), deckMd: cardMd }, ctx);
 }
 
-function renderFlat(cardMd, ctx) {
-  const model = parseCard(cardMd);
-  const name = cardName(cardMd, ctx.handle);
-  const fm = (k) => frontmatter(cardMd, k);
+/**
+ * renderSource: renderCardHTML's own path, for a page whose model is already made — the whole file's
+ * (renderCardHTML), or one window of Cards past the size tier (serve/size-tier.mjs windowOf, from the
+ * page exit below). src: { model, fm: key → the frontmatter value the whole file gives, name, deckMd: what
+ * w3/deck-page.mjs reads the deck's keys from, head?: the model the head's description, share image and
+ * icons are made of (absent: `model`) }.
+ */
+function renderSource(src, ctx) {
+  const pool = ctx.editIndex ? undefined : poolOf(ctx);
+  const flat = renderFlat(src, ctx.editIndex && ctx.pool !== undefined ? { ...ctx, pool: undefined } : ctx);
+  if (ctx.deck === false || ctx.editIndex) return flat;
+  const deck = ctx.deck && typeof ctx.deck === 'object' ? ctx.deck : {};
+  return withDeck(flat, src.deckMd, { view: deck.view, pool: pool === undefined ? deck.pool : false, handle: ctx.handle || '', lang: src.fm('lang') || ctx.chromeLang || '' });
+}
+
+// a window's share tags: the Cards' own, with the canonical moved to the window's address (none where the page has no canonical at all)
+const windowCanonical = (share, windowUrl) => (windowUrl && share.canonical ? { ...share, canonical: windowUrl } : share);
+/** window n's own address under the Cards' canonical one: `…?w=<n>`, no revision ('' when that address is no URL) */
+const windowAddress = (cardUrl, n) => {
+  try { const u = new URL(cardUrl); u.search = `?w=${n}`; u.hash = ''; return u.href; } catch { return ''; }
+};
+
+function renderFlat(src, ctx) {
+  const { model, fm, name } = src;
+  const head = src.head || model;
   return renderPage(model, {
     name,
     handle: ctx.handle || '',              // → the footer's feelreef.com/signup?ref=<handle>
@@ -466,11 +484,13 @@ function renderFlat(cardMd, ctx) {
     arrows: fm('arrows'),
     cardUrl: ctx.cardUrl || '',
     // favicon + apple-touch-icon — see card-icon.mjs. Addressed off cardUrl, so none without one.
-    iconLinks: iconLinks(model, { cardUrl: ctx.cardUrl || '' }),
+    iconLinks: iconLinks(head, { cardUrl: ctx.cardUrl || '' }),
     // og:* / twitter:* / description / canonical — see card-share.mjs. Same rule: none without cardUrl.
     // reef#2725 r3 — the address a preview claims is the CANONICAL one (ctx.canonicalUrl, which the
     // Worker sets from cardUrlFor and the switch), not whichever host answered. Absent = cardUrl.
-    shareTags: shareTags(model, { name, cardUrl: ctx.canonicalUrl || ctx.cardUrl || '' }),
+    // …and for one window of Cards served in windows (the page exit's `ctx.windowUrl`, CALLER-supplied,
+    // windows after the first only), the canonical is that window's own address; everything else is the Cards'.
+    shareTags: windowCanonical(shareTags(head, { name, cardUrl: ctx.canonicalUrl || ctx.cardUrl || '' }), ctx.windowUrl),
     since: fm('since'),
     accent: fm('accent'),
     theme: fm('theme'),                    // `theme: light|dark` pins it; absent follows the reader
@@ -516,6 +536,11 @@ function renderFlat(cardMd, ctx) {
     // …and its companion: the words on the two EDIT-ONLY placeholders (a link with no address, a
     // picture cell with no picture). Only meaningful with editIndex; the Worker never sets either.
     editStrings: ctx.editStrings || null,
+    // 🔴 CALLER-supplied, the page exit's only (reef#3361, serve/size-tier.mjs): which window of Cards served
+    // in windows this is, and whether the platform's closing reef.cards tile is drawn here (the last one
+    // only). Absent — every page at or below the tier, and every other caller — the page as it was.
+    ...(ctx.pager ? { pager: ctx.pager } : {}),
+    ...(ctx.poolTile === false ? { poolTile: false } : {}),
     qrScriptSrc: QR_PATH,                // external script → the page consumes the coral, unmodified
     drawerScriptSrc: DRAWER_PATH,          // ditto: the overlay's behaviour, shared with any Site
   });
@@ -1294,8 +1319,18 @@ const router = {
     // the legacy deletion marker. Its value never changes the public absence response.
     if (cardMd == null) await store.get(`gone:${resolved.handle}`);
 
+    // reef#3361 — the size tier (size-tier.mjs): a file with more than ON_DEMAND_TILES tiles is never parsed
+    // whole. Counted by the board parser's own rules, and the count stops past the threshold. Above it the
+    // exits read the file through one index of where its tiles are (scanCard): the page view is served in
+    // windows, the icons and the avatar read the first profile tile, a picture is found in the assets lane.
+    const onDemand = cardMd != null && scanCard(cardMd, { limit: ON_DEMAND_TILES }).above;
+    let scanned = null, headM = null;
+    const index = () => (scanned ??= scanCard(cardMd));
+    const head = () => (headM ??= headModel(cardMd, index()));
     // reef#2044 ④ — read once, used by every exit below that serves this card (page, markdown, icons).
-    const blank = cardMd != null && isTemplateOnly(cardMd);
+    // Above the tier the same rule, answered from the index (size-tier.mjs blankAbove): at any size a
+    // file that is still only the blank template is noindex.
+    const blank = cardMd != null && (onDemand ? blankAbove(cardMd, index()) : isTemplateOnly(cardMd));
 
     if (want === 'alias' && cardMd != null) return Response.redirect(`https://${host}/${url.search}`, 301);
 
@@ -1308,7 +1343,7 @@ const router = {
     // page on ours (one page for every "no card", tile-lab#51), the small 404 on a creator's domain.
     if (want === 'asset') {
       const ref = assetRef(url.pathname);
-      const found = cardMd && ref ? await findAsset(parseCard(cardMd).assets, ref.hex, ref.ext) : null;
+      const found = cardMd && ref ? await findAsset(onDemand ? allAssets(cardMd, index()) : parseCard(cardMd).assets, ref.hex, ref.ext) : null;
       if (!found) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
       const keeping = keepPicture(resolved.handle, gen, ref.hex, ref.ext, found.bytes);
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
@@ -1318,7 +1353,7 @@ const router = {
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
     // cardAvatar validates stored raster assets; remote pictures pass the proxy's type allowlist.
     if (want === 'avatar') {
-      const avatar = cardMd ? cardAvatar(parseCard(cardMd)) : null;
+      const avatar = cardMd ? cardAvatar(onDemand ? head() : parseCard(cardMd)) : null;
       const image = !avatar ? NOT_RELAYED()
         : avatar.url ? await relayAvatar(ctx, avatar.url)
           : new Response(Uint8Array.from(atob(avatar.b64.replace(/\s+/g, '')), (c) => c.charCodeAt(0)), {
@@ -1341,7 +1376,7 @@ const router = {
       const originMark = !cardMd && !!resolved.root && face === CARDS_HOST;
       if (!cardMd && !originMark) return new Response('', { status: 404, headers: { 'Cache-Control': 'public, max-age=60', ...ROBOTS_HEADERS(env, resolved.handle, at) } });
       const file = originMark ? await iconFile(want, NO_TILES, ORIGIN_MARK)
-        : await iconFile(want, parseCard(cardMd), { name: cardName(cardMd, resolved.handle), accent: frontmatter(cardMd, 'accent') });
+        : await iconFile(want, onDemand ? head() : parseCard(cardMd), { name: cardName(cardMd, resolved.handle), accent: frontmatter(cardMd, 'accent') });
       return new Response(file.body, {
         headers: {
           'Content-Type': file.type,
@@ -1403,12 +1438,46 @@ const router = {
     // tile#339: each fetch counted, because the picture cache's prefill below shares this invocation's
     // subrequest budget with it (picture-cache.mjs prefillCalls). tile#355: and capped at its own share of
     // that budget (CHANNEL_SUBREQUESTS), so a page naming many channels never spends the rest by itself.
+    // reef#3361 — above the size tier the page is served in windows (size-tier.mjs): the page is the first,
+    // `?w=<n>&r=<revision>` the n-th, each a whole page by this same renderer with plain links to the
+    // windows on either side. A window asked for under another revision is sent to that window of the
+    // current one (302), so no page ever holds two revisions; w3/deck.js sees the revision change and
+    // stops fetching. At or below the tier none of this runs, and the page is today's, byte for byte.
+    let win = null;
+    if (onDemand) {
+      const idx = index();
+      const rev = await revisionOf(cardMd);
+      const wq = url.searchParams.get('w');
+      const n = wq != null && /^[1-9]\d{0,8}$/.test(wq) ? Number(wq) : 1;
+      const rq = url.searchParams.get('r');
+      const at = (k) => (k === 1 ? url.pathname : `${url.pathname}?w=${k}&r=${rev}`);
+      if (rq != null && rq !== rev) return Response.redirect(`https://${host}${at(n)}`, 302);
+      const front = deckFront(cardMd);
+      const plan = windowsOf(cardMd, idx, { front });
+      if (n > plan.count) return Response.redirect(`https://${host}${url.pathname}`, 302);
+      win = {
+        src: { model: windowOf(cardMd, idx, plan, n - 1, { front }), fm: (k) => frontmatter(cardMd, k), name: cardName(cardMd, resolved.handle), deckMd: front, head: head() },
+        pager: { rev, prev: n > 1 ? at(n - 1) : null, next: n < plan.count ? at(n + 1) : null },
+        last: n === plan.count,
+        n,
+      };
+    }
     let ytCalls = 0;
-    const videos = await resolveChannels(cardMd, (u) => { ytCalls += 1; return ytFetch(u); }, channelShare);
+    const ytCount = (u) => { ytCalls += 1; return ytFetch(u); };
+    // A window resolves only the channels its own video tiles name, within the same share and from the same
+    // memory as every other page view (yt-channels.mjs resolveChannelsOf): one budget, one memory.
+    const videos = win ? await resolveChannelsOf(win.src.model, ytCount, channelShare) : await resolveChannels(cardMd, ytCount, channelShare);
 
     // reef#2725 r3 — og:url / canonical: a vanity card's own domain; any other card's canonical
     // address under the switch (reef.cards' root card = the bare origin), whatever host answered.
     const canonicalUrl = vanityHandle ? resolved.cardUrl : cardUrlFor(resolved.handle, {}, env);
+    // Cards served in windows: every window after the first holds tiles no other page holds, so its
+    // canonical is its own address — the Cards' canonical address with `?w=<n>` and no revision. That
+    // address always answers with window n of the current revision (above), so it is the one a search
+    // engine keeps; the revisioned address (`&r=…`, what the pager links to so one visit reads one
+    // revision) names it as canonical. The first window is the Cards' own address, bare. og:url stays
+    // the Cards' address in every window: a shared window previews as the Cards it belongs to.
+    const windowUrl = win && win.n > 1 ? windowAddress(canonicalUrl, win.n) : '';
     // tile#298 — a card that names its language speaks it, chrome and all, to everyone (unchanged). One
     // that names none gets its CHROME in the visitor's language, and the response varies by it.
     const chromeLang = frontmatter(cardMd, 'lang') ? '' : visitorLocale(url.searchParams, request);
@@ -1419,9 +1488,14 @@ const router = {
     // tile#339 — how the pictures travel, by the local switch (asset-urls.mjs; 'inline' unless set): hashed
     // here, from the body already read (no store read), because the render is synchronous. 'inline' hashes
     // nothing and hands the renderer nothing, which is the page as it was.
+    // A window's plan is made from the text of that window alone (size-tier.mjs windowPicturesText: its tiles,
+    // its backs, the frontmatter's backdrop) and the pictures on demand, so only the pictures this window
+    // names are looked up, decoded and hashed: the cost is the window's, whatever the rest of the file holds.
     const plan = pictures === 'inline' ? {}
-      : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
-    const page = renderCardHTML(cardMd, { ...resolved, canonicalUrl, videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) });
+      : win ? await picturePlan(windowPicturesText(win.src.model, frontmatter(cardMd, 'backdrop')), win.src.model.assets, assetBase(resolved.handle, !!vanityHandle), pictures)
+        : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
+    const pageCtx = { ...resolved, canonicalUrl, ...(windowUrl ? { windowUrl } : {}), videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) };
+    const page = win ? renderSource(win.src, { ...pageCtx, pager: win.pager, ...(win.last ? {} : { poolTile: false }) }) : renderCardHTML(cardMd, pageCtx);
     // tile#339 step 1: what this render decoded and hashed for the plan is kept for the picture requests
     // the page is about to cause (picture-cache.mjs keepPictures; one cache read when all are kept already):
     // only the pictures the rendered page names, in the order it draws them (a reference the page never

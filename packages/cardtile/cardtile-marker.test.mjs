@@ -371,7 +371,8 @@ function deckItems(md) {
 
 test('the deck reads its items from either spelling, and from a file that mixes them', () => {
   const want = deckItems(OLD);
-  assert.deepEqual(want.mdTexts, ['Illustrator.', '[Shop](https://example.org/shop)', '', '', '[Blog](https://example.org/blog)', 'AAAA', 'BBBB'], 'setup: the control read changed');
+  // (the `## assets` lane's lines are pictures, not items: reef#3361 — they used to be read as items `AAAA`, `BBBB`)
+  assert.deepEqual(want.mdTexts, ['Illustrator.', '[Shop](https://example.org/shop)', '', '', '[Blog](https://example.org/blog)'], 'setup: the control read changed');
   assert.deepEqual(want.backAt, [[0, 'about']]);
   assert.deepEqual(want.backs, [['about', ['I draw things.']]]);
   assert.deepEqual(deckItems(NEW), want);

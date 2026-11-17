@@ -62,6 +62,8 @@ export const FIXED = [
   ['href="${esc(l.href)}', 1, 'icon <link>s: local icon routes, or the avatar already registered as the profile image'],
   ['href="${esc(share.canonical)}', 1, "the card's own address"],
   ['href="${esc(u)}', 1, "tile#339 prototype preload (pictureTags): a picture path picturePlan wrote — the card's own base + a sha256 hex — and PICTURE_PATH checked; never author text"],
+  ['href="${esc(prev)}', 2, 'reef#3361 pager (pagerTags, <link> and <a>): the cardtile worker\'s own path for the previous window of this page, PAGER_PATH-checked (a path on this host, no scheme, no //host); never author text'],
+  ['href="${esc(next)}', 2, 'reef#3361 pager: the same, for the next window'],
   ['src="${u}', 2, 'tile#339 prototype reserved box (pictureTags): that same checked path inside a CSS attribute SELECTOR — it names an <img>, it fetches nothing'],
 ];
 const norm = (t) => t.replace(/\s+/g, ' ');

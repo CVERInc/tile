@@ -150,6 +150,9 @@ class Node extends EventTargetLike {
     if (ref === n) return n;
     const was = n.isConnected;
     this._take(n, keepFocus);
+    // a node from another document (one DOMParser made) is adopted on insert, as a browser's insert does
+    const doc = this.ownerDocument || this;
+    if (n.ownerDocument !== doc) { const adopt = (x) => { x.ownerDocument = doc; for (const c of x.childNodes) adopt(c); }; adopt(n); }
     const at = ref ? this.childNodes.indexOf(ref) : this.childNodes.length;
     this.childNodes.splice(at, 0, n); n.parentNode = this;
     if (was) this._left(n);   // moved into a subtree that is not in the document: it left, as surely as if it were removed
@@ -380,12 +383,20 @@ export function makeWindow(html, opts = {}) {
       setItem: (k, v) => { if (opts.storageThrows) throw new Error('SecurityError'); store.set(k, String(v)); },
       removeItem: (k) => { store.delete(k); },
     },
+    // only a page given one has a sessionStorage (`opts.session`, a Map the test keeps: it outlives the window, as a tab's does a load)
+    ...(opts.session ? { sessionStorage: {
+      getItem: (k) => (opts.session.has(k) ? opts.session.get(k) : null),
+      setItem: (k, v) => { opts.session.set(k, String(v)); },
+      removeItem: (k) => { opts.session.delete(k); },
+    } } : {}),
     history: { scrollRestoration: 'auto', pushed: 0, pushState() { this.pushed++; }, back() { this.pushed--; } },
     performance: { now: () => now },
     matchMedia: (q) => ({ matches: /reduced-motion/.test(q) ? !!opts.reducedMotion : false, addEventListener() {}, removeEventListener() {} }),
     getComputedStyle: () => ({ transform: 'none', overflowX: 'visible', getPropertyValue: () => '' }),
     getSelection: () => ({ toString: () => '' }),
     fetch: () => Promise.reject(new Error('mini-dom: no network')),
+    // a whole page parsed into a document of its own, as DOMParser('text/html') gives it (no script runs)
+    DOMParser: class { parseFromString(html) { const d = new Document(); parseInto(d, String(html)); return d; } },
     setTimeout: (fn, ms = 0) => { timers.push({ id: ++seq, at: now + Math.max(0, ms), fn }); return seq; },
     clearTimeout: (id) => { const k = timers.findIndex((t) => t.id === id); if (k >= 0) timers.splice(k, 1); },
     requestAnimationFrame: (fn) => { timers.push({ id: ++seq, at: now + 16, fn }); return seq; },
