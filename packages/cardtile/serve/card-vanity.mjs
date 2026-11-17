@@ -55,6 +55,29 @@ const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const PLATFORM_ZONES = ['feelreef.com', 'reef.cards', 'workers.dev'];
 
 /**
+ * pathHosts: env → frozen Set of extra hosts that route by path. Pure.
+ *
+ * Reads the `CARD_PATH_HOSTS` var (comma- or space-separated). Each entry is lowercased, trimmed and
+ * stripped of a port, and is honoured only when it is a well-formed name under a platform zone — a
+ * zone the vanity route never binds. A creator's domain, an IP, a dotless name, a malformed name and
+ * an empty entry are ignored. Unset or empty → the empty set.
+ */
+export function pathHosts(env) {
+  const raw = env && typeof env.CARD_PATH_HOSTS === 'string' ? env.CARD_PATH_HOSTS : '';
+  const out = new Set();
+  for (const entry of raw.split(/[\s,]+/)) {
+    const h = entry.trim().toLowerCase().replace(/:\d+$/, '');
+    if (!h || h.length > 253) continue;
+    const labels = h.split('.');
+    if (labels.length < 2 || !labels.every((l) => LABEL.test(l))) continue;
+    if (/^[0-9]+$/.test(labels[labels.length - 1])) continue;
+    if (!PLATFORM_ZONES.some((z) => h === z || h.endsWith('.' + z))) continue;
+    out.add(h);
+  }
+  return Object.freeze(out);
+}
+
+/**
  * vanityHost: input → the host itself, or null. Pure.
  *
  * Accepts exactly what `new URL(request.url).hostname` is for a creator's domain, because that is the

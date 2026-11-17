@@ -26,6 +26,7 @@ const ALLOW = new Set([
   // ours
   'card.feelreef.com', 'feelreef.com', 'saas.feelreef.com', 'cver.net',
   'reef.cards',             // the Cards' own domain (reef#2725), named by the Worker's switch
+  'cards-alt.feelreef.com', 'cards-other.feelreef.com',   // stand-in platform-zone names in the CARD_PATH_HOSTS tests
   'staging.feelreef.com',   // an allowed host-mode parent (/edit?host=), named by the contract
   // platforms the renderer knows by name — their marks, their embeds, their oEmbed
   'www.youtube.com', 'youtube.com', 'youtu.be', 'instagram.com', 'www.instagram.com',
