@@ -1427,7 +1427,8 @@ const NATIVE_FORM_POST_SOURCE = `function post(fp){const a=fp.action,f=fp.fields
 // On a preview page (`preview` set) one more exact pair is named: 409 with
 // {error:"preview_checkout_live_mode"}, RSP's refusal when the preview's rail would take real
 // money — for instance a page rendered before the rail changed. It gets the preview line with the
-// error tone, the control stays disabled, and nothing promises that trying again helps.
+// error tone, the control stays disabled, and nothing promises that trying again helps. On a page
+// with a payment-method choice Buy and the methods stay usable, since another method may be accepted.
 //
 // Every failure line the script writes — the generic one, the exact conflict, the currency
 // refusal and the preview refusal — carries data-ejecta-status-tone="error", the value the renderer
@@ -1457,7 +1458,7 @@ function nativeCheckoutScript(copy, preview, rail, choice, coupon, locale, curre
 		: { strings: {}, fn: '', decl: '', apply: '', text: '' };
 	const strings = JSON.stringify(Object.assign({ error: copy.checkoutError, conflict: copy.checkoutConflict, currencyRefused: copy.currencyRefused, notOpen: copy.checkoutNotOpen, busy: copy.checkoutBusy, emailLabel: copy.emailLabel, emailRequired: copy.emailRequired, emailInvalid: copy.emailInvalid, emailConflict: copy.emailConflict }, preview ? { refused: copy.previewLiveRefused } : {}, cp.strings)).replace(/</g, '\\u003c');
 	const pv = preview
-		? { decl: 'let refused=false;', detect: "refused=checkout.status===409&&!!result&&result.error==='preview_checkout_live_mode';", keep: '&&!refused', text: 'refused?C.refused:' }
+		? { decl: 'let refused=false;', detect: "refused=checkout.status===409&&!!result&&result.error==='preview_checkout_live_mode';", keep: choice ? '' : '&&!refused', text: 'refused?C.refused:' }
 		: { decl: '', detect: '', keep: '', text: '' };
 	// A page with at least one item carrying `checkout_rail` gets a body builder that adds
 	// `payment_rail` from the pressed button; every other page keeps the original builder bytes.

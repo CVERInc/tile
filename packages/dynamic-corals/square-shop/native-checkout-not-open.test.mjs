@@ -112,6 +112,32 @@ test('on a preview page the preview refusal is checked first and keeps the previ
   assert.equal(ui.button.disabled, true);
 });
 
+const PREVIEW_REFUSED = () => Response.json({ error: 'preview_checkout_live_mode', checkout_available: false }, { status: 409 });
+
+test('with a payment-method choice shown, a preview refusal shows its sentence and leaves Buy and the radios enabled', async () => {
+  const html = await emit({ preview_checkout: 'test' }, SHELLS['en-US'], item({ checkout_rails: ['stripe', 'ecpay'] }));
+  const ui = drive(html, PREVIEW_REFUSED(), true);
+  await ui.click();
+  assert.match(ui.status.textContent, /This is a preview/);
+  assert.equal(ui.status.attrs['data-ejecta-status-tone'], 'error');
+  assert.equal(ui.button.disabled, false);
+  assert.deepEqual(ui.radios.map((r) => r.disabled), [false, false]);
+  ui.radios[0].checked = false;
+  ui.radios[1].checked = true;
+  await ui.click();
+  assert.equal(ui.checkouts(), 2, 'another method can be tried after the refusal');
+});
+
+test('without a payment-method choice, a preview refusal still leaves Buy disabled', async () => {
+  const html = await emit({ preview_checkout: 'test' }, SHELLS['en-US']);
+  const ui = drive(html, PREVIEW_REFUSED());
+  await ui.click();
+  assert.match(ui.status.textContent, /This is a preview/);
+  assert.equal(ui.button.disabled, true);
+  await ui.click();
+  assert.equal(ui.checkouts(), 1);
+});
+
 test('a 409 without checkout_available:false, and other failures, stay the generic failure', async () => {
   for (const answer of [
     Response.json({ error: 'other' }, { status: 409 }),
