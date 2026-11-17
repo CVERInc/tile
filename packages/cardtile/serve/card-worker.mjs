@@ -983,10 +983,16 @@ async function openStageAnswer(request, url, env, ctx) {
 //                                   one page per referrer and `noindex`. Open stage: `noindex, nofollow`
 //                                   like every answer of that stage. A stricter header is never weakened.
 //
+//   a host in CARD_PATH_HOSTS       has no root card (pathHosts, card-vanity.mjs), so it has no home
+//                                   deck either: `/` there is answered as it was, switch or no switch.
+//                                   The home deck is the Cards host's alone, so the one listed host this
+//                                   can close it on is the Cards host itself.
+//
 // 🔴 A store that is not bound, or that throws, is the home deck — never a 500 on the front door.
 export const homeDeckOn = (env) => !!env && env.CARDS_HOME_DECK === 'on';
 const homeDeckAsked = (env, url, request) => homeDeckOn(env) && url.pathname === '/'
-  && (request.method === 'GET' || request.method === 'HEAD') && !wantsMarkdown(request);
+  && (request.method === 'GET' || request.method === 'HEAD') && !wantsMarkdown(request)
+  && !pathHosts(env).has(url.hostname);
 
 async function homeDeckAnswer(request, url, env, stage) {
   // 🔴 the only import of the home's module (see the header above): never at the top of this file

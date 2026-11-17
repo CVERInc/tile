@@ -150,6 +150,8 @@ PREVIEW = "false"
 #
 # Only GET/HEAD of the bare root changes. Every other path, every other host, POST and a markdown
 # request (`Accept: text/markdown`) are answered as with the setting off.
+# A host named in CARD_PATH_HOSTS has no root card and so no home deck: naming reef.cards there turns
+# both decks off on it, whatever this setting says.
 # CARDS_HOME_DECK = "on"
 
 [[env.production.kv_namespaces]]

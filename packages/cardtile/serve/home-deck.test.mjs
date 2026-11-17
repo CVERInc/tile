@@ -11,6 +11,8 @@
 //      handle is checked against the handle grammar before it reaches the page, the store or the
 //      visitor's sessionStorage, and the raw value is never written anywhere.
 //   4. ON: nothing but `/` changes — unknown paths, the other hosts and the dark stage are as they were.
+//   5. ON: a host named in CARD_PATH_HOSTS has no root card and no home deck — `/` there is answered
+//      as without the switch, the Cards host included once it is listed.
 //
 //   node --test packages/cardtile/serve/home-deck.test.mjs
 import test from 'node:test';
@@ -408,6 +410,80 @@ test('ON, open stage: reef.cards/ is the home deck too, kept out of every index 
   assert.equal(ref.header('x-robots-tag'), 'noindex, nofollow');
   // the sandbox is not served on reef.cards in this stage: the links go where it is
   assert.match(ref.body, / data-back-url="https:\/\/card\.feelreef\.com\/try\/edit"/);
+});
+
+// ── 5. ON, with CARD_PATH_HOSTS: a host that list names has no root card, so no home deck ────────
+// The list (card-vanity.mjs pathHosts) names extra hosts that route Cards by path and have NO root
+// card. The two settings meet at `/`: a listed host answers there what it answered before the home
+// deck existed — never the home deck, never the referral deck — whatever CARDS_HOME_DECK says.
+const LISTED = 'pages.feelreef.com';
+const isDeck = (body) => /data-reef-(home|ref)/.test(body);
+test('ON + CARD_PATH_HOSTS: "/" on a listed host is its answer without the switch — the nothing-here page, no home deck, no referral deck', async () => {
+  const seed = { ...SEED, feelreef: cardsFile('Root Page') };
+  for (const host of [LISTED, 'a.reef.cards', 'x.workers.dev']) {
+    for (const stage of [{}, OPEN, CUTOVER]) {
+      const list = { ...stage, CARD_PATH_HOSTS: `${LISTED}, a.reef.cards x.workers.dev` };
+      for (const path of ['/', '/?ref=aster', '/?ref=nobody', '/?lang=ja']) {
+        const why = `${host}${path} ${JSON.stringify(stage)}`;
+        const got = await ask(host, path, { seed, settings: { ...list, ...SWITCH } });
+        sameAnswer(got, await ask(host, path, { seed, settings: list }), why);
+        assert.equal(got.status, 404, `${why}: a listed host has no root card`);
+        assert.ok(!isDeck(got.body), `${why}: a home deck on a listed host`);
+        assert.ok(!got.body.includes('Root Page'), `${why}: the stored root page on a listed host`);
+      }
+      // the listed host still routes by path, switch or no switch
+      const card = await ask(host, '/aster', { seed, settings: { ...list, ...SWITCH } });
+      assert.equal(card.status, 200, `${host}/aster ${JSON.stringify(stage)}`);
+      sameAnswer(card, await ask(host, '/aster', { seed, settings: list }), `${host}/aster ${JSON.stringify(stage)}`);
+    }
+  }
+  // CONTROL: the list is what makes that host path-routed — unlisted, it has no page at /aster
+  assert.equal((await ask(LISTED, '/aster', { seed, settings: { ...CUTOVER, ...SWITCH } })).status, 404);
+});
+test('ON + CARD_PATH_HOSTS: the Cards host itself, once listed, answers "/" as without the switch — in every spelling the list honours', async () => {
+  const seed = { ...SEED, feelreef: cardsFile('Root Page') };
+  for (const listed of ['reef.cards', 'REEF.CARDS', 'reef.cards:443', ` ${LISTED},reef.cards `, `reef.cards\n${LISTED}`]) {
+    for (const stage of [OPEN, CUTOVER]) {
+      const list = { ...stage, CARD_PATH_HOSTS: listed };
+      for (const path of ['/', '/?ref=aster', '/?ref=nobody', '/?lang=ja']) {
+        for (const method of ['GET', 'HEAD']) {
+          const why = `${method} reef.cards${path} ${JSON.stringify(list)}`;
+          const got = await ask('reef.cards', path, { seed, method, settings: { ...list, ...SWITCH } });
+          sameAnswer(got, await ask('reef.cards', path, { seed, method, settings: list }), why);
+          assert.ok(!isDeck(got.body), `${why}: a home deck on a listed host`);
+        }
+      }
+    }
+    // with no stored root page it is the nothing-here page again, not the home deck
+    const bare = await ask('reef.cards', '/', { settings: { ...CUTOVER, CARD_PATH_HOSTS: listed, ...SWITCH } });
+    assert.equal(bare.status, 404, JSON.stringify(listed));
+    assert.ok(!isDeck(bare.body), JSON.stringify(listed));
+  }
+});
+test('ON + CARD_PATH_HOSTS: with the Cards host listed, the whole grid is byte for byte the merge base\'s, the root included', async () => {
+  const listing = { fetch: (request, env) => worker.fetch(request, { ...env, CARD_PATH_HOSTS: `reef.cards, ${LISTED}` }) };
+  const differ = [];
+  let asked = 0;
+  await atFixedClock(async () => {
+    for (const c of gridCases()) {
+      asked++;
+      const d = answerDiff(await answerOf(listing, c, 'on'), FIXTURE.answers[c.key]);
+      if (d) differ.push(`${c.key}: ${d}`);
+    }
+  });
+  assert.equal(asked, 252);
+  assert.equal(differ.length, 0, shown(differ));
+});
+test('ON + CARD_PATH_HOSTS: a list that does not name the Cards host leaves the home deck where it is', async () => {
+  // unset, empty, another platform host, and entries the list ignores (a creator's domain, a look-alike, an IP)
+  for (const listed of [undefined, '', LISTED, 'a.reef.cards', 'own.example', 'notreef.cards', 'reef.cards.example', '127.0.0.1', 'reef', 'cards']) {
+    const settings = listed === undefined ? {} : { CARD_PATH_HOSTS: listed };
+    const r = await on('/', { settings });
+    assert.equal(r.status, 200, JSON.stringify(listed));
+    assert.match(rootTag(r.body), / data-reef-home[ >]/, JSON.stringify(listed));
+    sameAnswer(r, await on('/'), `the home deck under CARD_PATH_HOSTS=${JSON.stringify(listed)}`);
+    assert.match(rootTag((await on('/?ref=aster', { settings })).body), / data-reef-ref[ >]/, JSON.stringify(listed));
+  }
 });
 
 // ── the words: one table, the source language written, the rest listed for a translator ─────────
