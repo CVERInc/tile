@@ -2,8 +2,15 @@
 // (`reef.cards/?ref=<handle>`), as cardtile files. card-worker.mjs renders them with the renderer and
 // the deck every Cards page gets, so the home is made of the product it shows.
 //
-// Behind a switch, default OFF: `CARDS_HOME_DECK = "on"` (homeDeckOn). Unset or any other value, the
-// Worker answers the root exactly as it did before this file existed.
+// Behind a switch, default OFF: `CARDS_HOME_DECK` is the exact string `on` (card-worker homeDeckOn).
+// Unset or any other value, the Worker answers exactly as it did before this file existed — and never
+// loads this file.
+//
+// 🔴 ONLY card-worker's homeDeckAnswer imports this module, and by `import()`: a static import from
+// card-worker.mjs, or from anything else the editor's entry (w3/edit3.mjs) reaches, puts these words
+// in the sandbox's bundle on every host, switch or no switch. For the same reason nothing the home
+// needs is added to the renderer or to w3/deck-page.mjs: the deck's home-only parts are written here,
+// onto the page withDeck returns (deckOurs).
 //
 // What is here, and nothing else:
 //   the words        HOME_DECK_WORDS — zh (Traditional) is the SOURCE: the product owner's sentences,
@@ -14,19 +21,19 @@
 //   the drafts       HOME_DECK_DRAFTS — the keys whose wording no ruling has fixed. They are drawn,
 //                    behind the same switch, so the product owner can read them in place.
 //   the two files    homeDeckSource / referralDeckSource — ordinary cardtile files (GRAMMAR.md).
-//   the page's own   homeDeckPage — the footer (the one place that says "Powered by feelreef") and
-//                    the referrer's name and picture, written into the rendered page as text.
+//   the page's own   homeDeckPage — the deck (the one every Cards page gets, plus what only the home
+//                    has: its mark on <html>, the way back, the kept ref), the footer (the one place
+//                    that says "Powered by feelreef") and the referrer's name and picture, written
+//                    into the rendered page as text.
 //
 // 🔴 Pure string work: no store, no clock but the footer's year, no request. The Worker decides who the
 // referrer is (card-worker homeDeckAnswer); this file only ever receives a handle that already passed
 // the handle grammar, and checks it again at each place it writes one.
 import { LOCALE_KEYS, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
+import { withDeck, DECK_TRY_URL } from '../w3/deck-page.mjs';
 
-/** the switch: exactly `on` (case and surrounding space aside). A typo is off. */
-export const homeDeckOn = (env) => String(env?.CARDS_HOME_DECK ?? '').trim().toLowerCase() === 'on';
-
-/** the visitor's sessionStorage key the ref is kept under (w3/deck-page.mjs writes it; nothing in this repository reads it yet) */
-export { REF_STORAGE_KEY } from '../w3/deck-page.mjs';
+/** the visitor's sessionStorage key the ref is kept under (deckOurs writes it; nothing in this repository reads it yet) */
+export const REF_STORAGE_KEY = 'cards-ref';
 /** the handle grammar (card-api VALID_HANDLE), kept here so this file imports nothing that reads a store */
 const HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
@@ -194,6 +201,50 @@ export function referralDeckSource(locale, { tryUrl = '' } = {}) {
   ].join('\n');
 }
 
+// ── the deck of the Cards host's own root ─────────────────────────────────────────────────────────
+// withDeck (w3/deck-page.mjs) makes the deck every Cards page gets and knows nothing about the home.
+// What only the home has is written onto its result, at the two places withDeck itself wrote:
+//
+//   <html data-view=… data-views=… data-reef-home>
+//                                     the home deck: deck.js closes the pile with its own last card
+//   <html data-view=… data-views=… data-reef-ref data-back-href="/<handle>">
+//                                     the referral deck: no closing card, and the way back to the
+//                                     page the visitor came from
+//   <script>try{sessionStorage.setItem(REF_STORAGE_KEY,<handle>);}catch(e){}window.__cardFront=…
+//                                     the ref the visitor arrived with, kept for the tab; before
+//                                     deck.js, so a deck that fails still keeps it
+//   window.__deckTry                  the sandbox where THIS stage serves it, in place of DECK_TRY_URL
+//
+// 🔴 `kind` and `ref` are CALLER-supplied and only homeDeckAnswer supplies them: no frontmatter key,
+// query or header reaches here, so no guest's page can call itself ours. The ref is checked against
+// the handle grammar HERE, at the sink, whatever the caller checked.
+const OURS_KINDS = { home: 'data-reef-home', ref: 'data-reef-ref' };
+// JSON that is safe inside an inline <script>: no `</script>`, no `<!--` (deck-page's own rule)
+const scriptJson = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
+const ROOT_AT = /^<html data-view="[a-z]*" data-views="[a-z ]*"/;
+const BOOT_AT = '<script>window.__cardFront=';
+
+function deckOurs(flat, source, { kind = '', ref = '', tryUrl = '' } = {}) {
+  const lang = (/^lang: (.+)$/m.exec(source) || [])[1] || '';
+  const page = withDeck(flat, source, { lang });
+  if (!Object.hasOwn(OURS_KINDS, kind)) return page;
+  const r = page.indexOf('<html');
+  const root = r < 0 ? null : ROOT_AT.exec(page.slice(r, r + 200));
+  const t = page.lastIndexOf(BOOT_AT);
+  if (!root || t < r) return page;   // withDeck made no deck of it (not the renderer's page): nothing of ours either
+  const handle = HANDLE.test(String(ref ?? '')) ? String(ref) : '';
+  const mine = ` ${OURS_KINDS[kind]}${kind === 'ref' && handle ? ` data-back-href="/${handle}"` : ''}`;
+  const keep = handle ? `try{sessionStorage.setItem(${scriptJson(REF_STORAGE_KEY)},${scriptJson(handle)});}catch(e){}` : '';
+  let tail = page.slice(t + '<script>'.length);
+  if (tryUrl) {
+    const was = `window.__deckTry=${scriptJson(DECK_TRY_URL)};`;
+    const w = tail.lastIndexOf(was);
+    if (w >= 0) tail = `${tail.slice(0, w)}window.__deckTry=${scriptJson(String(tryUrl))};${tail.slice(w + was.length)}`;
+  }
+  const end = r + root[0].length;
+  return `${page.slice(0, end)}${mine}${page.slice(end, t)}<script>${keep}${tail}`;
+}
+
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 /** how much of a referrer's title the sentence carries (code points) */
 export const REF_NAME_MAX = 80;
@@ -203,9 +254,11 @@ const shortName = (s) => {
 };
 
 /**
- * homeDeckPage: the rendered page → the page as served. Two things the renderer does not do for a
- * guest's page and the home needs:
+ * homeDeckPage: the renderer's FLAT page (`deck: false`) of `source` → the page as served. Three
+ * things the renderer does not do for a guest's page and the home needs:
  *
+ *   the deck      deckOurs above: `kind` ('home' | 'ref'), `ref` and `tryUrl` (the sandbox of this
+ *                 stage). With no `source` the page is taken as it is.
  *   the footer    `© <year> CVER Inc.  |  Powered by feelreef` — the home is the only page that says
  *                 it. Its link carries the referrer on (`?ref=<handle>`) when the visitor came with
  *                 one, because the sign-up page is on another origin and cannot read this origin's
@@ -217,7 +270,8 @@ const shortName = (s) => {
  * `ref` is the handle to carry on; `referrer.handle` the one drawn. Both are re-checked against the
  * handle grammar here: this is the last place before the bytes leave.
  */
-export function homeDeckPage(html, { ref = '', referrer = null, year = new Date().getFullYear() } = {}) {
+export function homeDeckPage(flat, { source = '', kind = '', ref = '', referrer = null, tryUrl = '', year = new Date().getFullYear() } = {}) {
+  const html = source ? deckOurs(flat, source, { kind, ref, tryUrl }) : flat;
   const carried = HANDLE.test(ref) ? ref : 'reef.cards';
   const footer = `<footer class="st-footer"><div><a href="/">&copy; ${Number(year)} CVER Inc.</a>&nbsp;&nbsp;|&nbsp;&nbsp;`
     + `<a href="https://feelreef.com/?ref=${carried}">Powered by feelreef</a></div></footer>`;

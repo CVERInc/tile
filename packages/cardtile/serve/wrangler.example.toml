@@ -134,7 +134,8 @@ PREVIEW = "false"
 # CARDS_HOST_OPEN = "reef.cards"
 # CARD_CANONICAL_HOST = "reef.cards"
 #
-# The root of reef.cards (serve/home-deck.mjs, card-worker.mjs `homeDeckAnswer`). Exactly "on" is on;
+# The root of reef.cards (serve/home-deck.mjs, card-worker.mjs `homeDeckAnswer`). Exactly "on" is on —
+# no trimming, no case folding: "On" and " on " are off;
 # unset or any other value is off, and off is the Worker as it was: `reef.cards/` is the stored page of
 # the handle `feelreef`, or the nothing-here 404 when none is stored.
 #

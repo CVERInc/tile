@@ -53,3 +53,18 @@ export const contentHash = (bytes, n = 12) => createHash('sha256').update(bytes)
  * any other source (the editor's preview needs the deck's version), so it is stamped like one.
  */
 export const isOwnOutput = (absPath, dir = DIR) => resolve(absPath) === resolve(dir, 'edit3-assets.mjs');
+
+/**
+ * Modules the editor bundle must NOT carry, although the bundle's entry reaches the file that loads
+ * them (paths relative to serve/).
+ *
+ * 🩸 w3/edit3.mjs imports card-worker.mjs for the renderer, so everything card-worker.mjs can reach is
+ * a candidate for the sandbox's inline script — on every host, whatever a setting says. The home deck
+ * (home-deck.mjs) is behind a switch whose OFF must be the Worker as it was, byte for byte; its words
+ * once rode into `/try/edit` this way (+5 KB with the switch off). card-worker.mjs therefore loads it
+ * with `import()` inside the one route that needs it, and the generator marks it external: the
+ * bundle has no copy, the stamp does not watch it, and the generator fails if either stops being true.
+ */
+export const NOT_IN_EDITOR = Object.freeze(['home-deck.mjs']);
+/** is `absPath` one of them? An exact resolved-path comparison, like isOwnOutput. */
+export const isKeptOut = (absPath, dir = DIR) => NOT_IN_EDITOR.some((f) => resolve(absPath) === resolve(dir, f));

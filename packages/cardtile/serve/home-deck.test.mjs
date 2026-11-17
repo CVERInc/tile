@@ -1,8 +1,10 @@
 // The root of the Cards host: `reef.cards/` is the home deck and `reef.cards/?ref=<handle>` the
 // referral deck, behind the switch CARDS_HOME_DECK (serve/home-deck.mjs, card-worker.mjs homeDeckAnswer).
 //
-//   1. OFF (unset, or any value but `on`): every answer is the one the Worker gave before the switch
-//      existed — the root, `?ref=`, in every stage, on every host.
+//   1. OFF (unset, or any value but the exact string `on` — `On` and ` on ` are off): every answer is
+//      the one the Worker gave before the switch existed — every path, in every stage, on every host.
+//      Checked against a FIXTURE captured from the merge base (gen-home-deck-off-fixture.mjs), because
+//      a comparison of this tree with and without the setting cannot see what the tree always does.
 //   2. ON: `/` on reef.cards is the home deck, drawn by the same renderer and deck as any Cards:
 //      200, indexable, canonical = the bare origin, one language per page, no store read.
 //   3. ON: `/?ref=<handle>` is the referral deck when that handle is live and in the exchange; the
@@ -18,6 +20,7 @@ import worker from './card-worker.mjs';
 import { LOCALE_KEYS } from '../w/sandbox-i18n.mjs';
 import { deckStrings } from '../w3/deck-i18n.mjs';
 import { makeWindow } from '../w3/mini-dom.mjs';
+import { gridCases, answerOf, answerDiff, atFixedClock, readFixture } from './gen-home-deck-off-fixture.mjs';
 
 const DECK_JS = readFileSync(new URL('../w3/deck.js', import.meta.url), 'utf8');
 const home = () => import('./home-deck.mjs');
@@ -71,7 +74,7 @@ const textOf = (html) => bodyOf(html).replace(/<script[\s\S]*?<\/script>/g, '').
 
 // ── the sentences a ruling gives, word for word (zh-TW is the source) ─────────────────────────────
 const RULED_HOME = [
-  '認識一個人，不必先加入同一個平台。',
+  '認識一個人，不必先加入同一個平台。', '地址不會過期。',
   '三種看法', '一句話就能改', '貼進來的時鐘',
   '檔案屬於你', '你做的，都在一個檔案裡，隨時帶得走。', '搬家、換平台，帶著它走就好。',
   'REEF with Domain 有賣，也能免費接你已經有的網域。',
@@ -90,7 +93,7 @@ const RULED_REF = [
 ];
 
 // ── 1. OFF ───────────────────────────────────────────────────────────────────────────────────────
-const NOT_ON = [undefined, '', '0', 'off', 'true', '1', 'reef.cards', 'onn', 'home'];
+const NOT_ON = [undefined, '', '0', 'off', 'true', '1', 'reef.cards', 'onn', 'home', 'On', 'ON', ' ON ', ' on', 'on ', 'on\n'];
 for (const [stage, settings] of [['dark', {}], ['open stage', OPEN], ['cutover', CUTOVER]]) {
   test(`OFF, ${stage}: reef.cards/ and /?ref= answer exactly as without the setting, whatever it says short of "on"`, async () => {
     for (const path of ['/', '/?ref=aster', '/?ref=nobody']) {
@@ -109,6 +112,63 @@ test('OFF, cutover: the root is still the stored root page when there is one, an
   assert.match(withRoot.body, /<title>Root Page<\/title>/);
   const without = await ask('reef.cards', '/', { settings: CUTOVER });
   assert.equal(without.status, 404, 'CONTROL: this is the 404 the home deck replaces');
+});
+
+
+// The grid a review of this switch drew: 3 stages × 6 hosts × 14 paths, each asked with the setting
+// unset and with three values that are not `on`. The expected answer is NOT this tree's: it is the
+// fixture, captured from the tree before the home deck existed.
+const FIXTURE = readFixture();
+const OFF_FLAGS = [undefined, 'off', 'On', ' ON '];
+const shown = (list) => `${list.length} answers differ from the merge base's:\n  ${list.slice(0, 12).join('\n  ')}${list.length > 12 ? '\n  …' : ''}`;
+test('the fixture is the whole grid, captured from one commit', () => {
+  assert.match(FIXTURE.base, /^[0-9a-f]{40}$/);
+  assert.deepEqual(Object.keys(FIXTURE.answers), gridCases().map((c) => c.key));
+  assert.equal(gridCases().length, 252);
+  // CONTROL: the fixture is of real answers — the sandbox is a page of hundreds of KB, the dark host an empty 404
+  assert.ok(FIXTURE.answers['dark card.feelreef.com /try/edit'].bytes > 100000);
+  assert.deepEqual([FIXTURE.answers['dark reef.cards /'].status, FIXTURE.answers['dark reef.cards /'].bytes], [404, 0]);
+});
+test('OFF: every answer of the grid — every path, host and stage, the sandbox included — is byte for byte the one the Worker gave before the home deck existed', async () => {
+  const differ = [];
+  let asked = 0;
+  await atFixedClock(async () => {
+    for (const c of gridCases()) {
+      for (const flag of OFF_FLAGS) {
+        asked++;
+        const d = answerDiff(await answerOf(worker, c, flag), FIXTURE.answers[c.key]);
+        if (d) differ.push(`${c.key} CARDS_HOME_DECK=${JSON.stringify(flag)}: ${d}`);
+      }
+    }
+  });
+  assert.equal(asked, 1008);
+  assert.equal(differ.length, 0, shown(differ));
+});
+test('ON: everything in the grid but the root of the Cards host is still byte for byte the merge base\'s answer', async () => {
+  const isRoot = (c) => c.host === 'reef.cards' && c.stage !== 'dark' && (c.path === '/' || c.path.startsWith('/?'));
+  const differ = [];
+  let asked = 0; let roots = 0;
+  await atFixedClock(async () => {
+    for (const c of gridCases()) {
+      const got = await answerOf(worker, c, 'on');
+      const d = answerDiff(got, FIXTURE.answers[c.key]);
+      if (isRoot(c)) { roots++; assert.ok(d, `CONTROL: ${c.key} is the home deck with the switch on, so it must differ from the fixture`); continue; }
+      asked++;
+      if (d) differ.push(`${c.key}: ${d}`);
+    }
+  });
+  assert.deepEqual([asked, roots], [244, 8]);
+  assert.equal(differ.length, 0, shown(differ));
+});
+test('OFF: a value that is "on" only after trimming or lower-casing does not open the home deck', async () => {
+  for (const v of ['On', 'ON', ' ON ', ' on', 'on ', 'on\n']) {
+    const settings = { ...CUTOVER, CARDS_HOME_DECK: v };
+    const stored = await ask('reef.cards', '/', { settings, seed: { feelreef: cardsFile('Root Page') } });
+    assert.equal(stored.status, 200);
+    assert.match(stored.body, /<title>Root Page<\/title>/, `${JSON.stringify(v)}: the stored root page is still the root`);
+    assert.ok(!/data-reef-(home|ref)/.test(stored.body), `${JSON.stringify(v)}: a home deck`);
+    assert.equal((await ask('reef.cards', '/', { settings })).status, 404, `${JSON.stringify(v)}: with no stored root page the root is still the nothing-here page`);
+  }
 });
 
 // ── 2. ON: the home deck ─────────────────────────────────────────────────────────────────────────
@@ -372,10 +432,11 @@ test('the open points: every draft sentence is named as a draft, and is in the t
   assert.ok(ruled.includes('{name}的那一頁，就是用這個做的。'));
   assert.ok(HOME_DECK_DRAFTS.includes('freeSmall'), 'the small print about "free" is an open point');
 });
-test('the switch: exactly "on" (case and surrounding space aside)', async () => {
-  const { homeDeckOn } = await home();
-  for (const v of ['on', ' ON ', 'On']) assert.equal(homeDeckOn({ CARDS_HOME_DECK: v }), true, JSON.stringify(v));
+test('the switch: the exact string "on", and nothing else', async () => {
+  const { homeDeckOn } = await import('./card-worker.mjs');
+  assert.equal(homeDeckOn({ CARDS_HOME_DECK: 'on' }), true);
   for (const v of NOT_ON) assert.equal(homeDeckOn(v === undefined ? {} : { CARDS_HOME_DECK: v }), false, JSON.stringify(v));
+  for (const v of [true, 1, ['on'], { toString: () => 'on' }]) assert.equal(homeDeckOn({ CARDS_HOME_DECK: v }), false, 'only a string is a setting');
   assert.equal(homeDeckOn(null), false);
   assert.equal(homeDeckOn(undefined), false);
 });

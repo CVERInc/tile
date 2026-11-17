@@ -27,7 +27,7 @@ import esbuild from 'esbuild';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
-import { sourceStamp, contentHash, isOwnOutput } from './edit3-sources.mjs';
+import { sourceStamp, contentHash, isOwnOutput, NOT_IN_EDITOR, isKeptOut } from './edit3-sources.mjs';
 import { DECK_STRINGS } from '../w3/deck-i18n.mjs';
 
 const DIR = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +66,11 @@ export const DECK_VERSION = ${JSON.stringify(DECK_VERSION)};
 // ── 2. the editor's module ────────────────────────────────────────────────────────────────────────
 // ESM, because the module awaits the borrowed editor at its top level; served as one inline
 // <script type="module">. The borrowed files stay runtime imports (their URLs come from the page).
+//
+// 🔴 `external`: the modules the editor must not carry (edit3-sources.mjs NOT_IN_EDITOR — the home
+// deck). card-worker.mjs loads them with `import()` inside a route; the editor uses the renderer
+// only, so that route is dropped from the bundle and the `import()` with it. Checked below: none of
+// them is an input, and the bundle does not name one.
 const bundled = await esbuild.build({
   entryPoints: [join(W3, 'edit3.mjs')],
   bundle: true,
@@ -73,6 +78,7 @@ const bundled = await esbuild.build({
   platform: 'browser',
   write: false,
   metafile: true,
+  external: NOT_IN_EDITOR.map((f) => join(DIR, f)),
   logLevel: 'silent',
 });
 if (bundled.errors?.length) {
@@ -81,8 +87,12 @@ if (bundled.errors?.length) {
 const EDIT3_JS = bundled.outputFiles[0].text;
 // an inline module ends at the first `</script` it contains, wherever it is
 if (/<\/script/i.test(EDIT3_JS)) throw new Error('gen-edit3-assets: the bundle contains </script — it cannot be inlined');
+for (const f of NOT_IN_EDITOR) {
+  if (EDIT3_JS.includes(f)) throw new Error(`gen-edit3-assets: the bundle names ${f} — a route that loads it is in the editor`);
+}
 const OUT_INPUTS = Object.values(bundled.metafile.outputs)[0].inputs;
 for (const k of Object.keys(bundled.metafile.inputs)) {
+  if (isKeptOut(join(process.cwd(), k), DIR)) throw new Error(`gen-edit3-assets: ${k} is an input of the editor bundle — it must only be loaded by import() from its own route (edit3-sources.mjs NOT_IN_EDITOR)`);
   // 🔴 This generator's OWN previous output may be in the graph (card-worker.mjs imports
   // edit3-assets.mjs) but esbuild must keep none of it: a bundle carrying bytes of the file being
   // written would embed a previous copy of itself.
