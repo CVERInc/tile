@@ -12,6 +12,7 @@
 // (SHA-256, first 16 hex, `v1:` prefix) so a Card version and a Page version read alike in a
 // transcript, but that is a shared CONVENTION, not a shared code path across two repos.
 import { parseCard, serializeCard, rasterCopyId } from './card-core.js';
+import { CELL_TYPES, CONTROL } from './ai-ops.mjs';
 
 /** Bytes → lowercase hex. */
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -71,6 +72,83 @@ export function referencedAssets(cardText) {
   const out = new Set();
   for (const m of String(cardText || '').matchAll(ASSET_REF_RE)) { out.add(m[1]); out.add(rasterCopyId(m[1])); }
   return out;
+}
+
+/**
+ * The params that name a picture, by cell type: every param ai-ops.mjs gives the asset control, and
+ * the slideshow's two that are plain text there (`images`, a list; `bg`). Derived from the shared
+ * definition rather than listed here, for the reason `referencedAssets` scans text: a second list of
+ * what the renderer reads goes stale. This one errs toward MISSING a param a cell grows later — a
+ * line absent from a report, where `referencedAssets` errs the other way because there the cost of
+ * a miss is a creator told to delete their own picture.
+ */
+const PICTURE_PARAMS = Object.fromEntries(Object.entries(CELL_TYPES).map(([type, def]) => [
+  type,
+  [...Object.keys(def.params || {}).filter((name) => def.params[name].control === CONTROL.ASSET),
+    ...(type === 'slides' ? ['images', 'bg'] : [])],
+]));
+
+/**
+ * What a writer should be told about the card it just handed over: `[{ code, say, … }]`, empty when
+ * there is nothing to say. `model` is the parsed card; `assets` is the lane it will be stored with.
+ *
+ * 🔴 REPORTED, never enforced — the same stance as `orphans`. Each row is something a creator may
+ * mean (a card with no face on it, a picture that lives on their own site), so none of them refuses
+ * a save. What they have in common is that the card answers 200 and LOOKS wrong, and that nothing
+ * else in the answer says so:
+ *
+ *   missing_assets   `ids`: `asset:<id>` references the store does not hold. Such a picture draws
+ *                    nothing. The usual cause is a put_asset that has not been made yet, or an id
+ *                    spelled two ways.
+ *   linked_pictures  `where`: `{ cell, param, url }` for each picture param holding an http(s)
+ *                    address. The picture is on someone else's server: it is not in the file the
+ *                    creator can take with them, and it goes blank when that server stops serving it.
+ *   no_avatar        the first `profile` cell has no `avatar`. The top of the card, the first card
+ *                    of the stack and the share preview all draw the name alone.
+ *
+ * `say` is English and for the agent door, like OPS's contract text in ai-ops.mjs: no form shows it.
+ */
+export function cardAdvice(model, assets = {}) {
+  const cells = (model && model.cells) || [];
+  const advice = [];
+
+  // the raw references only: `referencedAssets` also adds each id's raster copy, which no cell names
+  const thin = serializeCard({ ...model, assets: {} });
+  const missing = [...new Set([...thin.matchAll(ASSET_REF_RE)].map((m) => m[1]))]
+    .filter((id) => !Object.prototype.hasOwnProperty.call(assets, id)).sort();
+  if (missing.length) {
+    advice.push({
+      code: 'missing_assets',
+      ids: missing,
+      say: `${missing.map((id) => `asset:${id}`).join(', ')} ${missing.length === 1 ? 'is' : 'are'} referenced but not stored, so ${missing.length === 1 ? 'it draws' : 'they draw'} nothing. Store ${missing.length === 1 ? 'it' : 'each one'} with put_asset under that id, or correct the id.`,
+    });
+  }
+
+  const where = [];
+  for (const cell of cells) {
+    for (const param of PICTURE_PARAMS[cell.type] || []) {
+      for (const value of String((cell.params || {})[param] ?? '').split(',')) {
+        const url = value.trim();
+        if (/^https?:\/\//i.test(url)) where.push({ cell: cell.type, param, url });
+      }
+    }
+  }
+  if (where.length) {
+    advice.push({
+      code: 'linked_pictures',
+      where,
+      say: `${where.length} picture${where.length === 1 ? ' is' : 's are'} linked from another site and not stored in the card. A linked picture is not in the file the creator takes with them, and it goes blank when that site stops serving it. Store each with put_asset and refer to it as asset:<id>.`,
+    });
+  }
+
+  const profile = cells.find((cell) => cell.type === 'profile');
+  if (profile && !String((profile.params || {}).avatar ?? '').trim()) {
+    advice.push({
+      code: 'no_avatar',
+      say: 'The profile has no avatar, so the top of the card, the first card of the stack and the share preview show the name alone. Store a photo or a logo with put_asset and add avatar=asset:<id> to the profile cell.',
+    });
+  }
+  return advice;
 }
 
 /** cells grouped by type, for the structural diff. */
@@ -145,6 +223,7 @@ export function assembleSave(incomingMd, storedMd) {
   return {
     md: serializeCard({ ...incoming, assets }),
     orphans,
+    advice: cardAdvice(incoming, assets),
     carried: Object.keys(assets).length,
     diff: cardStructureDiff(stored || { cells: [], blocks: [], drawers: [] }, incoming),
   };

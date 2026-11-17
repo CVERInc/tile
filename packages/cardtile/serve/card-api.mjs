@@ -1128,7 +1128,7 @@ export class CardLifetime {
         : await checkBaseVersion(base, cur.md);
       if (conflict) return { status: 409, body: conflict };
     }
-    const { md, orphans, diff, carried } = assembleSave(markdown, cur && cur.md);
+    const { md, orphans, advice, diff, carried } = assembleSave(markdown, cur && cur.md);
     const bytes = utf8Bytes(md);
     if (bytes > KV_MAX_BYTES) {
       // reef#2725: when an embed's HTML is why, say which one — "the card is too big" sends the author
@@ -1140,7 +1140,7 @@ export class CardLifetime {
     // r3 (codex r2 P2): the Worker's preliminary check — the lock, the size, the structural answer a
     // dry run gives — is THIS, against the held card, so a current base_version is never vetoed by a
     // stale KV read. Nothing is written (a first contact may adopt; that is not a change of the card).
-    if (check) return { status: 200, body: { checked: true, version: cur ? cur.version : null, wouldChange, diff, orphans, carried } };
+    if (check) return { status: 200, body: { checked: true, version: cur ? cur.version : null, wouldChange, diff, orphans, advice, carried } };
     if ((cur ? cur.version : null) !== from) {
       const now = cardDestinations(md, { base: destBase });
       if (now.length !== dests.length || now.some((u) => !dests.includes(u))) {
@@ -1150,7 +1150,7 @@ export class CardLifetime {
     }
     const res = await this.commitCard(handle, gen, md, cur);
     if (res.conflict) return { status: 409, body: res };
-    return { status: 200, body: { ...res, created: !cur, wouldChange, diff, orphans, carried } };
+    return { status: 200, body: { ...res, created: !cur, wouldChange, diff, orphans, advice, carried } };
   }
   /**
    * put_asset, delete_asset and the fenced delete, against the card held here: every check against
@@ -1731,7 +1731,7 @@ export async function handleApi(request, env, url) {
     // the object's card when it holds one: a preview asked for right after put_asset must carry that
     // picture, and this location's KV may still answer the card from before it
     const { md: currentMd, gen } = await currentCard(env, store, handle);
-    const { md } = assembleSave(body.markdown, currentMd);
+    const { md, advice } = assembleSave(body.markdown, currentMd);
     const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
     // The handle rides as METADATA so delete_card can find this draft from `list()` alone, without
     // reading a megabyte of someone's pictures per key to learn whose it was (reef#2618). The
@@ -1744,6 +1744,8 @@ export async function handleApi(request, env, url) {
       url: `https://${url.host}/_preview/${id}`,
       expires_in_seconds: PREVIEW_TTL,
       note: 'Not indexed, not linked, and gone within the hour. It is not the card.',
+      // the same report a save gives (cardAdvice): a preview is where a missing picture is cheapest to hear about
+      advice,
     });
   }
 
@@ -1985,6 +1987,7 @@ export async function handleApi(request, env, url) {
       if (body.dry_run) {
         return json({
           handle, dry_run: true, valid: true, wouldChange: checked.wouldChange, diff: checked.diff, orphans: checked.orphans,
+          advice: checked.advice,
           assets_carried: checked.carried,
           message: checked.wouldChange
             ? 'Validates — nothing written (dry_run). Call again without dry_run to save.'
@@ -2026,6 +2029,9 @@ export async function handleApi(request, env, url) {
         // time they added it back. Removing bytes from a creator's file is their decision, and this
         // is how they get told there is one to make.
         orphans: res.orphans,
+        // what the card looks wrong for and nothing else says: a picture id the store does not hold, a
+        // picture only linked, a profile with no avatar (cardAdvice). Reported, like orphans.
+        advice: res.advice,
       });
     }
 
