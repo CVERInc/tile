@@ -1123,7 +1123,7 @@ test('🔴 the committed editor bundle is the one its sources produce', async ()
 
 test('🔴 the stale-bundle stamp covers every file the generator READ, not a hand-kept list', async () => {
   const assets = await import('./edit3-assets.mjs');
-  const { sourceStamp, isOwnOutput } = await import('./edit3-sources.mjs');
+  const { sourceStamp, isOwnOutput, isKeptOut, NOT_IN_EDITOR } = await import('./edit3-sources.mjs');
   const files = assets.SOURCE_FILES;
   const has = (suffix) => files.some((f) => f.endsWith(suffix));
   for (const f of ['hosts/web/modaltile/vendor/editor-core.js', 'core/obsidian-shim.js', 'core/web-host.js', '../../../styles.css',
@@ -1144,12 +1144,23 @@ test('🔴 the stale-bundle stamp covers every file the generator READ, not a ha
   while (todo.length) {
     const f = todo.pop(); if (seen.has(f)) continue; seen.add(f);
     if (isOwnOutput(f, here)) continue;
+    if (isKeptOut(f, here)) continue;   // loaded by import() from its own route and external to the bundle (NOT_IN_EDITOR): not followed
     for (const m of readFileSync(f, 'utf8').matchAll(/(?:from|import)\s*\(?\s*['"](\.{1,2}\/[^'"]+)['"]/g)) todo.push(join(dirname(f), m[1]));
   }
   assert.ok(seen.size > 10, 'the import walk found suspiciously few modules');
   const listed = new Set(files.map((f) => join(here, f)));
-  const missing = [...seen].filter((f) => !listed.has(f) && !isOwnOutput(f, here));
+  const missing = [...seen].filter((f) => !listed.has(f) && !isOwnOutput(f, here) && !isKeptOut(f, here));
   assert.deepEqual(missing, [], 'modules reachable by import from w3/edit3.mjs but not on the stamped list');
+  // 🔴 …and the modules the editor must not carry are neither on the list nor named in the bundle, and
+  // the walk DID reach each (CONTROL: the exclusion is exercised, not vacuous)
+  assert.deepEqual(NOT_IN_EDITOR, ['home-deck.mjs']);
+  for (const f of NOT_IN_EDITOR) {
+    assert.ok(seen.has(join(here, f)), `CONTROL: the import walk reaches ${f}`);
+    assert.ok(!listed.has(join(here, f)), `${f} is a source of the editor bundle — it must stay out of it`);
+    assert.ok(!assets.EDIT3_JS.includes(f), `the editor bundle names ${f}`);
+    // a STATIC import of it from the Worker would put it in the bundle whatever the generator says
+    assert.ok(!new RegExp(`from\\s*['"]\\./${f.replace('.', '\\.')}['"]`).test(readFileSync(join(here, 'card-worker.mjs'), 'utf8')), `card-worker.mjs imports ${f} statically`);
+  }
 });
 
 test('🔴 the previous-output exclusion is an EXACT path, not a basename suffix', async () => {

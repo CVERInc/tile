@@ -98,6 +98,8 @@ Moving:
 Born in the final form:
 
 - **`X-Cards-Serving`**, the response header of `GET /_api/cards/<handle>/full` (and `/_api/card/<handle>/full`): `serving` or `stopped`, whether the public door serves the body that read answered. A caller reads it, so it says Cards. The JSON reads (`GET /_api/cards/<handle>` and each summary of `POST /_api/cards`) carry the same fact as `serving: { stopped: true|false }`. The older header `X-Card-Handle` keeps its spelling until this file names a new one.
+- **`CARDS_HOME_DECK`**, the cardtile worker's setting for the root of the Cards host (`on`: `reef.cards/` is the home deck and `reef.cards/?ref=<handle>` the referral deck). An operator sets it, so it says Cards, like `CARDS_HOST_OPEN`.
+- **`cards-ref`**, the `sessionStorage` key the root of the Cards host keeps a visitor's `?ref=<handle>` under. Another page reads it, so it says Cards.
 
 Planned, not moved:
 

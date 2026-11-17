@@ -6,7 +6,9 @@
 //
 //   card.feelreef.com/<handle>   → handle = first path segment (canonical)
 //   reef.cards/<handle>          → the same; reef.cards/ is the root card (reef#2725, CARD_CANONICAL_HOST;
-//                                  before it, dark or a noindex mirror of the old host — cardsHostStage)
+//                                  before it, dark or a noindex mirror of the old host — cardsHostStage),
+//                                  or, behind CARDS_HOME_DECK, the home deck, and `/?ref=<handle>` the
+//                                  referral deck (homeDeckAnswer, serve/home-deck.mjs)
 //   <creator's own domain>/      → handle via the store's vanity: binding (one domain = one card)
 //   reef.cards/report            → the report door, reef.cards only (reef#2758, card-report.mjs)
 //   /_coral/<coral>-<ver>.js     → a coral client (served here so the page can <script src> it)
@@ -945,6 +947,86 @@ async function openStageAnswer(request, url, env, ctx) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+// ── the root of the Cards host: the home deck and the referral deck (serve/home-deck.mjs) ──────────
+//
+// Behind `CARDS_HOME_DECK = "on"` (homeDeckOn), and only where reef.cards answers at all (the open
+// stage and the cutover): `reef.cards/` is the home deck — a constant, made by the same renderer and
+// deck as any Cards — instead of the stored page of ROOT_HANDLE (or, with none stored, the 404 that
+// every guest's `reef.cards/?ref=<handle>` footer link landed on). Off, nothing here runs.
+//
+// 🔴 OFF IS THE WORKER BEFORE THIS EXISTED, BYTE FOR BYTE, ON EVERY PATH — the sandbox included. The
+// editor's bundle (serve/edit3-assets.mjs) is built from this file's import graph, so anything this
+// file imports statically, and anything in a module it shares with the renderer, is in `/try/edit`
+// whatever the switch says. Therefore:
+//   · serve/home-deck.mjs is loaded HERE, by `import()` inside homeDeckAnswer, and nowhere else: with
+//     the switch off the module is never even evaluated, and the bundle carries none of it;
+//   · the renderer and w3/deck-page.mjs know nothing about the home: homeDeckAnswer asks the renderer
+//     for the flat page and home-deck.mjs makes the deck of it (homeDeckPage);
+//   · home-deck.test.mjs holds every answer of a 252-case grid to a fixture captured from the tree
+//     before this existed (gen-home-deck-off-fixture.mjs).
+//
+//   the switch                      the exact string `on`. No trimming and no case folding: `On`,
+//                                   ` on ` and `true` are off — a typo must not open a public page.
+//   GET/HEAD `/` only, HTML only    every other path, method and a markdown request are answered as
+//                                   they were. (`/<ROOT_HANDLE>` still redirects to `/`, as it did, so
+//                                   it lands on the home deck; the stored root page stays readable as
+//                                   Markdown — `/<ROOT_HANDLE>.md`, or `/` asked for as Markdown.)
+//   `?ref=<handle>`                 lower-cased, then the handle grammar — or it is no ref at all: the
+//                                   raw value reaches nothing (not the page, not the store, not the
+//                                   visitor's sessionStorage). A ref is kept for the tab (deck-page).
+//   the referral deck               only for a handle that is live, not stopped, and IN the exchange:
+//                                   that one switch is what lets the platform quote a name and a
+//                                   picture on a page of its own. Missing, stopped, out and never-said
+//                                   all get the home deck, the same one — nothing here tells them apart.
+//   robots                          the home is indexable (it is ours; robotsTag's root rule) and its
+//                                   canonical is the bare origin under any query. The referral deck is
+//                                   one page per referrer and `noindex`. Open stage: `noindex, nofollow`
+//                                   like every answer of that stage. A stricter header is never weakened.
+//
+//   a host in CARD_PATH_HOSTS       has no root card (pathHosts, card-vanity.mjs), so it has no home
+//                                   deck either: `/` there is answered as it was, switch or no switch.
+//                                   The home deck is the Cards host's alone, so the one listed host this
+//                                   can close it on is the Cards host itself.
+//
+// 🔴 A store that is not bound, or that throws, is the home deck — never a 500 on the front door.
+export const homeDeckOn = (env) => !!env && env.CARDS_HOME_DECK === 'on';
+const homeDeckAsked = (env, url, request) => homeDeckOn(env) && url.pathname === '/'
+  && (request.method === 'GET' || request.method === 'HEAD') && !wantsMarkdown(request)
+  && !pathHosts(env).has(url.hostname);
+
+async function homeDeckAnswer(request, url, env, stage) {
+  // 🔴 the only import of the home's module (see the header above): never at the top of this file
+  const { homeDeckSource, referralDeckSource, homeDeckPage } = await import('./home-deck.mjs');
+  const locale = visitorLocale(url.searchParams, request);
+  const asked = String(url.searchParams.get('ref') ?? '').toLowerCase();
+  // the platform's own page is not a referrer: it is where the visitor already is
+  const ref = VALID_HANDLE.test(asked) && asked !== ROOT_HANDLE ? asked : '';
+  let referrer = null;
+  const store = env && env.CARDS;
+  if (ref && store) {
+    try {
+      const { md, stopped, pooled } = await liveCard(store, ref, { stop: true, pool: true });
+      if (md != null && stopped == null && pooled === POOL_IN) {
+        // the first profile tile is all that is read: above the size tier, through the index (as the avatar exit does)
+        const model = scanCard(md, { limit: ON_DEMAND_TILES }).above ? headModel(md, scanCard(md)) : parseCard(md);
+        referrer = { handle: ref, name: cardName(md, ref), avatar: !!cardAvatar(model) };
+      }
+    } catch { referrer = null; }
+  }
+  const origin = `https://${CARDS_HOST}`;
+  // the sandbox is where this stage serves it: on reef.cards after the cutover, on the old host before
+  const tryUrl = `https://${canonicalHost(env)}${SANDBOX_PATH}`;
+  const source = referrer ? referralDeckSource(locale, { tryUrl }) : homeDeckSource(locale);
+  // the flat page from the renderer (`deck: false`); the home's module makes the deck of it
+  const page = homeDeckPage(
+    renderCardHTML(source, { handle: '', cardUrl: origin, canonicalUrl: origin, deck: false }),
+    { source, kind: referrer ? 'ref' : 'home', ref, referrer, tryUrl },
+  );
+  const own = robotsTag({ env, host: CARDS_HOST, handle: ROOT_HANDLE });
+  const robots = stage === 'open' ? OPEN_STAGE_ROBOTS : own || (referrer ? 'noindex' : null);
+  return html(page, 200, env, ROOT_HANDLE, { host: CARDS_HOST, vanity: false }, false, { ...VARY_VISITOR_LANG, ...(robots ? { 'X-Robots-Tag': robots } : {}) });
+}
+
 const router = {
   // `askedOn` is set by openStageAnswer alone: the host the visitor asked, when this request is its
   // re-addressed twin. The Worker's own entry (the default export) never passes it.
@@ -963,6 +1045,7 @@ const router = {
     if (reqHost === CARDS_HOST) {
       const stage = cardsHostStage(env);
       if (stage === 'dark') return NOT_RELAYED();
+      if (homeDeckAsked(env, url, request)) return homeDeckAnswer(request, url, env, stage);
       if (stage === 'open') return openStageMirrors(url.pathname, request.method) ? openStageAnswer(request, url, env, ctx) : NOT_RELAYED();
     }
 
