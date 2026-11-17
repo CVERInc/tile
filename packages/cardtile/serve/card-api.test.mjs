@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { handleApi as handleApiAsWritten, previewKey, goneKey, liveCard, cardKey, stopKey, poolKey, genKey, vanityKey, vanityOfKey, vanityBindKey, bindVanity, HostBindings, CardLifetime, ENDED_KEEP_MS, TICKET_TTL_MS, PREVIEW_TTL, _internal } from './card-api.mjs';
 import worker from './card-worker.mjs';
-import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets } from '../card-save.mjs';
+import { assembleSave, thinCard, assetManifest, cardVersion, referencedAssets, cardAdvice } from '../card-save.mjs';
 import { parseCard, serializeCard } from '../card-core.js';
 import { twinned, asCalled, onCards } from './api-prefix-twin.mjs';
 // every `/_api/card/…` request below goes to `/_api/cards/…` instead when card-api-cards-twin.test.mjs runs this file
@@ -717,6 +717,66 @@ test('assembleSave IGNORES an assets lane the caller sent — the store is the s
   const { md } = assembleSave(forged, CARD);
   assert.ok(md.includes(GIF), "the caller's bytes won");
   assert.ok(!md.includes(FORGED));
+});
+
+// ── advice: what a save or a preview says about the card it was handed ───────────────────────────────
+//
+// A card was saved with no avatar, eight pictures linked from another site (one of them not
+// loading), and — on the way to repairing it — a preview whose pictures pointed at ids the store did
+// not hold. Every one of those answered 200 and said nothing. Advice is reported, never enforced:
+// each of the three is something a creator may mean.
+
+const cardOf = (...cells) => ['---', 'card-page: t', 'title: Tester', '---', '', '## grid', '', ...cells, ''].join('\n');
+const codes = (advice) => advice.map((a) => a.code);
+
+test('🔴 advice: a picture id the card points at and the store does not hold is named', () => {
+  const md = cardOf('- [ ] %% card: profile w=6 avatar=asset:face %% hi', '- [ ] %% card: feature w=6 img=asset:gone %%');
+  const advice = cardAdvice(parseCard(md), { face: { mime: 'image/gif', b64: GIF } });
+  const missing = advice.find((a) => a.code === 'missing_assets');
+  assert.deepEqual(missing.ids, ['gone']);
+  assert.match(missing.say, /draws nothing/);
+  // CONTROL: once it is stored, the same card gets no such row
+  assert.equal(codes(cardAdvice(parseCard(md), { face: { mime: 'image/gif', b64: GIF }, gone: { mime: 'image/gif', b64: GIF } })).includes('missing_assets'), false);
+});
+
+test('🔴 advice: a picture that is only linked is named, by the cell and param that link it', () => {
+  const md = cardOf(
+    '- [ ] %% card: profile w=6 avatar=https://elsewhere.example/me.png %% hi',
+    '- [ ] %% card: slides w=6 images=https://elsewhere.example/a.png,asset:kept,https://elsewhere.example/b.png %%',
+    '- [ ] %% card: link w=3 %% [Site](https://example.com)',
+  );
+  const linked = cardAdvice(parseCard(md), { kept: { mime: 'image/gif', b64: GIF } }).find((a) => a.code === 'linked_pictures');
+  assert.deepEqual(linked.where, [
+    { cell: 'profile', param: 'avatar', url: 'https://elsewhere.example/me.png' },
+    { cell: 'slides', param: 'images', url: 'https://elsewhere.example/a.png' },
+    { cell: 'slides', param: 'images', url: 'https://elsewhere.example/b.png' },
+  ]);
+  assert.match(linked.say, /not stored/);
+  // CONTROL: a link cell's own address is a destination, not a picture
+  assert.equal(linked.where.some((w) => w.url === 'https://example.com'), false);
+});
+
+test('🔴 advice: a profile with no avatar is named; one with an avatar, and a card with no profile, are not', () => {
+  const none = cardAdvice(parseCard(cardOf('- [ ] %% card: profile w=6 %% hi')), {});
+  assert.deepEqual(codes(none), ['no_avatar']);
+  assert.match(none[0].say, /avatar=/);
+  assert.deepEqual(cardAdvice(parseCard(cardOf('- [ ] %% card: profile w=6 avatar=asset:face %% hi')), { face: { mime: 'image/gif', b64: GIF } }), []);
+  assert.deepEqual(cardAdvice(parseCard(cardOf('- [ ] %% card: link w=3 %% [Site](https://example.com)')), {}), []);
+});
+
+test('advice rides a dry run, a save and a preview — and a card with nothing to say answers an empty list', async () => {
+  const env = envWith({ t: CARD });
+  const bare = thinCard(CARD).replace(' avatar="asset:pic"', '');
+  assert.notEqual(bare, thinCard(CARD), 'the fixture no longer carries the avatar this test removes');
+  const dry = await (await call(env, 'PUT', '/_api/card/t', { markdown: bare, dry_run: true })).json();
+  assert.deepEqual(codes(dry.advice), ['no_avatar']);
+  const preview = await (await call(env, 'POST', '/_api/preview', { handle: 't', markdown: bare })).json();
+  assert.deepEqual(codes(preview.advice), ['no_avatar']);
+  const saved = await (await call(env, 'PUT', '/_api/card/t', { markdown: bare })).json();
+  assert.deepEqual(codes(saved.advice), ['no_avatar']);
+  // CONTROL: the card as it was
+  const back = await (await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD) })).json();
+  assert.deepEqual(back.advice, []);
 });
 
 test('thinCard is idempotent and assetManifest counts decoded bytes', () => {

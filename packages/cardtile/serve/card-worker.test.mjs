@@ -5,6 +5,7 @@ import test from 'node:test';
 import worker, { resolveHandle, renderCardHTML } from './card-worker.mjs';
 // reef#2725's tests reach new exports through the namespace, so each goes red on its own assertion
 import * as W from './card-worker.mjs';
+import { pathHosts } from './card-vanity.mjs';
 import { BLANKS } from '../ai-ops.mjs';
 import { QR_VERSION, QR_JS, DRAWER_VERSION, DRAWER_JS, CSS } from './card-assets.mjs';
 import { readFileSync, existsSync } from 'node:fs';
@@ -53,6 +54,41 @@ test('🔴 resolveHandle: a path names a card on our hosts only; a creator domai
   }
   for (const host of ['card.inkbrush.com', 'former.example', 'feelreef.com.evil.example', 'workers.dev.example']) {
     for (const path of ['/inkbrush', '/inkbrush.md', '/inkbrush/favicon.ico']) assert.equal(resolveHandle(host, path), null, host + path);
+  }
+});
+
+test('pathHosts: reads CARD_PATH_HOSTS; only well-formed names under a platform zone count', () => {
+  assert.equal(pathHosts({}).size, 0);
+  assert.equal(pathHosts(undefined).size, 0);
+  assert.equal(pathHosts({ CARD_PATH_HOSTS: '' }).size, 0);
+  assert.deepEqual([...pathHosts({ CARD_PATH_HOSTS: ' Cards-Alt.feelreef.com:8787, x.reef.cards  alt.workers.dev ,,' })],
+    ['cards-alt.feelreef.com', 'x.reef.cards', 'alt.workers.dev']);
+  assert.ok(Object.isFrozen(pathHosts({ CARD_PATH_HOSTS: 'x.reef.cards' })));
+  for (const bad of ['card.example.com', 'feelreef.com.evil.example', 'workers.dev.example', '10.0.0.1', '127.0.0.1', 'localhost', 'x',
+    'bad_name.feelreef.com', '-a.reef.cards', 'a..reef.cards', 'https://cards-alt.feelreef.com', 'x.reef.cards/path', 'x.reef.cards.', '[::1]', '.reef.cards']) {
+    assert.equal(pathHosts({ CARD_PATH_HOSTS: bad }).size, 0, bad);
+  }
+  assert.deepEqual([...pathHosts({ CARD_PATH_HOSTS: 'card.example.com x.reef.cards 1.2.3.4 localhost' })], ['x.reef.cards']);
+});
+
+test('routesByPath / resolveHandle: a host in the extra set routes by path; with no set, nothing changes', () => {
+  const extra = pathHosts({ CARD_PATH_HOSTS: 'cards-alt.feelreef.com' });
+  assert.equal(W.routesByPath('cards-alt.feelreef.com'), false);
+  assert.equal(W.routesByPath('cards-alt.feelreef.com', extra), true);
+  assert.deepEqual(resolveHandle('cards-alt.feelreef.com', '/inkbrush', {}, extra),
+    { handle: 'inkbrush', cardUrl: 'https://cards-alt.feelreef.com/inkbrush' });
+  assert.equal(resolveHandle('cards-alt.feelreef.com', '/', {}, extra), null);   // no root card, like saas.feelreef.com
+  assert.equal(resolveHandle('cards-alt.feelreef.com', '/inkbrush'), null);
+  assert.equal(resolveHandle('other.feelreef.com', '/inkbrush', {}, extra), null);
+  // every host the tables above use answers as before with no set, an empty set, or a set naming another host
+  for (const e of [undefined, new Set(), pathHosts({}), pathHosts({ CARD_PATH_HOSTS: 'card.example.com' }), extra]) {
+    for (const host of ['card.feelreef.com', 'saas.feelreef.com', 'reef.cards', 'cardtile-preview.acct.workers.dev', 'localhost:8787', 'x', '127.0.0.1',
+      'card.inkbrush.com', 'former.example', 'feelreef.com.evil.example', 'workers.dev.example']) {
+      for (const path of ['/', '/inkbrush', '/inkbrush.md', '/inkbrush/favicon.ico']) {
+        assert.deepEqual(resolveHandle(host, path, {}, e), resolveHandle(host, path), host + path);
+      }
+      assert.equal(W.routesByPath(host, e), W.routesByPath(host), host);
+    }
   }
 });
 
@@ -1375,6 +1411,55 @@ test('Card not-found pages and missing icons carry the same host-aware noindex r
       const res = await worker.fetch(new Request(url, init), env);
       assert.equal(res.status, 404, url);
       assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
+    }
+  }
+});
+
+test('CARD_PATH_HOSTS: a listed platform-zone host serves Cards by path like the fallback origin; nothing else changes', async () => {
+  const host = 'cards-alt.feelreef.com';
+  const on = () => ({ PREVIEW: 'false', CARD_PATH_HOSTS: host, CARDS: recordingStore({ t: SERVING_CARD }) });
+  const off = () => ({ PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }) });
+  for (const [url, init] of servingRequests(host)) {
+    const res = await worker.fetch(new Request(url, init), on());
+    assert.equal(res.status, 200, url);
+    assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow', url);
+  }
+  // bare root and an unknown handle: the same nothing-here page the fallback origin answers, never the small 404
+  for (const path of ['/', '/nothing', '/nothing.md']) {
+    const got = await worker.fetch(new Request(`https://${host}${path}`), on());
+    const ref = await worker.fetch(new Request(`https://saas.feelreef.com${path}`), off());
+    assert.equal(got.status, 404, path);
+    assert.equal(got.status, ref.status, path);
+    assert.equal(await got.text(), await ref.text(), path);
+    assert.equal(got.headers.get('x-robots-tag'), 'noindex, nofollow', path);
+    assert.equal(got.headers.get('x-robots-tag'), ref.headers.get('x-robots-tag'), path);
+  }
+  // no root card on it, and the card's own address is on this host
+  const root = await worker.fetch(new Request(`https://${host}/feelreef`), { PREVIEW: 'false', CARD_PATH_HOSTS: host, CARDS: recordingStore() });
+  assert.equal(root.status, 404);
+  const page = await (await worker.fetch(new Request(`https://${host}/t`), on())).text();
+  assert.ok(page.includes(`https://${host}/t`));
+  // a host the var does not name still gets the small 404 (the var names one host only)
+  const other = await worker.fetch(new Request('https://cards-other.feelreef.com/t'), on());
+  assert.equal(other.status, 404);
+  assert.doesNotMatch(await other.text(), /Test Card/);
+  // creator domains, IPs, dotless names and malformed entries in the var change nothing
+  for (const bad of ['unbound.example', 'card.example.com', '10.0.0.1', 'x', 'bad_name.feelreef.com']) {
+    const env = { PREVIEW: 'false', CARD_PATH_HOSTS: bad, CARDS: recordingStore({ t: SERVING_CARD }) };
+    const res = await worker.fetch(new Request(`https://${bad}/t`), env);
+    const ref = await worker.fetch(new Request(`https://${bad}/t`), { PREVIEW: 'false', CARDS: recordingStore({ t: SERVING_CARD }) });
+    assert.equal(res.status, ref.status, bad);
+    assert.equal(await res.text(), await ref.text(), bad);
+  }
+});
+
+test('CARD_PATH_HOSTS unset, empty or naming another host: a platform-zone host outside the built-in list answers the small 404', async () => {
+  for (const vars of [{}, { CARD_PATH_HOSTS: '' }, { CARD_PATH_HOSTS: 'cards-other.feelreef.com' }]) {
+    const env = { PREVIEW: 'false', ...vars, CARDS: recordingStore({ t: SERVING_CARD }) };
+    for (const path of ['/t', '/', '/nothing']) {
+      const res = await worker.fetch(new Request('https://cards-alt.feelreef.com' + path), env);
+      assert.equal(res.status, 404, path);
+      assert.doesNotMatch(await res.text(), /Test Card/, path);
     }
   }
 });

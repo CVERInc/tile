@@ -41,6 +41,7 @@ PREVIEW = "true"          # → X-Robots-Tag: noindex (a preview must never outr
 # CARD_NOINDEX_ALL = "1"  # kill switch (reef#2044): uncomment/set to put `X-Robots-Tag: noindex` on EVERY
 #                         # card response, vanity hosts included. Default off. Per-environment: set it under
 #                         # [env.production.vars] too. Remove it (or "0") to resume indexing.
+# CARD_PATH_HOSTS = "cards-alt.feelreef.com"  # extra hosts that route by path like the fallback origin; comma- or space-separated; only names under feelreef.com, reef.cards or workers.dev count. Default empty.
 
 # card store (card:<handle>:<gen> → card.md). Create it once (see the header) and paste its id here.
 [[kv_namespaces]]

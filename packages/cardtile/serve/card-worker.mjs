@@ -134,7 +134,7 @@ async function relayAvatar(ctx, upstreamUrl) {
   return resp;
 }
 import { handleApi, previewKey, generationOf, isCurrentGen, liveCard, liveStop, POOL_IN, POOL_OUT, vanityKey, isBound, boundHostOf, hostOwner, tryKey, TRY_TTL, TRY_MAX_BYTES, VALID_HANDLE } from './card-api.mjs';
-import { vanityHost } from './card-vanity.mjs';
+import { vanityHost, pathHosts } from './card-vanity.mjs';
 import { EDIT3_BODY_HTML, EDIT3_BASE_CSS, EDIT3_CSS, EDIT3_JS, BORROWED, FONT_FILES } from './edit3-assets.mjs';
 import { DECK_CSS, DECK_JS } from './deck-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
@@ -269,8 +269,8 @@ const MOVED_CACHE = 'public, max-age=86400';
  * card, on every path. Before this, a domain whose binding was removed fell through to path routing,
  * so `<former-domain>/<handle>` served whoever owned that handle next.
  */
-export const routesByPath = (host) =>
-  !host || host === CANON_HOST || host === CARDS_HOST || host === FALLBACK_HOST || host.endsWith('.workers.dev')
+export const routesByPath = (host, extra = new Set()) =>
+  !host || extra.has(host) || host === CANON_HOST || host === CARDS_HOST || host === FALLBACK_HOST || host.endsWith('.workers.dev')
   || !host.includes('.') || host === '127.0.0.1';
 
 // reef#2725: on reef.cards the bare root, `/<ROOT_HANDLE>` and the origin-level icon files are the
@@ -282,11 +282,11 @@ const hasRootCard = (host) => host === CARDS_HOST || host === CANON_HOST;
 const isRootPath = (host, seg) =>
   hasRootCard(host) && (!seg || seg.toLowerCase() === ROOT_HANDLE || !!iconKind('/' + seg));
 
-export function resolveHandle(host, pathname, vanity = {}) {
+export function resolveHandle(host, pathname, vanity = {}, extra = new Set()) {
   host = (host || '').toLowerCase().replace(/:\d+$/, '');
   const seg = (pathname || '/').replace(/^\/+|\/+$/g, '').split('/')[0] || '';
   if (vanity[host]) return { handle: vanity[host], cardUrl: 'https://' + host };            // vanity domain = one card
-  if (!routesByPath(host)) return null;                                                       // a creator's domain, unbound → nothing
+  if (!routesByPath(host, extra)) return null;                                                // a creator's domain, unbound → nothing
   if (isRootPath(host, seg)) return { handle: ROOT_HANDLE, cardUrl: 'https://' + host, root: true };
   if (seg) return { handle: seg.toLowerCase(), cardUrl: 'https://' + (host || CANON_HOST) + '/' + seg.toLowerCase() };
   return null;                                                                                // canonical host, no handle → directory
@@ -1334,7 +1334,8 @@ const router = {
     // 🔴 Only a host the vanity route could have bound is looked up (vanityHost): a hand-written key for
     // saas.feelreef.com (the SaaS fallback origin every creator domain arrives through) or for an IP
     // would otherwise turn platform plumbing into one creator's page. Our own hosts never look.
-    const bindable = !!host && !routesByPath(host) && !!vanityHost(host);
+    const extraHosts = pathHosts(env);
+    const bindable = !!host && !routesByPath(host, extraHosts) && !!vanityHost(host);
     let pointer = bindable ? await store.get(VANITY_KEY(host)) : null;
     // 🔴 r9: `vanity:<host>` is HostBindings' write-through cache, so a MISS on a creator's domain may be
     // a put that failed after the bind was accepted: ask the host's object, once (card-api hostOwner)
@@ -1345,10 +1346,10 @@ const router = {
     const boundGen = pointer != null ? await generationOf(store, pointer) : null;
     const vanityHandle = boundGen != null && (await isBound(store, pointer, boundGen, host)) ? pointer : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
-      vanityHandle ? { [host]: vanityHandle } : {});
+      vanityHandle ? { [host]: vanityHandle } : {}, extraHosts);
     // a host of ours with no root card and no handle in the path: the nothing-here page. An unbound
     // creator's domain keeps the small 404 (see SMALL_404) — it is not our door to put our page on.
-    if (!resolved) return routesByPath(host) ? notFound(env, '', {}, who) : html(SMALL_404, 404, env);
+    if (!resolved) return routesByPath(host, extraHosts) ? notFound(env, '', {}, who) : html(SMALL_404, 404, env);
 
     // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
     // Card exits read the body and stop marker in parallel before any exit or redirect.
@@ -1391,7 +1392,7 @@ const router = {
     const cardMd = stopped != null ? null : liveMd;
     // An absent card on a creator's host has no public binding, even when a pointer remains.
     // Use the unbound response, including its robots headers, on every card exit.
-    if (cardMd == null && !routesByPath(host)) return html(SMALL_404, 404, env);
+    if (cardMd == null && !routesByPath(host, extraHosts)) return html(SMALL_404, 404, env);
     // Missing and stopped shared-host identities perform the same ordered reads, including
     // the legacy deletion marker. Its value never changes the public absence response.
     if (cardMd == null) await store.get(`gone:${resolved.handle}`);
