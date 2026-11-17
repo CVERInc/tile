@@ -227,7 +227,11 @@ export function homeDeckPage(html, { ref = '', referrer = null, year = new Date(
   const b = page.indexOf('<body');
   if (b < 0) return page;
   const who = referrer && HANDLE.test(referrer.handle) ? referrer : null;
-  const name = who ? esc(shortName(who.name) || who.handle) : '';
+  // The name may break ANYWHERE: a name that is one unbroken word — a 63-character handle whose file
+  // has no title is enough — otherwise runs past the tile's edge and is cut there in every view, and
+  // with scripts off the page scrolls sideways (seen in a browser, 390 and 1280 wide). The rule is on
+  // the element, like the picture's size: no stylesheet rule reaches a text tile's sentence.
+  const name = who ? `<span class="ref-name" style="overflow-wrap:anywhere">${esc(shortName(who.name) || who.handle)}</span>` : '';
   // 28 px beside the sentence: the size is on the element, since no stylesheet rule reaches a text tile's picture
   const avatar = who && who.avatar
     ? `<img class="ref-av" src="/${who.handle}/avatar" alt="" width="28" height="28" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:-8px;margin-right:8px">`

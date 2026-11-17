@@ -218,7 +218,7 @@ test('ON: /?ref=<a live handle in the exchange> is the referral deck — its fou
 test('ON: the referral deck names the referrer as text — nothing in their title becomes markup, a link or emphasis', async () => {
   const r = await on('/?ref=aster');
   const esc = EVIL_TITLE.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  assert.ok(r.body.includes(`${esc}的那一頁，就是用這個做的。`), 'the title, escaped, in the ruled sentence');
+  assert.ok(r.body.includes(`>${esc}</span>的那一頁，就是用這個做的。`), 'the title, escaped, in the ruled sentence');
   assert.ok(!r.body.includes('<script>alert(1)</script>'));
   assert.ok(!/<b>&/.test(r.body) && !/<strong>bold<\/strong>/.test(r.body), 'the title was read as HTML or Markdown');
   assert.ok(!/href="javascript:/i.test(r.body));
@@ -234,7 +234,31 @@ test('ON: the referrer\'s picture is their own avatar address, and is absent whe
   const without = await on('/?ref=plain');
   assert.match(rootTag(without.body), / data-reef-ref[ >]/, 'CONTROL: this is the referral deck');
   assert.ok(!/<img class="ref-av"/.test(without.body));
-  assert.ok(without.body.includes('Plain的那一頁，就是用這個做的。'));
+  assert.ok(without.body.includes('>Plain</span>的那一頁，就是用這個做的。'));
+});
+// Seen in a real browser (Chromium, 390 and 1280 wide): a name that is one unbroken word ran past the
+// tile's edge and was cut there, in the pile, the row and the wall; with scripts off the page scrolled
+// sideways. The longest such word needs nobody's bad will: a 63-character handle whose file has no title.
+test('ON: a referrer\'s name that is one unbroken word can break inside its tile — the name sits in an element that lets it', async () => {
+  const MAX = `m${'abcdefghij'.repeat(6)}xy`;
+  assert.equal(MAX.length, 63, 'CONTROL: the longest handle the grammar allows');
+  const WORD = 'Supercalifragilisticexpialidocious'.repeat(2);   // under the name's 80 code points: not shortened
+  const untitled = cardsFile('x').replace('title: x\n', '');
+  assert.ok(!/^title:/m.test(untitled), 'CONTROL: this file has no title');
+  const seed = { [MAX]: untitled, ...POOL(MAX, 'in'), oneword: cardsFile(WORD), ...POOL('oneword', 'in'), aster: SEED.aster, ...POOL('aster', 'in') };
+  const WRAPS = '<span class="ref-name" style="overflow-wrap:anywhere">';
+  for (const [handle, name] of [[MAX, MAX], ['oneword', WORD]]) {
+    const r = await on(`/?ref=${handle}`, { seed });
+    assert.match(rootTag(r.body), / data-reef-ref[ >]/, `CONTROL: ${handle} gets the referral deck`);
+    assert.ok(bodyOf(r.body).includes(`${WRAPS}${name}</span>的那一頁，就是用這個做的。`), `${handle}: the name is not in an element that may break anywhere`);
+    assert.equal(bodyOf(r.body).split(WRAPS).length - 1, 1, `${handle}: the name is drawn once`);
+  }
+  // what is inside is still the escaped title and nothing else
+  const evil = await on('/?ref=aster', { seed });
+  const inside = new RegExp(`${WRAPS}([^<]*)</span>`).exec(bodyOf(evil.body));
+  assert.ok(inside && inside[1].startsWith('Aster &lt;b&gt;&amp;&quot;&#39;&lt;/b&gt;'), 'the element holds the escaped title as text');
+  // the home deck names nobody
+  assert.ok(!(await on('/')).body.includes('ref-name'));
 });
 test('ON: the referral deck is not indexed, names the home as canonical, and links back to the referrer', async () => {
   const r = await on('/?ref=aster');
