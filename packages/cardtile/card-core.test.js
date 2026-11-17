@@ -101,6 +101,112 @@ test('packGrid: w wider than cols is clamped to cols', () => {
   assert.equal(packGrid({ ...m, cols: 2 }).placements[0].w, 2, 'w=3 clamped to cols=2');
 });
 
+// ── packGrid at size (tile#362) ────────────────────────────────────────────────────────────────
+// packGrid used to stop searching past row 10,000 and leave the cell out of `placements` without
+// saying so. The renderer iterates `placements`, so those cells were missing from the page.
+const spanCell = (w, h) => ({ type: 'text', params: { ...(w ? { w: String(w) } : {}), ...(h ? { h: String(h) } : {}) }, rawParams: '', body: '' });
+
+const assertPackedWhole = (g, n) => {
+  assert.equal(g.placements.length, n, `${g.placements.length} of ${n} cells placed`);
+  const occupied = new Set();
+  g.placements.forEach((p, i) => {
+    assert.equal(p.index, i, 'placements are in cell order, one per cell');
+    for (let dr = 0; dr < p.h; dr++) for (let dc = 0; dc < p.w; dc++) {
+      const key = (p.row + dr) * g.cols + (p.col + dc);
+      assert.ok(p.col + dc < g.cols && p.row + dr < g.rows, 'inside the grid');
+      assert.ok(!occupied.has(key), 'overlap at row ' + (p.row + dr));
+      occupied.add(key);
+    }
+  });
+};
+
+test('packGrid places every one of 40,000 width-2 cells (it stopped at 30,003, row 10,000)', () => {
+  const n = 40000;
+  const g = packGrid({ cells: Array.from({ length: n }, () => spanCell(2)), cols: 6 });
+  assertPackedWhole(g, n);
+  assert.equal(g.rows, Math.ceil(n / 3), 'three width-2 cells to a six-column row');
+  assert.deepEqual([g.placements[n - 1].row, g.placements[n - 1].col], [13333, 0]);
+});
+
+test('packGrid places every cell past row 10,000 when cells are tall, not only when there are many', () => {
+  // 2,000 full-width h=6 cells = 12,000 rows: under the 5,000-cell mark, still past the old cap
+  const n = 2000;
+  const g = packGrid({ cells: Array.from({ length: n }, () => spanCell(6, 6)), cols: 6 });
+  assertPackedWhole(g, n);
+  assert.equal(g.rows, 6 * n);
+});
+
+// The old loop, verbatim (row cap included — no input below reaches it). It is the definition
+// of where a cell goes; the new packGrid has to agree with it cell for cell, and on `rows`.
+function packGridBefore362(model) {
+  const cols = Math.max(1, model.cols || 6);
+  const occ = [];
+  const ensureRow = (r) => { while (occ.length <= r) occ.push(new Array(cols).fill(false)); };
+  const fits = (r, c, w, h) => {
+    if (c + w > cols) return false;
+    for (let dr = 0; dr < h; dr++) { ensureRow(r + dr); for (let dc = 0; dc < w; dc++) if (occ[r + dr][c + dc]) return false; }
+    return true;
+  };
+  const mark = (r, c, w, h) => { for (let dr = 0; dr < h; dr++) { ensureRow(r + dr); for (let dc = 0; dc < w; dc++) occ[r + dr][c + dc] = true; } };
+  const placements = [];
+  (model.cells || []).forEach((cell, index) => {
+    const w = Math.min(clampSpan(cell.params.w, 6), cols);
+    const h = clampSpan(cell.params.h, 6);
+    let r = 0, done = false;
+    while (!done) {
+      ensureRow(r);
+      for (let c = 0; c < cols; c++) {
+        if (fits(r, c, w, h)) { mark(r, c, w, h); placements.push({ cell, index, row: r, col: c, w, h, type: cell.type }); done = true; break; }
+      }
+      r++;
+      if (r > 10000) { done = true; }
+    }
+  });
+  return { placements, rows: occ.length, cols };
+}
+
+test('packGrid puts every cell exactly where the old first-fit loop did (holes are back-filled, not a skyline)', () => {
+  const same = (model, label) => assert.deepEqual(packGrid(model), packGridBefore362(model), label);
+  // every card in the repository the engine has fixtures for
+  same(parseCard(MD), 'MD');
+  same({ ...parseCard(MD), cols: 3 }, 'MD in three columns');
+  same({ cells: [] }, 'empty');
+  // a hole above a tall cell that a later small cell fills: a per-column-height packer gets this wrong
+  const holes = { cells: [spanCell(4), spanCell(1, 3), spanCell(2), spanCell(1), spanCell(1)], cols: 6 };
+  same(holes, 'back-fill');
+  assert.deepEqual(packGrid(holes).placements.map((p) => [p.row, p.col]), [[0, 0], [0, 4], [1, 0], [0, 5], [1, 2]]);
+  // seeded random models: mixed widths and heights, unparseable spans, 1 to 9 columns
+  let s = 362;
+  const rnd = () => ((s = (s * 1103515245 + 12345) >>> 0) / 2 ** 32);
+  for (let k = 0; k < 400; k++) {
+    const cols = 1 + Math.floor(rnd() * 9);
+    const cells = Array.from({ length: 1 + Math.floor(rnd() * 150) }, () => {
+      const c = spanCell(rnd() < 0.85 ? 1 + Math.floor(rnd() * 7) : 0, rnd() < 0.4 ? 1 + Math.floor(rnd() * 4) : 0);
+      if (rnd() < 0.03) c.params.w = 'wide';
+      return c;
+    });
+    same({ cells, cols }, 'random model ' + k);
+  }
+});
+
+// A wall-clock bound, so it is generous: on main these took 133 ms and 2,184 ms on the shared
+// test machine, and with the per-shape cursor 0.5 ms and 4.2 ms. The bound fails a quadratic pack
+// at 20,000 by an order of magnitude and leaves a linear one two orders of headroom. Best of three,
+// so one unlucky scheduling slice does not fail it.
+test('packGrid packs 5,000 cells in under 40 ms and 20,000 in under 200 ms (it was quadratic)', () => {
+  for (const [n, bound] of [[5000, 40], [20000, 200]]) {
+    const cells = Array.from({ length: n }, (_, i) => spanCell(1 + (i % 3)));
+    let best = Infinity;
+    for (let run = 0; run < 3; run++) {
+      const t0 = performance.now();
+      const g = packGrid({ cells, cols: 6 });
+      best = Math.min(best, performance.now() - t0);
+      assert.equal(g.placements.length, n);
+    }
+    assert.ok(best < bound, `${n} cells took ${best.toFixed(1)} ms (bound ${bound} ms)`);
+  }
+});
+
 // ── round-trip (idempotent) + reorder ────────────────────────────────────────────────────────────
 test('serialize(parse) is a stable fixpoint (idempotent)', () => {
   const once = serializeCard(parseCard(MD));
