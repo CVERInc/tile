@@ -677,6 +677,93 @@ test('CARDTILE_PICTURES=url: a window decodes and hashes only the pictures its o
   } finally { globalThis.atob = realAtob; }
 });
 
+// tile#355 / tile#357 — channel resolution has its own share of the page view's subrequests
+// (picture-cache.mjs CHANNEL_SUBREQUESTS) and one memory per isolate (yt-channels.mjs keptChannels). A
+// window is one page view: it resolves the channels its own video tiles name, and no others, within that
+// same share and from that same memory.
+test('🔴 a window naming 40 channels resolves only its own, within the channel share, and uses the memory every page view uses', async (t) => {
+  const SHARE = 30;   // CHANNEL_SUBREQUESTS, written out; held to the export at the end
+  const chan = (tag, i) => { const k = `${tag}${i}`; return { id: `UC${k.padStart(22, '0')}`, video: k.padStart(11, 'v') }; };
+  const first = [chan('one', 0), chan('one', 1)];                       // window 1
+  const mine = Array.from({ length: 40 }, (_, i) => chan('two', i));    // window 2
+  const later = Array.from({ length: 5 }, (_, i) => chan('six', i));    // window 6
+  const at = new Map([...first.map((c, i) => [100 + i, c]), ...mine.map((c, i) => [1200 + i, c]), ...later.map((c, i) => [5500 + i, c])]);
+  const video = (c) => `- [ ] %% card: video channel=${c.id} %%`;
+  const md = ['---', 'title: Long', '---', '', '## grid', '', ...Array.from({ length: 6000 }, (_, i) => (at.has(i) ? video(at.get(i)) : T(`n${i}`))), ''].join('\n');
+  // YouTube as it answers for these channels (yt.mjs): the uploads-playlist oEmbed names the latest video,
+  // that video's oEmbed its title; each answer dated, as an edge copy is. Every fetch is counted.
+  const all = [...first, ...mine, ...later, ...Array.from({ length: 15 }, (_, i) => chan('new', i))];
+  const byId = new Map(all.map((c) => [c.id, c])), byVideo = new Map(all.map((c) => [c.video, c]));
+  const uploadsAsked = (u) => { const m = /^https:\/\/www\.youtube\.com\/oembed\?.*list%3DUU([\w-]{22})$/.exec(u); return m ? `UC${m[1]}` : null; };
+  const fetched = [];
+  const before = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    const url = String(u && u.url ? u.url : u);
+    fetched.push(url);
+    const headers = { date: new Date().toUTCString() };
+    const up = byId.get(uploadsAsked(url));
+    if (up) return Response.json({ title: 'Uploads', thumbnail_url: `https://i.ytimg.com/vi/${up.video}/hqdefault.jpg` }, { headers });
+    const v = /^https:\/\/www\.youtube\.com\/oembed\?.*watch%3Fv%3D([\w-]{11})$/.exec(url);
+    if (v && byVideo.has(v[1])) return Response.json({ title: `Latest ${v[1]}` }, { headers });
+    return new Response('', { status: 404 });
+  };
+  t.after(() => { globalThis.fetch = before; });
+  const resolved = (html, c) => html.includes(`data-yt="${c.video}"`);
+  const degraded = (html, c) => html.includes(`data-yt-channel="${c.id}"`);
+  const drawn = (html, c) => resolved(html, c) || degraded(html, c);
+  const view = async (env, url) => {
+    const from = fetched.length;
+    const r = await ask(env, url);
+    assert.equal(r.status, 200, url);
+    const urls = fetched.slice(from);
+    return { html: await r.text(), spent: urls.length, asked: urls.map(uploadsAsked).filter(Boolean) };
+  };
+  const env = envOf(md);
+  const W2 = `https://${OWN}/?w=2`;
+
+  // the first view of window 2: the whole share, on the first 15 channels it names, and on no other window's
+  const a = await view(env, W2);
+  assert.ok(mine.every((c) => drawn(a.html, c)) && ![...first, ...later].some((c) => drawn(a.html, c)), 'CONTROL: window 2 draws its own 40 video tiles and no other window\'s');
+  assert.equal(a.spent, SHARE, `the window made ${a.spent} YouTube fetches; the share is ${SHARE}`);
+  assert.deepEqual(a.asked, mine.slice(0, 15).map((c) => c.id), 'the window did not ask for exactly the first 15 channels it names');
+  assert.deepEqual(mine.map((c) => resolved(a.html, c)), mine.map((_, i) => i < 15), 'not exactly the first 15 are drawn resolved');
+  assert.ok(mine.slice(15).every((c) => degraded(a.html, c)), 'a channel past the share is not drawn in the degraded state');
+
+  // the second and third: what is remembered costs nothing, so the share goes to the next ones
+  const b = await view(env, W2);
+  assert.equal(b.spent, SHARE);
+  assert.deepEqual(b.asked, mine.slice(15, 30).map((c) => c.id), 'the second view did not spend its share on the next 15');
+  assert.deepEqual(mine.map((c) => resolved(b.html, c)), mine.map((_, i) => i < 30));
+  const c3 = await view(env, W2);
+  assert.deepEqual(c3.asked, mine.slice(30).map((c) => c.id));
+  assert.equal(c3.spent, 20);
+  assert.ok(mine.every((c) => resolved(c3.html, c)), 'after three views a channel of the window is still unresolved');
+  const d = await view(env, W2);
+  assert.equal(d.spent, 0, 'a window whose channels are all remembered fetched again');
+  assert.ok(mine.every((c) => resolved(d.html, c)));
+
+  // a window within the share: every channel fetched on every view, as a small page does (memory is not read)
+  for (const [url, own] of [[`https://${OWN}/`, first], [`https://${OWN}/?w=6`, later]]) {
+    for (const round of [1, 2]) {
+      const w = await view(env, url);
+      assert.deepEqual(w.asked, own.map((c) => c.id), `${url}, view ${round}`);
+      assert.equal(w.spent, 2 * own.length, `${url}, view ${round}`);
+      assert.ok(own.every((c) => resolved(w.html, c)));
+    }
+  }
+
+  // one memory: a small page (16 channels, one past the share) naming a channel the window resolved is
+  // answered for it from memory, and spends its share on its other 15
+  const fresh = all.slice(-15);
+  const small = ['---', 'title: Small', '---', '', '## grid', '', video(mine[0]), ...fresh.map(video), ''].join('\n');
+  const s = await view(envOf(small), `https://${OWN}/`);
+  assert.deepEqual(s.asked, fresh.map((c) => c.id), 'the small page asked again for a channel the window had resolved, or left one of its own out');
+  assert.equal(s.spent, SHARE);
+  assert.ok([mine[0], ...fresh].every((c) => resolved(s.html, c)));
+
+  assert.equal((await import('./picture-cache.mjs')).CHANNEL_SUBREQUESTS, SHARE, 'the share this test wrote out is not the worker\'s');
+});
+
 test('deck.js: a window\'s backs and its video script join the page; a back already there is not drawn twice', async () => {
   const md = richFile(6200);
   const env = envOf(md);

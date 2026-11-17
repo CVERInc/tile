@@ -340,7 +340,7 @@ const richPage = (channels) => [
   ...Array.from({ length: channels }, (_, i) => `- [ ] %% card: video channel=${channel(i)} %%`),
   '', '## assets', '', ...MANY.map((p) => `- [ ] %% card: asset id=${p.id} mime=${p.mime} %% ${p.b.toString('base64')}`),
 ].join('\n') + '\n';
-/** every fetch is a YouTube feed that answers 404 (the designed no-poster state), counted */
+/** every YouTube fetch answers 404 (no uploads: the designed no-poster state), counted */
 const countFetches = (t) => {
   const before = globalThis.fetch;
   const urls = [];
@@ -382,19 +382,173 @@ test('🔴 #339 cache — 40 pictures and 9 channels: the page view spends at mo
 });
 
 test('🔴 #339 cache — the prefill shrinks by what YouTube already spent, and stops when nothing is left', async (t) => {
-  for (const [channels, most] of [[30, 12], [36, 6], [40, 0], [45, 0]]) {
+  // the arithmetic, for any count of fetches spent before it
+  for (const [spent, most] of [[0, 12], [30, 12], [36, 6], [40, 0], [45, 0]]) assert.equal(PC.prefillCalls(spent), most, `${spent} spent`);
+  // tile#355: a page view spends at most CHANNEL_SUBREQUESTS on YouTube, so it always leaves a whole prefill.
+  // Here every uploads oEmbed answers 404, so a channel stops after its first fetch; its worst case (2,
+  // yt-channels.mjs channelFetches) is still what the share sets aside for it: 15 channels asked.
+  for (const channels of [30, 36, 40, 45]) {
     const cache = useCache(t, fakeCache());
     const fetched = countFetches(t);
     const { env } = await world({ md: richPage(channels) });
     const from = { calls: cacheCalls(cache), fetched: fetched.length };
     assert.equal((await get(`${CANON}/${HANDLE}`, env)).status, 200);
     const spentYt = fetched.length - from.fetched, spentCache = cacheCalls(cache) - from.calls;
-    assert.equal(spentYt, channels, `CONTROL ${channels}: one fetch per channel`);
-    assert.equal(spentCache, most, `${channels} channels: ${spentCache} Cache API calls, expected ${most}`);
-    assert.equal(PC.prefillCalls(channels), most);
-    // the YouTube resolution itself is uncapped (not this change); the prefill never adds past the line
-    if (most) assert.ok(spentYt + spentCache <= PC.PAGE_SUBREQUESTS - PC.PAGE_SUBREQUESTS_HELD);
+    assert.equal(spentYt, Math.min(channels, PC.CHANNEL_SUBREQUESTS / 2), `${channels} channels: ${spentYt} fetches`);
+    assert.equal(spentCache, PC.PICTURE_PREFILL_CALLS, `${channels} channels: ${spentCache} Cache API calls`);
+    assert.ok(spentYt + spentCache <= PC.PAGE_SUBREQUESTS - PC.PAGE_SUBREQUESTS_HELD);
   }
+});
+
+// ── 2c. YouTube channel resolution has its own share of that budget (tile#355) ───────────────────────
+//
+// resolveChannels used to fetch every channel a page names — since tile#341 two fetches per UC id and
+// three per @handle — with no upper bound: a page naming 60 channels made 120–180 fetches on one page
+// view, past the 50 the invocation has, before the prefill or anything else. These tests count the same
+// way as 2b: every fetch and every Cache API call the page view makes. The fetch stand-in ANSWERS (a
+// handle page that names its channel, an uploads oEmbed naming one video, that video's oEmbed), so a
+// resolved channel is visible in the markup as its video (`data-yt="<id>"`) and an unresolved one as the
+// degraded state the renderer already draws (`data-yt-channel` for a UC id, `data-yt-handle` for a
+// handle).
+// Each case uses its own channel names: the cardtile worker remembers resolved channels for the life
+// of the module (yt-channels.mjs keptChannels), and every case must start with nothing remembered.
+let SEED = 0;
+const channelsFor = (n, kind) => {
+  SEED += 1;
+  const seed = `s${SEED.toString(36)}`;
+  return Array.from({ length: n }, (_, i) => {
+    const tag = `${seed}x${i}`;
+    const id = `UC${tag.padStart(22, '0')}`;
+    return { ref: kind === 'handle' ? `@${tag}` : id, id, video: tag.padStart(11, 'v') };
+  });
+};
+const channelPage = (chans) => [
+  '---', `card-page: ${HANDLE}`, 'title: Tide Pool', '---', '', '## front', '',
+  ...MANY.map((p) => `- [ ] %% card: feature w=3 img=asset:${p.id} %%`),
+  ...chans.map((c) => `- [ ] %% card: video channel=${c.ref} %%`),
+  '', '## assets', '', ...MANY.map((p) => `- [ ] %% card: asset id=${p.id} mime=${p.mime} %% ${p.b.toString('base64')}`),
+].join('\n') + '\n';
+/** every fetch answered as YouTube answers today for these channels (yt.mjs, tile#341), counted: a
+ * handle page that names its channel, the uploads-playlist oEmbed whose thumbnail names the channel's
+ * video, that video's oEmbed with its title. Every answer carries a `date` (as YouTube's do) and, when
+ * `ages` gives one for its kind (`handle`, `uploads`, `video`), the `age` an edge copy that old would carry. */
+const answerFetches = (t, chans, ages = {}) => {
+  const before = globalThis.fetch;
+  const urls = [];
+  const byHandle = new Map(chans.map((c) => [`https://www.youtube.com/${c.ref}`, c]));
+  const byId = new Map(chans.map((c) => [c.id, c]));
+  const byVideo = new Map(chans.map((c) => [c.video, c]));
+  const headers = (kind) => ({ date: new Date().toUTCString(), ...(ages[kind] == null ? {} : { age: String(ages[kind]) }) });
+  globalThis.fetch = async (u) => {
+    const url = String(u && u.url ? u.url : u);
+    urls.push(url);
+    const h = byHandle.get(url);
+    if (h) return new Response(`<html><meta itemprop="identifier" content="${h.id}"></html>`, { headers: headers('handle') });
+    const up = byId.get(uploadsAsked(url));
+    if (up) return Response.json({ title: `Uploads from ${up.ref}`, thumbnail_url: `https://i.ytimg.com/vi/${up.video}/hqdefault.jpg` }, { headers: headers('uploads') });
+    const v = /^https:\/\/www\.youtube\.com\/oembed\?.*watch%3Fv%3D([\w-]{11})$/.exec(url);
+    const c = v && byVideo.get(v[1]);
+    if (c) return Response.json({ title: `Latest ${c.video}` }, { headers: headers('video') });
+    return new Response('', { status: 404 });
+  };
+  t.after(() => { globalThis.fetch = before; });
+  return urls;
+};
+/** the channel (UC id) an uploads-playlist oEmbed address asks about, or null */
+const uploadsAsked = (url) => {
+  const m = /^https:\/\/www\.youtube\.com\/oembed\?.*list%3DUU([\w-]{22})$/.exec(url);
+  return m ? `UC${m[1]}` : null;
+};
+const drawnResolved = (html, c) => html.includes(`data-yt="${c.video}"`);
+const drawnDegraded = (html, c) => html.includes(c.ref.startsWith('@') ? `data-yt-handle="${c.ref}"` : `data-yt-channel="${c.id}"`);
+/** one page view naming `chans`: its subrequests, and the page */
+const viewWith = async (t, chans, ages = {}) => {
+  const cache = useCache(t, fakeCache());
+  const fetched = answerFetches(t, chans, ages);
+  const { env } = await world({ md: channelPage(chans) });
+  const from = { calls: cacheCalls(cache), fetched: fetched.length };
+  const page = await get(`${CANON}/${HANDLE}`, env);
+  const html = page.body.toString('utf8');
+  return { env, cache, fetched, page, html, spentYt: fetched.length - from.fetched, spentCache: cacheCalls(cache) - from.calls };
+};
+
+for (const kind of ['id', 'handle']) {
+  for (const n of [30, 40, 60]) {
+    test(`🔴 #355 channels — ${n} channels written as ${kind === 'id' ? 'UC ids' : '@handles'}: the page view stays within 50 subrequests, renders, and resolves the first N`, async (t) => {
+      const chans = channelsFor(n, kind);
+      // tile#341: uploads oEmbed + video oEmbed, and a handle page first for a handle
+      const cost = kind === 'handle' ? 3 : 2;
+      const { page, html, spentYt, spentCache } = await viewWith(t, chans);
+      assert.equal(page.status, 200, 'the page view failed');
+      const N = Math.min(n, Math.floor(PC.CHANNEL_SUBREQUESTS / cost));
+      assert.ok(spentYt <= PC.CHANNEL_SUBREQUESTS, `${spentYt} YouTube fetches, the share is ${PC.CHANNEL_SUBREQUESTS}`);
+      assert.equal(spentYt, N * cost, 'CONTROL: each resolved channel cost what it costs');
+      assert.equal(spentCache, PC.PICTURE_PREFILL_CALLS, 'the prefill was starved by YouTube');
+      assert.ok(spentYt + spentCache <= 50, `${spentYt + spentCache} subrequests`);
+      assert.ok(spentYt + spentCache + PC.PAGE_SUBREQUESTS_HELD <= PC.PAGE_SUBREQUESTS, `${spentYt + spentCache} subrequests counted, plus ${PC.PAGE_SUBREQUESTS_HELD} held`);
+      assert.deepEqual(chans.map((c) => drawnResolved(html, c)), chans.map((_, i) => i < N), 'not exactly the first N channels were drawn resolved');
+      for (const c of chans.slice(N)) assert.ok(drawnDegraded(html, c), `${c.ref} past the share is not drawn in the degraded state`);
+    });
+  }
+}
+
+test('🔴 #355 channels — past the share, a channel this isolate already resolved is served from memory, with no fetch', async (t) => {
+  const chans = channelsFor(30, 'id');
+  const first = await viewWith(t, chans);
+  assert.equal(first.spentYt, PC.CHANNEL_SUBREQUESTS, 'CONTROL: the first view spent the whole share');
+  // a second view: the first 15 are remembered, so the share goes to the next 15, and all 30 are drawn
+  const from = first.fetched.length;
+  const again = await get(`${CANON}/${HANDLE}`, first.env);
+  const html = again.body.toString('utf8');
+  assert.equal(again.status, 200);
+  assert.deepEqual(first.fetched.slice(from).map(uploadsAsked).filter(Boolean), chans.slice(15).map((c) => c.id), 'the second view did not spend its share on the next channels');
+  assert.deepEqual(chans.filter((c) => !drawnResolved(html, c)).map((c) => c.ref), [], 'some channels are still unresolved after two views');
+});
+
+for (const [what, ages] of [
+  ['an uploads answer the edge has held for its whole 1800 s', { uploads: 1800 }],
+  ['a title answer the edge has held for its whole day', { video: 86400 }],
+]) {
+  test(`🔴 #357 channels — ${what} is not remembered: the next view asks again`, async (t) => {
+    const chans = channelsFor(30, 'id');
+    const first = await viewWith(t, chans, ages);
+    assert.equal(first.spentYt, PC.CHANNEL_SUBREQUESTS, 'CONTROL: the first view spent the whole share');
+    assert.ok(drawnResolved(first.html, chans[0]), 'CONTROL: the first view resolved its first channel');
+    const from = first.fetched.length;
+    await get(`${CANON}/${HANDLE}`, first.env);
+    assert.deepEqual(first.fetched.slice(from).map(uploadsAsked).filter(Boolean), chans.slice(0, 15).map((c) => c.id), 'an expired edge copy was served from memory instead of asked for again');
+  });
+}
+
+test('🔴 #355 channels — a page within the share fetches every channel on every view, as before (memory is not read)', async (t) => {
+  const chans = channelsFor(10, 'handle');
+  const first = await viewWith(t, chans);
+  assert.equal(first.spentYt, 30, 'CONTROL: three fetches per handle');
+  const from = first.fetched.length;
+  await get(`${CANON}/${HANDLE}`, first.env);
+  assert.equal(first.fetched.length - from, 30, 'a page within its share was served from memory');
+});
+
+test('🔴 #355 channels — YouTube down on a page past the share: the page still renders, every channel degraded', async (t) => {
+  const chans = channelsFor(60, 'handle');
+  const cache = useCache(t, fakeCache());
+  const before = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('unreachable'); };
+  t.after(() => { globalThis.fetch = before; });
+  const { env } = await world({ md: channelPage(chans) });
+  const page = await get(`${CANON}/${HANDLE}`, env);
+  assert.equal(page.status, 200);
+  assert.ok(calls <= PC.CHANNEL_SUBREQUESTS, `${calls} fetches`);
+  const html = page.body.toString('utf8');
+  for (const c of chans) assert.ok(drawnDegraded(html, c), c.ref);
+  assert.ok(cacheCalls(cache) <= PC.PICTURE_PREFILL_CALLS);
+});
+
+test('#355 channels — the share is what the budget leaves, not a second budget', () => {
+  assert.equal(PC.CHANNEL_SUBREQUESTS, PC.PAGE_SUBREQUESTS - PC.PAGE_SUBREQUESTS_HELD - PC.PICTURE_PREFILL_CALLS);
+  assert.equal(PC.CHANNEL_SUBREQUESTS, 30);
+  assert.equal(PC.prefillCalls(PC.CHANNEL_SUBREQUESTS), PC.PICTURE_PREFILL_CALLS, 'a page view that spends the whole share leaves a whole prefill');
 });
 
 // ── 3. the cache is never needed, and never trusted beyond its bytes ──────────────────────────────
