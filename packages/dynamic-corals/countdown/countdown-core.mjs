@@ -47,6 +47,10 @@
 // no event to show falls back to `data-deadline` when the root has one and otherwise leaves the
 // root exactly as authored. A root WITHOUT `data-src` never touches the network.
 //
+// One calendar is in one language, so a root may name a feed per language: `data-src-<language>`
+// (`data-src-zh-tw`, `data-src-en`) is used on a page in that language (`<html lang>`), `data-src`
+// on every other. A root that names feeds only for some languages is not fed on the rest.
+//
 // Every root, typed or fed, carries `data-under-a-day` while less than a day is left — the hook a
 // host uses to trade its days for its seconds.
 //
@@ -68,7 +72,7 @@
 // subscribes again.
 //
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
-import { upcoming, nextMoment, phaseOf, locationKind, eventText, eventHref, unitText } from './countdown-feed.mjs';
+import { upcoming, nextMoment, phaseOf, locationKind, eventText, eventHref, unitText, feedSource } from './countdown-feed.mjs';
 import { createFlip, setFlip, settleFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
 
@@ -264,6 +268,13 @@ function fillSlots(root, event, ctx, env, measuring = false) {
   root.setAttribute('data-event-count', String(ctx.count));
 }
 
+/** The language the PAGE declares (`<html lang>`), and only that: which calendar a page shows is the
+ *  page's business, not the visitor's browser's. */
+function documentLanguage(env) {
+  const html = env.document && env.document.documentElement;
+  return (html && html.getAttribute('lang')) || '';
+}
+
 function pageLanguage(env) {
   const html = env.document && env.document.documentElement;
   return (html && html.getAttribute('lang')) || env.language || '';
@@ -286,7 +297,8 @@ export async function mountFromFeed(root, deps = {}) {
     // it forever and its typed `data-deadline` would never get its turn.
     const late = new Promise((resolve) => { timer = env.setTimeout(() => resolve(null), FEED_TIMEOUT_MS); });
     const read = async () => {
-      const res = env.fetch ? await env.fetch(root.getAttribute('data-src'), { headers: { Accept: 'application/json' } }) : null;
+      const src = feedSource(root, documentLanguage(env));
+      const res = env.fetch && src ? await env.fetch(src, { headers: { Accept: 'application/json' } }) : null;
       return res && res.ok ? res.json() : null;
     };
     feed = await Promise.race([read(), late]);
@@ -495,7 +507,9 @@ export function mountAll(doc, deps = {}) {
   doc.querySelectorAll(SELECTOR).forEach((root) => {
     if (root.getAttribute('data-dynamic-coral-mounted') === '1') return;
     root.setAttribute('data-dynamic-coral-mounted', '1');
-    if (root.getAttribute('data-src')) mountFromFeed(root, { document: doc, ...deps });
+    // A feed for THIS page's language (data-src-<language>, else data-src); a root with none is typed.
+    const env = { ...globals(), document: doc, ...deps };
+    if (feedSource(root, documentLanguage(env))) mountFromFeed(root, { document: doc, ...deps });
     else mountCountdown(root, { document: doc, ...deps });
   });
 }

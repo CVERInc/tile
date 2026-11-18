@@ -18,6 +18,29 @@
 import { mapsUrl, mapHref } from '../shared/map-link.mjs';
 import { addToCalendarUrl } from '../events/events-core.mjs';
 
+/**
+ * Which feed a root reads on a page in `language`: `data-src-<language>` when the root has one for
+ * the page's language — the whole tag first (`zh-TW` → `data-src-zh-tw`), then its primary subtag
+ * (`data-src-zh`) — else `data-src`. '' when none applies.
+ *
+ * Why: one calendar is in one language. A site in several puts ONE countdown in the chrome every
+ * page shares, and each language's pages are to show that language's calendar. A root that names
+ * only some languages shows nothing on the others, which is the honest state for "no calendar here".
+ */
+export function feedSource(root, language) {
+  const tag = String(language || '').trim().toLowerCase();
+  const tries = [];
+  if (/^[a-z]{2,3}(-[a-z0-9]{1,8})*$/.test(tag)) {
+    tries.push(tag);
+    if (tag.includes('-')) tries.push(tag.split('-')[0]);
+  }
+  for (const t of tries) {
+    const own = String(root.getAttribute(`data-src-${t}`) || '').trim();
+    if (own) return own;
+  }
+  return String(root.getAttribute('data-src') || '').trim();
+}
+
 const instant = (iso) => (typeof iso === 'string' && /Z$/.test(iso) ? Date.parse(iso) : NaN);
 
 /** What an item counts to at `now`: its start while that is ahead, its end once it is under way. */

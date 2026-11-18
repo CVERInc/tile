@@ -1,13 +1,13 @@
 {
   "name": "countdown",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/countdown/0.4.0/countdown.js",
+  "source": "https://feelreef.com/corals/countdown/0.4.1/countdown.js",
   "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/countdown",
   "requires": [],
   "calls": [
-    "GET <data-src> — only for a root that carries `data-src`, and then the bundle's only network call: one fetch per such root, sent once on load, with no request body and no header other than `Accept: application/json`; the browser's default credential behaviour for that URL applies. A root without `data-src` makes no network call at all. The response is read as an events feed (`{ calendar, events }`) and its text is written into the host's `data-event` elements as text; the only URLs it can put in a link are an http(s) location or URL from an event, a map search for an event's place, and an add-to-calendar link built from the event. A non-ok response, a network failure, no answer within eight seconds, a body that is not JSON, and a feed with no event still to come are all handled the same way — see `without`."
+    "GET <data-src> — only for a root that carries `data-src` (or, on a page whose `<html lang>` matches, `data-src-<language>`, which is then the URL used instead), and then the bundle's only network call: one fetch per such root, sent once on load, with no request body and no header other than `Accept: application/json`; the browser's default credential behaviour for that URL applies. A root with no feed for the page's language makes no network call at all. The response is read as an events feed (`{ calendar, events }`) and its text is written into the host's `data-event` elements as text; the only URLs it can put in a link are an http(s) location or URL from an event, a map search for an event's place, and an add-to-calendar link built from the event. A non-ok response, a network failure, no answer within eight seconds, a body that is not JSON, and a feed with no event still to come are all handled the same way — see `without`."
   ],
   "stores": [
     "none"
