@@ -85,9 +85,28 @@ class El {
   *walk() { for (const c of this.children) { yield c; yield* c.walk(); } }
   querySelector(sel) {
     if (sel === '[aria-expanded="true"]') return [...this.walk()].find((n) => n.getAttribute('aria-expanded') === 'true') || null;
-    if (sel === 'details[open]' || sel.startsWith('h1,')) return null;
+    if (sel === 'details[open]') return null;
+    if (sel.startsWith('h1,')) return [...this.walk()].find((n) => /^h[1-6]$/.test(n.tagName)) || null;
     throw new Error(`unsupported selector ${sel}`);
   }
+  // Classes only, comma-separated (`.when,.title`) — what the auto-open-by tests pass. Anything
+  // else throws, like a browser handed something that is not a selector.
+  querySelectorAll(sel) {
+    const parts = sel.split(',').map((x) => x.trim());
+    if (!parts.every((x) => /^\.[\w-]+$/.test(x))) throw new Error(`unsupported selector ${sel}`);
+    return [...this.walk()].filter((n) => parts.some((x) => n.className.split(/\s+/).includes(x.slice(1))));
+  }
+  get textContent() { return this.children.length ? this.children.map((c) => c.textContent).join('') : (this.text || ''); }
+  set textContent(v) { this.text = String(v); }
+}
+/**
+ * The content observer, by hand: mountItem registers one per item, and a test calls `changed()` where
+ * a browser would deliver the mutation. Returns a function that restores "no MutationObserver".
+ */
+function observing() {
+  const watchers = [];
+  globalThis.MutationObserver = class { constructor(fn) { watchers.push(fn); } observe() {} };
+  return { changed: () => watchers.forEach((fn) => fn([])), done: () => { delete globalThis.MutationObserver; } };
 }
 function fakePage() {
   const doc = new EventTarget();
@@ -160,4 +179,233 @@ test('a retired item ignores #name and announces nothing; the open bubble and th
   win.dispatchEvent(new Event('hashchange'));
   assert.equal(mo.isOpen(), true, 'a retired item\'s #name closed the panel on screen');
   assert.equal(bubble(gone).getAttribute('aria-expanded'), 'false', 'a retired item opened');
+});
+
+const bubble = (el) => el.shadowRoot.children.find((c) => c.className === 'b');
+const panelOf = (el) => el.shadowRoot.children.find((c) => c.className === 'p');
+const px = (el) => panelOf(el).children.find((c) => c.className === 'px');
+
+test('the bubble is named by what its panel says, whenever that arrives — not only at mount', () => {
+  _resetAutoOpen();
+  const { doc } = fakePage();
+  const watch = observing();
+  try {
+    // A panel whose heading a script fills later (a countdown naming the calendar it reads).
+    const el = authored(doc, doc.body, {});
+    const heading = el.appendChild(new El(doc, 'h2'));
+    el.hidden = false;
+    const m = mountItem(el);
+    assert.equal(bubble(el).getAttribute('aria-label'), null, 'no name yet');
+    heading.text = 'Studio events';
+    watch.changed();
+    assert.equal(bubble(el).getAttribute('aria-label'), 'Studio events');
+    assert.equal(panelOf(el).getAttribute('aria-label'), 'Studio events', 'the dialog is named the same');
+    m.open();
+    assert.equal(bubble(el).getAttribute('aria-label'), 'Close Studio events', 'open, it says what it closes');
+    assert.equal(px(el).getAttribute('aria-label'), 'Close Studio events');
+    heading.text = 'Workshops';
+    watch.changed();
+    assert.equal(bubble(el).getAttribute('aria-label'), 'Close Workshops', 'renamed while open: still the close control');
+    m.close();
+    assert.equal(bubble(el).getAttribute('aria-label'), 'Workshops');
+    heading.text = '';
+    watch.changed();
+    assert.equal(bubble(el).getAttribute('aria-label'), null, 'a name that goes away is not left behind');
+    assert.equal(panelOf(el).getAttribute('aria-label'), null);
+    // data-label, when the owner writes one, still wins over the heading
+    heading.text = 'Studio events';
+    el.setAttribute('data-label', 'Events');
+    watch.changed();
+    assert.equal(bubble(el).getAttribute('aria-label'), 'Events');
+  } finally { watch.done(); }
+});
+
+test('data-auto-open-by: once per CONTENT — it waits for the content, and opens again when it is about something else', () => {
+  const setup = (kept) => {
+    _resetAutoOpen();
+    const page = fakePage();
+    if (kept) for (const [k, v] of kept) page.kept.set(k, v);
+    const el = authored(page.doc, page.doc.body, { 'data-label': 'Events', 'data-open-on-hash': 'events', 'data-auto-open': '1', 'data-auto-open-by': '.when,.title' });
+    const when = el.appendChild(new El(page.doc, 'span')); when.className = 'when';
+    const title = el.appendChild(new El(page.doc, 'span')); title.className = 'title';
+    return { ...page, el, when, title };
+  };
+  const watch = observing();
+  try {
+    // First visit: nothing to key on until the content is there.
+    const a = setup();
+    a.el.hidden = false;
+    const ma = mountItem(a.el);
+    assert.equal(ma.isOpen(), false, 'no content yet: it waits rather than opening on an empty key');
+    assert.equal(a.kept.size, 0);
+    a.when.text = 'Oct 12 – Dec 1'; a.title.text = 'Applications open';
+    watch.changed();
+    assert.equal(ma.isOpen(), true, 'the content arrived: it opens');
+    assert.deepEqual([...a.kept.keys()], ['dc-dock:events|Oct 12 – Dec 1 | Applications open']);
+    ma.close();
+    watch.changed();
+    assert.equal(ma.isOpen(), false, 'closed by the visitor, it stays closed on this page');
+
+    // Next page of the same visit, same event: already shown.
+    const b = setup(a.kept);
+    b.el.hidden = false;
+    const mb = mountItem(b.el);
+    b.when.text = 'Oct 12 – Dec 1'; b.title.text = 'Applications open';
+    watch.changed();
+    assert.equal(mb.isOpen(), false, 'the same content does not open twice in a visit');
+
+    // Same visit, the calendar has moved on to the next event: once more.
+    const c = setup(a.kept);
+    c.el.hidden = false;
+    const mc = mountItem(c.el);
+    c.when.text = 'Feb 1 – Mar 15'; c.title.text = 'Applications open';
+    watch.changed();
+    assert.equal(mc.isOpen(), true, 'a different event opens once more');
+    assert.equal(c.kept.size, 2);
+
+    // Not a selector at all (a browser throws a SyntaxError on it, as this tree does): it never has
+    // content to key on, so it never opens by itself — and never throws.
+    _resetAutoOpen();
+    const d = fakePage();
+    const del = authored(d.doc, d.doc.body, { 'data-label': 'X', 'data-auto-open': '1', 'data-auto-open-by': '[[' });
+    del.hidden = false;
+    const md = mountItem(del);
+    watch.changed();
+    assert.equal(md.isOpen(), false);
+  } finally { watch.done(); }
+});
+
+// One keyed item (its content comes later) in the left corner, as `setup` in the test above builds.
+function keyed(page, extra = {}) {
+  const el = authored(page.doc, page.doc.body, { 'data-label': 'Events', 'data-open-on-hash': 'events', 'data-auto-open': '1', 'data-auto-open-by': '.when', 'data-dock': 'left', ...extra });
+  const when = el.appendChild(new El(page.doc, 'span')); when.className = 'when';
+  el.hidden = false;
+  return { el, when };
+}
+
+test('a keyed item that waits holds no turn: an item after it is not starved (N7, again)', () => {
+  const watch = observing();
+  try {
+    // A's event was already shown this visit; B, a plain item after it, has not been.
+    _resetAutoOpen();
+    const page = fakePage();
+    page.kept.set('dc-dock:events|Oct 12', 'opened');
+    const a = keyed(page);
+    const b = authored(page.doc, page.doc.body, { 'data-label': 'B', 'data-auto-open': '1' });
+    b.hidden = false;
+    const ma = mountItem(a.el), mb = mountItem(b);
+    assert.equal(mb.isOpen(), true, 'B opens at mount: A, still waiting, took nothing');
+    a.when.text = 'Oct 12';
+    watch.changed();
+    assert.equal(ma.isOpen(), false, 'A’s content was already shown');
+    assert.equal(mb.isOpen(), true);
+
+    // A's content never arrives, or its selector is not one: B still gets its turn.
+    for (const by of ['.when', '[[']) {
+      _resetAutoOpen();
+      const p2 = fakePage();
+      const a2 = keyed(p2, { 'data-auto-open-by': by });
+      const b2 = authored(p2.doc, p2.doc.body, { 'data-label': 'B', 'data-auto-open': '1' });
+      b2.hidden = false;
+      const ma2 = mountItem(a2.el), mb2 = mountItem(b2);
+      watch.changed();
+      assert.deepEqual([ma2.isOpen(), mb2.isOpen()], [false, true], by);
+    }
+
+    // And the other way round: something already opened by itself on this page, so A, arriving
+    // late, does not open over it — and is NOT remembered as shown, so it opens on the next page.
+    _resetAutoOpen();
+    const p3 = fakePage();
+    const a3 = keyed(p3);
+    const b3 = authored(p3.doc, p3.doc.body, { 'data-label': 'B', 'data-auto-open': '1' });
+    b3.hidden = false;
+    const ma3 = mountItem(a3.el), mb3 = mountItem(b3);
+    mb3.close();
+    a3.when.text = 'Oct 12';
+    watch.changed();
+    assert.equal(ma3.isOpen(), false, 'one auto-open per page');
+    assert.equal(p3.kept.has('dc-dock:events|Oct 12'), false, 'not shown, so not remembered');
+  } finally { watch.done(); }
+});
+
+test('the visitor outranks the wait: once they open or close a keyed item it does not move by itself', () => {
+  const watch = observing();
+  try {
+    // Opened and closed by the visitor before its content could be named.
+    _resetAutoOpen();
+    const page = fakePage();
+    const a = keyed(page);
+    const m = mountItem(a.el);
+    m.open(); m.close();
+    a.when.text = 'Oct 12';
+    watch.changed();
+    assert.equal(m.isOpen(), false, 'it does not open again by itself');
+    assert.equal(page.kept.get('dc-dock:events|Oct 12'), 'opened', 'they saw it: remembered as shown once it can be named');
+
+    // Open (by the visitor) when the content arrives: left open, and remembered.
+    _resetAutoOpen();
+    const p2 = fakePage();
+    const a2 = keyed(p2);
+    const m2 = mountItem(a2.el);
+    m2.open();
+    a2.when.text = 'Oct 12';
+    watch.changed();
+    assert.equal(m2.isOpen(), true);
+    assert.equal(p2.kept.get('dc-dock:events|Oct 12'), 'opened', 'so the next page does not open it again');
+
+    // Only closed (never opened) while waiting: stays closed, and nothing is remembered.
+    _resetAutoOpen();
+    const p3 = fakePage();
+    const a3 = keyed(p3);
+    const m3 = mountItem(a3.el);
+    m3.close();                                  // already closed: not a visitor action that changes anything
+    a3.when.text = 'Oct 12';
+    watch.changed();
+    assert.equal(m3.isOpen(), true, 'a close that closed nothing is not the visitor taking it in hand');
+  } finally { watch.done(); }
+});
+
+test('a keyed item that left the page before its content came shows nothing and remembers nothing', () => {
+  const watch = observing();
+  try {
+    _resetAutoOpen();
+    const page = fakePage();
+    const section = page.doc.body.appendChild(new El(page.doc, 'section'));
+    const el = authored(page.doc, section, { 'data-label': 'Events', 'data-open-on-hash': 'events', 'data-auto-open': '1', 'data-auto-open-by': '.when' });
+    const when = el.appendChild(new El(page.doc, 'span')); when.className = 'when';
+    el.hidden = false;
+    const m = mountItem(el);
+    el.remove();                                 // its dock let it go (the place it was written left the page)
+    when.text = 'Oct 12';
+    watch.changed();
+    assert.equal(m.isOpen(), false);
+    assert.equal(page.kept.size, 0, 'what was never shown is not marked as shown');
+  } finally { watch.done(); }
+});
+
+test('a keyed item with no name and no data-label is keyed by the label it has when it decides', () => {
+  const watch = observing();
+  try {
+    _resetAutoOpen();
+    const page = fakePage();
+    const el = authored(page.doc, page.doc.body, { 'data-auto-open': '1', 'data-auto-open-by': '.when' });
+    const heading = el.appendChild(new El(page.doc, 'h2'));
+    const when = el.appendChild(new El(page.doc, 'span')); when.className = 'when';
+    el.hidden = false;
+    const m = mountItem(el);
+    heading.text = 'Studio events'; when.text = 'Oct 12';
+    watch.changed();
+    assert.equal(m.isOpen(), true);
+    assert.deepEqual([...page.kept.keys()], ['dc-dock:right:Studio events|Oct 12'], 'not `dc-dock:right:`, which every unnamed item in the corner would share');
+  } finally { watch.done(); }
+});
+
+test('without data-auto-open-by, auto-open is what it was: once per item per visit, decided at mount', () => {
+  _resetAutoOpen();
+  const { doc, kept } = fakePage();
+  const el = authored(doc, doc.body, { 'data-label': 'Events', 'data-open-on-hash': 'events', 'data-auto-open': '1' });
+  el.hidden = false;
+  const m = mountItem(el);
+  assert.equal(m.isOpen(), true);
+  assert.deepEqual([...kept.keys()], ['dc-dock:events']);
 });
