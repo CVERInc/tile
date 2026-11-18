@@ -1,17 +1,17 @@
 {
   "name": "events",
-  "version": "0.9.6",
+  "version": "0.10.0",
   "author": "CVER Inc.",
   "license": "MIT",
-  "source": "https://feelreef.com/corals/events/0.9.6/events.js",
+  "source": "https://feelreef.com/corals/events/0.10.0/events.js",
   "source_note": "原始碼將隨 OSS 化公開",
   "requires": [],
   "calls": [
-    "GET <data-src> (defaults to `/events.json` when the host element sets no `data-src`) — the bundle's only network call, one fetch per mounted root, sent once on load; sets no request body and no header other than `Accept: application/json`; the browser's default same-origin credential behaviour applies; a non-ok HTTP response resolves to `null` in place of the body; a network failure is caught the same way; in every one of those cases, and also when the JSON body parses but carries no `.html` string, the root renders the same `<div class=\"dc-ev--empty\">` fallback text as a feed that is genuinely empty (`data-empty` on the root, default \"No upcoming events.\") — a visitor cannot tell a broken feed from an empty one from the rendered page alone; a response that does carry `.html` is assigned to the root's `innerHTML` verbatim, trusting the feed endpoint (not user input) to have produced safe markup; there is no retry, no polling and no second fetch — only the once-per-second local countdown re-render (`events-core.mjs#countdownText`) reads the clock again, never the network"
+    "GET <data-src> (defaults to `/events.json` when the host element sets no `data-src`) — the bundle's only network call, one fetch per mounted root, sent once on load; sets no request body and no header other than `Accept: application/json`; the browser's default same-origin credential behaviour applies; a non-ok HTTP response resolves to `null` in place of the body; a network failure is caught the same way. A body with an `events` array is drawn in the browser (`events-list.mjs`), every value from it escaped; an empty array renders the `<div class=\"dc-ev--empty\">` text (`data-empty` on the root, default \"No upcoming events.\"). A body with no `events` but an `.html` string has that string assigned to the root's `innerHTML` verbatim, trusting the feed endpoint (not user input) to have produced safe markup. Anything else — no body, neither field — renders the same empty text, so a visitor cannot tell a broken feed from an empty one from the page alone. There is no retry, no polling and no second fetch: the list drawn from `events` is re-read against the clock every 30 seconds, the `.html` one every second (`events-core.mjs#countdownText`), never against the network. The links the list writes are navigations the visitor makes, not calls the bundle makes: the location (an http(s) URL as written, or a map search), and add-to-calendar (a Google Calendar link, or — in Safari on an Apple device, when the feed said `ics: true` — the feed's own address with `ics=<uid>`)"
   ],
   "stores": ["none"],
   "paid": false,
   "funding": null,
-  "without": "requires nothing (`requires` is empty — no module gate is checked). Without a reachable feed at `data-src` (unset, wrong origin, non-ok status, or a network error): the widget shows the same honest empty-state message a real empty calendar would show, per `data-empty`, and never fabricates an event or leaves the mount area blank. Without feelreef entirely, the fetch simply fails the same way. The countdown badges and platform-specific map links (Apple Maps / Android `geo:`) only ever act on `.html` the fetch already delivered — with no feed, there is nothing for them to enhance.",
+  "without": "requires nothing (`requires` is empty — no module gate is checked). Without a reachable feed at `data-src` (unset, wrong origin, non-ok status, or a network error): the widget shows the same honest empty-state message a real empty calendar would show, per `data-empty`, and never fabricates an event or leaves the mount area blank. Without feelreef entirely, the fetch simply fails the same way. Dates, relative times and the platform-specific links (Apple Maps / Android `geo:`, the `.ics` file) are made only from what the fetch already delivered — with no feed, there is nothing for them to act on.",
   "capabilities": []
 }

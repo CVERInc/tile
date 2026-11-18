@@ -145,20 +145,29 @@ function formatRange(format, a, b) {
  * An all-day event is its DATES as the calendar wrote them (its end is exclusive, so the last day is
  * the one before): "Oct 12 – Dec 1", or one date. A timed event is its instants in the VISITOR's
  * zone, with the zone named, because a time read on a screen is a time on the reader's clock.
+ * With `now`, a date that is not in the year `now` is in carries its year ("Feb 13 – 14, 2027"): a
+ * list that runs past December would otherwise show next year's dates as if they were this year's.
  */
-export function whenText(event, locale) {
+export function whenText(event, locale, now) {
   if (!event) return '';
   const lang = locale || undefined;
+  // "This year" is the year on the VISITOR's calendar; an all-day date's own year is read in UTC,
+  // where it was parsed (`zone`), a timed one's on the visitor's clock.
+  const year = (ms, zone) => (now == null ? {} : (() => {
+    const y = (t, z) => Number(new Intl.DateTimeFormat('en', { year: 'numeric', ...(z ? { timeZone: z } : {}) }).format(new Date(t)));
+    const thisYear = y(now);
+    return ms.some((t) => y(t, zone) !== thisYear) ? { year: 'numeric' } : {};
+  })());
   try {
     if (event.allDay && /^\d{4}-\d{2}-\d{2}$/.test(String(event.start))) {
       const first = Date.parse(`${event.start}T00:00:00Z`);
       const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(event.end)) ? Date.parse(`${event.end}T00:00:00Z`) - DAY : first;
-      const format = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const format = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', timeZone: 'UTC', ...year([first, endDate], 'UTC') });
       return endDate > first ? formatRange(format, new Date(first), new Date(endDate)) : format.format(new Date(first));
     }
     const startsAt = instant(event.startsAt), endsAt = instant(event.endsAt);
     if (Number.isNaN(startsAt)) return '';
-    const format = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+    const format = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short', ...year(endsAt > startsAt ? [startsAt, endsAt] : [startsAt]) });
     return endsAt > startsAt ? formatRange(format, new Date(startsAt), new Date(endsAt)) : format.format(new Date(startsAt));
   } catch { return ''; }
 }
