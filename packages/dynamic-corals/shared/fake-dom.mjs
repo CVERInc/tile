@@ -40,6 +40,8 @@ class FakeElement {
   addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, []); this.listeners.get(type).push(fn); }
   /** Test helper: fire the element's click listeners (a disabled control fires none, as in a browser). */
   click() { if (this.disabled) return; for (const fn of this.listeners.get('click') || []) fn({ target: this, preventDefault() {} }); }
+  /** Test helper: fire the element's keydown listeners with `key`; returns whether one called preventDefault. */
+  press(key) { let prevented = false; for (const fn of this.listeners.get('keydown') || []) fn({ target: this, key, preventDefault() { prevented = true; } }); return prevented; }
   getAttribute(n) { if (n === 'class') return this.className || null; return this.attrs.has(n) ? this.attrs.get(n) : null; }
   appendChild(c) { return this.insertBefore(c, null); }
   insertBefore(c, ref) {

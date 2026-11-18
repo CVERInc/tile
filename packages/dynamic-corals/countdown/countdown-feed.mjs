@@ -78,7 +78,7 @@ export function locationText(event) {
 export function eventHref(event, which, userAgent) {
   if (!event) return '';
   if (which === 'url') return httpUrl(event.url);
-  if (which === 'add') return addToCalendarUrl(calendarEntry(event));
+  if (which === 'add') return addToCalendarUrl(calendarEntry(event), { descriptionIsText: true });   // the feed's description is already text
   if (which !== 'location') return '';
   const kind = locationKind(event);
   if (kind === 'url') return httpUrl(event.location);

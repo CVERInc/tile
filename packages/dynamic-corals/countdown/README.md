@@ -51,7 +51,7 @@ Nothing stored, and no network call unless the root carries `data-src`.
   <span data-part="minutes"></span> <span data-unit="minutes">m</span>
   <a data-event="title" data-event-href="location"></a>
   <a data-event-if="location" data-event-href="location"><span data-event="location"></span></a>
-  <p data-event-if="description"><span data-event="description"></span></p>
+  <p data-event-if="description" data-event-more><span data-event="description"></span></p>
   <div data-event-if="several">
     <button data-event-nav="prev" aria-label="Previous event">‹</button>
     <span data-event="position"></span>
@@ -89,6 +89,19 @@ of an earlier one; and anything past the feed's own cap of 20 upcoming events.
 - **`data-event-fit`** keeps one element as tall as the tallest event needs, so paging moves neither
   the controls nor the edges. It is measured while the element has a box, and again when its width
   changes.
+- **`data-event-more`** is for text the host's CSS clips — a description held to two lines. Whether
+  it is clipped is only known once laid out, so the coral measures — the element itself and the
+  text inside it, whichever holds the clamp — and measures again when a panel it sits in reopens: a
+  clipped one gets
+  `data-event-clipped` and becomes a control (`role="button"`, focusable, `aria-expanded`; click,
+  Enter, Space) that toggles `data-event-open`, and the host's CSS shows the whole text for that
+  attribute. One that fits is left exactly as authored. Showing another event closes it, and the
+  height `data-event-fit` keeps is the height with everything closed — so one long description
+  never becomes the height of every event. The element's kind stays the host's (the coral adds a
+  role, it does not swap in a `<button>`), so no browser button styling arrives with it.
+- **Add to calendar says what the event says.** The link carries the description (as plain text,
+  its first 1,500 characters) and the event's URL, so the copy in the visitor's own calendar is where the whole of a long
+  description can be read.
 - **Recurring events are not expanded**: the feed's parser reads a repeating event's first
   occurrence only. A timed event that states no end is treated as lasting an hour (the events
   coral's long-standing reading), so it shows as under way for that hour; `DURATION` is not read. A calendar that shares only free/busy shows what it shares ("Busy").
@@ -187,6 +200,9 @@ Requires one of: `data-deadline` or `data-src`.
 | `data-event-if` | enum | no | — | With data-src, on a child element: shown only while that holds for the event being shown, hidden otherwise. url and place are the two kinds of location; several is true when there is more than one event to page through. Values: `title`, `location`, `description`, `url`, `place`, `several`. |
 | `data-event-nav` | enum | no | — | With data-src, on a child button: pages to the previous or next event. Disabled at the first and the last; it does not wrap. Values: `prev`, `next`. |
 | `data-event-fit` | boolean | no | `false` | With data-src, on the root or one child: that element is kept at least as tall as the tallest event needs, measured again when its width changes, so paging moves nothing around it. |
+| `data-event-more` | boolean | no | `false` | With data-src, on a child element whose text the host’s CSS clips (a two-line description): when the text really is clipped the element gets data-event-clipped and becomes a control (role, tabindex, aria-expanded; click, Enter, Space) that toggles data-event-open, for which the host’s CSS shows the whole text. Text that fits is left exactly as authored. Showing another event closes it. |
+| `data-event-clipped` | boolean | no | `false` | Written by the coral, not by the host: present on a data-event-more element while its text is clipped. The hook for showing that there is more (an arrow, a cursor). |
+| `data-event-open` | boolean | no | `false` | Written by the coral, not by the host: present on a data-event-more element while the visitor has opened it. The host’s CSS shows the whole text for it. |
 | `data-unit` | enum | no | — | With data-src, on a child element: its text becomes the page-language word for that unit, from the browser (日, hr, Tg.). Left as authored where the browser has none. Values: `days`, `hours`, `minutes`, `seconds`. |
 | `data-expired` | enum | no | `hide` | What the root does when nothing is left to count to (the deadline, or the last event of a feed): hide it, or replace its content with data-expired-text (text without a data-expired-text hides). Values: `hide`, `text`. |
 | `data-expired-text` | string | no | `` | Text shown in place of the countdown when data-expired is text. |

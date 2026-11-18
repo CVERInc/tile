@@ -38,6 +38,10 @@
 //   data-unit="days|hours|minutes|seconds"                the page-language word for that unit
 //   data-event-fit                                        an element kept as tall as the tallest
 //                                                         event needs, so paging moves nothing
+//   data-event-more                                       an element whose text the host's CSS
+//                                                         clips (a two-line description): when
+//                                                         it really is clipped it becomes a
+//                                                         control that opens it in place
 // and the root says where it is: `data-event-state` (before | during), `data-event-location`
 // (url | place | none), `data-event-index`, `data-event-count`. A feed that fails, is slow, or holds
 // no event to show falls back to `data-deadline` when the root has one and otherwise leaves the
@@ -321,6 +325,7 @@ export async function mountFromFeed(root, deps = {}) {
     if (!(width > 0)) return;
     if (width !== fitWidth) fitHeight = 0;      // a new width is a new layout; the same one never shrinks
     fitWidth = width;
+    closeMore();                                // the height kept is the height with everything closed
     fitEl.style.minHeight = authoredMinHeight;
     if (items.length > 1) {
       for (const item of items) {
@@ -330,14 +335,86 @@ export async function mountFromFeed(root, deps = {}) {
       fillSlots(root, current.event, ctxOf(current), env, true);
     }
     if (fitHeight > 0) fitEl.style.minHeight = Math.ceil(fitHeight) + 'px';
+    measureMore();
   }
+  // ── data-event-more: text the host clips, opened in place ─────────────────────────────────────
+  // Whether a line is clipped is only known once it is laid out, so it is measured — after every
+  // fill, and again with the fit. A clipped one gets `data-event-clipped` and becomes a control
+  // (role, tabindex, aria-expanded; click, Enter and Space) that sets `data-event-open`; the host's
+  // CSS shows the whole text for that attribute. One that fits is left exactly as authored: no
+  // role, not focusable, nothing to press. Showing another event closes it.
+  const moreEls = root.querySelectorAll('[data-event-more]');
+  // 🔴 Either box may be the one that clips: the element itself (`<p data-event-more>` with a
+  // line clamp, an inline <span> inside it — whose own heights are 0) or the text inside it (a
+  // clamped <span> in a flex row). Measuring only one of them means the other markup never opens.
+  const overflows = (box) => !!box && typeof box.scrollHeight === 'number' && typeof box.clientHeight === 'number'
+    && box.scrollHeight > box.clientHeight + 1;
+  const clippedText = (el) => overflows(el) || overflows(el.getAttribute('data-event') !== null ? null : el.querySelector('[data-event]'));
+  // An element with no box (inside a closed panel) cannot be measured; what was known stays known.
+  const laidOut = (el) => typeof el.getBoundingClientRect !== 'function' || el.getBoundingClientRect().width > 0;
+  const CONTROL = ['data-event-clipped', 'role', 'tabindex', 'aria-expanded'];
+  function closeMore() {
+    for (const el of moreEls) {
+      el.removeAttribute('data-event-open');
+      if (el.getAttribute('data-event-clipped') !== null) el.setAttribute('aria-expanded', 'false');
+    }
+  }
+  function measureMore() {
+    for (const el of moreEls) {
+      if (el.getAttribute('data-event-open') !== null) continue;   // open: it is clipped by definition
+      if (!laidOut(el)) continue;
+      if (clippedText(el)) {
+        el.setAttribute('data-event-clipped', '');
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        el.setAttribute('aria-expanded', 'false');
+      } else {
+        for (const name of CONTROL) el.removeAttribute(name);
+      }
+    }
+  }
+  const toggleMore = (el) => {
+    if (stopped || el.getAttribute('data-event-clipped') === null) return;
+    const open = el.getAttribute('data-event-open') === null;
+    if (open) el.setAttribute('data-event-open', '');
+    else el.removeAttribute('data-event-open');
+    el.setAttribute('aria-expanded', String(open));
+  };
+  for (const el of moreEls) {
+    if (typeof el.addEventListener !== 'function') continue;
+    el.addEventListener('click', () => toggleMore(el));
+    el.addEventListener('keydown', (e) => {
+      if (!e || (e.key !== 'Enter' && e.key !== ' ')) return;
+      if (el.getAttribute('data-event-clipped') === null) return;
+      if (typeof e.preventDefault === 'function') e.preventDefault();   // Space would scroll the page
+      toggleMore(el);
+    });
+  }
+
   let observer = null;
   if (fitEl && env.ResizeObserver) {
+    // A box that went away and came back at the SAME width (a panel closed and reopened) needs no
+    // new fit, but what was filled while it was away could not be measured for clipping.
+    let away = false;
     observer = new env.ResizeObserver(() => {
       const width = fitEl.getBoundingClientRect().width;
-      if (width > 0 && width !== fitWidth) fit();
+      if (!(width > 0)) { away = true; return; }
+      if (width !== fitWidth) fit();
+      else if (away) measureMore();
+      away = false;
     });
     observer.observe(fitEl);
+  } else if (moreEls.length && env.ResizeObserver) {
+    // No fit element to tell us the layout changed: watch the root for the same reason (it also
+    // fires when a closed panel opens, which is when clipping first becomes knowable).
+    let seen = -1, away = false;
+    observer = new env.ResizeObserver(() => {
+      const width = typeof root.getBoundingClientRect === 'function' ? root.getBoundingClientRect().width : 0;
+      if (!(width > 0)) { away = true; return; }
+      if (width !== seen || away) { seen = width; measureMore(); }
+      away = false;
+    });
+    observer.observe(root);
   }
   const fonts = env.document && env.document.fonts;
   if (fitEl && fonts && fonts.ready && typeof fonts.ready.then === 'function') {
@@ -353,7 +430,9 @@ export async function mountFromFeed(root, deps = {}) {
     const mine = ++shows;
     current = item;
     if (counting) counting.stop();
+    closeMore();
     fillSlots(root, item.event, ctxOf(item), env);
+    measureMore();
     root.setAttribute('data-event-state', phaseOf(item, env.now()));
     const mounted = mountAt(root, nextMoment(item, env.now()), env, { onExpired });
     if (mine === shows) counting = mounted;
@@ -397,7 +476,13 @@ export async function mountFromFeed(root, deps = {}) {
   show(current);
   fit();
   return {
-    stop() { stopped = true; if (counting) counting.stop(); if (observer) observer.disconnect(); },
+    stop() {
+      stopped = true;
+      if (counting) counting.stop();
+      if (observer) observer.disconnect();
+      // Nothing answers a press any more, so nothing may still look or focus like a control.
+      for (const el of moreEls) for (const name of CONTROL) el.removeAttribute(name);
+    },
     next: () => go(1),
     prev: () => go(-1),
     get index() { return items.indexOf(current); },

@@ -90,6 +90,27 @@
       "description": "With data-src, on the root or one child: that element is kept at least as tall as the tallest event needs, measured again when its width changes, so paging moves nothing around it."
     },
     {
+      "name": "data-event-more",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "With data-src, on a child element whose text the host’s CSS clips (a two-line description): when the text really is clipped the element gets data-event-clipped and becomes a control (role, tabindex, aria-expanded; click, Enter, Space) that toggles data-event-open, for which the host’s CSS shows the whole text. Text that fits is left exactly as authored. Showing another event closes it."
+    },
+    {
+      "name": "data-event-clipped",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Written by the coral, not by the host: present on a data-event-more element while its text is clipped. The hook for showing that there is more (an arrow, a cursor)."
+    },
+    {
+      "name": "data-event-open",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Written by the coral, not by the host: present on a data-event-more element while the visitor has opened it. The host’s CSS shows the whole text for it."
+    },
+    {
       "name": "data-unit",
       "type": "enum",
       "required": false,
