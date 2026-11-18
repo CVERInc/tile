@@ -36,6 +36,15 @@ const ZONES = ['feelreef.com', 'reef.cards'];
 const NEVER = ['saas.feelreef.com', 'www.feelreef.com', 'staging.feelreef.com'];
 
 /**
+ * hostName: a host as the three roles compare it — lower case, no port, no trailing dot. Pure.
+ * `new URL().hostname` is lowercase and port-free, but it keeps the dot of a fully qualified name
+ * (`cards.feelreef.com.`), and the same host must not be two names to a rule that is decided by
+ * name (tile#378). Read only once the service host is on: with it off, every host is compared as
+ * it always was (card-worker.mjs serviceHostStage).
+ */
+export const hostName = (host) => String(host ?? '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+
+/**
  * standIns: (env, real: { role → real host }) → { byHost: Map stand-in → real host, byRole: Map role → stand-in }. Pure.
  */
 export function standIns(env, real) {
@@ -67,22 +76,26 @@ export function standIn(request, env, real) {
   const map = standIns(env, real);
   if (!map.byHost.size) return null;
   const url = new URL(request.url);
-  const to = map.byHost.get(url.hostname);
+  const to = map.byHost.get(hostName(url.hostname));
   if (!to) return null;
   url.hostname = to;
   const headers = new Headers(request.headers);
+  const roleOf = new Map(Object.entries(real).map(([role, host]) => [host, role]));
   // a browser on the stand-in says so in Origin; the routes that compare it compare it with the real host.
   // 🔴 Only the hostname is re-addressed, as in the URL above: the scheme and the port are the
   // sender's, and an origin on another port is another origin.
+  // 🔴 An Origin that names a role's REAL host is another site to the stand-in, but after the request
+  // is re-addressed it could equal the request's own origin: it is replaced by "null", which equals no
+  // origin, so it stays cross-origin (tile#378).
   const origin = headers.get('origin');
   if (origin) {
     try {
       const o = new URL(origin);
       const r = map.byHost.get(o.hostname);
       if (r && o.protocol === 'https:' && origin === o.origin) { o.hostname = r; headers.set('origin', o.origin); }
+      else if (roleOf.has(hostName(o.hostname))) headers.set('origin', 'null');
     } catch { /* not an origin: left as sent */ }
   }
-  const roleOf = new Map(Object.entries(real).map(([role, host]) => [host, role]));
   return {
     request: new Request(url.href, new Request(request, { headers })),
     answer(res) {
@@ -92,7 +105,7 @@ export function standIn(request, env, real) {
         try {
           const l = new URL(loc);   // a relative Location stays on the stand-in by itself
           const s = map.byRole.get(roleOf.get(l.hostname));
-          if (s && l.protocol === 'https:') { l.hostname = s; out.set('location', l.href); }
+          if (s && (l.protocol === 'https:' || l.protocol === 'http:')) { l.hostname = s; out.set('location', l.href); }
         } catch { /* relative: untouched */ }
       }
       out.set('X-Robots-Tag', 'noindex, nofollow');
