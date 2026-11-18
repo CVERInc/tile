@@ -1569,6 +1569,16 @@ function inlineHtml(text, opts) {
     // The start tag is an atom: its href is decoded text, which the final restore must not scan.
     return atom('<a href="' + attrq(real) + '"' + tgt + '>') + lab + '</a>';
   });
+  // tile#291: `~~x~~` is struck text (the editor's `strike` tool), shaped like bold — markers kept in
+  // the hidden `-mk` span. It runs AFTER images and links are built: a destination, an <img> (its alt
+  // included) and a code span are atoms by now, so none of them can be reached. A pair whose inside is
+  // not tag-balanced (`~~a [b~~ c](/p)` — it would cross the link's edge) stays as typed.
+  s = s.replace(RE_STRIKE, (m, inner) => {
+    const n = (re) => (inner.match(re) || []).length;
+    const opens = [...inner.matchAll(anyRe)].filter((t) => t[2] !== undefined && atoms[+t[2]].startsWith('<a ')).length;
+    if (n(/<span\b/g) !== n(/<\/span>/g) || opens !== n(/<\/a>/g)) return m;
+    return '<span class="st-s"><span class="st-mk">~~</span>' + inner + '<span class="st-mk">~~</span></span>';
+  });
   // Allowlisted inline <small> (no attributes) — the one raw tag legacy IRs use for muted fine
   // print (e.g. an "updated on …" stamp). escapeInline escaped it to `&lt;small&gt;`; re-emit
   // the bare tag so it renders small instead of showing literally. script-injection-safe: no attrs, no other tag.
@@ -1629,6 +1639,10 @@ const RE_FENCE_OPEN = /^(\s*)(```|~~~)(.*)$/;
 const RE_LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;   // [1]=indent (for nesting) [2]=marker [3]=text
 const RE_LIST_ORDERED = /^\s*\d+[.)]\s+/;
 const RE_QUOTE_LINE = /^\s*>\s?(.*)$/;
+const RE_RULE_LINE = /^ {0,3}-{3,}[ \t]*$/;                 // tile#291: `---` on its own block → <hr>
+const RE_TASK_ITEM = /^\[([ xX])\](?:[ \t]+|$)/;           // tile#291: `- [ ] x` / `- [x] x` → checkbox
+// tile#291: `~~x~~`, no whitespace just inside either marker (GFM's flanking rule), no `~` inside.
+const RE_STRIKE = /~~([^~\s](?:[^~\n]*[^~\s])?)~~/g;
 // ATX heading (### Section). Requires non-whitespace body text — a comment-only heading
 // (`# <!-- title -->`) still matches this (the comment text itself is non-whitespace), and is only
 // dropped afterward, once its inline content resolves empty (R3-P2-02; see bodyHtml's heading branch).
@@ -1765,7 +1779,10 @@ function renderList(items) {
     // leak through some OTHER route) — with no children to hold either, an `<li></li>` would be exactly
     // the empty-block leak issue #496 is about. A comment-only item that DOES have nested children still
     // needs its `<li>` — that's where the children's `<ul>`/`<ol>` lives.
-    if (it.text.trim() || children) html += '<li' + (it.src || '') + '>' + inlineHtml(it.text) + children + '</li>';
+    // tile#291: a `[ ]`/`[x]` lead is a task item — a read-only checkbox, not the typed brackets.
+    const task = RE_TASK_ITEM.exec(it.text);
+    if (task) html += '<li class="st-task"' + (it.src || '') + '><input type="checkbox" disabled' + (task[1] === ' ' ? '' : ' checked') + '> ' + inlineHtml(it.text.slice(task[0].length)) + children + '</li>';
+    else if (it.text.trim() || children) html += '<li' + (it.src || '') + '>' + inlineHtml(it.text) + children + '</li>';
     i = j;
   }
   return html + '</' + tag + '>';
@@ -2325,6 +2342,11 @@ function bodyHtml(body, opts) {
       out.push('<table class="st-table" data-headless>' + tbody + '</table>');
       continue;
     }
+
+    // tile#291: `---` alone at the start of a block is a rule (what the editor's `rule` tool writes,
+    // and what cardtile draws). Only here, never in isBlockStart: a `---` directly under a paragraph
+    // line keeps joining that paragraph, as it did. Four spaces of indent stays literal, as for comments.
+    if (RE_RULE_LINE.test(lines[i])) { out.push('<hr' + srcAttr(opts, i, i) + '>'); i++; continue; }
 
     const h = headingParts(lines[i]);                                         // ATX heading (### Section)
     if (h) {
