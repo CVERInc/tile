@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { upcoming, nextMoment, phaseOf, httpUrl, locationKind, locationText, eventHref, eventText, whenText, unitText } from './countdown-feed.mjs';
 import { mountFromFeed, mountAll, FEED_TIMEOUT_MS } from './countdown-core.mjs';
-import { feedEvents, eventInstants, plainText, renderEvents, addToCalendarUrl, FEED_MAX } from '../events/events-core.mjs';
+import { feedEvents, eventInstants, plainText, renderEvents, addToCalendarUrl, FEED_MAX, DETAILS_MAX } from '../events/events-core.mjs';
 import { parseICal, parseICalCalendar } from '../events/ical.mjs';
 import { mapsUrl, mapHref, mapPlatform } from '../shared/map-link.mjs';
 import { createDocument, createClock } from '../shared/fake-dom.mjs';
@@ -53,6 +53,8 @@ test('plainText: a formatted description is its words', () => {
   assert.equal(plainText('a &lt;b&gt; c &quot;d&quot; &#39;e&#39;&nbsp;f'), 'a <b> c "d" \'e\' f');
   assert.equal(plainText('  plain   text \n\n\n next '), 'plain text\nnext');
   assert.equal(plainText('<script>alert(1)</script>x'), 'alert(1)x', 'still text: whoever shows it writes it as text');
+  assert.equal(plainText('under < 10 and > 5, or <3'), 'under < 10 and > 5, or <3', 'a sign that is not a tag is the author’s own');
+  assert.equal(plainText('<a href="https://example.com/x?a=1&amp;b=2">here</a>'), 'here');
   assert.equal(plainText(null), '');
 });
 
@@ -139,10 +141,24 @@ test('add to calendar carries what the event says: the description as text, then
   const base = { title: 'Closed', start: '2026-12-28', end: '2027-01-04', allDay: true };
   assert.equal(details(base), null, 'nothing to say: no details at all');
   assert.equal(details({ ...base, description: 'Back on Jan 4.\n\nOrders ship from Jan 5.' }), 'Back on Jan 4.\nOrders ship from Jan 5.');
-  assert.equal(details({ ...base, description: '<b>Back</b> on Jan 4<br>Orders &amp; replies after' }), 'Back on Jan 4\nOrders & replies after', 'a formatted description goes as its words');
+  assert.equal(details({ ...base, description: '<b>Back</b> on Jan 4<br>Orders &amp; replies after' }), 'Back on Jan 4\nOrders &amp; replies after', 'a formatted description goes as its words — and its own & stays an & in Google’s HTML reading');
   assert.equal(details({ ...base, url: 'https://example.com/e' }), 'https://example.com/e');
   assert.equal(details({ ...base, description: 'Read more', url: 'https://example.com/e' }), 'Read more\n\nhttps://example.com/e');
   assert.equal(details({ ...base, description: 'x', url: 'javascript:alert(1)' }), 'x', 'only an http(s) URL is added');
+  // text stays text: Google reads `details` as limited HTML
+  assert.equal(details({ ...base, description: 'a < b & c > d' }), 'a &lt; b &amp; c &gt; d');
+  // the feed's description is ALREADY text; decoding it again would turn visible text into a tag
+  const shown = plainText('&amp;lt;b&amp;gt; is how you write bold');
+  assert.equal(shown, '&lt;b&gt; is how you write bold', 'what the page shows');
+  assert.equal(details({ ...base, description: shown }), '<b> is how you write bold'.replace(/</g, '&lt;').replace(/>/g, '&gt;'), 'the raw path decodes once more (its input is the calendar’s HTML)');
+  assert.equal(new URL(addToCalendarUrl({ ...base, description: shown }, { descriptionIsText: true })).searchParams.get('details'), '&amp;lt;b&amp;gt; is how you write bold', 'the text path does not');
+  assert.equal(new URL(eventHref({ ...base, description: shown, startsAt: '2026-12-27T15:00:00.000Z', endsAt: '2027-01-03T15:00:00.000Z' }, 'add')).searchParams.get('details'), '&amp;lt;b&amp;gt; is how you write bold', 'and the countdown takes the text path');
+  // a long description is capped, and never costs the link its URL
+  const long = details({ ...base, description: 'x'.repeat(50000), url: 'https://example.com/e' });
+  assert.equal(long.length, DETAILS_MAX + 2 + 'https://example.com/e'.length);
+  assert.ok(long.startsWith('x'.repeat(DETAILS_MAX - 1) + '…'));
+  assert.ok(long.endsWith('\n\nhttps://example.com/e'));
+  assert.ok(addToCalendarUrl({ ...base, description: 'あ'.repeat(50000) }).length < 15000, 'even when every character is nine bytes in a URL');
   // and the countdown's link is the same one, for the feed's event
   const fed = { ...base, description: 'Back on Jan 4.', startsAt: '2026-12-27T15:00:00.000Z', endsAt: '2027-01-03T15:00:00.000Z' };
   assert.equal(new URL(eventHref(fed, 'add')).searchParams.get('details'), 'Back on Jan 4.');
@@ -508,55 +524,63 @@ test('data-event-fit: the element is as tall as the tallest event needs, and pag
   c2.stop();
 });
 
-test('data-event-more: text the host clips becomes a control that opens it; text that fits is left alone', async () => {
-  const LONG = ev('Closed', NOW + 40 * D, NOW + 47 * D, { description: 'a very long description' });
-  const SHORT = ev('Workshop', NOW + 7 * D, NOW + 7 * D + 2 * H, { description: 'short' });
-  const { doc, root, els } = page({ 'data-src': '/f' });
+// How a browser reports clipping, for the two ways a host writes it. `clamp` is the box that holds
+// the line clamp: the data-event-more element itself (an inline <span> inside it has no height of
+// its own), or the text element inside it. The OTHER box always reports "fits".
+function clipAt(els, which) {
+  const open = () => els.descLine.getAttribute('data-event-open') !== null;
+  const long = () => els.desc.textContent.length > 10;
+  const fits = { clientHeight: 0, scrollHeight: 0 };
+  const clamp = { get clientHeight() { return open() ? 90 : 36; }, get scrollHeight() { return long() ? 90 : 18; } };
+  const give = (el, box) => { for (const k of ['clientHeight', 'scrollHeight']) Object.defineProperty(el, k, { get: () => box[k], configurable: true }); };
+  give(els.descLine, which === 'outer' ? clamp : fits);
+  give(els.desc, which === 'inner' ? clamp : fits);
   els.descLine.setAttribute('data-event-more', '');
-  // a stand-in for layout: two lines fit; the long text needs five unless the line is open
-  Object.defineProperty(els.desc, 'clientHeight', { get: () => (els.descLine.getAttribute('data-event-open') !== null ? 90 : 36) });
-  Object.defineProperty(els.desc, 'scrollHeight', { get: () => (els.desc.textContent.length > 10 ? 90 : 18) });
-  // the element the test markup nests the text in: make it the line's child, as a host would
   els.descLine.appendChild(els.desc);
-  const clock = createClock(NOW);
-  const c = await mountFromFeed(root, env(doc, clock, feedOf({ events: [SHORT, LONG] }).fetch));
-  const state = () => ['data-event-clipped', 'data-event-open', 'role', 'tabindex', 'aria-expanded'].map((n) => els.descLine.getAttribute(n));
-  assert.equal(els.desc.textContent, 'short');
-  assert.deepEqual(state(), [null, null, null, null, null], 'it fits: not a control, not focusable');
-  els.descLine.click();
-  assert.equal(els.descLine.press('Enter'), false);
-  assert.deepEqual(state(), [null, null, null, null, null], 'and pressing it does nothing');
-  c.next();
-  assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'clipped: a control, closed');
-  els.descLine.click();
-  assert.deepEqual(state(), ['', '', 'button', '0', 'true'], 'opened in place');
-  els.descLine.click();
-  assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'and closed again');
-  assert.equal(els.descLine.press(' '), true, 'Space opens it and does not scroll the page');
-  assert.equal(els.descLine.getAttribute('data-event-open'), '');
-  assert.equal(els.descLine.press('Enter'), true);
-  assert.equal(els.descLine.getAttribute('data-event-open'), null);
-  assert.equal(els.descLine.press('a'), false, 'any other key is not ours');
-  els.descLine.click();
-  c.prev();
-  assert.deepEqual(state(), [null, null, null, null, null], 'showing another event closes it, and that one fits');
-  c.next();
-  assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'coming back, it is closed');
-  els.descLine.click();
-  c.stop();
-  els.descLine.click();
-  assert.equal(els.descLine.getAttribute('data-event-open'), '', 'a stopped root does not toggle');
-});
+  return { open, state: () => ['data-event-clipped', 'data-event-open', 'role', 'tabindex', 'aria-expanded'].map((n) => els.descLine.getAttribute(n)) };
+}
+const LONG = ev('Closed', NOW + 40 * D, NOW + 47 * D, { description: 'a very long description' });
+const SHORT = ev('Workshop', NOW + 7 * D, NOW + 7 * D + 2 * H, { description: 'short' });
+const NONE = [null, null, null, null, null];
+
+for (const which of ['outer', 'inner']) {
+  test(`data-event-more (${which} box clips): clipped text becomes a control that opens it; text that fits is left alone`, async () => {
+    const { doc, root, els } = page({ 'data-src': '/f' });
+    const { state } = clipAt(els, which);
+    const c = await mountFromFeed(root, env(doc, createClock(NOW), feedOf({ events: [SHORT, LONG] }).fetch));
+    assert.equal(els.desc.textContent, 'short');
+    assert.deepEqual(state(), NONE, 'it fits: not a control, not focusable');
+    els.descLine.click();
+    assert.equal(els.descLine.press('Enter'), false);
+    assert.deepEqual(state(), NONE, 'and pressing it does nothing');
+    c.next();
+    assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'clipped: a control, closed');
+    els.descLine.click();
+    assert.deepEqual(state(), ['', '', 'button', '0', 'true'], 'opened in place');
+    els.descLine.click();
+    assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'and closed again');
+    assert.equal(els.descLine.press(' '), true, 'Space opens it and does not scroll the page');
+    assert.equal(els.descLine.getAttribute('data-event-open'), '');
+    assert.equal(els.descLine.press('Enter'), true);
+    assert.equal(els.descLine.getAttribute('data-event-open'), null);
+    assert.equal(els.descLine.press('a'), false, 'any other key is not ours');
+    els.descLine.click();
+    c.prev();
+    assert.deepEqual(state(), NONE, 'showing another event closes it, and that one fits');
+    c.next();
+    assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'coming back, it is closed');
+    els.descLine.click();
+    c.stop();
+    assert.deepEqual(state(), [null, '', null, null, null], 'stopped: nothing answers a press, so nothing looks or focuses like a control');
+    els.descLine.click();
+    assert.equal(els.descLine.press('Enter'), false);
+    assert.equal(els.descLine.getAttribute('data-event-open'), '', 'and a stopped root does not toggle');
+  });
+}
 
 test('data-event-more with data-event-fit: the height kept is the height with everything closed', async () => {
-  const LONG = ev('Closed', NOW + 40 * D, NOW + 47 * D, { description: 'a very long description' });
-  const SHORT = ev('Workshop', NOW + 7 * D, NOW + 7 * D + 2 * H, { description: 'short' });
   const { doc, root, els } = page({ 'data-src': '/f', 'data-event-fit': '' });
-  els.descLine.setAttribute('data-event-more', '');
-  els.descLine.appendChild(els.desc);
-  const open = () => els.descLine.getAttribute('data-event-open') !== null;
-  Object.defineProperty(els.desc, 'clientHeight', { get: () => (open() ? 90 : 36) });
-  Object.defineProperty(els.desc, 'scrollHeight', { get: () => (els.desc.textContent.length > 10 ? 90 : 18) });
+  const { open } = clipAt(els, 'inner');
   let width = 352;
   root.getBoundingClientRect = () => ({ width, height: 200 + (open() ? 90 : 36) });
   let resized = null;
@@ -573,6 +597,32 @@ test('data-event-more with data-event-fit: the height kept is the height with ev
   assert.equal(els.descLine.getAttribute('data-event-clipped'), '', 'and it is still known to be clipped');
   c.stop();
 });
+
+for (const fitting of [true, false]) {
+  test(`data-event-more: a panel closed and reopened at the same width is measured again (${fitting ? 'with' : 'without'} data-event-fit)`, async () => {
+    const { doc, root, els } = page(fitting ? { 'data-src': '/f', 'data-event-fit': '' } : { 'data-src': '/f' });
+    const { state } = clipAt(els, 'inner');
+    let width = 352;
+    root.getBoundingClientRect = () => ({ width, height: 236 });
+    els.descLine.getBoundingClientRect = () => ({ width, height: 36 });
+    let resized = null;
+    const opened = () => resized();              // the observer's first report, at the open width
+    const clock = createClock(NOW);
+    // SOON ends in 10 s; LONG follows. The panel is closed while SOON gives way to LONG.
+    const SOON = ev('Soon', NOW - D, NOW + 10e3, { description: 'short' });
+    const e = { ...env(doc, clock, feedOf({ events: [SOON, LONG] }).fetch), ResizeObserver: class { constructor(fn) { resized = fn; } observe() {} disconnect() {} } };
+    const c = await mountFromFeed(root, e);
+    opened();
+    assert.deepEqual(state(), NONE);
+    width = 0; resized();                       // the panel closes
+    clock.advance(10e3 + 10);                   // …and the long one arrives while there is no box
+    assert.equal(els.desc.textContent, 'a very long description');
+    assert.deepEqual(state(), NONE, 'not measurable while away: what was known stays');
+    width = 352; resized();                     // reopened, same width
+    assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'measured on the way back');
+    c.stop();
+  });
+}
 
 test('mountAll: only a root that carries data-src touches the network', async () => {
   const typed = page({ 'data-deadline': '2026-11-20T00:00:00Z' });

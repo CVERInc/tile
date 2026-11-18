@@ -90,15 +90,17 @@ of an earlier one; and anything past the feed's own cap of 20 upcoming events.
   the controls nor the edges. It is measured while the element has a box, and again when its width
   changes.
 - **`data-event-more`** is for text the host's CSS clips — a description held to two lines. Whether
-  it is clipped is only known once laid out, so the coral measures: a clipped one gets
+  it is clipped is only known once laid out, so the coral measures — the element itself and the
+  text inside it, whichever holds the clamp — and measures again when a panel it sits in reopens: a
+  clipped one gets
   `data-event-clipped` and becomes a control (`role="button"`, focusable, `aria-expanded`; click,
   Enter, Space) that toggles `data-event-open`, and the host's CSS shows the whole text for that
   attribute. One that fits is left exactly as authored. Showing another event closes it, and the
   height `data-event-fit` keeps is the height with everything closed — so one long description
   never becomes the height of every event. The element's kind stays the host's (the coral adds a
   role, it does not swap in a `<button>`), so no browser button styling arrives with it.
-- **Add to calendar says what the event says.** The link carries the description (as plain text)
-  and the event's URL, so the copy in the visitor's own calendar is where the whole of a long
+- **Add to calendar says what the event says.** The link carries the description (as plain text,
+  its first 1,500 characters) and the event's URL, so the copy in the visitor's own calendar is where the whole of a long
   description can be read.
 - **Recurring events are not expanded**: the feed's parser reads a repeating event's first
   occurrence only. A timed event that states no end is treated as lasting an hour (the events
