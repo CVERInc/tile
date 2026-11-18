@@ -49,7 +49,7 @@
       "type": "enum",
       "required": false,
       "default": null,
-      "description": "With data-src, on a child link: its href (removed when there is none). location is the location itself when the whole field is an http(s) URL and otherwise the platform’s map for the place; url is the event’s own URL; add is an add-to-calendar link for the event: a Google Calendar link, or, on an Apple device when the feed says it serves one (`ics: true`), the event as an .ics file from the feed’s own address, which the device’s calendar opens. Only http(s), a map, or that add link is ever written.",
+      "description": "With data-src, on a child link: its href (removed when there is none). location is the location itself when the whole field is an http(s) URL and otherwise the platform’s map for the place; url is the event’s own URL; add is an add-to-calendar link for the event: a Google Calendar link, or, in Safari on an Apple device when the feed says it serves one (`ics: true`), the event as an .ics file from the feed’s own address, which the device’s calendar opens. Only http(s), a map, or that add link is ever written.",
       "values": [
         "location",
         "url",

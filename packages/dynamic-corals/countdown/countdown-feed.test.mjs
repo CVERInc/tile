@@ -726,11 +726,13 @@ test('mountAll: a root with only per-language feeds is fed on that language’s 
 });
 
 // ── add to calendar on an Apple device: the event as a file, from the feed that says it serves one ──
-const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)';
-const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)';
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const IPHONE_IN_APP = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0.0';
+const MAC_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel)';
 
-test('eventHref add: an .ics link on Apple devices only, and only with a feed address and a uid', () => {
+test('eventHref add: an .ics link in Safari on Apple devices only, and only with a feed address and a uid', () => {
   const event = { uid: 'u1@google.com', title: 'Open', start: '2026-10-12', end: '2026-12-02', allDay: true };
   const src = 'https://feed.example/v0/?cal=x';
   for (const ua of [IPHONE, MAC]) {
@@ -741,6 +743,8 @@ test('eventHref add: an .ics link on Apple devices only, and only with a feed ad
   }
   const google = addToCalendarUrl(event);
   assert.equal(eventHref(event, 'add', ANDROID, src), google, 'Android keeps the Google link');
+  assert.equal(eventHref(event, 'add', IPHONE_IN_APP, src), google, 'an app’s built-in browser keeps the Google link');
+  assert.equal(eventHref(event, 'add', MAC_CHROME, src), google, 'Chrome on a Mac keeps the Google link');
   assert.equal(eventHref(event, 'add', '', src), google, 'an unknown device keeps the Google link');
   assert.equal(eventHref(event, 'add', IPHONE), google, 'no feed address: the Google link');
   assert.equal(eventHref(event, 'add', IPHONE, '/events.json'), google, 'a relative feed address: the Google link');

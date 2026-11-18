@@ -6,11 +6,16 @@
 
 const CRLF = '\r\n';
 
-/** TEXT value escaping (RFC 5545 §3.3.11): backslash, semicolon, comma, and a newline as `\n`. */
+/**
+ * TEXT value escaping (RFC 5545 §3.3.11): backslash, semicolon, comma, and a newline as `\n`.
+ * Control characters other than a tab are not TEXT at all and are dropped: the value is a third
+ * party's, and a NUL in a file is something a native parser may stop at.
+ */
 export function icsText(value) {
   return String(value == null ? '' : value)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\;')
+    .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
     .replace(/\r\n|\r|\n/g, '\\n');
 }
@@ -72,6 +77,19 @@ export function eventIcs(event, opts = {}) {
   if (url) lines.push('URL:' + url);
   lines.push('END:VEVENT', 'END:VCALENDAR');
   return lines.map(foldLine).join(CRLF) + CRLF;
+}
+
+/**
+ * Whether this browser hands a text/calendar response to the device's own calendar: Safari on an
+ * Apple device. Chrome or Firefox there, and an app's built-in browser (a chat or social app's web
+ * view), are not it — one saves a file the visitor then has to find, the other may show nothing —
+ * so they keep the link that opens in any browser. Safari is the one whose user agent carries both
+ * `Version/…` and `Safari/…`; the others drop one or the other.
+ */
+export function opensIcs(userAgent) {
+  const ua = String(userAgent || '');
+  if (/Android/.test(ua) || !/iPhone|iPad|iPod|Macintosh/.test(ua)) return false;
+  return /Version\/[\d.]+.*Safari\//.test(ua) && !/CriOS|FxiOS|EdgiOS|EdgA?\/|OPiOS|OPR\/|Chrome\//.test(ua);
 }
 
 /**

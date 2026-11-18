@@ -1,6 +1,6 @@
 // node packages/dynamic-corals/events/ics-file.test.mjs
 import assert from 'node:assert/strict';
-import { eventIcs, icsText, foldLine, icsUrl } from './ics-file.mjs';
+import { eventIcs, icsText, foldLine, icsUrl, opensIcs } from './ics-file.mjs';
 import { parseICal } from './ical.mjs';
 
 let n = 0;
@@ -8,7 +8,10 @@ const ok = (name, fn) => { fn(); n++; console.log('PASS ' + name); };
 const NOW = Date.UTC(2026, 10, 18, 12, 0, 0);
 
 ok('text escaping: backslash first, then ; , and newlines', () => {
-  assert.equal(icsText('a\\b; c, d\ne\r\nf'), 'a\\\\b\; c\\, d\\ne\\nf');
+  // spelled with String.raw so that what is compared is the file's own characters
+  assert.equal(icsText('a\\b; c, d\ne\r\nf'), String.raw`a\\b\; c\, d\ne\nf`);
+  assert.equal(icsText('x;y'), String.raw`x\;y`);
+  assert.equal(icsText('x;y').length, 4, 'a semicolon becomes two characters');
   assert.equal(icsText(null), '');
 });
 
@@ -45,7 +48,7 @@ ok('a timed event is its exact instants in UTC, not its wall clock', () => {
   assert.ok(ics.includes('\r\nDTSTART:20261120T100000Z\r\n'));
   assert.ok(ics.includes('\r\nDTEND:20261120T113000Z\r\n'));
   assert.ok(!ics.includes('190000'), 'the wall-clock start is not what is written');
-  assert.ok(ics.includes('\r\nSUMMARY:Panel\; Q&A\\, signing\r\n'));
+  assert.ok(ics.includes('\r\n' + String.raw`SUMMARY:Panel\; Q&A\, signing` + '\r\n'));
   assert.ok(ics.includes('\r\nDESCRIPTION:Line one\\nLine two\r\n'));
   assert.ok(ics.includes('\r\nURL:https://example.com/e\r\n'));
 });
@@ -82,6 +85,35 @@ ok('round trip: this repo\'s own parser reads the file back as the same event', 
     if (ev.allDay) { assert.equal(back.start, ev.start); assert.equal(back.end, ev.end); }
     else { assert.equal(Date.parse(back.start), Date.parse(ev.startsAt)); assert.equal(Date.parse(back.end), Date.parse(ev.endsAt)); }
   }
+});
+
+ok('control characters are not text: dropped, a tab kept', () => {
+  assert.equal(icsText('a\u0000b\tc\u0007d\u007Fe\u001Bf'), 'ab\tcdef');
+  const ics = eventIcs({ ...timed, title: 'A\u0000B', uid: 'u\u0001v' }, { now: NOW });
+  assert.ok(ics.includes('\r\nSUMMARY:AB\r\n') && ics.includes('\r\nUID:uv\r\n'));
+  assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(ics));
+});
+
+ok('opensIcs: Safari on an Apple device, and nothing else', () => {
+  const yes = [
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+  ];
+  const no = [
+    '',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0.0.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/131.0 Mobile/15E148 Safari/605.1.15',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0.0',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 Line/14.16.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:131.0) Gecko/20100101 Firefox/131.0',
+    'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  ];
+  for (const ua of yes) assert.equal(opensIcs(ua), true, ua);
+  for (const ua of no) assert.equal(opensIcs(ua), false, ua);
 });
 
 ok('icsUrl: the feed\'s own address plus the uid, encoded; nothing for a relative or odd address', () => {
