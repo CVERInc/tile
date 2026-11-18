@@ -164,7 +164,6 @@ export function mountItem(el) {
   const lang = doc.documentElement && doc.documentElement.getAttribute('lang');
   let label = itemLabel(el);
   let close = closeLabel(lang, label);
-  const mountedLabel = label;
 
   const style = doc.createElement('style');
   style.textContent = withDynamicCoralCssLayer(ITEM_CSS, doc);
@@ -254,6 +253,8 @@ export function mountItem(el) {
 
   function setOpen(next, { user = false, focus = false } = {}) {
     if (!panel || next === open || (next && (el.hidden || retired()))) return;
+    // The visitor has taken it in hand: a keyed item still waiting for its content stops waiting.
+    if (user && pendingAuto && autoBySelector) { pendingAuto = false; if (next) seenByVisitor = true; }
     open = next;
     if (next && !slotted) {
       panel.appendChild(doc.createElement('slot'));
@@ -278,29 +279,47 @@ export function mountItem(el) {
   //
   // `data-auto-open-by="<selector>"` makes that once per CONTENT: the remembered key also carries
   // the text of what the selector finds in the panel, so when the panel is about something else
-  // (the next event) it opens once more. Until that text exists the turn waits — the content may
-  // still be loading.
-  const autoBase = autoKey(el, mountedLabel);
+  // (the next event) it opens once more.
+  //
+  // 🔴 Such an item cannot decide at mount — its content may not be there yet — so it WAITS, and
+  // waiting takes nothing from anyone: it does not hold the page's one auto-open turn (an item that
+  // may never open, or whose content never comes, would starve every item after it). When its text
+  // arrives it opens only if nothing has opened by itself on this page yet and nothing is open now.
+  // And the visitor outranks the wait: once they have opened or closed it themselves, it will not
+  // move by itself on this page — but what they opened is remembered as shown once it can be named.
   const autoBySelector = String(el.getAttribute('data-auto-open-by') || '').trim();
   function autoBy() {
     let found = [];
     try { found = [...el.querySelectorAll(autoBySelector)]; } catch { return ''; }   // not a selector: never ready
     return found.map((n) => String(n.textContent || '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' | ').slice(0, 200);
   }
+  // The key is made when it is used: a keyed item is named by then (its label may have arrived with
+  // its content), where the label at mount would be '' and shared by every unnamed item in the corner.
+  const autoKeyNow = () => {
+    const base = autoKey(el, itemLabel(el));
+    if (!autoBySelector) return base;
+    const about = autoBy();
+    return about ? `${base}|${about}` : '';
+  };
+  const remember = (key) => { try { if (store && key) store.setItem(key, 'opened'); } catch { /* full or blocked */ } };
+  const remembered = (key) => { try { return !!(store && key && store.getItem(key)); } catch { return false; } };
+  let seenByVisitor = false;   // they opened it before its content could be named: remember it when it can
   function autoOpen() {
-    let key = autoBase;
-    if (autoBySelector) {
-      const about = autoBy();
-      if (!about) return;                        // nothing to key on yet: keep waiting
-      key = `${autoBase}|${about}`;
-      let done = false;
-      try { done = !!(store && store.getItem(key)); } catch { /* blocked */ }
-      if (done) { pendingAuto = false; return; }  // this content was already shown this visit
+    if (!autoBySelector) {     // decided at mount (below); this is its first visible moment
+      pendingAuto = false;
+      if (dockAnyOpen(doc)) return;
+      setOpen(true);
+      if (open) remember(autoKeyNow());
+      return;
     }
+    const key = autoKeyNow();
+    if (!key) return;                            // nothing to key on yet: keep waiting
     pendingAuto = false;
-    if (dockAnyOpen(doc)) return;
+    if (remembered(key) || autoTaken || dockAnyOpen(doc)) return;
     setOpen(true);
-    try { if (store) store.setItem(key, 'opened'); } catch { /* full or blocked */ }
+    if (!open) return;                           // refused (retired, hidden): nothing was shown
+    autoTaken = true;
+    remember(key);
   }
 
   if (panel) {
@@ -340,6 +359,7 @@ export function mountItem(el) {
     if (retire && open) setOpen(false);
     rename();
     if (!retire && pendingAuto) autoOpen();     // autoOpen clears pendingAuto once it has decided
+    if (seenByVisitor) { const key = autoKeyNow(); if (key) { seenByVisitor = false; remember(key); } }
   };
   if (typeof MutationObserver === 'function') {
     new MutationObserver(sync).observe(el, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'data-label'] });
@@ -351,13 +371,18 @@ export function mountItem(el) {
     if (hashOpens()) {
       autoTaken = true;
       setOpen(true);
-    } else if (el.getAttribute('data-auto-open') === '1' && !autoTaken) {
-      let done = false;
-      // Keyed by content, whether it was shown is only known once the content is there: take the turn.
-      if (!autoBySelector) { try { done = !!(store && store.getItem(autoBase)); } catch { /* blocked */ } }
-      // Only an item that will open this visit takes the turn: one already shown leaves it to the next
-      // (cold review of tile#233, N7 — otherwise a later item was starved on every page).
-      if (!done) { autoTaken = true; pendingAuto = true; sync(); }
+    } else if (el.getAttribute('data-auto-open') === '1') {
+      if (autoBySelector) {
+        // Keyed by content: it waits for the content and takes nothing meanwhile (see autoOpen).
+        pendingAuto = true;
+        sync();
+      } else if (!autoTaken && !remembered(autoKey(el, label))) {
+        // Only an item that will open this visit takes the turn: one already shown leaves it to the
+        // next (cold review of tile#233, N7 — otherwise a later item was starved on every page).
+        autoTaken = true;
+        pendingAuto = true;
+        sync();
+      }
     }
     if (name && win) {
       const onHash = () => { if (!retired() && hashOpens()) setOpen(true); };

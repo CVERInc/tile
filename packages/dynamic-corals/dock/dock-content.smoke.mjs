@@ -135,12 +135,31 @@ for (const [width, want] of [[1440, 440], [700, 440], [699, 352], [390, 352], [3
   s = await state(p, 'a');
   check('the calendar has moved on to another event: it opens once more', s.open && s.keys.length === 2, JSON.stringify(s));
 
-  // A visitor closes it and the content ticks on (same text re-written): it stays closed.
-  await p.evaluate(() => document.getElementById('a').shadowRoot.querySelector('.b').click());
-  await fill('Feb 1 – Mar 15', 'Applications open');
+  // The visitor outranks the wait. The panel is on screen (its content element is visible) but the
+  // keyed text has not arrived; they open it and close it; THEN the text arrives.
+  await p.evaluate(() => sessionStorage.clear());
+  await load(body);
+  await p.evaluate(() => { document.getElementById('c').hidden = false; });
   await settle(p);
   s = await state(p, 'a');
-  check('closed by the visitor, re-written content does not reopen it', !s.open, JSON.stringify(s));
+  check('visible but not yet nameable: it waits, closed', !s.hidden && !s.open && s.keys.length === 0, JSON.stringify(s));
+  await p.evaluate(() => { const b = document.getElementById('a').shadowRoot.querySelector('.b'); b.click(); b.click(); });
+  await fill('Apr 2', 'Open day');
+  await settle(p);
+  s = await state(p, 'a');
+  check('opened and closed by the visitor before its text came: it does not open by itself', !s.open, JSON.stringify(s));
+  check('and what they opened is remembered as shown once it can be named', s.keys.join() === 'dc-dock:events|Apr 2 | Open day', JSON.stringify(s));
+
+  // A keyed item that waits takes no turn: a plain auto-open item after it opens at once.
+  await p.evaluate(() => sessionStorage.clear());
+  await load(body + `<div id="b" data-dynamic-coral="dock" data-label="Other" data-open-on-hash="other" data-auto-open="1" hidden>${ICON}<div><p>content</p></div></div>`);
+  await settle(p);
+  const other = await state(p, 'b');
+  check('a keyed item still waiting does not starve the item after it', other.open, JSON.stringify(other));
+  await fill('Oct 12 – Dec 1', 'Applications open');
+  await settle(p);
+  s = await state(p, 'a');
+  check('arriving late, it does not open over what already opened, and is not marked as shown', !s.open && !s.keys.some((k) => k.startsWith('dc-dock:events|')), JSON.stringify(s));
 
   // Without data-auto-open-by: decided at mount, keyed by the item alone — as before.
   await p.evaluate(() => sessionStorage.clear());

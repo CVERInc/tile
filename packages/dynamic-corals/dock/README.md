@@ -140,9 +140,16 @@ open item shows).
 
 `data-auto-open-by="<selector>"` makes that once per **content** instead of once per item: the text
 of what the selector finds inside the panel is part of the remembered key, so a panel that is now
-about something else — the next event of a calendar — opens once more in the same visit. Until
-that text exists (content still loading) the item waits. The dock knows nothing of what the content
-is; the host names what identifies it.
+about something else — the next event of a calendar — opens once more in the same visit. The dock
+knows nothing of what the content is; the host names what identifies it.
+
+Such an item cannot decide when it is mounted, so it **waits** for that text — and waiting takes
+nothing from anyone. It does not hold the page's one auto-open turn: an item after it opens as
+usual, and one whose content never comes (or whose selector is not one) simply never opens by
+itself. When its text arrives it opens only if nothing has opened by itself on this page and nothing
+is open; if it does not open, it is not remembered as shown. The visitor outranks the wait: once
+they have opened or closed it themselves it will not move by itself on this page, and what they
+opened is remembered as shown as soon as it can be named.
 
 ## In an installed app — only on the renderer's bar
 
