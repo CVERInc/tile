@@ -43,7 +43,7 @@ export function tileParts(item, now, locale) {
   } else {
     // The last day of a timed event is the day its last moment is in: one that ends at midnight
     // ends on the day before, not on the day that midnight begins.
-    date = new Date(during ? item.endsAt - 1 : item.startsAt);
+    date = new Date(during ? Math.max(item.startsAt, item.endsAt - 1) : item.startsAt);
   }
   const part = (options) => { try { return new Intl.DateTimeFormat(locale || undefined, { ...options, ...(timeZone ? { timeZone } : {}) }).format(date); } catch { return ''; } };
   // The day is the NUMBER alone. Some languages write a day as number + a word for "day" (19日);
@@ -74,7 +74,9 @@ export function badgeText(item, now, locale) {
   // From a day out, days are CALENDAR days on the visitor's clock: "tomorrow" is the next date,
   // whether that is 3 hours or 40 hours away.
   const midnight = (t) => { const d = new Date(t); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); };
-  const days = Math.max(1, Math.round((midnight(item.startsAt) - midnight(now)) / D));
+  const days = Math.round((midnight(item.startsAt) - midnight(now)) / D);
+  // 24 hours off and still today: the day the clocks go back is 25 hours long.
+  if (days < 1) return rtf.format(23, 'hour');
   if (days < 14) return rtf.format(days, 'day');
   if (days < 60) return rtf.format(Math.round(days / 7), 'week');
   if (days < 365) return rtf.format(Math.min(11, Math.round(days / 30.44)), 'month');

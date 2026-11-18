@@ -77,15 +77,21 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
       'a.dc-ev-cal{color:inherit;text-decoration:none;transition:background .15s}',
       // The tile: still a square. The month is a bar across its top; weekday and day sit centred
       // in the rest (a flex child that takes what the bar leaves).
-      '.dc-ev-list--live .dc-ev-cal{padding:0;gap:0;justify-content:flex-start;overflow:hidden;background:var(--gd-bg,#fff)}',
-      '.dc-ev-list--live .dc-ev-cal-mo{align-self:stretch;flex:none;padding:3px 0;font-size:.6rem;font-weight:800;letter-spacing:.06em;line-height:1.1;text-align:center;background:var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-ink,#fff)}',
+      // Its face is the page's background where the host names one, so the tile reads as a leaf on a
+      // tinted card; where it names none the tile stays as it was (the card's own surface), because a
+      // white guessed here would sit under whatever colour the page's text is.
+      // The tile is a size container: its type is sized from the TILE (cqw), not from the viewport —
+      // the same tile is 92px in a wide column and 60px in a sidebar on the same screen.
+      '.dc-ev-list--live .dc-ev-cal{padding:0;gap:0;justify-content:flex-start;overflow:hidden;container-type:inline-size;background:var(--gd-bg,var(--gd-surface,transparent))}',
+      '.dc-ev-list--live .dc-ev-cal-mo{align-self:stretch;flex:none;padding:.3em 0;font-size:max(8.5px,10.4cqw);font-weight:800;letter-spacing:.06em;line-height:1.1;text-align:center;background:var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-ink,#fff)}',
       // 0.95, not 1: the bar above is heavy, so the pair sits a hair above the true middle of the face.
       '.dc-ev-cal-face{align-self:stretch;flex:.95 1 0%;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}',
-      '.dc-ev-cal-wd{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;line-height:1;color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)))}',
-      '.dc-ev-list--live .dc-ev-cal-day{font-size:2rem}',
+      '.dc-ev-cal-wd{font-size:max(9px,12.5cqw);font-weight:700;text-transform:uppercase;letter-spacing:.03em;line-height:1;color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)))}',
+      '.dc-ev-list--live .dc-ev-cal-day{font-size:34.8cqw}',
       // the same faint tint the badge takes: the whole tile is the door
-      '.dc-ev-list--live a.dc-ev-cal:hover{background:color-mix(in srgb,var(--gd-accent,#875fb6) 12%,var(--gd-bg,#fff))}',
-      '@media (max-width:560px){.dc-ev-cal-face{gap:1px}.dc-ev-list--live .dc-ev-cal-mo{padding:2px 0;font-size:.56rem}.dc-ev-cal-wd{font-size:.62rem}.dc-ev-list--live .dc-ev-cal-day{font-size:1.4rem}}',
+      // (inside @supports: with a var() in it, an unsupported color-mix() is not dropped but computes
+      // to nothing, and the tile would lose its background on hover)
+      '@supports (background:color-mix(in srgb,red 10%,white)){.dc-ev-list--live a.dc-ev-cal:hover{background:color-mix(in srgb,var(--gd-accent,#875fb6) 12%,var(--gd-bg,var(--gd-surface,transparent)))}}',
       // the badge: an outline while the event is ahead, filled once it is under way
       '.dc-ev-list--live .dc-ev-cd{margin-top:.15em;text-decoration:none;background:transparent;border:1.5px solid var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)));padding:2px 9px}',
       '.dc-ev-list--live a.dc-ev-cd:hover{background:color-mix(in srgb,var(--gd-accent,#875fb6) 12%,transparent)}',

@@ -46,6 +46,8 @@ ok('the date tile is the day the event counts to: first day ahead, LAST day once
   const late = { event: timed('late', local(2026, 10, 19, 20), local(2026, 10, 20, 0)), startsAt: local(2026, 10, 19, 20), endsAt: local(2026, 10, 20, 0) };
   assert.equal(tileParts(late, local(2026, 10, 19, 22), 'en').day, '19');
   assert.equal(tileParts(late, local(2026, 10, 19, 12), 'en').day, '19', 'and before it starts, the day it starts');
+  const instant = { event: timed('instant', local(2026, 10, 20, 0), local(2026, 10, 20, 0)), startsAt: local(2026, 10, 20, 0), endsAt: local(2026, 10, 20, 0) };
+  assert.equal(tileParts(instant, local(2026, 10, 20, 0), 'en').day, '20', 'never a day before the event starts');
 });
 
 ok('the date line: all-day dates as the calendar wrote them; a year only when it is not this one', () => {
@@ -56,7 +58,8 @@ ok('the date line: all-day dates as the calendar wrote them; a year only when it
   assert.equal(sp(whenText(NEXT_YEAR, 'en')), 'Feb 13 – 14', 'without `now` the line is as it was (the countdown’s)');
   assert.match(when.talk, /\d{1,2}:\d{2}/, 'a timed event shows its time');
   // "this year" is the year on the visitor's calendar: in the first hours of January 1st, east of
-  // Greenwich, UTC is still in the old year (this arm bites in a zone ahead of UTC; CI runs several)
+  // Greenwich, UTC is still in the old year (this arm bites in a zone ahead of UTC; the file re-runs
+  // itself in two such zones at the end, so it bites wherever the suite runs)
   const newYear = new Date(2027, 0, 1, 1).getTime();
   assert.ok(!/2027/.test(whenText(allDay('today', '2027-01-01', '2027-01-02'), 'en', newYear)), 'today is not "another year"');
   const eve = new Date(2026, 11, 31, 23).getTime();
@@ -80,6 +83,10 @@ ok('the badge is Intl’s words: how far off, or the browser’s "now"', () => {
   assert.equal(from(local(2026, 10, 19, 22), local(2026, 10, 21, 9)), 'in 2 days', '35 hours away, and the day after tomorrow');
   assert.equal(from(local(2026, 10, 19, 8), local(2026, 10, 21, 20)), 'in 2 days', '60 hours away, and still the day after tomorrow');
   assert.equal(from(local(2026, 10, 19, 1), local(2026, 10, 20, 23)), 'tomorrow', '46 hours away, and tomorrow');
+  // later the SAME day is never "tomorrow" — also on the 25-hour day the clocks go back, when it can
+  // be more than 24 hours off (2026-11-01 in America/Los_Angeles; this file re-runs itself there)
+  assert.match(from(local(2026, 10, 1, 0), local(2026, 10, 1, 23) + 45 * 6e4), /^in 2[34] hr\.$/);
+  assert.equal(sp(badgeText({ startsAt: local(2026, 10, 1, 0) + 24.2 * H, endsAt: local(2026, 10, 3, 0) }, local(2026, 10, 1, 0), 'en')) === 'tomorrow', new Date(local(2026, 10, 1, 0) + 24.2 * H).getDate() === 2);
   assert.equal(badgeText({ startsAt: NOW + D, endsAt: NOW + 2 * D }, NOW, 'ja'), '明日');
   assert.equal(badgeText({ startsAt: NOW - H, endsAt: NOW + H }, NOW, 'de'), 'jetzt');
 });
@@ -183,4 +190,14 @@ ok('rowsShape: the same rows a minute later differ only in badge words; a start 
   assert.notEqual(rowsShape(at(NOW)), rowsShape(at(NOW + 3 * H)), 'it ended');
 });
 
-console.log(`\nevents-list: ${n} passed`);
+// Several rules here are about the VISITOR's clock, and a runner in UTC cannot fail them: the same
+// file again east and west of Greenwich, and where a day is 25 hours long.
+if (!process.env.EVENTS_LIST_ZONE) {
+  const { execFileSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  for (const zone of ['Asia/Tokyo', 'America/Los_Angeles', 'Pacific/Kiritimati']) {
+    execFileSync(process.execPath, [fileURLToPath(import.meta.url)], { env: { ...process.env, TZ: zone, EVENTS_LIST_ZONE: zone }, stdio: ['ignore', 'ignore', 'inherit'] });
+    console.log(`PASS the same ${n} again with the clock in ${zone}`);
+  }
+}
+console.log(`\nevents-list: ${n} passed${process.env.EVENTS_LIST_ZONE ? ` (${process.env.EVENTS_LIST_ZONE})` : ''}`);

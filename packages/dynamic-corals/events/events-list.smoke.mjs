@@ -43,10 +43,10 @@ const LEGACY = { html: '<ul class="dc-ev-list"><li class="dc-ev-item"><div class
 // user agent is whatever machine this runs on.
 const DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const SAFARI_IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
-const page = (lang, src, extra = '') => `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:16px;font-family:system-ui,sans-serif}</style></head><body><div data-dynamic-coral="events" data-src="${src}" data-countdown="always" data-empty="Nothing right now." ${extra}></div></body></html>`;
+const page = (lang, src, extra = 'data-countdown="always"', css = '', column = 0) => `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:16px;font-family:system-ui,sans-serif}${css}</style></head><body><div${column ? ` style="width:${column}px"` : ''}><div data-dynamic-coral="events" data-src="${src}" data-empty="Nothing right now." ${extra}></div></div></body></html>`;
 
 const browser = await lib.chromium.launch();
-async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent = DESKTOP, extra = '' }) {
+async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent = DESKTOP, extra = 'data-countdown="always"', css = '', column = 0 }) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, timezoneId: 'Asia/Taipei', userAgent });
   const p = await ctx.newPage();
   const errors = [];
@@ -57,7 +57,7 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
     if (path === '/empty.json') return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ events: [] }) });
     if (path === '/legacy.json') return r.fulfill({ contentType: 'application/json', body: JSON.stringify(LEGACY) });
     if (path === '/down.json') return r.fulfill({ status: 503, body: 'no' });
-    return r.fulfill({ contentType: 'text/html', body: page(lang, src, extra) });
+    return r.fulfill({ contentType: 'text/html', body: page(lang, src, extra, css, column) });
   });
   await p.goto('http://events.test/');
   await p.addScriptTag({ content: SRC });
@@ -81,8 +81,9 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
         const t = tile.getBoundingClientRect(), f = face.getBoundingClientRect();
         const top = face.firstElementChild.getBoundingClientRect().top - f.top, bottom = f.bottom - face.lastElementChild.getBoundingClientRect().bottom;
         const bar = tile.querySelector('.dc-ev-cal-mo').getBoundingClientRect();
-        return { square: Math.abs(t.width - t.height) <= 1, offCentre: Math.abs(top - bottom), faceShare: Math.round(100 * f.height / (t.bottom - bar.bottom)) / 100, fits: face.scrollHeight <= face.clientHeight + 1 && top >= 0 && bottom >= 0, text: [...tile.querySelectorAll('span > span, .dc-ev-cal-mo')].map((x) => x.textContent).join('/') };
+        return { size: Math.round(t.width), square: Math.abs(t.width - t.height) <= 1, offCentre: Math.abs(top - bottom), faceShare: Math.round(100 * f.height / (t.bottom - bar.bottom)) / 100, fits: face.scrollHeight <= face.clientHeight + 1 && top >= 0 && bottom >= 0, text: [...tile.querySelectorAll('span > span, .dc-ev-cal-mo')].map((x) => x.textContent).join('/') };
       }),
+      tileBackground: root.querySelector('.dc-ev-cal') ? getComputedStyle(root.querySelector('.dc-ev-cal')).backgroundColor : null,
       dayColour: root.querySelector('.dc-ev-cal-day') ? getComputedStyle(root.querySelector('.dc-ev-cal-day')).color : null, bodyColour: getComputedStyle(document.body).color,
     };
   });
@@ -123,9 +124,30 @@ for (const [lang, width] of [['zh-Hant', 390], ['de', 340], ['ja', 320]]) {
   check('the page’s language decides the words (ja)', s.badges[2] === '今' || s.badges[2] === '現在', JSON.stringify(s.badges));
 }
 
+// ── 2b: the tile is sized from itself, and guesses no colour ─────────────────────────────────────
+{
+  // a 280px column on a 1280px screen: the tile is as small as on a phone, and the viewport says "desktop"
+  const s = await open({ column: 280 });
+  check('in a narrow column on a wide screen the tile is small and its weekday and day still fit, centred', s.tiles.every((t) => t && t.size <= 64 && t.square && t.fits && t.offCentre <= 1), JSON.stringify(s.tiles));
+}
+{
+  const s = await open({});
+  check('with no theme tokens the tile takes no background of its own', s.tileBackground === 'rgba(0, 0, 0, 0)', s.tileBackground);
+  const dark = await open({ css: 'body{background:#111;color:#eee}' });
+  check('so on a dark page with no tokens the day is the page’s light text on the page’s dark ground', dark.tileBackground === 'rgba(0, 0, 0, 0)' && dark.dayColour === 'rgb(238, 238, 238)', JSON.stringify([dark.tileBackground, dark.dayColour]));
+  const themed = await open({ css: ':root{--gd-bg:#14161a;--gd-text:#e9edf2}' });
+  check('and where the host names its background, the tile’s face is that', themed.tileBackground === 'rgb(20, 22, 26)' && themed.dayColour === 'rgb(233, 237, 242)', JSON.stringify([themed.tileBackground, themed.dayColour]));
+}
+{
+  // far-off badges asked for in the feed address alone, the way a pasted worker URL does
+  const without = await open({ extra: '' });
+  const inAddress = await open({ extra: '', src: '/feed.json?countdown=always' });
+  check('countdown=always in the feed address keeps the far-off badges; without either, they are gone', without.badges[4] === '' && inAddress.badges[4] !== '', JSON.stringify([without.badges, inAddress.badges]));
+}
+
 // ── 3: add to calendar is the feed’s .ics in Safari on an Apple device ───────────────────────────
 {
-  const s = await open({ userAgent: SAFARI_IOS, width: 390, extra: 'data-show="2"' });
+  const s = await open({ userAgent: SAFARI_IOS, width: 390, extra: 'data-countdown="always" data-show="2"' });
   check('data-show limits the rows', s.uids.length === 2, String(s.uids.length));
   check('in Safari on iOS, with a feed that serves it, all three doors are the .ics file', s.doors.every((d) => d.join() === 'ics,ics,ics'), JSON.stringify(s.doors));
 }
