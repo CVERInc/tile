@@ -17,6 +17,7 @@
 // of the controls) is the host's markup.
 import { mapsUrl, mapHref } from '../shared/map-link.mjs';
 import { addToCalendarUrl } from '../events/events-core.mjs';
+import { icsUrl, opensIcs } from '../events/ics-file.mjs';
 
 /**
  * Which feed a root reads on a page in `language`: `data-src-<language>` when the root has one for
@@ -101,12 +102,18 @@ export function locationText(event) {
  *   location → the location itself when it is a URL; a map for a place (the platform's own, by
  *              `userAgent` — the same link the events coral gives a place).
  *   url      → the event's own URL property.
- *   add      → an add-to-calendar link for this event (the events coral's).
+ *   add      → an add-to-calendar link for this event (the events coral's). In Safari on an Apple
+ *              device (opensIcs), when the feed's address is known (`feedSrc`) and the event has a
+ *              uid, the event as an .ics file from that feed instead: the device's own calendar
+ *              opens it, where the Google link would ask for a Google sign-in first.
  */
-export function eventHref(event, which, userAgent) {
+export function eventHref(event, which, userAgent, feedSrc) {
   if (!event) return '';
   if (which === 'url') return httpUrl(event.url);
-  if (which === 'add') return addToCalendarUrl(calendarEntry(event), { descriptionIsText: true });   // the feed's description is already text
+  if (which === 'add') {
+    const file = opensIcs(userAgent) ? icsUrl(feedSrc, event.uid) : '';
+    return file || addToCalendarUrl(calendarEntry(event), { descriptionIsText: true });   // the feed's description is already text
+  }
   if (which !== 'location') return '';
   const kind = locationKind(event);
   if (kind === 'url') return httpUrl(event.location);

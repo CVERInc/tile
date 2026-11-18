@@ -724,3 +724,58 @@ test('mountAll: a root with only per-language feeds is fed on that language’s 
     assert.equal(p.els.days.textContent, fed ? '07' : '02', `${lang}: ${fed ? 'the feed' : 'the typed deadline'}`);
   }
 });
+
+// ── add to calendar on an Apple device: the event as a file, from the feed that says it serves one ──
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const IPHONE_IN_APP = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0.0';
+const MAC_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel)';
+
+test('eventHref add: an .ics link in Safari on Apple devices only, and only with a feed address and a uid', () => {
+  const event = { uid: 'u1@google.com', title: 'Open', start: '2026-10-12', end: '2026-12-02', allDay: true };
+  const src = 'https://feed.example/v0/?cal=x';
+  for (const ua of [IPHONE, MAC]) {
+    const u = new URL(eventHref(event, 'add', ua, src));
+    assert.equal(u.origin + u.pathname, 'https://feed.example/v0/');
+    assert.equal(u.searchParams.get('ics'), 'u1@google.com');
+    assert.equal(u.searchParams.get('cal'), 'x');
+  }
+  const google = addToCalendarUrl(event);
+  assert.equal(eventHref(event, 'add', ANDROID, src), google, 'Android keeps the Google link');
+  assert.equal(eventHref(event, 'add', IPHONE_IN_APP, src), google, 'an app’s built-in browser keeps the Google link');
+  assert.equal(eventHref(event, 'add', MAC_CHROME, src), google, 'Chrome on a Mac keeps the Google link');
+  assert.equal(eventHref(event, 'add', '', src), google, 'an unknown device keeps the Google link');
+  assert.equal(eventHref(event, 'add', IPHONE), google, 'no feed address: the Google link');
+  assert.equal(eventHref(event, 'add', IPHONE, '/events.json'), google, 'a relative feed address: the Google link');
+  assert.equal(eventHref({ ...event, uid: null }, 'add', IPHONE, src), google, 'no uid: the Google link');
+});
+
+test('a mounted root links to the file only when the feed says it serves one', async () => {
+  const apple = (doc, clock, fetch) => ({ ...env(doc, clock, fetch), userAgent: IPHONE });
+  // the feed says so
+  let p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
+  let c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
+  let u = new URL(p.els.when.getAttribute('href'));
+  assert.equal(u.searchParams.get('ics'), 'Workshop');
+  assert.equal(u.searchParams.get('cal'), 'x');
+  p.els.next.click();
+  assert.equal(new URL(p.els.when.getAttribute('href')).searchParams.get('ics'), 'Applications open', 'paging re-points the link at the event shown');
+  c.stop();
+  // the feed does not say so (a static feed, an older worker): the Google link, even on an iPhone
+  p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
+  c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf(FEED).fetch));
+  assert.equal(p.els.when.getAttribute('href'), addToCalendarUrl(WORKSHOP));
+  c.stop();
+  // the feed says so, on a device that is not Apple's: the Google link
+  p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
+  c = await mountFromFeed(p.root, env(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
+  assert.equal(p.els.when.getAttribute('href'), addToCalendarUrl(WORKSHOP));
+  c.stop();
+  // the language's own feed address is the one the file comes from
+  p = page({ 'data-src': 'https://feed.example/v0/?cal=x', 'data-src-ja': 'https://feed.example/v0/?cal=ja' });
+  p.doc.documentElement.setAttribute('lang', 'ja');
+  c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
+  assert.equal(new URL(p.els.when.getAttribute('href')).searchParams.get('cal'), 'ja');
+  c.stop();
+});
