@@ -77,7 +77,7 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
       'a.dc-ev-cal{color:inherit;text-decoration:none}',
       // The tile: still a square. The month is a bar across its top; weekday and day sit centred
       // in the rest (a flex child that takes what the bar leaves).
-      '.dc-ev-list--live .dc-ev-cal{padding:0;gap:0;justify-content:flex-start;overflow:hidden}',
+      '.dc-ev-list--live .dc-ev-cal{padding:0;gap:0;justify-content:flex-start;overflow:hidden;background:var(--gd-bg,#fff)}',
       '.dc-ev-list--live .dc-ev-cal-mo{align-self:stretch;flex:none;padding:3px 0;font-size:.6rem;font-weight:800;letter-spacing:.06em;line-height:1.1;text-align:center;background:var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-ink,#fff)}',
       '.dc-ev-cal-face{align-self:stretch;flex:1 1 0%;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:background .15s}',
       '.dc-ev-cal-wd{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;line-height:1;color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)))}',
