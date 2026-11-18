@@ -134,6 +134,21 @@ test('add to calendar is the events coral’s link for the same event', () => {
   assert.match(eventHref(event, 'add'), /^https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE&text=Open&dates=20261012%2F20261202/);
 });
 
+test('add to calendar carries what the event says: the description as text, then its URL', () => {
+  const details = (event) => new URL(addToCalendarUrl(event)).searchParams.get('details');
+  const base = { title: 'Closed', start: '2026-12-28', end: '2027-01-04', allDay: true };
+  assert.equal(details(base), null, 'nothing to say: no details at all');
+  assert.equal(details({ ...base, description: 'Back on Jan 4.\n\nOrders ship from Jan 5.' }), 'Back on Jan 4.\nOrders ship from Jan 5.');
+  assert.equal(details({ ...base, description: '<b>Back</b> on Jan 4<br>Orders &amp; replies after' }), 'Back on Jan 4\nOrders & replies after', 'a formatted description goes as its words');
+  assert.equal(details({ ...base, url: 'https://example.com/e' }), 'https://example.com/e');
+  assert.equal(details({ ...base, description: 'Read more', url: 'https://example.com/e' }), 'Read more\n\nhttps://example.com/e');
+  assert.equal(details({ ...base, description: 'x', url: 'javascript:alert(1)' }), 'x', 'only an http(s) URL is added');
+  // and the countdown's link is the same one, for the feed's event
+  const fed = { ...base, description: 'Back on Jan 4.', startsAt: '2026-12-27T15:00:00.000Z', endsAt: '2027-01-03T15:00:00.000Z' };
+  assert.equal(new URL(eventHref(fed, 'add')).searchParams.get('details'), 'Back on Jan 4.');
+  assert.match(renderEvents([{ ...base, start: '2999-01-01', end: '2999-01-02', description: 'Back on Jan 4.' }], { now: 0 }), /details=Back\+on\+Jan\+4\./, 'the events list’s link says it too');
+});
+
 test('add to calendar states a timed event’s exact instants, whoever’s device builds the link', () => {
   // 10:00 in Los Angeles: the feed keeps the wall clock in start/end and gives the instants beside it.
   const zoned = { title: 'Talk', allDay: false, start: '2026-11-25T10:00:00', end: '2026-11-25T11:00:00', startsAt: '2026-11-25T18:00:00.000Z', endsAt: '2026-11-25T19:00:00.000Z' };
@@ -491,6 +506,72 @@ test('data-event-fit: the element is as tall as the tallest event needs, and pag
   const c2 = await mountFromFeed(closed.root, env(closed.doc, createClock(NOW), feedOf(FEED).fetch));
   assert.equal(closed.root.style.minHeight, undefined);
   c2.stop();
+});
+
+test('data-event-more: text the host clips becomes a control that opens it; text that fits is left alone', async () => {
+  const LONG = ev('Closed', NOW + 40 * D, NOW + 47 * D, { description: 'a very long description' });
+  const SHORT = ev('Workshop', NOW + 7 * D, NOW + 7 * D + 2 * H, { description: 'short' });
+  const { doc, root, els } = page({ 'data-src': '/f' });
+  els.descLine.setAttribute('data-event-more', '');
+  // a stand-in for layout: two lines fit; the long text needs five unless the line is open
+  Object.defineProperty(els.desc, 'clientHeight', { get: () => (els.descLine.getAttribute('data-event-open') !== null ? 90 : 36) });
+  Object.defineProperty(els.desc, 'scrollHeight', { get: () => (els.desc.textContent.length > 10 ? 90 : 18) });
+  // the element the test markup nests the text in: make it the line's child, as a host would
+  els.descLine.appendChild(els.desc);
+  const clock = createClock(NOW);
+  const c = await mountFromFeed(root, env(doc, clock, feedOf({ events: [SHORT, LONG] }).fetch));
+  const state = () => ['data-event-clipped', 'data-event-open', 'role', 'tabindex', 'aria-expanded'].map((n) => els.descLine.getAttribute(n));
+  assert.equal(els.desc.textContent, 'short');
+  assert.deepEqual(state(), [null, null, null, null, null], 'it fits: not a control, not focusable');
+  els.descLine.click();
+  assert.equal(els.descLine.press('Enter'), false);
+  assert.deepEqual(state(), [null, null, null, null, null], 'and pressing it does nothing');
+  c.next();
+  assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'clipped: a control, closed');
+  els.descLine.click();
+  assert.deepEqual(state(), ['', '', 'button', '0', 'true'], 'opened in place');
+  els.descLine.click();
+  assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'and closed again');
+  assert.equal(els.descLine.press(' '), true, 'Space opens it and does not scroll the page');
+  assert.equal(els.descLine.getAttribute('data-event-open'), '');
+  assert.equal(els.descLine.press('Enter'), true);
+  assert.equal(els.descLine.getAttribute('data-event-open'), null);
+  assert.equal(els.descLine.press('a'), false, 'any other key is not ours');
+  els.descLine.click();
+  c.prev();
+  assert.deepEqual(state(), [null, null, null, null, null], 'showing another event closes it, and that one fits');
+  c.next();
+  assert.deepEqual(state(), ['', null, 'button', '0', 'false'], 'coming back, it is closed');
+  els.descLine.click();
+  c.stop();
+  els.descLine.click();
+  assert.equal(els.descLine.getAttribute('data-event-open'), '', 'a stopped root does not toggle');
+});
+
+test('data-event-more with data-event-fit: the height kept is the height with everything closed', async () => {
+  const LONG = ev('Closed', NOW + 40 * D, NOW + 47 * D, { description: 'a very long description' });
+  const SHORT = ev('Workshop', NOW + 7 * D, NOW + 7 * D + 2 * H, { description: 'short' });
+  const { doc, root, els } = page({ 'data-src': '/f', 'data-event-fit': '' });
+  els.descLine.setAttribute('data-event-more', '');
+  els.descLine.appendChild(els.desc);
+  const open = () => els.descLine.getAttribute('data-event-open') !== null;
+  Object.defineProperty(els.desc, 'clientHeight', { get: () => (open() ? 90 : 36) });
+  Object.defineProperty(els.desc, 'scrollHeight', { get: () => (els.desc.textContent.length > 10 ? 90 : 18) });
+  let width = 352;
+  root.getBoundingClientRect = () => ({ width, height: 200 + (open() ? 90 : 36) });
+  let resized = null;
+  const e = { ...env(doc, createClock(NOW), feedOf({ events: [SHORT, LONG] }).fetch), ResizeObserver: class { constructor(fn) { resized = fn; } observe() {} disconnect() {} } };
+  const c = await mountFromFeed(root, e);
+  assert.equal(root.style.minHeight, '236px');
+  c.next();
+  els.descLine.click();
+  assert.equal(open(), true);
+  assert.equal(root.style.minHeight, '236px', 'opening it does not raise the kept height: the panel just grows');
+  width = 300; resized();
+  assert.equal(open(), false, 're-measuring closes it first');
+  assert.equal(root.style.minHeight, '236px', 'so the open text never becomes the height of every event');
+  assert.equal(els.descLine.getAttribute('data-event-clipped'), '', 'and it is still known to be clipped');
+  c.stop();
 });
 
 test('mountAll: only a root that carries data-src touches the network', async () => {
