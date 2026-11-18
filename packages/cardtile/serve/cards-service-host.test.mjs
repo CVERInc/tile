@@ -375,6 +375,27 @@ test('CONTROL staging: a browser on the stand-in passes the same-origin check, a
   assert.equal((await list.json()).cards[0].handle, 't');
 });
 
+test('staging: a stand-in keeps the scheme and the port of an Origin — the same-origin check answers as on the real host, for every port pair', async () => {
+  let rows = 0;
+  for (const [real, standin] of [[SERVICE, S_SERVICE], [LEGACY, S_LEGACY]]) {
+    for (const urlPort of ['', ':8443']) for (const originPort of ['', ':8443', ':9443']) {
+      const answers = [];
+      for (const host of [real, standin]) {
+        const env = envFor({ ...SPLIT, ...STANDINS, ...NOT_PRODUCTION });
+        const before = env.CARDS.kv.size;
+        const res = await ask(`${host}${urlPort}`, '/try/park', env, { method: 'POST', headers: { origin: `https://${host}${originPort}` }, body: SEED.t });
+        answers.push({ status: res.status, stored: env.CARDS.kv.size - before });
+      }
+      const row = `${standin}${urlPort} asked from port "${originPort}"`;
+      rows += 1;
+      // CONTROL: the real host parks for its own origin only — the same port included
+      assert.deepEqual(answers[0], urlPort === originPort ? { status: 200, stored: 1 } : { status: 403, stored: 0 }, `the real host, ${row}`);
+      assert.deepEqual(answers[1], answers[0], row);
+    }
+  }
+  assert.equal(rows, 12);
+});
+
 test('staging: only a name of ours can stand in — anything else in the setting is ignored', async () => {
   const { standIns } = await import('./host-standins.mjs');
   const real = { service: SERVICE, people: PEOPLE, legacy: LEGACY };
@@ -542,6 +563,88 @@ test('CONTROL split: the people\'s host answers no service endpoint — every se
     }
   }
   assert.equal(rows, paths.length * METHODS.length * 3);
+});
+
+// ── the legacy host after the split ─────────────────────────────────────────────────────────────
+// It still serves the editor in place (host mode, and the sandbox at `?stay=1`), so it is an origin
+// that serves the editor: it never renders what a person wrote either. A read moves, as before; any
+// other method is refused unread. What it answers in place is untouched.
+const LEGACY_IN_PLACE = ['/_api/card/t', '/_api/cards', `/_api/try/${PARKED_ID}`, '/_api/nope', '/try/park', '/edit', '/edit/', '/edit?host=https://feelreef.com',
+  '/try/edit', '/try/edit/', '/try/edit?stay=1', '/try/edit2', ASSET_PATH, '/try/edit/a/000000000000/nope.js', '/try/edit/a/not-a-hash/nope.js'];
+// [class, path]: everything else — a read is a 301 to the same address on the people's host.
+// (Bare `/_api` is left out: a read of it does not move — movedTo's exception, as at the cutover — and
+// is the nothing-here page; any other method is refused like the rest, asserted further down. And
+// anything under the editor's file prefix is answered in place, a name that is no file included.)
+const LEGACY_MOVED = [
+  ...SERVICE_TABLE.filter(([cls, path]) => cls !== 'service page' && path !== '/_api' && !path.startsWith('/try/edit/a/')).map(([cls, path]) => [cls, path]),
+  ['person', '/'], ['person', `/?ref=${MARKER}`], ['person', '/nobody'], ['person', '/t/'],
+  ['file', DECK_JS_PATH], ['file', DECK_CSS_PATH], ['file', '/_icon/example.com.ico'], ['file', '/_yt/abcdefghijk.jpg'],
+];
+
+test('split: the legacy host renders, reflects and reads nothing a person wrote — every path class × every method', async () => {
+  let rows = 0;
+  await withUpstream(async (upstream) => {
+    for (const [cls, path] of LEGACY_MOVED) {
+      for (const method of METHODS) {
+        for (const headers of [{}, { origin: 'https://evil.example' }, { origin: 'https://card.feelreef.com' }]) {
+          const row = `${method} ${path} (${cls})`;
+          const env = envFor(SPLIT, { CARDS: store(MARKED_SEED) });
+          const res = await ask(LEGACY, path, env, { method, headers, ...bodyOf(method) });
+          const body = await res.text();
+          rows += 1;
+          assert.ok(!body.includes(MARKER), `${row}: the answer carries what a person wrote`);
+          assert.deepEqual(env.CARDS.reads, [], `${row}: the store was read`);
+          assert.equal(env.CARDS.kv.size, Object.keys(MARKED_SEED).length, `${row}: something was stored`);
+          assert.equal(upstream.length, 0, `${row}: an upstream was asked`);
+          assert.equal(body, '', row);
+          if (READS.includes(method)) {
+            // CONTROL: a read moves as it did
+            assert.equal(res.status, 301, row);
+            assert.equal(loc(res), `https://reef.cards${path}`, row);
+          } else {
+            assert.equal(res.status, 405, row);
+            assert.equal(res.headers.get('allow'), 'GET, HEAD', row);
+            assert.equal(loc(res), null, row);
+          }
+        }
+      }
+    }
+  });
+  assert.equal(rows, LEGACY_MOVED.length * METHODS.length * 3);
+});
+
+test('CONTROL split: what the legacy host answers in place is answered as before the split, for every method — the API, the park, host mode, the editor\'s files', async () => {
+  let rows = 0;
+  for (const path of LEGACY_IN_PLACE) {
+    for (const method of METHODS) {
+      assert.equal(W.hostBoundary(SPLIT, LEGACY, new URL(`https://x${path}`).pathname, method), null, `${method} ${path}: the boundary decided`);
+      // a read of the sandbox and of the park's address moves in the split (movedTo); nothing else differs
+      if (READS.includes(method) && ['/try/edit', '/try/edit/', '/try/edit?stay=1', '/try/edit2', '/try/park'].includes(path)) continue;
+      for (const headers of [{}, AUTH, { origin: 'https://card.feelreef.com' }]) {
+        const init = { method, headers, ...bodyOf(method) };
+        const split = await whole(LEGACY, path, envFor(SPLIT, { CARDS: store(MARKED_SEED) }), init);
+        const before = await whole(LEGACY, path, envFor(CANONICAL, { CARDS: store(MARKED_SEED) }), init);
+        rows += 1;
+        // the nothing-here page links to the editor, whose address is the split's own: its text differs
+        const seen = (w) => (path === '/try/edit/a/not-a-hash/nope.js' ? { status: w.status, reads: w.reads } : w);
+        assert.deepEqual(seen(split), seen(before), `${method} ${path}`);
+      }
+    }
+  }
+  assert.equal(rows, (LEGACY_IN_PLACE.length * METHODS.length - 5 * READS.length) * 3);
+});
+
+test('the legacy host\'s rule is the split\'s alone — off, open and at the cutover the boundary decides nothing there', () => {
+  for (const env of [undefined, {}, CANONICAL, OPEN, { ...CANONICAL, CARDS_SERVICE_HOST: 'CARDS.FEELREEF.COM' }]) {
+    for (const [, path] of LEGACY_MOVED) for (const method of METHODS) {
+      assert.equal(W.hostBoundary(env, LEGACY, new URL(`https://x${path}`).pathname, method), null, `${JSON.stringify(env)} ${method} ${path}`);
+    }
+  }
+  // CONTROL: in the split it decides, and only for the legacy host — a creator's domain is not one
+  assert.deepEqual(W.hostBoundary(SPLIT, LEGACY, '/t', 'POST'), { answer: 'method' });
+  assert.deepEqual(W.hostBoundary(SPLIT, LEGACY, '/_api', 'POST'), { answer: 'method' });
+  assert.equal(W.hostBoundary(SPLIT, LEGACY, '/t', 'GET'), null);
+  for (const method of METHODS) assert.equal(W.hostBoundary(SPLIT, 'own.example', '/', method), null);
 });
 
 test('hostBoundary: off, it decides nothing — on any host, any path, any method', () => {

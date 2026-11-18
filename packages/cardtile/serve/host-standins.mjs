@@ -71,13 +71,15 @@ export function standIn(request, env, real) {
   if (!to) return null;
   url.hostname = to;
   const headers = new Headers(request.headers);
-  // a browser on the stand-in says so in Origin; the routes that compare it compare it with the real host
+  // a browser on the stand-in says so in Origin; the routes that compare it compare it with the real host.
+  // 🔴 Only the hostname is re-addressed, as in the URL above: the scheme and the port are the
+  // sender's, and an origin on another port is another origin.
   const origin = headers.get('origin');
   if (origin) {
     try {
       const o = new URL(origin);
       const r = map.byHost.get(o.hostname);
-      if (r && o.protocol === 'https:' && origin === o.origin) headers.set('origin', `https://${r}`);
+      if (r && o.protocol === 'https:' && origin === o.origin) { o.hostname = r; headers.set('origin', o.origin); }
     } catch { /* not an origin: left as sent */ }
   }
   const roleOf = new Map(Object.entries(real).map(([role, host]) => [host, role]));

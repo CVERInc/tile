@@ -905,9 +905,9 @@ const isRead = (method) => method === 'GET' || method === 'HEAD';
 
 /**
  * hostBoundary: (env, host, pathname, method) → null | verdict. Pure — it reads no store and no body.
- * The ONE decision about what the service's host and the people's host may answer, taken before any
- * handler runs, for every method. null = this request is not the boundary's to refuse: the handlers
- * below answer it as they answer it on any host.
+ * The ONE decision about what the service's host, the people's host and (after the split) the legacy
+ * host may answer, taken before any handler runs, for every method. null = this request is not the
+ * boundary's to refuse: the handlers below answer it as they answer it on any host.
  *
  * 🔴 TWO RULES, each for EVERY method (a browser can be sent anywhere with a cross-origin form POST,
  * and a route that only checks GET is open to it):
@@ -939,6 +939,17 @@ const isRead = (method) => method === 'GET' || method === 'HEAD';
  *   /  (GET/HEAD)                302 → the editor
  *   anything else                null: what people wrote, and this host's own doors
  *
+ * The legacy host (card.feelreef.com, 'split' only). It still serves the editor in place — host mode,
+ * and the sandbox at `?stay=1` — so the first rule is its rule too:
+ *
+ *   GET/HEAD                     null: movedTo redirects it, or it is one of the answers in place
+ *   /_api/…, the editor's pages and hashed files, the park
+ *                                null: answered in place, as before the split, whatever the method
+ *   any other method, any other path   405, empty — a page, a preview and every other address that
+ *                                moved are not rendered or read here for a POST
+ *
+ * Before the split (serviceHostStage 'off' and 'open') the legacy host is none of this function's.
+ *
  * verdict: { answer: 'refused' }            404, empty
  *          { answer: 'method' }             405, empty
  *          { answer: 'editor' }             302 → the editor on the service's host, query carried
@@ -966,6 +977,10 @@ export function hostBoundary(env, host, pathname, method) {
     if (isServicePath(p)) return reading ? { answer: 'moved', status: 301, to: SERVICE_HOST, query: true } : { answer: 'refused' };
     // no handle: temporary, because a home page will stand here later
     if (p === '/' && reading) return { answer: 'editor' };
+  }
+  if (stage === 'split' && host === CANON_HOST) {
+    if (reading || p.startsWith(`${API_PATH}/`) || isServicePath(p)) return null;
+    return { answer: 'method' };
   }
   return null;
 }
@@ -1222,7 +1237,8 @@ const router = {
 
     // reef#2758 — the report door, on reef.cards only (and only with the switch on: the host is dark
     // otherwise, above, and so is this route in the open stage). On the old card host `/report` 301s here like every other path (GET), and a
-    // POST there falls through to handle routing — `report` is a reserved handle, so it is no card.
+    // POST there falls through to handle routing — `report` is a reserved handle, so it is no card
+    // (after the split hostBoundary has refused that POST already).
     if (reqHost === CARDS_HOST && (url.pathname === REPORT_PATH || url.pathname === `${REPORT_PATH}/`)) {
       return handleReport(request, env, { handleOf: (u) => reportedHandle(u, env) });
     }

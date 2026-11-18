@@ -176,6 +176,9 @@ PREVIEW = "false"
 #                                                → 405, empty: the service's host renders nothing a
 #                                                  person wrote, whatever the method (also in `open`,
 #                                                  where a preview goes to card.feelreef.com instead)
+#             card.feelreef.com, any method but GET/HEAD, on anything but what it answers in place
+#                                                → 405, empty: it still serves the editor, so it renders
+#                                                  nothing a person wrote either (this stage only)
 #             every page                         → its "make your own" link names cards.feelreef.com;
 #                                                  reef.cards/feelreef is an ordinary address
 #
