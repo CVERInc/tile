@@ -661,8 +661,24 @@ test('feedSource: the page’s language picks its own feed, then its primary sub
   // only some languages named: nothing on the others
   assert.equal(feedSource(root({ 'data-src-zh-tw': '/zh' }), 'ja'), '');
   assert.equal(feedSource(root({ 'data-src-zh-tw': '  ' , 'data-src': '/ja' }), 'zh-TW'), '/ja', 'an empty one is not one');
-  // a language tag that is not one never becomes an attribute name
-  for (const bad of ['zh tw', '"><x', 'a', '../x', 'zh_TW']) assert.equal(feedSource(all, bad), '/ja', bad);
+  // a script subtag between the language and the region: what the host wrote for the region applies
+  assert.equal(feedSource(all, 'zh-Hant-TW'), '/zh', 'zh-Hant-TW finds data-src-zh-tw');
+  const chain = root({ 'data-src': '/d', 'data-src-zh-hant': '/hant', 'data-src-zh': '/zh' });
+  assert.equal(feedSource(chain, 'zh-Hant-TW'), '/hant', 'no region match: shortened from the end');
+  assert.equal(feedSource(chain, 'zh-Hans-CN'), '/zh');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-es-419': '/latam' }), 'es-419'), '/latam', 'a numeric region is a region');
+  assert.equal(feedSource(all, 'en-x-private'), '/en');
+  // a language tag that is not one never becomes an attribute name: watch what is READ, because a
+  // root that simply has no such attribute would answer the same either way
+  for (const bad of ['zh tw', '"><x', 'a', '../x', 'zh_TW', 'zh-', '-tw', 'zh--tw']) {
+    const read = [];
+    const spy = { getAttribute: (n) => { read.push(n); return n === 'data-src' ? '/ja' : null; } };
+    assert.equal(feedSource(spy, bad), '/ja', bad);
+    assert.deepEqual(read, ['data-src'], `${JSON.stringify(bad)} read ${read.join(', ')}`);
+  }
+  const read = [];
+  feedSource({ getAttribute: (n) => { read.push(n); return null; } }, 'zh-Hant-TW');
+  assert.deepEqual(read, ['data-src-zh-hant-tw', 'data-src-zh-tw', 'data-src-zh-hant', 'data-src-zh', 'data-src'], 'the order it looks in');
 });
 
 test('a root reads the feed for the page’s language, and a page with no feed for it is not fed', async () => {
