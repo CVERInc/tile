@@ -47,6 +47,26 @@ export function upcomingEvents(events, now) {
   });
 }
 
+/**
+ * The same upcoming list `renderEvents` draws, as DATA: what another coral needs to act on an event
+ * without scraping the rendered HTML (the countdown coral reads the next one as its deadline). Plain
+ * fields only, in the Event shape's own names; `start`/`end` are the ISO strings the source gave —
+ * date-only for an all-day event, no offset for a floating one — because inventing a zone here would
+ * be a guess the reader could not see.
+ */
+export function feedEvents(events, opts = {}) {
+  const { showCount = 3, now = Date.now() } = opts;
+  return upcomingEvents(events, now).slice(0, Math.max(1, showCount | 0)).map((ev) => ({
+    title: ev.title || '',
+    start: ev.start,
+    end: ev.end || null,
+    allDay: !!ev.allDay,
+    location: ev.location || null,
+    description: ev.description || null,
+    url: ev.url || null,
+  }));
+}
+
 /** Human "when" — a live-countdown bucket: live / <1h ticking seconds / <24h / <7d / (date beyond).
  *  Seconds appear only inside the final hour, where they add real drama; days/hours out stay coarse.
  *
