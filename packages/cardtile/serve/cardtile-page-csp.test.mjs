@@ -7,7 +7,13 @@
 //   · the STATIC CHECK: on a page holding every tile type, every inline script and every inline
 //     event handler the page carries is in the policy by hash, and every address class the page
 //     loads from is allowed — and the same check FAILS on a page with one script added;
-//   · a page that carries an embed gets no policy (a srcdoc frame inherits its parent's policy);
+//   · the policy is on EVERY person's page and preview, whatever it holds: nothing a person writes, and
+//     nothing in the rendered page, decides whether it is sent (an embed, the word "embed" in a file
+//     served in windows, ` srcdoc="` in the page — the r1 review's cases);
+//   · with the setting on, an embed is its own document (cardtile-embed-document.mjs): its frame names a
+//     same-origin address with the same sandbox, that address answers with exactly the document the
+//     srcdoc held under a policy of its own, and only for an embed tile of the file it names; with the
+//     setting off that address is an unknown path, answer for answer;
 //   · the setting leaves every other answer alone, the `.md` exits included (their nosniff is
 //     cardtile-md-nosniff.test.mjs, and does not depend on this setting).
 // What a browser does with the policy is verify/page-csp.mjs.
@@ -16,18 +22,28 @@ import test from 'node:test';
 import { createHash } from 'node:crypto';
 import worker, { renderCardHTML } from './card-worker.mjs';
 import { gridCases, answerOf, answerDiff, atFixedClock, readFixture } from './gen-service-host-off-fixture.mjs';
-import { pageCspStage, pageCspHeaderName, pagePolicy, pageCspHeaders, bootScriptOf, isBootData, carriesEmbed, fileNamesEmbed,
+import vm from 'node:vm';
+import { deflateSync, crc32 } from 'node:zlib';
+import { pageCspStage, pageCspHeaderName, pagePolicy, pageCspHeaders, bootScriptOf, isBootData,
   videoScript, pictureScript, hashSource, PAGE_HANDLERS, DECK_FILE_ONERROR, ICON_ONERROR, PAGE_CSP_STAGES } from './cardtile-page-csp.mjs';
+import { embedDocuments, framesAsDocuments, EMBED_DOCUMENT_POLICY } from './cardtile-embed-document.mjs';
+import { parseCard } from '../card-core.js';
+import { PICTURE_STRATEGIES } from './asset-urls.mjs';
+import { WINDOW_TILES } from './size-tier.mjs';
+import { GRID_STAGES, GRID_HOSTS, GRID_PREVIEW } from './gen-service-host-off-fixture.mjs';
 import { DECK_HEAD_JS, DECK_JS_PATH } from '../w3/deck-page.mjs';
 import { ON_DEMAND_TILES } from './size-tier.mjs';
-import { PNG, EVERY_TILE, PLAIN, WITH_EMBED, HOSTILE_FRONT, long } from './cardtile-page-csp-fixtures.mjs';
+import { PNG, EVERY_TILE, PLAIN, WITH_EMBED, HOSTILE_FRONT, long, proseNamingEmbed, wordsNamingEmbed, EMBED_ON_BACK, OTHER_EMBED } from './cardtile-page-csp-fixtures.mjs';
 
 const ENFORCED = 'content-security-policy';
 const REPORTED = 'content-security-policy-report-only';
 
 const CARDS = { every: EVERY_TILE, plain: PLAIN, embedded: WITH_EMBED, hostile: HOSTILE_FRONT,
   long: long(ON_DEMAND_TILES + 40), longembedded: long(ON_DEMAND_TILES + 40, '- [ ] %% card: embed w=6 %% <script>1</script>\n'),
+  prose: proseNamingEmbed(ON_DEMAND_TILES + 1), words: wordsNamingEmbed(ON_DEMAND_TILES + 5), onback: EMBED_ON_BACK, other: OTHER_EMBED,
   [`_preview:${'c'.repeat(32)}`]: EVERY_TILE, [`_preview:${'d'.repeat(32)}`]: WITH_EMBED };
+// the window of `longembedded` that holds its embed (its last tile)
+const EMBED_WINDOW = Math.ceil((ON_DEMAND_TILES + 41) / WINDOW_TILES);
 const store = () => ({ get: async (k) => CARDS[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } });
 const ask = (path, settings = {}, init = {}) => worker.fetch(new Request(`http://localhost${path}`, init), { CARDS: store(), ...settings });
 const ON = { CARDS_PAGE_CSP: 'enforce' };
@@ -51,7 +67,15 @@ function refusals(page, policy) {
     if (!(script.includes("'unsafe-hashes'") && script.includes(sha(text)))) out.push(`inline handler ${JSON.stringify(text.slice(0, 60))}`);
   }
   if (/javascript:/i.test(page)) out.push('a javascript: address');
-  for (const tag of ['form', 'base', 'object', 'embed', 'iframe', 'video', 'audio', 'source']) if (new RegExp(`<${tag}\\b`).test(page)) out.push(`a <${tag}>`);
+  for (const tag of ['form', 'base', 'object', 'embed', 'video', 'audio', 'source']) if (new RegExp(`<${tag}\\b`).test(page)) out.push(`a <${tag}>`);
+  // a frame: a srcdoc document inherits this policy (its script is refused); a frame by address must be one frame-src allows
+  const frame = d['frame-src'] || [];
+  for (const m of page.matchAll(/<iframe\b([^>]*)>/g)) {
+    if (/\ssrcdoc="/.test(m[1])) { out.push('a srcdoc frame (it inherits this policy)'); continue; }
+    const src = (/\ssrc="([^"]*)"/.exec(m[1]) || [])[1] || '';
+    const ok = src.startsWith('/') && !src.startsWith('//') ? frame.includes("'self'") : frame.some((h) => /^https:\/\//.test(h) && src.startsWith(`${h}/`));
+    if (!ok) out.push(`a frame ${src.slice(0, 60)}`);
+  }
   const img = d['img-src'] || [];
   const imgOk = (u) => (u.startsWith('data:') ? img.includes('data:') : /^https:/i.test(u) ? img.includes('https:') : /^http:/i.test(u) ? img.includes('http:')
     : u.startsWith('/') && !u.startsWith('//') ? img.includes("'self'") : false);
@@ -114,7 +138,7 @@ test('the policy text, whole', async () => {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https: http:",
     "connect-src 'self'",
-    'frame-src https://www.youtube-nocookie.com',
+    "frame-src 'self' https://www.youtube-nocookie.com",
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
@@ -123,12 +147,13 @@ test('the policy text, whole', async () => {
   for (const banned of ["'unsafe-inline'", "'unsafe-eval'", "'strict-dynamic'", '*', 'https:', 'http:', 'data:', 'blob:']) assert.ok(!d['script-src'].includes(banned), `script-src holds ${banned}`);
   assert.ok(!d['script-src'].some((s) => s.startsWith("'nonce-")), 'a nonce in a cached page is one nonce for every visitor');
   assert.ok(!('frame-ancestors' in d) && !('report-uri' in d) && !('report-to' in d));
-  assert.equal(pagePolicy(), "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'none'; form-action 'none'");
+  assert.equal(pagePolicy(), "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self'; frame-src 'self' https://www.youtube-nocookie.com; object-src 'none'; base-uri 'none'; form-action 'none'");
 });
 
 // ── the static check ───────────────────────────────────────────────────────────────────────────
 test('STATIC CHECK: every inline script, inline handler and address class of a page with every tile type fits its policy', async () => {
   for (const [path, settings] of [['/every', ON], ['/every?lang=ja', ON], ['/plain', ON], ['/hostile', ON], ['/long', ON], ['/long?w=2', ON], [`/_preview/${'c'.repeat(32)}`, ON],
+    ['/embedded', ON], ['/onback', ON], [`/_preview/${'d'.repeat(32)}`, ON], [`/longembedded?w=${EMBED_WINDOW}`, ON], ['/prose', ON], ['/words?w=5', ON],
     ['/every', { ...ON, CARD_CANONICAL_HOST: 'reef.cards', CARDS_SERVICE_HOST: 'cards.feelreef.com' }]]) {
     const host = settings.CARD_CANONICAL_HOST ? 'https://reef.cards' : 'http://localhost';
     const r = await worker.fetch(new Request(`${host}${path}`, { redirect: 'manual' }), { CARDS: store(), ...settings });
@@ -136,8 +161,7 @@ test('STATIC CHECK: every inline script, inline handler and address class of a p
     const policy = r.headers.get(ENFORCED);
     assert.ok(policy, `${path}: no policy`);
     const page = await r.text();
-    assert.deepEqual(refusals(page, policy).filter((x) => !/^a <(iframe)>/.test(x)), [], path);
-    assert.ok(!/<iframe\b/.test(page), `${path}: a frame in a page that should have none`);
+    assert.deepEqual(refusals(page, policy), [], path);
     // the page did carry what the check is about
     assert.ok((page.match(/<script>/g) || []).length >= 2, `${path}: fewer than two inline scripts`);
     assert.ok(page.includes(` onerror="${DECK_FILE_ONERROR}"`), `${path}: the deck file's handler is not the one the policy hashes`);
@@ -165,6 +189,8 @@ test('CONTROL: the static check refuses a page with one script, one handler or o
     ['a base', '<base href="https://evil.example/">', /a <base>/],
     ['a form', '<form action="https://evil.example/"></form>', /a <form>/],
     ['an object', '<object data="https://evil.example/x"></object>', /a <object>/],
+    ['a frame from elsewhere', '<iframe src="https://evil.example/"></iframe>', /a frame https:\/\/evil\.example/],
+    ['a srcdoc frame', '<iframe sandbox="allow-scripts" srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"></iframe>', /a srcdoc frame/],
   ]) {
     const tampered = page.replace('<main', `${added}<main`);
     assert.notEqual(tampered, page, what);
@@ -237,42 +263,219 @@ test('the renderer\'s own scripts are read from the renderer, and the after-pain
   assert.equal(await hashSource('x'), sha('x'));
 });
 
-test('the local picture switch: a page whose pictures travel by address still fits its policy', async () => {
-  const withAsset = `${EVERY_TILE.replace(PNG, 'asset:pic')}\n\n## assets\n\n- pic: ${PNG}\n`;
-  for (const mode of ['hybrid', 'urls', 'all', 'after-paint', '1']) {
-    const env = { CARDS: { ...store(), get: async (k) => (k === 'every' ? withAsset : CARDS[k] ?? null) }, ...ON, CARDS_PICTURES: mode };
+// a real PNG past the inline threshold (asset-urls.mjs INLINE_MAX_BYTES): rows of bytes that do not compress
+const bigPng = (seed) => {
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc32(td)); return Buffer.concat([len, td, c]); };
+  const w = 32, h = 32;
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc(h * (1 + 3 * w));
+  let x = seed;
+  for (let i = 0; i < raw.length; i += 1) { x = (x * 1103515245 + 12345) >>> 0; raw[i] = i % (1 + 3 * w) === 0 ? 0 : x >>> 24; }
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+};
+test('the local picture switch: a page whose pictures travel by address still fits its policy, in every strategy', async () => {
+  // four pictures of the file's own, past the inline threshold: the first screen takes two, the rest go by address
+  const pics = [1, 2, 3, 4].map((i) => ({ id: `pic${i}`, b: bigPng(i) }));
+  assert.ok(pics.every((p) => p.b.length > 1024), 'the pictures are past the inline threshold');
+  const withAssets = `${EVERY_TILE.replace(`img=${PNG}`, 'img=asset:pic1').replace('## back: about',
+    '- [ ] %% card: feature w=6 img=asset:pic2 %% Two.\n- [ ] %% card: feature w=6 img=asset:pic3 %% Three.\n- [ ] %% card: feature w=6 img=asset:pic4 %% Four.\n\n## back: about')}\n## assets\n\n${pics.map((p) => `- [ ] %% card: asset id=${p.id} mime=image/png %% ${p.b.toString('base64')}`).join('\n')}\n`;
+  assert.equal(parseCard(withAssets).assets.pic4 != null, true, 'the assets lane parses');
+  const seen = [];
+  for (const mode of PICTURE_STRATEGIES) {
+    const env = { CARDS: { ...store(), get: async (k) => (k === 'every' ? withAssets : CARDS[k] ?? null) }, ...ON, CARDTILE_PICTURES: mode };
     const r = await worker.fetch(new Request('http://localhost/every'), env);
     const page = await r.text();
-    assert.equal(r.status, 200);
-    assert.deepEqual(refusals(page, r.headers.get(ENFORCED)), [], `CARDS_PICTURES=${mode}`);
+    assert.equal(r.status, 200, mode);
+    const policy = r.headers.get(ENFORCED);
+    assert.deepEqual(refusals(page, policy), [], `CARDTILE_PICTURES=${mode}`);
+    const byAddress = (page.match(/\/every\/a\/[0-9a-f]{64}\.png/g) || []).length;
+    const afterPaint = pictureScript('/every/a/');
+    // the switch did switch: by address for every strategy but inline, and the after-paint script exactly where asked
+    if (mode === 'inline') assert.equal(byAddress, 0, mode);
+    else assert.ok(byAddress > 0, `${mode}: no picture by address`);
+    assert.equal(page.includes(`<script>${afterPaint}</script>`), mode.endsWith('-after-paint'), `${mode}: the after-paint script`);
+    if (mode.endsWith('-after-paint')) assert.ok(directives(policy)['script-src'].includes(sha(afterPaint)), `${mode}: the after-paint script is not in the policy`);
+    seen.push(`${mode}:${byAddress}`);
   }
+  console.log(`# picture switch: ${seen.join(' ')}`);
 });
 
 // ── the embed ──────────────────────────────────────────────────────────────────────────────────
-test('a page that carries an embed gets no policy in either stage, and is the page it was', async () => {
-  for (const path of ['/embedded', `/_preview/${'d'.repeat(32)}`, '/longembedded', '/longembedded?w=2']) {
-    const off = await ask(path);
+test('the policy is on EVERY person\'s page and preview, whatever it holds (r1: an embed, the word "embed", a window)', async () => {
+  const words = Math.ceil((ON_DEMAND_TILES + 5) / WINDOW_TILES);
+  const longEmbedded = Array.from({ length: EMBED_WINDOW }, (_, i) => `/longembedded?w=${i + 1}`);
+  const prose = Array.from({ length: Math.ceil((ON_DEMAND_TILES + 1) / WINDOW_TILES) }, (_, i) => `/prose?w=${i + 1}`);
+  const paths = ['/embedded', '/onback', `/_preview/${'d'.repeat(32)}`, '/longembedded', ...longEmbedded, '/prose', ...prose,
+    '/words', ...Array.from({ length: words }, (_, i) => `/words?w=${i + 1}`)];
+  let sent = 0;
+  for (const path of paths) {
+    const plain = (await ask('/plain', ON)).headers.get(ENFORCED);
     for (const stage of ['report-only', 'enforce']) {
       const r = await ask(path, { CARDS_PAGE_CSP: stage });
       assert.equal(r.status, 200, path);
-      assert.equal(r.headers.get(ENFORCED), null, `${path} ${stage}`);
-      assert.equal(r.headers.get(REPORTED), null, `${path} ${stage}`);
-      assert.deepEqual([...r.headers], [...off.headers], `${path} ${stage}: the headers differ from off`);
+      const policy = r.headers.get(pageCspHeaderName(stage));
+      assert.ok(policy, `${path} ${stage}: no policy`);
+      // the same policy as any page, but for the page's own boot line
+      const strip = (p) => p.replace(/'sha256-[^']*'/g, 'H');
+      assert.equal(strip(policy), strip(plain), `${path} ${stage}: not the policy every page gets`);
+      sent += 1;
     }
   }
-  const page = await (await ask('/embedded')).text();
-  assert.ok(/<iframe sandbox="allow-scripts" srcdoc="/.test(page), 'the embed is still a sandboxed srcdoc frame');
-  assert.equal(carriesEmbed(page), true);
-  // the first window of the long file holds no frame itself: the file is what says so
-  const first = await (await ask('/longembedded')).text();
-  assert.equal(carriesEmbed(first), false, 'the fixture\'s embed must be in a later window');
-  assert.equal(fileNamesEmbed(CARDS.longembedded), true);
-  assert.equal(carriesEmbed(await (await ask('/every')).text()), false);
-  assert.equal(fileNamesEmbed(CARDS.long), false);
-  // CONTROL: the same long file without the embed does get the policy on its first window
-  assert.ok((await ask('/long', ON)).headers.get(ENFORCED));
-  assert.deepEqual(await pageCspHeaders(ON, page), {});
-  assert.deepEqual(await pageCspHeaders({ CARDS_PAGE_CSP: 'report-only' }, first, { windowedFile: CARDS.longembedded }), {});
+  console.log(`# cardtile page csp: ${sent} answers of ${paths.length} pages with an embed or the word, all with the policy`);
+  // the review's exact case: a file served in windows whose title says "embed", and no frame anywhere
+  assert.ok(CARDS.prose.includes('title: How to embed a video'));
+  assert.ok(!(await (await ask('/prose', ON)).text()).includes('<iframe'));
+});
+
+test('r1 (third review): ` srcdoc="` in an injected payload does not take the policy away, and the injected script is refused', async () => {
+  const page = await (await ask('/plain')).text();
+  const tampered = page.replace('<main', '<script>alert(1)</script><!-- srcdoc=" --><main');
+  assert.notEqual(tampered, page);
+  const headers = await pageCspHeaders(ON, tampered);
+  assert.ok(headers['Content-Security-Policy'], 'no policy for a page holding the string');
+  assert.ok(refusals(tampered, headers['Content-Security-Policy']).some((s) => /inline script "alert\(1\)"/.test(s)));
+  // …and a frame an escaping bug writes is not an embed: it is left as it is, and inherits the policy
+  const forged = page.replace('<main', '<iframe sandbox="allow-scripts" srcdoc="&lt;script&gt;parent.x=1&lt;/script&gt;"></iframe><main');
+  const docs = await embedDocuments(parseCard(PLAIN), () => '');
+  assert.equal(framesAsDocuments(forged, docs, '/plain/'), forged);
+  assert.ok(refusals(forged, (await pageCspHeaders(ON, forged))['Content-Security-Policy']).some((s) => /srcdoc frame/.test(s)));
+});
+
+/** the frames of a page: [{ attrs, src, srcdoc }] */
+const framesOf = (page) => [...page.matchAll(/<iframe\b([^>]*)>/g)].map((m) => ({ attrs: m[1], src: (/\ssrc="([^"]*)"/.exec(m[1]) || [])[1], srcdoc: (/\ssrcdoc="([^"]*)"/.exec(m[1]) || [])[1] }));
+const fromSrcdoc = (s) => s.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const EMBED_HEADERS = [['cache-control', 'public, max-age=60'], ['content-security-policy', EMBED_DOCUMENT_POLICY], ['content-type', 'text/html; charset=utf-8'],
+  ['cross-origin-resource-policy', 'same-origin'], ['x-content-type-options', 'nosniff'], ['x-robots-tag', 'noindex']];
+
+test('setting on: an embed is its own document — same sandbox, a same-origin address, exactly the srcdoc\'s document, its own policy', async () => {
+  assert.equal(EMBED_DOCUMENT_POLICY, "sandbox allow-scripts; frame-ancestors 'self'");
+  for (const [path, base, query] of [['/embedded', '/embedded/', ''], ['/onback', '/onback/', ''], [`/_preview/${'d'.repeat(32)}`, `/_preview/${'d'.repeat(32)}/`, ''],
+    [`/longembedded?w=${EMBED_WINDOW}`, '/longembedded/', `?w=${EMBED_WINDOW}`]]) {
+    const off = await (await ask(path)).text();
+    const offFrames = framesOf(off);
+    assert.equal(offFrames.length, 1, `${path}: the fixture holds one embed`);
+    assert.ok(offFrames[0].srcdoc && !offFrames[0].src, `${path}: off, the embed is a srcdoc frame`);
+    assert.ok(!off.includes('/_embed/'), `${path}: off, no embed address`);
+    for (const stage of ['report-only', 'enforce']) {
+      const r = await ask(path, { CARDS_PAGE_CSP: stage });
+      const on = await r.text();
+      const [f] = framesOf(on);
+      assert.match(f.src, new RegExp(`^${base.replace(/[/.?]/g, '\\$&')}_embed/[0-9a-f]{64}${query.replace('?', '\\?')}$`), `${path} ${stage}: ${f.src}`);
+      assert.equal(f.srcdoc, undefined);
+      assert.match(f.attrs, /^ sandbox="allow-scripts" src="/, `${path}: the sandbox is the one token, as before`);
+      assert.ok(!/allow-same-origin/.test(on));
+      // every other byte of the page is the page served with the setting off
+      assert.equal(on, off.replace(` srcdoc="${offFrames[0].srcdoc}"`, ` src="${f.src}"`), `${path} ${stage}: the page changed elsewhere`);
+      // the address answers with exactly the document the srcdoc held, under its own policy
+      const doc = await ask(f.src, { CARDS_PAGE_CSP: stage });
+      assert.equal(doc.status, 200, `${path} ${stage}: ${f.src}`);
+      assert.equal(await doc.text(), fromSrcdoc(offFrames[0].srcdoc), `${path} ${stage}: not the srcdoc's document`);
+      const preview = path.startsWith('/_preview/');
+      assert.deepEqual([...doc.headers], preview
+        ? EMBED_HEADERS.map(([k, v]) => [k, k === 'cache-control' ? 'no-store' : k === 'x-robots-tag' ? 'noindex, nofollow' : v])
+        : EMBED_HEADERS, `${path}: the embed document's headers`);
+      const head = await ask(f.src, { CARDS_PAGE_CSP: stage }, { method: 'HEAD' });
+      assert.equal(head.status, 200);
+    }
+  }
+});
+
+test('setting on, a person\'s own domain and the root card: the address is under the page\'s own base, and answers there', async () => {
+  const seed = { aster: WITH_EMBED, 'vanity:own.example': 'aster', 'vanityof:aster:0': 'own.example', 'vanitybind:aster:0:own.example': '1' };
+  const env = { CARDS: { get: async (k) => seed[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...ON, PREVIEW: 'false' };
+  const page = await (await worker.fetch(new Request('https://own.example/'), env)).text();
+  const [f] = framesOf(page);
+  assert.match(f.src, /^\/_embed\/[0-9a-f]{64}$/);
+  const doc = await worker.fetch(new Request(`https://own.example${f.src}`), env);
+  assert.equal(doc.status, 200);
+  assert.equal(doc.headers.get('content-security-policy'), EMBED_DOCUMENT_POLICY);
+  // the same document under /<handle>/ on the domain (the root card's spelling) answers too
+  assert.equal((await worker.fetch(new Request(`https://own.example/aster${f.src}`), env)).status, 200);
+});
+
+test('the embed address cannot be made to answer with anything but an embed tile of the file it names', async () => {
+  const src = framesOf(await (await ask('/embedded', ON)).text())[0].src;
+  const theirs = framesOf(await (await ask('/other', ON)).text())[0].src;
+  const unknown = await ask('/embedded/nope', ON);
+  const unknownBody = await unknown.text();
+  const missOn = async (path, why) => {
+    const r = await ask(path, ON);
+    assert.equal(r.status, unknown.status, `${why}: ${path}`);
+    assert.deepEqual([...r.headers], [...unknown.headers], `${why}: ${path}`);
+    assert.equal(await r.text(), unknownBody, `${why}: ${path}`);
+  };
+  const hexOf = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
+  await missOn(theirs.replace('/other/', '/embedded/'), 'somebody else\'s embed under this handle');
+  await missOn(`/embedded/_embed/${hexOf('<script>alert(1)</script>')}`, 'arbitrary HTML');
+  await missOn(`/embedded/_embed/${hexOf(await (await ask('/embedded')).text())}`, 'the page itself');
+  await missOn(`/plain/_embed/${src.split('/').pop()}`, 'this embed under a handle that has none');
+  await missOn(`/nobody/_embed/${src.split('/').pop()}`, 'a handle with no file');
+  await missOn(src.toUpperCase().replace('/EMBEDDED/_EMBED/', '/embedded/_embed/'), 'an upper-case hash');
+  await missOn(`${src}/`, 'a trailing slash');
+  // the word "embed", a link address and an `embed kind=slider` are no embed tile: no frame, no document
+  assert.deepEqual(await embedDocuments(parseCard(wordsNamingEmbed(ON_DEMAND_TILES + 5)), () => ''), []);
+  // a window that does not hold the embed does not answer for it, nor does a window that does not exist
+  const longSrc = framesOf(await (await ask(`/longembedded?w=${EMBED_WINDOW}`, ON)).text())[0].src;
+  assert.equal((await ask(longSrc, ON)).status, 200);
+  for (const q of ['', '?w=1', `?w=${EMBED_WINDOW + 1}`, '?w=0', '?w=x']) {
+    const r = await ask(longSrc.replace(/\?.*$/, '') + q, ON);
+    assert.notEqual(r.status, 200, `the long file's embed answered at ${q || 'no window'}`);
+  }
+  // a preview's embed: under its own preview only
+  const pv = framesOf(await (await ask(`/_preview/${'d'.repeat(32)}`, ON)).text())[0].src;
+  assert.equal((await ask(pv, ON)).status, 200);
+  for (const p of [pv.replace('d'.repeat(32), 'c'.repeat(32)), pv.replace('d'.repeat(32), 'e'.repeat(32)), pv.replace(/[0-9a-f]{64}$/, '0'.repeat(64))]) {
+    const r = await ask(p, ON);
+    assert.equal(r.status, 404, p);
+    assert.equal(await r.text(), '', p);
+  }
+});
+
+test('setting off: the embed address is an unknown path, answer for answer (status, headers, body, store reads) on every stage and host', async () => {
+  const hex = 'a'.repeat(64);
+  const pairs = [[`/aster/_embed/${hex}`, `/aster/_embee/${hex}`], [`/_embed/${hex}`, `/_embee/${hex}`], [`/aster/_embed/${hex}?w=1`, `/aster/_embee/${hex}?w=1`],
+    [`/_preview/${GRID_PREVIEW}/_embed/${hex}`, `/_preview/${GRID_PREVIEW}/_embee/${hex}`], [`/feelreef/_embed/${hex}`, `/feelreef/_embee/${hex}`]];
+  let compared = 0;
+  const bad = [];
+  await atFixedClock(async () => {
+    for (const stage of Object.keys(GRID_STAGES)) for (const host of GRID_HOSTS) for (const [path, sibling] of pairs) for (const init of [{}, { method: 'HEAD' }, { method: 'POST', body: 'x' }]) {
+      for (const extra of [{}, { CARDS_PAGE_CSP: 'off' }, { CARDS_PAGE_CSP: 'Enforce' }]) {
+        const got = await answerOf(worker, { stage, host, path, init }, extra);
+        const asked = await answerOf(worker, { stage, host, path: sibling, init }, extra);
+        // a redirect names the path it was asked: that one header is the sibling's path, and is read as ours
+        const want = { ...asked, headers: asked.headers.map(([k, v]) => [k, k === 'location' ? v.replace('/_embee/', '/_embed/') : v]) };
+        const d = answerDiff(got, want);
+        if (d) bad.push(`${stage} ${host} ${init.method || 'GET'} ${path}: ${d}`);
+        compared += 1;
+      }
+    }
+  });
+  console.log(`# cardtile page csp off: ${compared} embed addresses compared with an unknown path, ${bad.length} mismatches`);
+  assert.deepEqual(bad, []);
+  // and a page with an embed is the srcdoc page
+  const off = await (await ask('/embedded')).text();
+  assert.ok(/<iframe sandbox="allow-scripts" srcdoc="/.test(off) && !off.includes('/_embed/'));
+});
+
+test('r1: the boot line under the review\'s adversarial values — hashed, and running it runs nothing but data', async () => {
+  const payloads = ['";globalThis.__pwn=1;//', '</script><script>globalThis.__pwn=2</script>', '\u2028globalThis.__pwn=3\u2029', '\\u0022;globalThis.__pwn=4;//', '\\u003c/script\\u003e',
+    '\\\\";globalThis.__pwn=5;//', '\u0000\r', 'a'.repeat(200000), '\ud800', '"};window.__x={"__proto__":{"pwn":1}};//'];
+  for (const [i, v] of payloads.entries()) {
+    const md = `---\nview: stack\nback: ${v}\n---\n\n## grid\n\n- [ ] %% card: text %% safe\n`;
+    const r = await worker.fetch(new Request('http://localhost/attack'), { CARDS: { get: async (k) => (k === 'attack' ? md : null), async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...ON });
+    const page = await r.text();
+    const boot = bootScriptOf(page);
+    assert.ok(boot, `payload ${i}: no boot line`);
+    assert.ok(directives(r.headers.get(ENFORCED))['script-src'].includes(sha(boot)), `payload ${i}: the boot line is not hashed`);
+    const ctx = { window: {} };
+    vm.runInNewContext(boot, ctx, { timeout: 1000 });
+    assert.equal(ctx.__pwn, undefined, `payload ${i}`);
+    assert.ok(!('pwn' in Object.getPrototypeOf(ctx.window)), `payload ${i}`);
+    assert.deepEqual(refusals(page, r.headers.get(ENFORCED)), [], `payload ${i}`);
+  }
+  for (const [code, data] of [['window.__x="";alert(1);', false], ['window.__x={"x":(alert(1))};', false], ['window.__x="\\u0022;alert(1);//";', true], ['window.__proto__={};', false]]) {
+    assert.equal(isBootData(code), data, code);
+  }
 });
 
 // ── where it is NOT sent ───────────────────────────────────────────────────────────────────────

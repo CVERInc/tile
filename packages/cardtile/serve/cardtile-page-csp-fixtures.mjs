@@ -26,3 +26,15 @@ export const WITH_EMBED = '---\ntitle: With an embed\n---\n\n## grid\n\n- [ ] %%
 export const HOSTILE_FRONT = '---\ntitle: </script><script>alert(1)</script>\nviews: stack list </script><script>alert(2)</script>\nview: list";alert(3);//\nback: "</script><script>alert(4)//"\n---\n\n## grid\n\n- [ ] %% card: text %% </script><script>alert(5)</script> \';alert(6);//\n';
 export const long = (n, extra = '') => `---\ntitle: Long\n---\n\n## grid\n\n${Array.from({ length: n }, (_, i) => `- [ ] %% card: text %% Tile ${i}.`).join('\n')}\n${extra}`;
 
+// tile#372 r1 — files where the word "embed" appears and no embed tile does: a page served in windows whose
+// title says it (the review's case, 5,001 text tiles), and one whose text, a link address and an older
+// slider spelled `embed kind=slider` say it (5,005 tiles, the words at tile 4,000)
+export const proseNamingEmbed = (n) => long(n).replace('title: Long', 'title: How to embed a video');
+export const wordsNamingEmbed = (n) => long(n)
+  .replace('%% card: text %% Tile 4000.', '%% card: text %% I embedded a photo')
+  .replace('%% card: text %% Tile 4001.', '%% card: link w=6 %% [Listen](https://open.spotify.com/embed/track/abc)')
+  .replace('%% card: text %% Tile 4002.', '%% card: embed kind=slider w=6 images="https://pictures.example/1.png,https://pictures.example/2.png" %%');
+// an embed on a back
+export const EMBED_ON_BACK = '---\ntitle: An embed on a back\n---\n\n## grid\n\n- [ ] %% card: text back=#more %% Turn me over.\n\n## back: more | More\n\n- [ ] %% card: embed w=6 %% <p id="b">back</p><script>b.textContent = "ran on the back"</script>\n';
+// somebody else's embed (an address made from it must not be answered under another handle)
+export const OTHER_EMBED = '---\ntitle: Somebody else\n---\n\n## grid\n\n- [ ] %% card: embed w=6 %% <p>somebody else</p><script>document.title = "theirs"</script>\n';

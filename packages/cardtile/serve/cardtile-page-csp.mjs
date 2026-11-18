@@ -6,9 +6,12 @@
 // bug would be script on every page. This module says which scripts a page may run, so that a
 // script the renderer did not write does not run even when the escaping fails.
 //
-// 🔴 A HEADER AND NOTHING ELSE. The page's bytes are the same in all three stages of the setting:
-// nothing here changes the renderer, the deck or any markup (the editor's own module carries the
-// renderer, so a change there would change the editor's page whatever this setting says).
+// 🔴 A HEADER, ON EVERY PERSON'S PAGE. With the setting on, every person's page and every preview
+// carries the policy, whatever the page holds: nothing a person writes, and nothing in the rendered
+// page, decides whether it is sent. The page's bytes are the same as with the setting off, but for
+// one attribute of an embed's frame (below). Nothing here changes the renderer or the deck (the
+// editor's own module carries the renderer, so a change there would change the editor's page
+// whatever this setting says).
 //
 //   CARDS_PAGE_CSP   unset, or anything but the two values below   off: no header, every answer as before
 //                    "report-only"   Content-Security-Policy-Report-Only: <the policy>
@@ -37,22 +40,21 @@
 //   img-src 'self' data: https: http:   the relays and icon files (same origin), a file's own
 //                                pictures (data:), and a picture address a person wrote
 //   connect-src 'self'           the deck fetching the next window of a long file
-//   frame-src https://www.youtube-nocookie.com   the player a video tile opens on a click
+//   frame-src 'self'             an embed's document (cardtile-embed-document.mjs)
+//             https://www.youtube-nocookie.com   the player a video tile opens on a click
 //   object-src, base-uri, form-action 'none'   a page has no plugin content, no <base> and no form
 //   default-src 'none'           everything not named above: fonts, media, workers, manifests
 //
 //   frame-ancestors is NOT sent. Today any site may frame a person's page (no X-Frame-Options, no
 //   policy), and this module keeps what a page does today.
 //
-// 🔴 A PAGE THAT CARRIES AN `embed` GETS NO POLICY. An embed is `<iframe sandbox="allow-scripts"
-// srcdoc=…>`, and an `about:srcdoc` document INHERITS its parent's whole policy: under the
-// script-src above the author's own script — the one place a person's script is meant to run — is
-// refused, and img-src, connect-src and frame-src would bind whatever the embed loads as well. No
-// directive exempts a frame from the policy it inherits, and a hash of the author's script in the
-// parent's policy would allow the same text in the parent. So such a page is served as it is today.
-// That is the limit of this wall: it holds for a page without an embed, and a person can leave it by
-// adding one. It becomes a wall for every page when an embed is a response of its own (a URL with
-// its own policy) instead of a srcdoc.
+// 🔴 AN `embed` IS ITS OWN DOCUMENT WHILE THE SETTING IS ON. An `about:srcdoc` document INHERITS its
+// parent's whole policy: under the script-src above the author's own script — the one place a
+// person's script is meant to run — would be refused, and a hash of it in the parent's policy would
+// allow the same text in the parent. So with the setting on, the Worker writes each embed's frame
+// with `src` (a same-origin address, the same sandbox) instead of `srcdoc`, and answers that address
+// with the document under a policy of its own (cardtile-embed-document.mjs). The parent's policy
+// does not bend for it: it allows frames of its own origin, and nothing more.
 import { parseCard } from '../card-core.js';
 import { renderPage } from '../card-render.mjs';
 import { iconOnerror } from '../marks.mjs';
@@ -183,14 +185,6 @@ export function bootScriptOf(page) {
   return isBootData(boot) ? boot : null;
 }
 
-// ── does the page carry an embed? ───────────────────────────────────────────────────────────────
-// Both answers may say yes for a page that has none (a person's text can hold either string): that
-// page is served as it is today. Neither may say no for a page that has one.
-/** the rendered page holds a srcdoc frame (packages/emit/embed.mjs writes ` srcdoc="` and nothing else does) */
-export const carriesEmbed = (page) => String(page).includes(' srcdoc="');
-/** a file served in windows: a later window's tiles arrive in the first window's document, so the whole file is asked */
-export const fileNamesEmbed = (md) => String(md).includes('embed');
-
 // ── the policy ──────────────────────────────────────────────────────────────────────────────────
 const b64 = (bytes) => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); };
 const hashed = /* @__PURE__ */ new Map();   // the constants only; a page's own boot script is hashed per answer
@@ -215,7 +209,7 @@ export function pagePolicy({ scripts = [], handlers = [] } = {}) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https: http:",
     "connect-src 'self'",
-    'frame-src https://www.youtube-nocookie.com',
+    "frame-src 'self' https://www.youtube-nocookie.com",
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
@@ -225,16 +219,15 @@ export function pagePolicy({ scripts = [], handlers = [] } = {}) {
 /**
  * pageCspHeaders: (env, the finished page, facts) → the header to add to a person's page, or {}.
  *
- *   facts.windowedFile   the whole file, when the page is one window of a file served in windows
  *   facts.afterPaint     the prefix the after-paint picture script was written with, when the caller
  *                        handed the renderer one (the local picture switch)
  *
- * {} when the setting is off, and for a page that carries an embed (see the top of this file).
+ * {} when the setting is off, and ONLY then. The page is read for the hashes it needs (the boot line),
+ * never for whether to send the policy.
  */
-export async function pageCspHeaders(env, page, { windowedFile = null, afterPaint = '' } = {}) {
+export async function pageCspHeaders(env, page, { afterPaint = '' } = {}) {
   const stage = pageCspStage(env);
   if (stage === 'off') return {};
-  if (carriesEmbed(page) || (windowedFile != null && fileNamesEmbed(windowedFile))) return {};
   const boot = bootScriptOf(page);
   const picture = pictureScript(afterPaint);
   const scripts = [
