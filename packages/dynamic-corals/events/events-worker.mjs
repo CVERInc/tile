@@ -9,7 +9,7 @@
 // small JSON result. The client (events.js) is unchanged except its data-src points here.
 //
 //   GET /?cal=<google-ical-url>&locale=zh-TW&show=6&add=加入行事曆
-import { parseICal } from './ical.mjs';
+import { parseICal, parseICalCalendar } from './ical.mjs';
 import { mergeEvents, renderEvents, feedEvents } from './events-core.mjs';
 
 // 🔒 SSRF guard — only fetch PUBLIC Google Calendar iCal feeds. Without this the worker would fetch
@@ -78,12 +78,14 @@ export default {
 		}
 
 		const events = mergeEvents([parseICal(icsText, 'gcal')]);
+		// What the calendar says about itself: its name, and the zone its bare dates are in.
+		const calendar = parseICalCalendar(icsText);
 		const now = Date.now();
 		const html = renderEvents(events, { showCount: show, now, locale, labels, countdown });
 		// `events` is the calendar as data (additive, 2026-11): a coral that needs the next event
 		// itself — the countdown coral's `data-src` — reads it here instead of parsing `html`. It has
 		// its own, wider window than `html` and ignores `show`; see feedEvents.
-		return json({ html, events: feedEvents(events, { now }), count: events.length, generatedAt: new Date().toISOString() }, 200, {
+		return json({ html, calendar, events: feedEvents(events, { now, timeZone: calendar.timeZone }), count: events.length, generatedAt: new Date().toISOString() }, 200, {
 			// Edge-cache the rendered result 10 min; serve stale up to 30 min while revalidating.
 			'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1800'
 		});

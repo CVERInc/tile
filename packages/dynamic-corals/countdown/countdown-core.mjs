@@ -24,14 +24,27 @@
 // without an explicit offset, or one that does not exist, is refused (see shared/countdown-parts.mjs)
 // and the root is left exactly as authored.
 //
-// `data-src` — the deadline comes from a calendar instead of being typed. It names an events feed
-// (the events coral's: `{ events: [...] }`); the root makes ONE GET to it on load and counts to the
-// first event still ahead (countdown-feed.mjs: `data-count-to` start|end, `data-offset` for all-day
-// and floating events). Elements inside the root may ask for the event's words — `data-event`
-// (title | location | description) as text, `data-event-href` (location | url) as a link's href —
-// and an empty field leaves that element as authored. A feed that fails, or holds no event the root
-// can count to — or does not answer within eight seconds — falls back to `data-deadline` when the root has one and otherwise leaves the root
-// exactly as authored. A root WITHOUT `data-src` never touches the network.
+// `data-src` — the countdown comes from a calendar instead of being typed. It names an events feed
+// (the events coral's: `{ calendar, events }`); the root makes ONE GET to it on load and shows the
+// events still to come in what's-next order (countdown-feed.mjs): each counts to its start while
+// that is ahead and to its end once it is under way. At zero nothing reloads — an event that has
+// started goes on to count to its end, one that has ended gives way to the next, and when none is
+// left the root expires as a typed deadline does. What the host's markup may ask for, all optional:
+//   data-event="title|location|description|when|calendar|position"   that text (emptied when the
+//                                                         event has none: the calendar is the source)
+//   data-event-href="location|url|add"                    a link's href (removed when there is none)
+//   data-event-if="title|location|description|url|place|several"   shown only when that holds
+//   data-event-nav="prev|next"                            a control that pages through the events
+//   data-unit="days|hours|minutes|seconds"                the page-language word for that unit
+//   data-event-fit                                        an element kept as tall as the tallest
+//                                                         event needs, so paging moves nothing
+// and the root says where it is: `data-event-state` (before | during), `data-event-location`
+// (url | place | none), `data-event-index`, `data-event-count`. A feed that fails, is slow, or holds
+// no event to show falls back to `data-deadline` when the root has one and otherwise leaves the
+// root exactly as authored. A root WITHOUT `data-src` never touches the network.
+//
+// Every root, typed or fed, carries `data-under-a-day` while less than a day is left — the hook a
+// host uses to trade its days for its seconds.
 //
 // `data-flip-mode="drum"` turns each card into a mechanical counter wheel (shared/flip.mjs): every
 // place carries the same 0–9 wheel, turning DOWNWARD (9, 8, … 0, then 9 again), because a countdown
@@ -51,7 +64,7 @@
 // subscribes again.
 //
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
-import { pickEvent, eventText, eventHref } from './countdown-feed.mjs';
+import { upcoming, nextMoment, phaseOf, locationKind, eventText, eventHref, unitText } from './countdown-feed.mjs';
 import { createFlip, setFlip, settleFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
 
@@ -84,6 +97,9 @@ function globals() {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (id) => clearTimeout(id),
     fetch: typeof fetch === 'function' ? (url, init) => fetch(url, init) : null,
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    language: typeof navigator !== 'undefined' ? navigator.language : '',
+    ResizeObserver: w.ResizeObserver || null,
     motion: w.matchMedia ? w.matchMedia('(prefers-reduced-motion: reduce)') : null,
   };
 }
@@ -132,7 +148,7 @@ export function mountCountdown(root, deps = {}) {
   return mountAt(root, parseDeadline(root.getAttribute('data-deadline')), { ...globals(), ...deps });
 }
 
-function mountAt(root, deadline, env) {
+function mountAt(root, deadline, env, hooks = {}) {
   if (Number.isNaN(deadline)) return null;
   const expiredText = root.getAttribute('data-expired-text') || '';
   const expiredMode = root.getAttribute('data-expired') === 'text' && expiredText ? 'text' : 'hide';
@@ -177,6 +193,9 @@ function mountAt(root, deadline, env) {
     const left = remainingParts(deadline, env.now());
     if (left.expired) {
       stop();
+      // A fed root may have somewhere to go from here (the event's end, or the next event).
+      if (hooks.onExpired && hooks.onExpired()) return left;
+      root.removeAttribute('data-under-a-day');
       if (expiredMode === 'text') {
         root.textContent = expiredText;
         root.hidden = false;
@@ -193,6 +212,8 @@ function mountAt(root, deadline, env) {
       if (part.flip) showFlip(part, text, env);
       else part.el.textContent = text;
     }
+    if (left.days === 0) root.setAttribute('data-under-a-day', '');
+    else root.removeAttribute('data-under-a-day');
     root.hidden = false;
     schedule();
     return left;
@@ -202,26 +223,54 @@ function mountAt(root, deadline, env) {
   return { stop, tick, get running() { return timer !== null; } };
 }
 
-function fillSlots(root, event) {
+const CONDITIONS = {
+  title: (event) => !!eventText(event, 'title'),
+  description: (event) => !!eventText(event, 'description'),
+  location: (event) => locationKind(event) !== 'none',
+  url: (event) => locationKind(event) === 'url',
+  place: (event) => locationKind(event) === 'place',
+  several: (event, ctx) => ctx.count > 1,
+};
+
+/** Write one event into the host's markup. Digits are not touched: that is mountAt's. */
+function fillSlots(root, event, ctx, env) {
   for (const el of root.querySelectorAll('[data-event]')) {
-    const text = eventText(event, el.getAttribute('data-event'));
-    if (text) el.textContent = text;
+    el.textContent = eventText(event, el.getAttribute('data-event'), ctx);
   }
   for (const el of root.querySelectorAll('[data-event-href]')) {
-    const href = eventHref(event, el.getAttribute('data-event-href'));
+    const href = eventHref(event, el.getAttribute('data-event-href'), env.userAgent);
     if (href) el.setAttribute('href', href);
+    else el.removeAttribute('href');
   }
+  for (const el of root.querySelectorAll('[data-event-if]')) {
+    const holds = CONDITIONS[el.getAttribute('data-event-if')];
+    el.hidden = !(holds && holds(event, ctx));
+  }
+  for (const el of root.querySelectorAll('[data-event-nav]')) {
+    const dir = el.getAttribute('data-event-nav');
+    el.disabled = dir === 'prev' ? ctx.index === 0 : dir === 'next' ? ctx.index === ctx.count - 1 : true;
+  }
+  root.setAttribute('data-event-location', locationKind(event));
+  root.setAttribute('data-event-index', String(ctx.index + 1));
+  root.setAttribute('data-event-count', String(ctx.count));
+}
+
+function pageLanguage(env) {
+  const html = env.document && env.document.documentElement;
+  return (html && html.getAttribute('lang')) || env.language || '';
 }
 
 /**
- * Mount a root whose deadline comes from its `data-src` feed. Resolves to what mountCountdown
- * returns: { stop, tick } once it is counting, or null when the root was left as authored. Never
- * rejects — a feed is a third party, and its failure is the fallback's business, not the page's.
+ * Mount a root whose countdown comes from its `data-src` feed. Resolves to a controller —
+ * { stop, next, prev, index, count, running } — once it is showing an event, to what mountCountdown
+ * returns when it fell back to a typed `data-deadline`, or to null when the root was left as
+ * authored. Never rejects — a feed is a third party, and its failure is the fallback's business,
+ * not the page's.
  */
 export const FEED_TIMEOUT_MS = 8000;
 export async function mountFromFeed(root, deps = {}) {
   const env = { ...globals(), ...deps };
-  let picked = null;
+  let feed = null;
   let timer = null;
   try {
     // A feed that never answers is a feed that failed: without this a `hidden` root would wait on
@@ -231,15 +280,104 @@ export async function mountFromFeed(root, deps = {}) {
       const res = env.fetch ? await env.fetch(root.getAttribute('data-src'), { headers: { Accept: 'application/json' } }) : null;
       return res && res.ok ? res.json() : null;
     };
-    const data = await Promise.race([read(), late]);
-    picked = pickEvent(data && data.events, env.now(), root.getAttribute('data-count-to'), root.getAttribute('data-offset'));
+    feed = await Promise.race([read(), late]);
   } catch {
-    picked = null;
+    feed = null;
   }
   if (timer !== null) env.clearTimeout(timer);
-  if (!picked) return mountAt(root, parseDeadline(root.getAttribute('data-deadline')), env);
-  fillSlots(root, picked.event);
-  return mountAt(root, picked.deadline, env);
+
+  let items = upcoming(feed, env.now());
+  if (!items.length) return mountAt(root, parseDeadline(root.getAttribute('data-deadline')), env);
+
+  const calendar = feed && feed.calendar && typeof feed.calendar === 'object' ? feed.calendar : null;
+  const locale = pageLanguage(env);
+  let current = items[0];
+  let counting = null;
+  let stopped = false;
+  const ctxOf = (item) => ({ calendar, locale, index: items.indexOf(item), count: items.length });
+
+  // The unit words are the page's, not the event's: once.
+  for (const el of root.querySelectorAll('[data-unit]')) {
+    const word = unitText(el.getAttribute('data-unit'), locale);
+    if (word) el.textContent = word;
+  }
+
+  // ── data-event-fit: as tall as the tallest event needs ────────────────────────────────────────
+  // Every event is laid out once and measured, so paging never moves the controls or the edges.
+  // It can only be measured while it has a box (a root inside a closed panel has none), so it is
+  // measured again whenever the element's width changes — which is also what "became visible" is.
+  const fitEl = root.getAttribute('data-event-fit') !== null ? root : root.querySelector('[data-event-fit]');
+  let fitWidth = -1, fitHeight = 0;
+  function fit() {
+    if (!fitEl || typeof fitEl.getBoundingClientRect !== 'function') return;
+    const width = fitEl.getBoundingClientRect().width;
+    if (!(width > 0)) return;
+    if (width !== fitWidth) fitHeight = 0;      // a new width is a new layout; the same one never shrinks
+    fitWidth = width;
+    fitEl.style.minHeight = '';
+    if (items.length > 1) {
+      for (const item of items) {
+        fillSlots(root, item.event, ctxOf(item), env);
+        fitHeight = Math.max(fitHeight, fitEl.getBoundingClientRect().height);
+      }
+      fillSlots(root, current.event, ctxOf(current), env);
+    }
+    if (fitHeight > 0) fitEl.style.minHeight = Math.ceil(fitHeight) + 'px';
+  }
+  let observer = null;
+  if (fitEl && env.ResizeObserver) {
+    observer = new env.ResizeObserver(() => {
+      const width = fitEl.getBoundingClientRect().width;
+      if (width > 0 && width !== fitWidth) fit();
+    });
+    observer.observe(fitEl);
+  }
+  const fonts = env.document && env.document.fonts;
+  if (fitEl && fonts && fonts.ready && typeof fonts.ready.then === 'function') {
+    fonts.ready.then(() => { if (!stopped) { fitWidth = -1; fit(); } }).catch(() => {});
+  }
+
+  function show(item) {
+    current = item;
+    if (counting) counting.stop();
+    fillSlots(root, item.event, ctxOf(item), env);
+    root.setAttribute('data-event-state', phaseOf(item, env.now()));
+    counting = mountAt(root, nextMoment(item, env.now()), env, { onExpired });
+  }
+
+  // At zero: what is still to come is worked out afresh (an event that has started now counts to
+  // its end and may have moved down the order; one that has ended is gone). The visitor keeps the
+  // event they were looking at while it lasts, and gets the one that took its place when it is over.
+  function onExpired() {
+    if (stopped) return true;
+    const was = current.event, at = items.indexOf(current);
+    items = upcoming(feed, env.now());
+    if (!items.length) return false;            // nothing left: expire as a typed deadline does
+    show(items.find((item) => item.event === was) || items[Math.min(at, items.length - 1)]);
+    return true;
+  }
+
+  const go = (step) => {
+    if (stopped) return;
+    const to = items.indexOf(current) + step;
+    if (to < 0 || to >= items.length) return;   // it stops at the ends; it does not wrap
+    show(items[to]);
+  };
+  for (const el of root.querySelectorAll('[data-event-nav]')) {
+    const dir = el.getAttribute('data-event-nav');
+    if (typeof el.addEventListener === 'function') el.addEventListener('click', () => go(dir === 'prev' ? -1 : dir === 'next' ? 1 : 0));
+  }
+
+  show(current);
+  fit();
+  return {
+    stop() { stopped = true; if (counting) counting.stop(); if (observer) observer.disconnect(); },
+    next: () => go(1),
+    prev: () => go(-1),
+    get index() { return items.indexOf(current); },
+    get count() { return items.length; },
+    get running() { return !stopped && !!counting && counting.running; },
+  };
 }
 
 export function mountAll(doc, deps = {}) {

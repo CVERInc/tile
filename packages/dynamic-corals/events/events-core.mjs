@@ -10,7 +10,9 @@
 //
 // The time-left arithmetic is ../shared/countdown-parts.mjs — the same module the countdown coral
 // uses — so two corals cannot disagree about how many seconds are left.
-import { remainingParts, pad2 } from '../shared/countdown-parts.mjs';
+import { remainingParts, pad2, parseDeadline } from '../shared/countdown-parts.mjs';
+import { zonedInstant, knownTimeZone, addDays } from '../shared/zoned-time.mjs';
+import { mapsUrl } from '../shared/map-link.mjs';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ms = (t) => (typeof t === 'number' ? t : Date.parse(t));
@@ -47,33 +49,96 @@ export function upcomingEvents(events, now) {
   });
 }
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
- * The events as DATA: what another coral needs to act on an event without scraping the rendered
- * HTML (the countdown coral reads the next one as its deadline). Plain fields only, in the Event
- * shape's own names; `start`/`end` are the ISO strings the source gave — date-only for an all-day
- * event, no offset for a floating one — because inventing a zone here would be a guess the reader
- * could not see.
+ * Feed text → the words in it. A Google Calendar description is HTML when its author used the
+ * formatting bar (<b>, <a href>, <br>, lists); a reader that shows text wants the text. Tags go,
+ * block ends and <br> become line breaks, the five entities a calendar actually emits are decoded,
+ * and runs of blank space collapse. Not a sanitiser — the result is still TEXT and must be written
+ * as text — just the difference between "Booth 5524" and "<b>Booth 5524</b>" on the page.
+ */
+export function plainText(value) {
+  return String(value == null ? '' : value)
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(p|div|li|h[1-6]|tr)\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&amp;/gi, '&')
+    .replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
+}
+
+/**
+ * When an event really starts and ends, as epoch ms — { startsAt, endsAt }, either NaN when it
+ * cannot be known.
  *
- * 🔴 NOT the rendered list's filter, and not its `showCount`. This side reads a date-only or
- * floating time as UTC; the reader places it in its own offset, where the same event can end up to
- * half a day later (−12:00). So an event stays in the feed until a full day after it looks over
- * here, and the reader does the real "still ahead" test. And the cap is this feed's own: a reader
- * counting to the next START must be able to see past every event that is under way, which a
- * caller's `show=1` would hide.
+ * A time the feed gives in UTC is exact. Everything else is a wall clock or a bare date and needs a
+ * zone: the event's own (`startZone`/`endZone`, a zoned DTSTART) when the runtime knows it, else the
+ * CALENDAR's (`calendarZone`, its X-WR-TIMEZONE). An all-day event is a date in the calendar's zone:
+ * it starts at that zone's midnight and ends at the midnight after its last day (the feed's own end
+ * is already exclusive; an all-day event that names none is one day). A timed event with no end is
+ * given the hour the rest of this core already assumes (see upcomingEvents).
+ *
+ * 🔴 No zone, no instant. Reading a bare date in the server's zone, or the visitor's, would put the
+ * same event at different moments for different people and look right to each of them.
+ */
+export function eventInstants(ev, calendarZone) {
+  const at = (text, own) => {
+    const t = String(text || '').trim();
+    if (!t) return NaN;
+    if (/(?:Z|[+-]\d{2}:\d{2})$/.test(t)) return parseDeadline(t);
+    const zone = !DATE_ONLY.test(t) && knownTimeZone(own) ? own : calendarZone;
+    return zonedInstant(t, zone);
+  };
+  const startsAt = at(ev && ev.start, ev && ev.startZone);
+  let endsAt = at(ev && ev.end, ev && ev.endZone);
+  if (Number.isNaN(endsAt) && !Number.isNaN(startsAt) && !(ev && ev.end)) {
+    endsAt = ev.allDay && DATE_ONLY.test(String(ev.start)) ? zonedInstant(addDays(ev.start, 1), calendarZone) : startsAt + 3600e3;
+  }
+  return { startsAt, endsAt };
+}
+
+/**
+ * The calendar as DATA: what another coral needs to act on an event without scraping the rendered
+ * HTML (the countdown coral counts to these). Each event carries the Event shape's own fields plus
+ * `startsAt`/`endsAt` — ISO instants in UTC, computed with the calendar's zone (eventInstants), null
+ * when unknowable — and `description` as plain text.
+ *
+ * 🔴 NOT the rendered list's filter, and not its `showCount`. An event stays until it has really
+ * ended (`endsAt`), which the rendered list's UTC reading of a bare date can miss by half a day; one
+ * with no knowable end stays a day past where it looks over from here. And the cap is this feed's
+ * own: a reader paging through events must see past every one that is under way, which a caller's
+ * `show=1` would hide. A cancelled event is not offered. Order is the source's (by start); the
+ * reader orders by what it counts to.
  */
 export const FEED_GRACE_MS = 864e5;
 export const FEED_MAX = 20;
 export function feedEvents(events, opts = {}) {
-  const { now = Date.now() } = opts;
-  return upcomingEvents(events, ms(now) - FEED_GRACE_MS).slice(0, FEED_MAX).map((ev) => ({
-    title: ev.title || '',
-    start: ev.start,
-    end: ev.end || null,
-    allDay: !!ev.allDay,
-    location: ev.location || null,
-    description: ev.description || null,
-    url: ev.url || null,
-  }));
+  const { now = Date.now(), timeZone = null } = opts;
+  const n = ms(now);
+  const out = [];
+  for (const ev of mergeEvents([events])) {
+    if (ev.cancelled) continue;
+    const { startsAt, endsAt } = eventInstants(ev, timeZone);
+    if (Number.isNaN(endsAt)) {
+      const looksOver = ev.end ? ms(ev.end) : ms(ev.start) + 3600e3;
+      if (!(looksOver >= n - FEED_GRACE_MS)) continue;
+    } else if (!(endsAt > n)) continue;
+    const iso = (t) => (Number.isNaN(t) ? null : new Date(t).toISOString());
+    out.push({
+      uid: ev.uid || null,
+      title: ev.title || '',
+      start: ev.start,
+      end: ev.end || null,
+      allDay: !!ev.allDay,
+      startsAt: iso(startsAt),
+      endsAt: iso(endsAt),
+      location: ev.location || null,
+      description: plainText(ev.description) || null,
+      url: ev.url || null,
+    });
+    if (out.length === FEED_MAX) break;
+  }
+  return out;
 }
 
 /** Human "when" — a live-countdown bucket: live / <1h ticking seconds / <24h / <7d / (date beyond).
@@ -146,12 +211,8 @@ function gcalStamp(iso, allDay) {
   return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
-/** Build-time maps href for a location string — Google Maps web search. This is the universal
- *  fallback: works with no JS, on desktop, and on any platform as a web map. events.js upgrades it
- *  per-platform after hydration (Apple → maps.apple.com native; Android → geo: system chooser). */
-export function mapsUrl(location) {
-  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(location || '');
-}
+// The maps link lives in ../shared/map-link.mjs now — the countdown coral gives a place the same one.
+export { mapsUrl };
 
 /** An "add to Google Calendar" link carrying the event's title / range / location. */
 export function addToCalendarUrl(ev) {

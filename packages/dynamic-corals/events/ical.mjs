@@ -1,6 +1,9 @@
 // REEF with Events — a minimal iCal (RFC 5545) parser. Pure, node-runnable, zero deps.
 // Turns an .ics text feed into the normalized Event shape the events coral renders:
-//   { title, start, end, location, description, url, allDay, uid, source: 'ical' }
+//   { title, start, end, location, description, url, allDay, uid, source: 'ical',
+//     startZone, endZone, cancelled }
+// `startZone`/`endZone` are the TZID a zoned DTSTART/DTEND named (null when it named none) — the
+// wall clock in start/end is in THAT zone. `cancelled` is STATUS:CANCELLED. All three are additive.
 // start/end are ISO 8601 strings (UTC when the source is UTC/zoned, floating kept as-is).
 //
 // v1 scope (deliberate): single-instance VEVENTs only. RRULE recurrence expansion is NOT done
@@ -57,6 +60,31 @@ export function parseICalDate(value, params = {}) {
   return { iso: z ? `${base}.000Z` : base, allDay: false };
 }
 
+/** The TZID a date property named, without the quotes a name containing punctuation is wrapped in. */
+function zoneOf(params) {
+  const z = String((params && params.TZID) || '').trim().replace(/^"(.*)"$/, '$1');
+  return z || null;
+}
+
+/**
+ * What the calendar says about ITSELF, above its events: the name its owner gave it, the zone it
+ * lives in, and its description. Google Calendar writes all three (X-WR-CALNAME / X-WR-TIMEZONE /
+ * X-WR-CALDESC); a feed that carries none yields nulls. Only what precedes the first VEVENT is read.
+ */
+export function parseICalCalendar(text) {
+  const calendar = { name: null, timeZone: null, description: null };
+  for (const raw of unfold(text).split('\n')) {
+    const line = raw.trim();
+    if (line === 'BEGIN:VEVENT') break;
+    const p = parseLine(line);
+    if (!p) continue;
+    if (p.name === 'X-WR-CALNAME') calendar.name = unescapeText(p.value).trim() || null;
+    else if (p.name === 'X-WR-TIMEZONE') calendar.timeZone = p.value.trim() || null;
+    else if (p.name === 'X-WR-CALDESC') calendar.description = unescapeText(p.value).trim() || null;
+  }
+  return calendar;
+}
+
 /**
  * Parse an .ics feed into normalized events. `sourceLabel` is stamped as `source` (default 'ical').
  * Malformed VEVENTs are skipped, never thrown — a bad feed yields the events it can, not a crash.
@@ -80,6 +108,9 @@ export function parseICal(text, sourceLabel = 'ical') {
           allDay: !!cur.allDay,
           uid: cur.uid || null,
           source: sourceLabel,
+          startZone: cur.startZone || null,
+          endZone: cur.endZone || null,
+          cancelled: !!cur.cancelled,
         });
       }
       cur = null;
@@ -94,8 +125,9 @@ export function parseICal(text, sourceLabel = 'ical') {
       case 'DESCRIPTION': cur.description = unescapeText(p.value); break;
       case 'URL': cur.url = p.value.trim(); break;
       case 'UID': cur.uid = p.value.trim(); break;
-      case 'DTSTART': { const d = parseICalDate(p.value, p.params); if (d) { cur.start = d.iso; cur.allDay = d.allDay; } break; }
-      case 'DTEND': { const d = parseICalDate(p.value, p.params); if (d) cur.end = d.iso; break; }
+      case 'DTSTART': { const d = parseICalDate(p.value, p.params); if (d) { cur.start = d.iso; cur.allDay = d.allDay; cur.startZone = zoneOf(p.params); } break; }
+      case 'DTEND': { const d = parseICalDate(p.value, p.params); if (d) { cur.end = d.iso; cur.endZone = zoneOf(p.params); } break; }
+      case 'STATUS': cur.cancelled = p.value.trim().toUpperCase() === 'CANCELLED'; break;
       default: break;
     }
   }
