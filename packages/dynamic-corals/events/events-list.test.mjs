@@ -1,6 +1,6 @@
 // node packages/dynamic-corals/events/events-list.test.mjs
 import assert from 'node:assert/strict';
-import { listRows, renderRows, rowsShape, tileParts, badgeText, showCount, LIST_DEFAULT, LIST_MAX } from './events-list.mjs';
+import { listRows, renderRows, rowsShape, tileParts, badgeText, showCount, farBadges, usableLocale, LIST_DEFAULT, LIST_MAX } from './events-list.mjs';
 import { upcoming, whenText } from '../countdown/countdown-feed.mjs';
 import { addToCalendarUrl } from './events-core.mjs';
 import { mapsUrl } from '../shared/map-link.mjs';
@@ -33,11 +33,16 @@ ok('what’s-next order: by the moment each counts to — an event under way sor
 
 ok('the date tile is the day the event counts to: first day ahead, LAST day once under way', () => {
   const tiles = Object.fromEntries(rows().map((r) => [r.uid, r.tile]));
-  assert.deepEqual(tiles.con, { mo: 'Dec', day: '12' });
-  assert.deepEqual(tiles.season, { mo: 'Nov', day: '21' }, 'the end is exclusive: Nov 22 means through the 21st');
+  assert.deepEqual(tiles.con, { mo: 'Dec', wd: 'Sat', day: '12' });
+  assert.deepEqual(tiles.season, { mo: 'Nov', wd: 'Sat', day: '21' }, 'the end is exclusive: Nov 22 means through the 21st');
   const [item] = upcoming({ events: [allDay('x', '2026-11-30', '2026-12-01')] }, NOW);
-  assert.deepEqual(tileParts(item, NOW, 'en'), { mo: 'Nov', day: '30' }, 'a single all-day date is that date in every zone');
+  assert.deepEqual(tileParts(item, NOW, 'en'), { mo: 'Nov', wd: 'Mon', day: '30' }, 'a single all-day date is that date in every zone');
   assert.equal(tileParts(item, NOW, 'ja').mo, '11月');
+  // a timed event under way that ends at local midnight ends on the day BEFORE that midnight
+  const local = (y, m, d, h) => new Date(y, m, d, h).getTime();
+  const late = { event: timed('late', local(2026, 10, 19, 20), local(2026, 10, 20, 0)), startsAt: local(2026, 10, 19, 20), endsAt: local(2026, 10, 20, 0) };
+  assert.equal(tileParts(late, local(2026, 10, 19, 22), 'en').day, '19');
+  assert.equal(tileParts(late, local(2026, 10, 19, 12), 'en').day, '19', 'and before it starts, the day it starts');
 });
 
 ok('the date line: all-day dates as the calendar wrote them; a year only when it is not this one', () => {
@@ -47,6 +52,13 @@ ok('the date line: all-day dates as the calendar wrote them; a year only when it
   assert.equal(when.season, 'Nov 16 – 21');
   assert.equal(sp(whenText(NEXT_YEAR, 'en')), 'Feb 13 – 14', 'without `now` the line is as it was (the countdown’s)');
   assert.match(when.talk, /\d{1,2}:\d{2}/, 'a timed event shows its time');
+  // "this year" is the year on the visitor's calendar: in the first hours of January 1st, east of
+  // Greenwich, UTC is still in the old year (this arm bites in a zone ahead of UTC; CI runs several)
+  const newYear = new Date(2027, 0, 1, 1).getTime();
+  assert.ok(!/2027/.test(whenText(allDay('today', '2027-01-01', '2027-01-02'), 'en', newYear)), 'today is not "another year"');
+  const eve = new Date(2026, 11, 31, 23).getTime();
+  assert.ok(!/2026/.test(whenText(allDay('today', '2026-12-31', '2027-01-01'), 'en', eve)));
+  assert.ok(/2027/.test(whenText(allDay('next', '2027-01-01', '2027-01-02'), 'en', eve)), 'tomorrow, on New Year’s Eve, is next year');
 });
 
 ok('the badge is Intl’s words: how far off, or the browser’s "now"', () => {
@@ -57,6 +69,14 @@ ok('the badge is Intl’s words: how far off, or the browser’s "now"', () => {
   assert.equal(badge.later, 'in 3 mo.');
   const at = (ms) => sp(badgeText({ startsAt: NOW + ms, endsAt: NOW + ms + H }, NOW, 'en'));
   assert.deepEqual([at(20e3), at(40 * 6e4), at(D), at(2 * D), at(13 * D), at(400 * D)], ['in 1 min.', 'in 40 min.', 'tomorrow', 'in 2 days', 'in 13 days', 'next yr.']);
+  // a unit never shows the next unit's worth
+  assert.deepEqual([at(59 * 6e4 + 40e3), at(23.6 * H), at(364 * D)], ['in 59 min.', 'in 23 hr.', 'in 11 mo.']);
+  // from a day out, days are calendar days on the visitor's clock, not elapsed 24-hour periods
+  const local = (y, m, d, h) => new Date(y, m, d, h).getTime();
+  const from = (now, start) => sp(badgeText({ startsAt: start, endsAt: start + H }, now, 'en'));
+  assert.equal(from(local(2026, 10, 19, 22), local(2026, 10, 21, 9)), 'in 2 days', '35 hours away, and the day after tomorrow');
+  assert.equal(from(local(2026, 10, 19, 8), local(2026, 10, 21, 20)), 'in 2 days', '60 hours away, and still the day after tomorrow');
+  assert.equal(from(local(2026, 10, 19, 1), local(2026, 10, 20, 23)), 'tomorrow', '46 hours away, and tomorrow');
   assert.equal(badgeText({ startsAt: NOW + D, endsAt: NOW + 2 * D }, NOW, 'ja'), '明日');
   assert.equal(badgeText({ startsAt: NOW - H, endsAt: NOW + H }, NOW, 'de'), 'jetzt');
 });
@@ -79,6 +99,25 @@ ok('add to calendar: the Google link; the feed’s own .ics in Safari on an Appl
   const apple = (feed) => listRows(feed, { now: NOW, locale: 'en', userAgent: SAFARI_IOS, feedSrc: src }).find((r) => r.uid === 'season').addHref;
   assert.equal(new URL(apple({ ...FEED, ics: true })).searchParams.get('ics'), 'season');
   assert.match(apple(FEED), /^https:\/\/calendar\.google\.com\//, 'a feed that does not say so keeps the Google link');
+});
+
+ok('a page language Intl refuses falls back to the browser’s own: the row still has its date', () => {
+  assert.equal(usableLocale('en_US'), undefined);
+  assert.equal(usableLocale('x'), undefined);
+  assert.equal(usableLocale(''), undefined);
+  assert.equal(usableLocale('zh-hant-tw'), 'zh-Hant-TW');
+  for (const lang of ['en_US', 'zh_TW', 'x', 'i-klingon', null]) {
+    const [row] = listRows(FEED, { now: NOW, locale: lang, far: true });
+    assert.ok(row.when && row.tile.day && row.tile.mo && row.tile.wd && row.badge, `${lang}: ${JSON.stringify([row.when, row.tile, row.badge])}`);
+  }
+});
+
+ok('far-off badges: the root’s data-countdown, or the feed address’s own countdown=always', () => {
+  assert.equal(farBadges('always', ''), true);
+  assert.equal(farBadges(null, 'https://f.example/v0/?cal=x&countdown=always'), true);
+  assert.equal(farBadges(null, '/events.json?countdown=always'), true);
+  assert.equal(farBadges(null, 'https://f.example/v0/?cal=x'), false);
+  assert.equal(farBadges('near', 'https://f.example/v0/?cal=x&countdown=near'), false);
 });
 
 ok('how many rows: data-show, else the feed address’s show=, else the default; never past the cap', () => {
@@ -122,8 +161,8 @@ ok('every value from the feed is escaped, and nothing but http(s) or a map becom
   assert.ok(!/<img|onerror=1>/.test(bare));
   assert.ok(bare.includes('<span class="dc-ev-title">&lt;img src=x onerror=1&gt;&quot;&#39;&amp;</span>'));
   // and each remaining text slot on its own: when-less values cannot occur, so location text and badge
-  const place = renderRows([{ uid: 'p', state: 'before', title: 't', when: '<w>', tile: { mo: '<m>', day: '<d>' }, badge: '<b>', location: '<l>', locationKind: 'place', locationHref: '', description: '', addHref: '' }]);
-  assert.ok(!/<(w|m|d|b|l)>/.test(place), 'when, tile, badge and location text are escaped with or without links');
+  const place = renderRows([{ uid: 'p', state: 'before', title: 't', when: '<w>', tile: { mo: '<m>', wd: '<k>', day: '<d>' }, badge: '<b>', location: '<l>', locationKind: 'place', locationHref: '', description: '', addHref: '' }]);
+  assert.ok(!/<(w|m|k|d|b|l)>/.test(place), 'when, tile, badge and location text are escaped with or without links');
 });
 
 ok('an empty list says what the site wrote, escaped', () => {

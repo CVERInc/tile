@@ -12,12 +12,23 @@ import { upcoming, phaseOf, nextMoment, locationKind, locationText, eventHref, w
 import { esc, icon } from './events-core.mjs';
 
 const H = 36e5, D = 24 * H;
+
+/**
+ * A language tag Intl will take, or undefined (the browser's own). A page's `lang` is whatever its
+ * author typed — `en_US`, `x` — and a tag Intl refuses throws from every formatter, which would
+ * leave a row with no date at all.
+ */
+export function usableLocale(tag) {
+  const text = String(tag == null ? '' : tag).trim();
+  if (!text) return undefined;
+  try { return Intl.getCanonicalLocales(text)[0]; } catch { return undefined; }
+}
 export const LIST_DEFAULT = 5;
 export const LIST_MAX = 20;
 
 /**
- * The date tile: month and day of the moment the event counts to — its first day while that is
- * ahead, its last day once it is under way. An all-day event's dates are the calendar's own (its
+ * The date tile: month, weekday and day of the moment the event counts to — its first day while
+ * that is ahead, its last day once it is under way. An all-day event's dates are the calendar's own (its
  * end is exclusive, so the last day is the one before); a timed event's are the visitor's.
  */
 export function tileParts(item, now, locale) {
@@ -30,10 +41,12 @@ export function tileParts(item, now, locale) {
     const last = dateOnly(event.end) ? Math.max(first, Date.parse(`${event.end}T00:00:00Z`) - D) : first;
     date = new Date(during ? last : first); timeZone = 'UTC';
   } else {
-    date = new Date(nextMoment(item, now));
+    // The last day of a timed event is the day its last moment is in: one that ends at midnight
+    // ends on the day before, not on the day that midnight begins.
+    date = new Date(during ? item.endsAt - 1 : item.startsAt);
   }
   const part = (options) => { try { return new Intl.DateTimeFormat(locale || undefined, { ...options, ...(timeZone ? { timeZone } : {}) }).format(date); } catch { return ''; } };
-  return { mo: part({ month: 'short' }), day: part({ day: 'numeric' }) };
+  return { mo: part({ month: 'short' }), wd: part({ weekday: 'short' }), day: part({ day: 'numeric' }) };
 }
 
 /**
@@ -46,12 +59,24 @@ export function badgeText(item, now, locale) {
   try { rtf = new Intl.RelativeTimeFormat(locale || undefined, { numeric: 'auto', style: 'short' }); } catch { return ''; }
   if (phaseOf(item, now) === 'during') return rtf.format(0, 'second');
   const ms = item.startsAt - now;
-  if (ms < H) return rtf.format(Math.max(1, Math.round(ms / 6e4)), 'minute');
-  if (ms < D) return rtf.format(Math.round(ms / H), 'hour');
-  if (ms < 14 * D) return rtf.format(Math.round(ms / D), 'day');
-  if (ms < 60 * D) return rtf.format(Math.round(ms / (7 * D)), 'week');
-  if (ms < 365 * D) return rtf.format(Math.round(ms / (30.44 * D)), 'month');
-  return rtf.format(Math.round(ms / (365.25 * D)), 'year');
+  // A unit never shows the next unit's worth: 59 min 40 s is "in 59 min.", not "in 60 min.".
+  if (ms < H) return rtf.format(Math.min(59, Math.max(1, Math.round(ms / 6e4))), 'minute');
+  if (ms < D) return rtf.format(Math.min(23, Math.max(1, Math.round(ms / H))), 'hour');
+  // From a day out, days are CALENDAR days on the visitor's clock: "tomorrow" is the next date,
+  // whether that is 3 hours or 40 hours away.
+  const midnight = (t) => { const d = new Date(t); return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()); };
+  const days = Math.max(1, Math.round((midnight(item.startsAt) - midnight(now)) / D));
+  if (days < 14) return rtf.format(days, 'day');
+  if (days < 60) return rtf.format(Math.round(days / 7), 'week');
+  if (days < 365) return rtf.format(Math.min(11, Math.round(days / 30.44)), 'month');
+  return rtf.format(Math.max(1, Math.round(days / 365.25)), 'year');
+}
+
+/** Whether a root keeps the badge on far-off events: its `data-countdown="always"`, or the feed
+ *  address's own `countdown=always` (read like `show=`, so the address a site pasted keeps working). */
+export function farBadges(dataCountdown, feedSrc) {
+  if (dataCountdown === 'always') return true;
+  try { return new URL(String(feedSrc || ''), 'https://x.invalid/').searchParams.get('countdown') === 'always'; } catch { return false; }
 }
 
 /** How many rows a root asks for: `show` (the root's `data-show`, else the feed address's own
@@ -70,7 +95,8 @@ export function showCount(dataShow, feedSrc) {
  * without it those rows have none — the knob the list has always had.
  */
 export function listRows(feed, opts = {}) {
-  const { now = Date.now(), locale, userAgent = '', feedSrc = '', show = LIST_DEFAULT, far = false } = opts;
+  const { now = Date.now(), userAgent = '', feedSrc = '', show = LIST_DEFAULT, far = false } = opts;
+  const locale = usableLocale(opts.locale);
   const fileSrc = feed && feed.ics === true ? feedSrc : '';
   return upcoming(feed, now).slice(0, show).map((item) => {
     const { event } = item;
@@ -93,7 +119,7 @@ export function listRows(feed, opts = {}) {
 }
 
 /** What must match for a repaint to be only a change of badge words: which rows, in which state. */
-export const rowsShape = (rows) => rows.map((r) => `${r.uid}\u0000${r.state}\u0000${r.title}\u0000${r.when}\u0000${r.tile.mo}${r.tile.day}\u0000${r.badge ? 1 : 0}`).join('\u0001');
+export const rowsShape = (rows) => rows.map((r) => `${r.uid}\u0000${r.state}\u0000${r.title}\u0000${r.when}\u0000${r.tile.mo}${r.tile.wd}${r.tile.day}\u0000${r.badge ? 1 : 0}`).join('\u0001');
 
 const ADD = 'Add to calendar';   // accessible name only; English like every aria string the corals ship
 const link = (href, cls, inner, label) => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener"${label ? ` aria-label="${esc(label)}"` : ''}>${inner}</a>`;
@@ -102,7 +128,8 @@ const link = (href, cls, inner, label) => `<a class="${cls}" href="${esc(href)}"
 export function renderRows(rows, opts = {}) {
   if (!rows.length) return `<div class="dc-ev--empty">${esc(opts.empty || 'No upcoming events.')}</div>`;
   const items = rows.map((r) => {
-    const tileInner = `<span class="dc-ev-cal-mo">${esc(r.tile.mo)}</span><span class="dc-ev-cal-day">${esc(r.tile.day)}</span>`;
+    // The tile: the month as a bar across the top, weekday and day centred in what is left.
+    const tileInner = `<span class="dc-ev-cal-mo">${esc(r.tile.mo)}</span><span class="dc-ev-cal-face"><span class="dc-ev-cal-wd">${esc(r.tile.wd)}</span><span class="dc-ev-cal-day">${esc(r.tile.day)}</span></span>`;
     // The tile and the badge are extra doors to what the date line already does and says, so a
     // screen reader is given the date line only: one "Add to calendar: <when>", not three.
     const tile = r.addHref

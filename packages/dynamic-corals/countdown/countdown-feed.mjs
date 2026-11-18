@@ -151,9 +151,12 @@ function formatRange(format, a, b) {
 export function whenText(event, locale, now) {
   if (!event) return '';
   const lang = locale || undefined;
+  // "This year" is the year on the VISITOR's calendar; an all-day date's own year is read in UTC,
+  // where it was parsed (`zone`), a timed one's on the visitor's clock.
   const year = (ms, zone) => (now == null ? {} : (() => {
-    const y = (t) => Number(new Intl.DateTimeFormat('en', { year: 'numeric', ...(zone ? { timeZone: zone } : {}) }).format(new Date(t)));
-    return ms.some((t) => y(t) !== y(now)) ? { year: 'numeric' } : {};
+    const y = (t, z) => Number(new Intl.DateTimeFormat('en', { year: 'numeric', ...(z ? { timeZone: z } : {}) }).format(new Date(t)));
+    const thisYear = y(now);
+    return ms.some((t) => y(t, zone) !== thisYear) ? { year: 'numeric' } : {};
   })());
   try {
     if (event.allDay && /^\d{4}-\d{2}-\d{2}$/.test(String(event.start))) {

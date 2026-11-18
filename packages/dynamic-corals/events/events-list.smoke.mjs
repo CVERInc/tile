@@ -75,6 +75,14 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
       badgeFilled: items.map((i) => { const b = i.querySelector('.dc-ev-cd'); return b ? getComputedStyle(b).backgroundColor !== 'rgba(0, 0, 0, 0)' : null; }),
       descriptionLines: (() => { const d = root.querySelector('.dc-ev-desc > span'); return d ? Math.round(d.getBoundingClientRect().height / parseFloat(getComputedStyle(d).lineHeight)) : 0; })(),
       empty: (root.querySelector('.dc-ev--empty') || {}).textContent || null,
+      tiles: items.map((i) => {
+        const tile = i.querySelector('.dc-ev-cal'), face = i.querySelector('.dc-ev-cal-face');
+        if (!tile || !face) return null;
+        const t = tile.getBoundingClientRect(), f = face.getBoundingClientRect();
+        const top = face.firstElementChild.getBoundingClientRect().top - f.top, bottom = f.bottom - face.lastElementChild.getBoundingClientRect().bottom;
+        return { square: Math.abs(t.width - t.height) <= 1, offCentre: Math.abs(top - bottom), fits: face.scrollHeight <= face.clientHeight + 1 && top >= 0 && bottom >= 0, text: [...tile.querySelectorAll('span > span, .dc-ev-cal-mo')].map((x) => x.textContent).join('/') };
+      }),
+      dayColour: root.querySelector('.dc-ev-cal-day') ? getComputedStyle(root.querySelector('.dc-ev-cal-day')).color : null, bodyColour: getComputedStyle(document.body).color,
     };
   });
   await ctx.close();
@@ -91,7 +99,11 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
   check('markup in a title is text', s.tags === 0, `${s.tags} element(s) from the feed`);
   check('a description keeps its lines and is shown whole', s.descriptionLines >= 3, `${s.descriptionLines} line(s)`);
   check('badges are Intl’s words', s.badges[2] === 'now' && /^in 5 hr/.test(s.badges[0]) && /yr|year/.test(s.badges[4]), JSON.stringify(s.badges));
-  check('a date in another year carries its year', /\d{4}/.test(s.whens[4]) && !/\d{4}/.test(s.whens[2]), JSON.stringify(s.whens));
+  // the row under way runs from two days ago to two days ahead: over New Year those are two years
+  const sameYear = new Date(now - 2 * D).getUTCFullYear() === new Date(now + 2 * D).getUTCFullYear() && new Date(now - 2 * D).getUTCFullYear() === new Date(now).getFullYear();
+  check('a date in another year carries its year', /\d{4}/.test(s.whens[4]) && /\d{4}/.test(s.whens[2]) === !sameYear, JSON.stringify(s.whens));
+  check('the tile is a square with the month as a bar, weekday and day centred in the rest', s.tiles.every((t) => t && t.square && t.fits && t.offCentre <= 1), JSON.stringify(s.tiles));
+  check('on a page with no theme the tile, now a link, keeps the page’s text colour', s.dayColour === s.bodyColour, `${s.dayColour} vs ${s.bodyColour}`);
   check('no script error', s.errors.length === 0, s.errors.join(' | '));
 }
 
@@ -99,6 +111,11 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
 for (const [lang, width] of [['zh-Hant', 390], ['de', 340], ['ja', 320]]) {
   const s = await open({ lang, width });
   check(`${lang} at ${width}px: no row is wider than the viewport`, !s.overflowX && s.widest <= s.viewport, `widest ${s.widest} of ${s.viewport}`);
+  check(`${lang} at ${width}px: every tile is square and its weekday and day fit, centred`, s.tiles.every((t) => t && t.square && t.fits && t.offCentre <= 1), JSON.stringify(s.tiles));
+}
+{
+  const s = await open({ lang: 'en_US' });
+  check('a page language Intl refuses still gets dates, tiles and badges', s.whens.every(Boolean) && s.badges.every(Boolean) && s.tiles.every((t) => t && /\S\/\S+\/\S/.test(t.text)), JSON.stringify([s.whens, s.badges, s.tiles.map((t) => t && t.text)]));
 }
 {
   const s = await open({ lang: 'ja' });
