@@ -30,7 +30,7 @@
 // and floating events). Elements inside the root may ask for the event's words — `data-event`
 // (title | location | description) as text, `data-event-href` (location | url) as a link's href —
 // and an empty field leaves that element as authored. A feed that fails, or holds no event the root
-// can count to, falls back to `data-deadline` when the root has one and otherwise leaves the root
+// can count to — or does not answer within eight seconds — falls back to `data-deadline` when the root has one and otherwise leaves the root
 // exactly as authored. A root WITHOUT `data-src` never touches the network.
 //
 // `data-flip-mode="drum"` turns each card into a mechanical counter wheel (shared/flip.mjs): every
@@ -218,16 +218,25 @@ function fillSlots(root, event) {
  * returns: { stop, tick } once it is counting, or null when the root was left as authored. Never
  * rejects — a feed is a third party, and its failure is the fallback's business, not the page's.
  */
+export const FEED_TIMEOUT_MS = 8000;
 export async function mountFromFeed(root, deps = {}) {
   const env = { ...globals(), ...deps };
   let picked = null;
+  let timer = null;
   try {
-    const res = env.fetch ? await env.fetch(root.getAttribute('data-src'), { headers: { Accept: 'application/json' } }) : null;
-    const data = res && res.ok ? await res.json() : null;
+    // A feed that never answers is a feed that failed: without this a `hidden` root would wait on
+    // it forever and its typed `data-deadline` would never get its turn.
+    const late = new Promise((resolve) => { timer = env.setTimeout(() => resolve(null), FEED_TIMEOUT_MS); });
+    const read = async () => {
+      const res = env.fetch ? await env.fetch(root.getAttribute('data-src'), { headers: { Accept: 'application/json' } }) : null;
+      return res && res.ok ? res.json() : null;
+    };
+    const data = await Promise.race([read(), late]);
     picked = pickEvent(data && data.events, env.now(), root.getAttribute('data-count-to'), root.getAttribute('data-offset'));
   } catch {
     picked = null;
   }
+  if (timer !== null) env.clearTimeout(timer);
   if (!picked) return mountAt(root, parseDeadline(root.getAttribute('data-deadline')), env);
   fillSlots(root, picked.event);
   return mountAt(root, picked.deadline, env);

@@ -7,13 +7,13 @@
   "source_note": "https://github.com/CVERInc/tile/tree/main/packages/dynamic-corals/countdown",
   "requires": [],
   "calls": [
-    "GET <data-src> — only for a root that carries `data-src`, and then the bundle's only network call: one fetch per such root, sent once on load, with no request body and no header other than `Accept: application/json`; the browser's default credential behaviour for that URL applies. A root without `data-src` makes no network call at all. The response is read as an events feed (`{ events: [...] }`); a non-ok response, a network failure, a body that is not JSON, and a feed with no event the root can count to are all handled the same way — see `without`."
+    "GET <data-src> — only for a root that carries `data-src`, and then the bundle's only network call: one fetch per such root, sent once on load, with no request body and no header other than `Accept: application/json`; the browser's default credential behaviour for that URL applies. A root without `data-src` makes no network call at all. The response is read as an events feed (`{ events: [...] }`); a non-ok response, a network failure, no answer within eight seconds, a body that is not JSON, and a feed with no event the root can count to are all handled the same way — see `without`."
   ],
   "stores": [
     "none"
   ],
   "paid": false,
   "funding": null,
-  "without": "requires nothing. A root without `data-src` calls nothing: without the script it stays exactly as authored — an author who marked it `hidden` sees nothing, otherwise the host's own markup shows with empty unit elements — and a `data-deadline` without an explicit offset is treated the same way: nothing is mounted and nothing is changed. A root with `data-src` whose feed is unreachable, or holds no event it can count to (none still ahead, or only all-day and floating events with no `data-offset` on the root), counts to its `data-deadline` when it has a valid one and is otherwise left exactly as authored; its `data-event` and `data-event-href` elements keep the host's own text and links.",
+  "without": "requires nothing. A root without `data-src` calls nothing: without the script it stays exactly as authored — an author who marked it `hidden` sees nothing, otherwise the host's own markup shows with empty unit elements — and a `data-deadline` without an explicit offset is treated the same way: nothing is mounted and nothing is changed. A root with `data-src` whose feed is unreachable or slow to answer, or holds no event it can count to (none still ahead, or only all-day and floating events with no `data-offset` on the root), counts to its `data-deadline` when it has a valid one and is otherwise left exactly as authored; its `data-event` and `data-event-href` elements keep the host's own text and links.",
   "capabilities": []
 }

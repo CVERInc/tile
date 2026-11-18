@@ -1,7 +1,7 @@
 // REEF with Events — the DYNAMIC edge. A tiny Cloudflare Worker that fetches an iCal calendar at
 // request time, parses + renders it with the SAME node-tested core (ical.mjs / events-core.mjs),
-// and returns the `{ html }` shape events.js already injects — plus `events`, the same upcoming
-// list as data, for a coral that acts on an event instead of drawing the list (countdown's `data-src`). Edge-cached ~10 min, so a creator's
+// and returns the `{ html }` shape events.js already injects — plus `events`, the calendar
+// as data, for a coral that acts on an event instead of drawing the list (countdown's `data-src`). Edge-cached ~10 min, so a creator's
 // Google-Calendar edits appear on-page with ZERO redeploy — the "live-edge variant" of gen-events.
 //
 // Why an edge worker at all: Google's iCal endpoint sends no CORS headers, so a browser can't fetch
@@ -80,9 +80,10 @@ export default {
 		const events = mergeEvents([parseICal(icsText, 'gcal')]);
 		const now = Date.now();
 		const html = renderEvents(events, { showCount: show, now, locale, labels, countdown });
-		// `events` is the same upcoming list as data (additive, 2026-11): a coral that needs the next
-		// event itself — the countdown coral's `data-src` — reads it here instead of parsing `html`.
-		return json({ html, events: feedEvents(events, { showCount: show, now }), count: events.length, generatedAt: new Date().toISOString() }, 200, {
+		// `events` is the calendar as data (additive, 2026-11): a coral that needs the next event
+		// itself — the countdown coral's `data-src` — reads it here instead of parsing `html`. It has
+		// its own, wider window than `html` and ignores `show`; see feedEvents.
+		return json({ html, events: feedEvents(events, { now }), count: events.length, generatedAt: new Date().toISOString() }, 200, {
 			// Edge-cache the rendered result 10 min; serve stale up to 30 min while revalidating.
 			'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1800'
 		});

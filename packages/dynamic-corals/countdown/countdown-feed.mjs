@@ -9,6 +9,8 @@
 // wall clock: neither says where on earth it is, so each needs the root's `data-offset` (`Z` or
 // `±hh:mm`), and without one the event is passed over rather than read in the visitor's zone —
 // which would end the same countdown hours apart for two visitors and look correct to both.
+// (A time the calendar wrote with a named zone arrives floating too — the feed's parser keeps the
+// wall clock and drops the zone — so it is read in `data-offset` like any other.)
 import { parseDeadline } from '../shared/countdown-parts.mjs';
 
 const OFFSET = /^(?:Z|[+-]\d{2}:\d{2})$/;
@@ -17,27 +19,39 @@ const FLOATING = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/;
 
 /**
  * The instant (epoch ms) a root counts to for `event`, or NaN when it cannot be known.
- * `countTo` is `start` (default) or `end`; an event with no end is counted to its start. An all-day
- * event's end is the feed's own exclusive one (the midnight AFTER its last day), so `end` on a
- * one-day deadline is the end of that day.
+ * `countTo` is `start` (default) or `end`; a timed event with no end is counted to its start. An
+ * all-day event's end is the feed's own exclusive one (the midnight AFTER its last day), so `end` on
+ * a one-day deadline is the end of that day — and an all-day event that names no end is that one
+ * day, so its end is the midnight after its start.
  */
 export function eventInstant(event, countTo, offset) {
   if (!event) return NaN;
-  const text = String((countTo === 'end' && event.end) || event.start || '').trim();
+  const toEnd = countTo === 'end';
+  const text = String((toEnd && event.end) || event.start || '').trim();
   const off = String(offset == null ? '' : offset).trim();
-  if (DATE_ONLY.test(text)) return OFFSET.test(off) ? parseDeadline(`${text}T00:00:00${off}`) : NaN;
+  if (DATE_ONLY.test(text)) {
+    if (!OFFSET.test(off)) return NaN;
+    return parseDeadline(`${text}T00:00:00${off}`) + (toEnd && !event.end ? 864e5 : 0);
+  }
   if (FLOATING.test(text)) return OFFSET.test(off) ? parseDeadline(text + off) : NaN;
   return parseDeadline(text);
 }
 
-/** The first event (feed order: soonest first) whose instant is still ahead of `now`, or null. */
+/**
+ * The event whose instant is the SOONEST one still ahead of `now`, or null. Not "the first in the
+ * feed": the feed is sorted by start as the feed's own side read it, which is not this root's order
+ * once all-day and timed events mix under an offset, or once the root counts to ends. A tie keeps
+ * the earlier one in the feed.
+ */
 export function pickEvent(events, now, countTo, offset) {
   if (!Array.isArray(events)) return null;
+  let best = null;
   for (const event of events) {
     const deadline = eventInstant(event, countTo, offset);
-    if (!Number.isNaN(deadline) && deadline > now) return { event, deadline };
+    if (Number.isNaN(deadline) || !(deadline > now)) continue;
+    if (!best || deadline < best.deadline) best = { event, deadline };
   }
-  return null;
+  return best;
 }
 
 /** `text` when it is an absolute http(s) URL, else ''. Nothing else is ever written into an href. */
@@ -49,8 +63,9 @@ export function httpUrl(text) {
 
 /**
  * The href for a `data-event-href` link. `url` is the event's own URL. `location` is the location
- * when the author wrote a URL there (an online event, a sign-up page), and otherwise a map search
- * for it — the same link the events coral gives the same field (asserted in countdown-feed.test.mjs).
+ * when the author wrote a URL there (an online event, a sign-up page) — where the events coral
+ * would search a map for that text — and otherwise a map search for the place, which IS the link the
+ * events coral gives it (asserted in countdown-feed.test.mjs).
  * '' means "leave the link as authored".
  */
 export function eventHref(event, which) {
