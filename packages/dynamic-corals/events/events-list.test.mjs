@@ -38,6 +38,9 @@ ok('the date tile is the day the event counts to: first day ahead, LAST day once
   const [item] = upcoming({ events: [allDay('x', '2026-11-30', '2026-12-01')] }, NOW);
   assert.deepEqual(tileParts(item, NOW, 'en'), { mo: 'Nov', wd: 'Mon', day: '30' }, 'a single all-day date is that date in every zone');
   assert.equal(tileParts(item, NOW, 'ja').mo, '11月');
+  // the day is the number alone: no 日 (ja, zh), no trailing dot (de), and the language's own digits (ar-EG)
+  assert.deepEqual(['ja', 'zh-Hant', 'ko', 'de', 'en'].map((l) => tileParts(item, NOW, l).day), ['30', '30', '30', '30', '30']);
+  assert.equal(tileParts(item, NOW, 'ar-EG').day, '٣٠');
   // a timed event under way that ends at local midnight ends on the day BEFORE that midnight
   const local = (y, m, d, h) => new Date(y, m, d, h).getTime();
   const late = { event: timed('late', local(2026, 10, 19, 20), local(2026, 10, 20, 0)), startsAt: local(2026, 10, 19, 20), endsAt: local(2026, 10, 20, 0) };

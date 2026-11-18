@@ -46,7 +46,16 @@ export function tileParts(item, now, locale) {
     date = new Date(during ? item.endsAt - 1 : item.startsAt);
   }
   const part = (options) => { try { return new Intl.DateTimeFormat(locale || undefined, { ...options, ...(timeZone ? { timeZone } : {}) }).format(date); } catch { return ''; } };
-  return { mo: part({ month: 'short' }), wd: part({ weekday: 'short' }), day: part({ day: 'numeric' }) };
+  // The day is the NUMBER alone. Some languages write a day as number + a word for "day" (19日);
+  // on a calendar leaf that word is the leaf itself, so only Intl's `day` part is taken — still the
+  // browser's digits for the language, never ours.
+  const dayNumber = () => {
+    try {
+      const parts = new Intl.DateTimeFormat(locale || undefined, { day: 'numeric', ...(timeZone ? { timeZone } : {}) }).formatToParts(date);
+      return parts.filter((p) => p.type === 'day').map((p) => p.value).join('') || part({ day: 'numeric' });
+    } catch { return ''; }
+  };
+  return { mo: part({ month: 'short' }), wd: part({ weekday: 'short' }), day: dayNumber() };
 }
 
 /**
