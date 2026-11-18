@@ -62,7 +62,9 @@ export function plainText(value) {
   return String(value == null ? '' : value)
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\/\s*(p|div|li|h[1-6]|tr)\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
+    // Only what is SHAPED like a tag goes: `<b>`, `</a>`, `<a href="…">`. A description typed as
+    // plain text may say "under < 10 and > 5", and everything between those two signs is its words.
+    .replace(/<\/?[a-zA-Z][^<>]*>/g, '')
     .replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&amp;/gi, '&')
     .replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();
 }
@@ -220,14 +222,23 @@ export { mapsUrl };
  * in the visitor's calendar was an event with nothing in it; the place to read the whole of a long
  * description is the calendar it was written for.
  */
-export function addToCalendarUrl(ev) {
+export const DETAILS_MAX = 1500;
+export function addToCalendarUrl(ev, opts = {}) {
   const start = gcalStamp(ev.start, ev.allDay);
   const end = gcalStamp(ev.end || ev.start, ev.allDay);
   const p = new URLSearchParams({ action: 'TEMPLATE', text: ev.title || '' });
   if (start && end) p.set('dates', `${start}/${end}`);
   if (ev.location) p.set('location', ev.location);
-  const details = [plainText(ev.description), /^https?:\/\//i.test(String(ev.url || '').trim()) ? String(ev.url).trim() : '']
-    .filter(Boolean).join('\n\n');
+  // `descriptionIsText`: the caller's description is ALREADY plain text (the feed's is). Running
+  // plainText over it again would decode entities a second time and turn the visible text `&lt;b&gt;`
+  // into a tag. The description is capped (a link this is going into has a length someone's server
+  // will refuse) and the URL goes after the cap, so a long description never costs the link.
+  // Google reads `details` as limited HTML, so the text's own <, > and & are escaped to stay text.
+  let said = opts.descriptionIsText ? String(ev.description == null ? '' : ev.description).trim() : plainText(ev.description);
+  if (said.length > DETAILS_MAX) said = said.slice(0, DETAILS_MAX - 1).trimEnd() + '…';
+  said = said.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const link = /^https?:\/\//i.test(String(ev.url || '').trim()) ? String(ev.url).trim() : '';
+  const details = [said, link].filter(Boolean).join('\n\n');
   if (details) p.set('details', details);
   return 'https://calendar.google.com/calendar/render?' + p.toString();
 }

@@ -344,10 +344,15 @@ export async function mountFromFeed(root, deps = {}) {
   // CSS shows the whole text for that attribute. One that fits is left exactly as authored: no
   // role, not focusable, nothing to press. Showing another event closes it.
   const moreEls = root.querySelectorAll('[data-event-more]');
-  const clippedText = (el) => {
-    const text = el.getAttribute('data-event') !== null ? el : el.querySelector('[data-event]') || el;
-    return typeof text.scrollHeight === 'number' && typeof text.clientHeight === 'number' && text.scrollHeight > text.clientHeight + 1;
-  };
+  // 🔴 Either box may be the one that clips: the element itself (`<p data-event-more>` with a
+  // line clamp, an inline <span> inside it — whose own heights are 0) or the text inside it (a
+  // clamped <span> in a flex row). Measuring only one of them means the other markup never opens.
+  const overflows = (box) => !!box && typeof box.scrollHeight === 'number' && typeof box.clientHeight === 'number'
+    && box.scrollHeight > box.clientHeight + 1;
+  const clippedText = (el) => overflows(el) || overflows(el.getAttribute('data-event') !== null ? null : el.querySelector('[data-event]'));
+  // An element with no box (inside a closed panel) cannot be measured; what was known stays known.
+  const laidOut = (el) => typeof el.getBoundingClientRect !== 'function' || el.getBoundingClientRect().width > 0;
+  const CONTROL = ['data-event-clipped', 'role', 'tabindex', 'aria-expanded'];
   function closeMore() {
     for (const el of moreEls) {
       el.removeAttribute('data-event-open');
@@ -357,13 +362,14 @@ export async function mountFromFeed(root, deps = {}) {
   function measureMore() {
     for (const el of moreEls) {
       if (el.getAttribute('data-event-open') !== null) continue;   // open: it is clipped by definition
+      if (!laidOut(el)) continue;
       if (clippedText(el)) {
         el.setAttribute('data-event-clipped', '');
         el.setAttribute('role', 'button');
         el.setAttribute('tabindex', '0');
         el.setAttribute('aria-expanded', 'false');
       } else {
-        for (const name of ['data-event-clipped', 'role', 'tabindex', 'aria-expanded']) el.removeAttribute(name);
+        for (const name of CONTROL) el.removeAttribute(name);
       }
     }
   }
@@ -387,18 +393,26 @@ export async function mountFromFeed(root, deps = {}) {
 
   let observer = null;
   if (fitEl && env.ResizeObserver) {
+    // A box that went away and came back at the SAME width (a panel closed and reopened) needs no
+    // new fit, but what was filled while it was away could not be measured for clipping.
+    let away = false;
     observer = new env.ResizeObserver(() => {
       const width = fitEl.getBoundingClientRect().width;
-      if (width > 0 && width !== fitWidth) fit();
+      if (!(width > 0)) { away = true; return; }
+      if (width !== fitWidth) fit();
+      else if (away) measureMore();
+      away = false;
     });
     observer.observe(fitEl);
   } else if (moreEls.length && env.ResizeObserver) {
     // No fit element to tell us the layout changed: watch the root for the same reason (it also
     // fires when a closed panel opens, which is when clipping first becomes knowable).
-    let seen = -1;
+    let seen = -1, away = false;
     observer = new env.ResizeObserver(() => {
       const width = typeof root.getBoundingClientRect === 'function' ? root.getBoundingClientRect().width : 0;
-      if (width > 0 && width !== seen) { seen = width; measureMore(); }
+      if (!(width > 0)) { away = true; return; }
+      if (width !== seen || away) { seen = width; measureMore(); }
+      away = false;
     });
     observer.observe(root);
   }
@@ -462,7 +476,13 @@ export async function mountFromFeed(root, deps = {}) {
   show(current);
   fit();
   return {
-    stop() { stopped = true; if (counting) counting.stop(); if (observer) observer.disconnect(); },
+    stop() {
+      stopped = true;
+      if (counting) counting.stop();
+      if (observer) observer.disconnect();
+      // Nothing answers a press any more, so nothing may still look or focus like a control.
+      for (const el of moreEls) for (const name of CONTROL) el.removeAttribute(name);
+    },
     next: () => go(1),
     prev: () => go(-1),
     get index() { return items.indexOf(current); },
