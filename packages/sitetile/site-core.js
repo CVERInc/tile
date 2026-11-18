@@ -1571,14 +1571,9 @@ function inlineHtml(text, opts) {
   });
   // tile#291: `~~x~~` is struck text (the editor's `strike` tool), shaped like bold — markers kept in
   // the hidden `-mk` span. It runs AFTER images and links are built: a destination, an <img> (its alt
-  // included) and a code span are atoms by now, so none of them can be reached. A pair whose inside is
-  // not tag-balanced (`~~a [b~~ c](/p)` — it would cross the link's edge) stays as typed.
-  s = s.replace(RE_STRIKE, (m, inner) => {
-    const n = (re) => (inner.match(re) || []).length;
-    const opens = [...inner.matchAll(anyRe)].filter((t) => t[2] !== undefined && atoms[+t[2]].startsWith('<a ')).length;
-    if (n(/<span\b/g) !== n(/<\/span>/g) || opens !== n(/<\/a>/g)) return m;
-    return '<span class="st-s"><span class="st-mk">~~</span>' + inner + '<span class="st-mk">~~</span></span>';
-  });
+  // included) and a code span are atoms by now, so none of them can be reached. Which pairs are drawn
+  // is decided by markStrike's walk over the finished structure, not by a regex: see there.
+  s = markStrike(s, atoms, A);
   // Allowlisted inline <small> (no attributes) — the one raw tag legacy IRs use for muted fine
   // print (e.g. an "updated on …" stamp). escapeInline escaped it to `&lt;small&gt;`; re-emit
   // the bare tag so it renders small instead of showing literally. script-injection-safe: no attrs, no other tag.
@@ -1589,6 +1584,107 @@ function inlineHtml(text, opts) {
   // gets real line breaks for free. script-injection-safe: no attrs, no other tag.
   s = s.replace(/&lt;br\s*\/?&gt;/g, '<br>');
   return restore(s);
+}
+
+// tile#291 review: `~~x~~` → struck text, decided by STRUCTURE. A regex over the string cannot see
+// where an element starts and ends, so a first version counted tags inside each candidate pair and
+// was fooled by `[a ~~b](/one) gap [c~~ d](/two)`: one `</a>` and one `<a …>` inside, but the closing
+// one first — the strike would open in one link and close in another, and the browser repairs that
+// by moving it. This walks the string once, left to right, keeping the stack of open elements; a
+// `~~` that can open is remembered ON the element it stands in, and a `~~` that can close pairs only
+// with an opener on the element it stands in. An element's unpaired openers die with it. So a pair
+// is drawn only inside one container (a link label, a bold/italic span, a raw <small>, or the bare
+// line), with everything between it properly closed; every other `~~` stays as typed.
+//   - Only a run of exactly two `~` is a delimiter (`~`, `~~~~` stay literal), flanked like GFM: no
+//     whitespace just inside either marker.
+//   - An escaped `~` (markEscapes has already hidden its backslash in a marker span, so the escape is
+//     read from that span) is never part of a run: `\~~b~~` and `~~b\~~` show their tildes as typed.
+//   - A URL written straight into prose (`scheme://…`, up to whitespace) is a literal run: tildes in
+//     it are part of the address, not delimiters. Nothing in this renderer autolinks a bare URL, so
+//     this is that narrowest rule and nothing more; it ends early if its container closes.
+//   - A newline ends every pending opener, as the regex this replaced never matched across one.
+// `s` here holds: escaped text, the spans markEmphasis/markEscapes built, `</a>`, the still-escaped
+// `&lt;small&gt;`, and atom/href placeholders (opaque; an atom that is an `<a …>` start tag opens a
+// link). Nothing else in it starts with `<`, because escapeInline escaped every authored one.
+const MK_ESCAPE = '<span class="st-mk">\\</span>';
+const RE_URL_SCHEME = /[a-z][a-z0-9+.-]*:\/\//iy;
+const RE_RAW_SMALL = /&lt;(\/?)small&gt;/y;
+const STRIKE_OPEN = '<span class="st-s"><span class="st-mk">~~</span>', STRIKE_CLOSE = '<span class="st-mk">~~</span></span>';
+function markStrike(s, atoms, A) {
+  if (s.indexOf('~~') < 0) return s;
+  const out = [];
+  const root = { tag: '', openers: [] };
+  const stack = [root];
+  const top = () => stack[stack.length - 1];
+  const close = (tag) => {                 // pop up to and including the nearest `tag`; none → no pop
+    for (let k = stack.length - 1; k > 0; k--) {
+      if (stack[k].tag !== tag) continue;
+      const gone = stack.splice(k);
+      if (url && gone.includes(url)) url = null;
+      return;
+    }
+    top().openers.length = 0;              // a stray closer: nothing pairs across it
+  };
+  let url = null;                          // the frame a bare-URL run started in, while inside one
+  let prev = ' ';                          // the last visible character (line start counts as space)
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (s.startsWith(MK_ESCAPE, i)) {      // `\x`: the backslash's marker span, then x — never a delimiter
+      const end = i + MK_ESCAPE.length + 1;
+      out.push(s.slice(i, end)); prev = s[end - 1]; i = end; continue;
+    }
+    if (c === '<') {
+      const end = s.indexOf('>', i) + 1;   // our own tags only; no `>` occurs inside one
+      if (end <= i) { out.push(s.slice(i)); break; }
+      const tag = s.slice(i, end);
+      out.push(tag); i = end;
+      if (tag === '</span>') close('span');
+      else if (tag === '</a>') close('a');
+      else if (tag.startsWith('<span')) stack.push({ tag: 'span', openers: [] });
+      continue;
+    }
+    if (s.startsWith(A, i)) {              // atom: opaque; an `<a …>` start tag opens a link
+      const end = s.indexOf(A, i + A.length) + A.length;
+      if (end < i + 2 * A.length) { out.push(s.slice(i)); break; }
+      out.push(s.slice(i, end));
+      if (atoms[+s.slice(i + A.length, end - A.length)].startsWith('<a ')) stack.push({ tag: 'a', openers: [] });
+      prev = 'x'; i = end; continue;
+    }
+    RE_RAW_SMALL.lastIndex = i;
+    const sm = RE_RAW_SMALL.exec(s);
+    if (sm) {                              // raw <small>/</small>, re-emitted after this pass: a container
+      out.push(sm[0]); i += sm[0].length; prev = ';';
+      if (sm[1]) close('small'); else stack.push({ tag: 'small', openers: [] });
+      continue;
+    }
+    if (/\s/.test(c)) {
+      url = null;
+      if (c === '\n') top().openers.length = 0;
+      out.push(c); prev = c; i++; continue;
+    }
+    if (!url && !/[a-z0-9+.-]/i.test(prev)) {
+      RE_URL_SCHEME.lastIndex = i;
+      if (RE_URL_SCHEME.test(s)) url = top();
+    }
+    if (c !== '~') { out.push(c); prev = c; i++; continue; }
+    let j = i;
+    while (s[j] === '~') j++;
+    const run = s.slice(i, j);
+    const next = j < s.length ? s[j] : ' ';
+    i = j;
+    if (run.length !== 2 || url) { out.push(run); prev = '~'; continue; }
+    const f = top();
+    if (!/\s/.test(prev) && f.openers.length) {        // close the nearest opener in this same container
+      out[f.openers.pop()] = STRIKE_OPEN;
+      out.push(STRIKE_CLOSE);
+    } else {
+      if (!/\s/.test(next)) f.openers.push(out.length);  // may open; stays `~~` unless a closer comes
+      out.push(run);
+    }
+    prev = '~';
+  }
+  return out.join('');
 }
 
 // Private-use code points `text` does not contain, `n` of them, for inlineHtml's per-call stash
@@ -1641,8 +1737,6 @@ const RE_LIST_ORDERED = /^\s*\d+[.)]\s+/;
 const RE_QUOTE_LINE = /^\s*>\s?(.*)$/;
 const RE_RULE_LINE = /^ {0,3}-{3,}[ \t]*$/;                 // tile#291: `---` on its own block → <hr>
 const RE_TASK_ITEM = /^\[([ xX])\](?:[ \t]+|$)/;           // tile#291: `- [ ] x` / `- [x] x` → checkbox
-// tile#291: `~~x~~`, no whitespace just inside either marker (GFM's flanking rule), no `~` inside.
-const RE_STRIKE = /~~([^~\s](?:[^~\n]*[^~\s])?)~~/g;
 // ATX heading (### Section). Requires non-whitespace body text — a comment-only heading
 // (`# <!-- title -->`) still matches this (the comment text itself is non-whitespace), and is only
 // dropped afterward, once its inline content resolves empty (R3-P2-02; see bodyHtml's heading branch).
@@ -1779,9 +1873,12 @@ function renderList(items) {
     // leak through some OTHER route) — with no children to hold either, an `<li></li>` would be exactly
     // the empty-block leak issue #496 is about. A comment-only item that DOES have nested children still
     // needs its `<li>` — that's where the children's `<ul>`/`<ol>` lives.
-    // tile#291: a `[ ]`/`[x]` lead is a task item — a read-only checkbox, not the typed brackets.
+    // tile#291: a `[ ]`/`[x]` lead is a task item — a read-only checkbox, not the typed brackets. The
+    // checkbox and its own text sit in one <label>, which is what names the checkbox for assistive
+    // technology; nested child tasks follow the label, so they are not part of the name. No `name`
+    // attribute and `disabled`: it is never submitted and never changes.
     const task = RE_TASK_ITEM.exec(it.text);
-    if (task) html += '<li class="st-task"' + (it.src || '') + '><input type="checkbox" disabled' + (task[1] === ' ' ? '' : ' checked') + '> ' + inlineHtml(it.text.slice(task[0].length)) + children + '</li>';
+    if (task) html += '<li class="st-task"' + (it.src || '') + '><label><input type="checkbox" disabled' + (task[1] === ' ' ? '' : ' checked') + '> ' + inlineHtml(it.text.slice(task[0].length)) + '</label>' + children + '</li>';
     else if (it.text.trim() || children) html += '<li' + (it.src || '') + '>' + inlineHtml(it.text) + children + '</li>';
     i = j;
   }

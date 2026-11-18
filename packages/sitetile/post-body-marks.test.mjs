@@ -90,20 +90,70 @@ test('unchanged: `~~` in an image alt does not put markup inside the attribute',
   assert.doesNotMatch(post('![a ~~b~~](/x.png)'), /alt="[^"]*</);
 });
 
+// ── review of PR 382: which `~~` pairs are drawn is decided by structure ────────────────────────
+// Each "as on main" string below is what origin/main (no strike support at all) rendered for the
+// same input, captured byte-for-byte: these inputs must not change.
+test('a `~~` pair whose ends sit in two different links stays as typed (as on main)', () => {
+  assert.equal(post('[a ~~b](/one) gap [c~~ d](/two)'),
+    '<p><a href="/one">a ~~b</a> gap <a href="/two">c~~ d</a></p>');
+});
+test('a `~~` pair whose ends sit in two different bold spans stays as typed (as on main)', () => {
+  assert.equal(post('**a ~~b** gap **c~~ d**'),
+    '<p><span class="st-b"><span class="st-mk">**</span>a ~~b<span class="st-mk">**</span></span> gap '
+    + '<span class="st-b"><span class="st-mk">**</span>c~~ d<span class="st-mk">**</span></span></p>');
+});
+test('a `~~` pair that would cross a raw <small> edge stays as typed (as on main)', () => {
+  assert.equal(post('<small>a ~~b</small> c~~ d'), '<p><small>a ~~b</small> c~~ d</p>');
+});
+test('a pair that wraps a whole link, or sits wholly inside a <small>, is still drawn', () => {
+  assert.equal(post('~~a [b](/p) c~~'), '<p>' + STRUCK('a <a href="/p">b</a> c') + '</p>');
+  assert.equal(post('<small>~~a~~</small>'), '<p><small>' + STRUCK('a') + '</small></p>');
+});
+test('an escaped opening `\\~~` is never a delimiter (as on main)', () => {
+  assert.equal(post('a \\~~b~~ c'), '<p>a <span class="st-mk">\\</span>~~b~~ c</p>');
+});
+test('an escaped closing `\\~~` is never a delimiter (as on main)', () => {
+  assert.equal(post('a ~~b\\~~ c'), '<p>a ~~b<span class="st-mk">\\</span>~~ c</p>');
+});
+test('a bare URL in prose keeps its tildes: the full address shows (as on main)', () => {
+  assert.equal(post('Visit https://example.com/a~~b~~c today'), '<p>Visit https://example.com/a~~b~~c today</p>');
+});
+test('a strike next to a bare URL is still drawn; one that would end inside the URL is not', () => {
+  assert.equal(post('~~old~~ https://x.example/a~~b'), '<p>' + STRUCK('old') + ' https://x.example/a~~b</p>');
+  assert.equal(post('~~see https://x.example/a~~'), '<p>~~see https://x.example/a~~</p>');
+});
+
 // ── `- [ ]` / `- [x]` → a task item ─────────────────────────────────────────────────────────────
 test('`- [ ]` and `- [x]` are task items with a checkbox, not the text "[ ]"', () => {
   assert.equal(post('- [ ] todo\n- [x] done'),
-    '<ul class="st-list"><li class="st-task"><input type="checkbox" disabled> todo</li>'
-    + '<li class="st-task"><input type="checkbox" disabled checked> done</li></ul>');
+    '<ul class="st-list"><li class="st-task"><label><input type="checkbox" disabled> todo</label></li>'
+    + '<li class="st-task"><label><input type="checkbox" disabled checked> done</label></li></ul>');
 });
 test('an upper-case `[X]` is done too, and inline marks still render in the item', () => {
   assert.equal(post('- [X] **b**'),
-    '<ul class="st-list"><li class="st-task"><input type="checkbox" disabled checked> '
-    + '<span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span></li></ul>');
+    '<ul class="st-list"><li class="st-task"><label><input type="checkbox" disabled checked> '
+    + '<span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span></label></li></ul>');
 });
 test('a nested task item keeps its parent', () => {
   assert.equal(post('- a\n  - [ ] b'),
-    '<ul class="st-list"><li>a<ul class="st-list"><li class="st-task"><input type="checkbox" disabled> b</li></ul></li></ul>');
+    '<ul class="st-list"><li>a<ul class="st-list"><li class="st-task"><label><input type="checkbox" disabled> b</label></li></ul></li></ul>');
+});
+test('each task checkbox is named by its own text: checkbox and text share one <label>', () => {
+  const html = post('- [ ] Send invoice\n- [x] Receive payment');
+  assert.equal(html,
+    '<ul class="st-list"><li class="st-task"><label><input type="checkbox" disabled> Send invoice</label></li>'
+    + '<li class="st-task"><label><input type="checkbox" disabled checked> Receive payment</label></li></ul>');
+  // every checkbox is inside a label, disabled, and has no name (never submitted)
+  for (const m of html.matchAll(/<input[^>]*>/g)) {
+    assert.match(m[0], /\bdisabled\b/);
+    assert.doesNotMatch(m[0], /\bname=/);
+    assert.equal(html.slice(0, m.index).lastIndexOf('<label>') > html.slice(0, m.index).lastIndexOf('</label>'), true);
+  }
+});
+test('a nested child task is not part of its parent checkbox\'s name', () => {
+  assert.equal(post('- [ ] parent\n  - [x] child'),
+    '<ul class="st-list"><li class="st-task"><label><input type="checkbox" disabled> parent</label>'
+    + '<ul class="st-list"><li class="st-task"><label><input type="checkbox" disabled checked> child</label></li></ul></li></ul>');
 });
 test('unchanged: plain items, `[]`, `[ ]x` and a link item render as they did', () => {
   assert.equal(post('- a\n- b'), '<ul class="st-list"><li>a</li><li>b</li></ul>');
