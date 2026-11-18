@@ -62,8 +62,10 @@ Nothing stored, and no network call unless the root carries `data-src`.
 
 **The calendar is the source.** The owner writes an event in their calendar and the page says it:
 nothing about the event is written on the page, nothing is translated, and nothing is filtered by
-what an event says (an untitled event is shown untitled). Only an event the calendar itself marks
-cancelled is left out.
+what an event says (an untitled event is shown untitled). What is left out is what cannot be shown
+or is not happening: an event the calendar marks cancelled; one the feed could not place in time
+(an all-day or zoneless event in a calendar that states no time zone); a second entry with the UID
+of an earlier one; and anything past the feed's own cap of 20 upcoming events.
 
 - `data-src` names an **events feed** — the events coral's (`../events/events-worker.mjs`), which
   answers `{ html, calendar, events }`. One GET, on load.
@@ -88,7 +90,8 @@ cancelled is left out.
   the controls nor the edges. It is measured while the element has a box, and again when its width
   changes.
 - **Recurring events are not expanded**: the feed's parser reads a repeating event's first
-  occurrence only. A calendar that shares only free/busy shows what it shares ("Busy").
+  occurrence only. A timed event that states no end is treated as lasting an hour (the events
+  coral's long-standing reading), so it shows as under way for that hour; `DURATION` is not read. A calendar that shares only free/busy shows what it shares ("Busy").
 - A feed that fails, does not answer within eight seconds, or holds no event still to come falls
   back to `data-deadline` when the root has a valid one; otherwise the root is left exactly as
   authored (a `hidden` root stays unseen — the honest state for "nothing coming up").
