@@ -27,14 +27,14 @@
       "type": "url",
       "required": false,
       "default": null,
-      "description": "An events feed URL (the events coral’s feed). The root makes one GET to it on load and counts to the first event still ahead, instead of to a typed data-deadline. Without it the root makes no network call."
+      "description": "An events feed URL (the events coral’s feed). The root makes one GET to it on load and counts to the soonest event still ahead, instead of to a typed data-deadline. Without it the root makes no network call."
     },
     {
       "name": "data-count-to",
       "type": "enum",
       "required": false,
       "default": "start",
-      "description": "With data-src: which moment of the event is the deadline. An event with no end is counted to its start; an all-day event’s end is the midnight after its last day.",
+      "description": "With data-src: which moment of the event is the deadline. A timed event with no end is counted to its start; an all-day event’s end is the midnight after its last day.",
       "values": [
         "start",
         "end"
@@ -45,7 +45,7 @@
       "type": "string",
       "required": false,
       "default": null,
-      "description": "With data-src: the UTC offset (Z or ±hh:mm) that all-day and floating events are read in. Without it those events are passed over; an event the feed gives in UTC needs none.",
+      "description": "With data-src: the UTC offset (Z or ±hh:mm) that all-day events and times without an offset are read in. Without it those events are passed over; an event the feed gives in UTC needs none.",
       "pattern": "^(Z|[+-]\\d{2}:\\d{2})$"
     },
     {

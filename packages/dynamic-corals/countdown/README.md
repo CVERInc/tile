@@ -51,21 +51,23 @@ Nothing stored, and no network call unless the root carries `data-src`.
 ```
 
 - `data-src` names an **events feed** — the events coral's (`../events/events-worker.mjs`), which
-  answers `{ html, events }`. The root makes one GET on load and counts to the **first event still
-  ahead**. Editing the calendar moves the countdown; the page is not rebuilt.
-- `data-count-to` is `start` (default) or `end`. An event with no end is counted to its start. An
-  all-day event's end is the midnight after its last day, so `end` on a one-day "closes on the 1st"
-  event is the end of the 1st.
+  answers `{ html, events }`. The root makes one GET on load and counts to the **soonest event still
+  ahead** (by start or by end, whichever `data-count-to` says). Editing the calendar moves the countdown; the page is not rebuilt.
+- `data-count-to` is `start` (default) or `end`. A timed event with no end is counted to its start.
+  An all-day event's end is the midnight after its last day, so `end` on a one-day "closes on the
+  1st" event is the end of the 1st.
 - **An event's moment must name its offset, like a typed deadline.** A timed event the feed gives in
   UTC is exact. An all-day event is only a date and a floating time only a wall clock, so each is
   read in the root's `data-offset` (`Z` or `±hh:mm`) — and without one it is passed over, never read
-  in the visitor's zone.
+  in the visitor's zone. A time the calendar wrote with a named zone (a recurring event's `TZID`)
+  arrives as a wall clock as well, and is read in the same one fixed `data-offset`: right while that
+  zone sits at that offset, an hour out across a daylight-saving change.
 - `data-event="title|location|description"` on a child replaces its text with that field;
   `data-event-href="location|url"` on a link sets its href. `location` is the location itself when
   the author wrote an http(s) URL there (a sign-up page, an online event) and otherwise a map search
-  for the place — the same link the events coral gives that field. An empty field, or anything that
+  for the place — for a place, the same link the events coral gives that field. An empty field, or anything that
   is not http(s), leaves the element as authored, so the host's own text and link are the defaults.
-- A feed that fails, or holds no event the root can count to, falls back to `data-deadline` when the
+- A feed that fails, does not answer within eight seconds, or holds no event the root can count to, falls back to `data-deadline` when the
   root has a valid one; otherwise the root is left exactly as authored (a `hidden` root stays
   unseen — the honest state for "nothing coming up").
 - The event is chosen once, on load. When its countdown ends, `data-expired` applies as usual; the
@@ -154,9 +156,9 @@ Requires one of: `data-deadline` or `data-src`.
 |---|---|---|---|---|
 | `data-dynamic-coral` | enum | yes | — | Selects the countdown coral. Values: `countdown`. |
 | `data-deadline` | string | no | — | ISO date-time WITH an explicit offset (Z or ±hh:mm) naming a real date; otherwise the root is left as authored. With data-src it is the fallback, used when the feed gives no event to count to. Pattern: `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z\|[+-]\d{2}:\d{2})$`. |
-| `data-src` | url | no | — | An events feed URL (the events coral’s feed). The root makes one GET to it on load and counts to the first event still ahead, instead of to a typed data-deadline. Without it the root makes no network call. |
-| `data-count-to` | enum | no | `start` | With data-src: which moment of the event is the deadline. An event with no end is counted to its start; an all-day event’s end is the midnight after its last day. Values: `start`, `end`. |
-| `data-offset` | string | no | — | With data-src: the UTC offset (Z or ±hh:mm) that all-day and floating events are read in. Without it those events are passed over; an event the feed gives in UTC needs none. Pattern: `^(Z\|[+-]\d{2}:\d{2})$`. |
+| `data-src` | url | no | — | An events feed URL (the events coral’s feed). The root makes one GET to it on load and counts to the soonest event still ahead, instead of to a typed data-deadline. Without it the root makes no network call. |
+| `data-count-to` | enum | no | `start` | With data-src: which moment of the event is the deadline. A timed event with no end is counted to its start; an all-day event’s end is the midnight after its last day. Values: `start`, `end`. |
+| `data-offset` | string | no | — | With data-src: the UTC offset (Z or ±hh:mm) that all-day events and times without an offset are read in. Without it those events are passed over; an event the feed gives in UTC needs none. Pattern: `^(Z\|[+-]\d{2}:\d{2})$`. |
 | `data-event` | enum | no | — | With data-src, on a child element: replace its text with that field of the event being counted to. An empty field leaves the element as authored. Values: `title`, `location`, `description`. |
 | `data-event-href` | enum | no | — | With data-src, on a child link: set its href from the event. location is the location itself when it is an http(s) URL and otherwise a map search for it; url is the event’s own URL. Only http(s) is ever written; otherwise the link is left as authored. Values: `location`, `url`. |
 | `data-expired` | enum | no | `hide` | What the root does at the deadline: hide it, or replace its content with data-expired-text (text without a data-expired-text hides). Values: `hide`, `text`. |

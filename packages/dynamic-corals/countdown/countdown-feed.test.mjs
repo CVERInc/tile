@@ -3,8 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { eventInstant, pickEvent, httpUrl, eventHref, eventText } from './countdown-feed.mjs';
-import { mountFromFeed, mountAll } from './countdown-core.mjs';
-import { mapsUrl, feedEvents } from '../events/events-core.mjs';
+import { mountFromFeed, mountAll, FEED_TIMEOUT_MS } from './countdown-core.mjs';
+import { mapsUrl, feedEvents, renderEvents, FEED_MAX } from '../events/events-core.mjs';
 import { parseICal } from '../events/ical.mjs';
 import { createDocument, createClock } from '../shared/fake-dom.mjs';
 
@@ -39,6 +39,12 @@ test('a floating time needs the offset too; an event with no end counts to its s
   assert.equal(eventInstant(ev, 'end', '-05:00'), Date.UTC(2026, 11, 1, 15));
 });
 
+test('an all-day event that names no end is that one day', () => {
+  const ev = { start: '2026-12-01', end: null, allDay: true };
+  assert.equal(eventInstant(ev, 'start', '+09:00'), Date.UTC(2026, 10, 30, 15));
+  assert.equal(eventInstant(ev, 'end', '+09:00'), Date.UTC(2026, 11, 1, 15), 'the midnight after it, not the one before');
+});
+
 test('junk is NaN, never a date that rolled over', () => {
   for (const ev of [null, {}, { start: '' }, { start: 'tomorrow' }, { start: '2026-02-31' }, { start: 20261201 }]) {
     assert.ok(Number.isNaN(eventInstant(ev, 'start', '+09:00')), JSON.stringify(ev));
@@ -63,6 +69,26 @@ test('pickEvent takes the first event still ahead, and passes over what it canno
   for (const bad of [null, undefined, {}, 'x', 3]) assert.equal(pickEvent(bad, now, 'start', null), null);
 });
 
+test('pickEvent takes the SOONEST instant, which is not always the first in the feed', () => {
+  const now = Date.UTC(2026, 10, 18);
+  // The feed sorts by start read as UTC: the timed event (Nov 19 20:00Z) comes before the all-day
+  // Nov 20 — which under +09:00 really starts Nov 19 15:00Z, five hours earlier.
+  const mixed = [
+    { title: 'timed', start: '2026-11-19T20:00:00.000Z' },
+    { title: 'all-day', start: '2026-11-20', end: '2026-11-21', allDay: true },
+  ];
+  assert.equal(pickEvent(mixed, now, 'start', '+09:00').event.title, 'all-day');
+  assert.equal(pickEvent(mixed, now, 'start', '-08:00').event.title, 'timed');
+  // counting to ENDS: a long event that started first does not end first
+  const ends = [
+    { title: 'season', start: '2026-11-01T00:00:00.000Z', end: '2026-12-31T00:00:00.000Z' },
+    { title: 'sale', start: '2026-11-10T00:00:00.000Z', end: '2026-11-20T00:00:00.000Z' },
+  ];
+  assert.equal(pickEvent(ends, now, 'end', null).event.title, 'sale');
+  const tie = [{ title: 'first', start: '2026-11-20T00:00:00.000Z' }, { title: 'second', start: '2026-11-20T00:00:00.000Z' }];
+  assert.equal(pickEvent(tie, now, 'start', null).event.title, 'first');
+});
+
 test('only http(s) ever becomes an href', () => {
   assert.equal(httpUrl(' https://example.com/a?b=1 '), 'https://example.com/a?b=1');
   assert.equal(httpUrl('HTTP://example.com'), 'http://example.com/');
@@ -74,7 +100,8 @@ test('only http(s) ever becomes an href', () => {
 test('eventHref: a URL in the location is the link; a place is the same map search events gives it', () => {
   assert.equal(eventHref({ location: 'https://example.com/apply' }, 'location'), 'https://example.com/apply');
   const place = 'NTU Sports Center, Taipei';
-  assert.equal(eventHref({ location: place }, 'location'), mapsUrl(place), 'one map link for one field, in both corals');
+  assert.equal(eventHref({ location: place }, 'location'), mapsUrl(place), 'a place: the same map link in both corals');
+  assert.match(renderEvents([{ title: 'x', start: '2999-01-01T00:00:00.000Z', location: place }], { now: 0 }), new RegExp(mapsUrl(place).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/&/g, '&amp;')), 'and that IS what events renders');
   assert.equal(eventHref({ location: 'javascript:alert(1)' }, 'location'), mapsUrl('javascript:alert(1)'), 'searched for, never followed');
   assert.equal(eventHref({ location: null }, 'location'), '');
   assert.equal(eventHref({ url: 'https://example.com/e' }, 'url'), 'https://example.com/e');
@@ -92,23 +119,56 @@ test('eventText: three named fields, trimmed; anything else is empty', () => {
   assert.equal(eventText({ title: null }, 'title'), '');
 });
 
-test('feedEvents is the upcoming list as data, in the fields the countdown reads', () => {
+test('feedEvents is the calendar as data, in the fields the countdown reads', () => {
   const ics = ['BEGIN:VCALENDAR',
     'BEGIN:VEVENT', 'UID:a', 'SUMMARY:Gone', 'DTSTART:20261101T000000Z', 'DTEND:20261101T010000Z', 'END:VEVENT',
     'BEGIN:VEVENT', 'UID:b', 'SUMMARY:Deadline', 'DTSTART;VALUE=DATE:20261201', 'DTEND;VALUE=DATE:20261202', 'LOCATION:https://example.com/apply', 'END:VEVENT',
     'BEGIN:VEVENT', 'UID:c', 'SUMMARY:Later', 'DTSTART:20261212T010000Z', 'END:VEVENT',
     'END:VCALENDAR'].join('\r\n');
   const now = Date.UTC(2026, 10, 18);
-  const feed = feedEvents(parseICal(ics), { showCount: 5, now });
+  const feed = feedEvents(parseICal(ics), { now });
   assert.deepEqual(feed, [
     { title: 'Deadline', start: '2026-12-01', end: '2026-12-02', allDay: true, location: 'https://example.com/apply', description: null, url: null },
     { title: 'Later', start: '2026-12-12T01:00:00.000Z', end: null, allDay: false, location: null, description: null, url: null },
   ]);
-  assert.equal(feedEvents(parseICal(ics), { showCount: 1, now }).length, 1, 'showCount clamps it like the rendered list');
+  assert.equal(feedEvents(parseICal(ics), { showCount: 1, now }).length, 2, 'the rendered list’s showCount does not narrow the feed');
   // and the countdown side reads exactly that
   const picked = pickEvent(JSON.parse(JSON.stringify(feed)), now, 'end', '+09:00');
   assert.equal(picked.event.title, 'Deadline');
   assert.equal(picked.deadline, Date.UTC(2026, 11, 1, 15));
+});
+
+test('feedEvents keeps what a reader in another offset still needs', () => {
+  const H = 36e5;
+  // Floating 10:00–11:00 on Dec 1. Read as UTC it is over at 11:00Z; at −08:00 it STARTS at 18:00Z.
+  const floating = [{ title: 'west', start: '2026-12-01T10:00:00', end: '2026-12-01T11:00:00' }];
+  const noon = Date.UTC(2026, 11, 1, 12);
+  assert.equal(feedEvents(floating, { now: noon }).length, 1, 'still in the feed after it looks over from here');
+  assert.equal(pickEvent(feedEvents(floating, { now: noon }), noon, 'start', '-08:00').deadline, Date.UTC(2026, 11, 1, 18));
+  // All-day Dec 1, counted to its end at −08:00 (Dec 2 08:00Z), asked at Dec 2 01:00Z.
+  const allDay = [{ title: 'day', start: '2026-12-01', end: '2026-12-02', allDay: true }];
+  const late = Date.UTC(2026, 11, 2, 1);
+  assert.equal(pickEvent(feedEvents(allDay, { now: late }), late, 'end', '-08:00').deadline, Date.UTC(2026, 11, 2, 8));
+  // …and it does leave: two days on, it is gone.
+  assert.equal(feedEvents(allDay, { now: late + 48 * H }).length, 0);
+  // Events under way do not hide the next start, however many there are.
+  const now = Date.UTC(2026, 10, 18);
+  const busy = [];
+  for (let i = 0; i < 5; i++) busy.push({ title: 'on' + i, uid: 'on' + i, start: '2026-11-17T00:00:00.000Z', end: '2026-11-19T00:00:00.000Z' });
+  busy.push({ title: 'next', uid: 'next', start: '2026-11-25T00:00:00.000Z' });
+  assert.equal(pickEvent(feedEvents(busy, { now }), now, 'start', null).event.title, 'next');
+  const many = Array.from({ length: FEED_MAX + 15 }, (_, i) => ({ title: 'e' + i, uid: 'e' + i, start: new Date(now + (i + 1) * 864e5).toISOString() }));
+  assert.equal(feedEvents(many, { now }).length, FEED_MAX, 'capped');
+});
+
+test('events: a feed URL that is not http(s) never becomes the title link', () => {
+  const start = '2999-01-01T00:00:00.000Z';
+  assert.match(renderEvents([{ title: 'ok', start, url: 'https://example.com/e' }], { now: 0 }), /<a class="dc-ev-title" href="https:\/\/example\.com\/e"/);
+  for (const url of ['javascript:alert(1)', 'data:text/html,x', ' JaVaScript:alert(1)', '//example.com']) {
+    const html = renderEvents([{ title: 'bad', start, url }], { now: 0 });
+    assert.equal(html.includes('<a class="dc-ev-title"'), false, url);
+    assert.match(html, /<span class="dc-ev-title">bad<\/span>/);
+  }
 });
 
 // ── the root, with a fake document, clock and fetch ─────────────────────────────────────────────
@@ -198,6 +258,32 @@ test('no usable event: falls back to data-deadline, and without one leaves the r
     assert.equal(typed.els.title.textContent, 'authored title', `${name}: a fallback fills no slot`);
     mounted.stop();
   }
+});
+
+test('a feed that never answers is a feed that failed: the typed deadline gets its turn', async () => {
+  const { doc, root, els } = page({ 'data-src': '/f', 'data-offset': 'Z', 'data-deadline': '2026-11-20T00:00:00Z' });
+  const clock = createClock(NOW);
+  const pending = mountFromFeed(root, env(doc, clock, () => new Promise(() => {})));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(root.hidden, true, 'still waiting');
+  clock.advance(FEED_TIMEOUT_MS - 1);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(root.hidden, true);
+  clock.advance(1);
+  const mounted = await pending;
+  assert.ok(mounted && mounted.running);
+  assert.equal(root.hidden, false);
+  assert.equal(els.days.textContent, '01', 'eight seconds later, counting to the typed deadline');
+  mounted.stop();
+});
+
+test('an answered feed leaves no timeout behind', async () => {
+  const { doc, root } = page({ 'data-src': '/f', 'data-offset': 'Z' });
+  const clock = createClock(NOW);
+  const mounted = await mountFromFeed(root, env(doc, clock, feedOf({ events: [EVENT] }).fetch));
+  assert.equal(clock.pending(), 1, 'only the countdown’s own next tick');
+  mounted.stop();
+  assert.equal(clock.pending(), 0);
 });
 
 test('a usable feed wins over a typed data-deadline', async () => {
