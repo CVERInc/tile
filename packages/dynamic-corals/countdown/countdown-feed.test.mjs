@@ -733,12 +733,12 @@ const MAC_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
 const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel)';
 
 test('eventHref add: an .ics link in Safari on Apple devices only, and only with a feed address and a uid', () => {
-  const event = { uid: 'u1@google.com', title: 'Open', start: '2026-10-12', end: '2026-12-02', allDay: true };
+  const event = { uid: 'u1@example.com', title: 'Open', start: '2026-10-12', end: '2026-12-02', allDay: true };
   const src = 'https://feed.example/v0/?cal=x';
   for (const ua of [IPHONE, MAC]) {
     const u = new URL(eventHref(event, 'add', ua, src));
     assert.equal(u.origin + u.pathname, 'https://feed.example/v0/');
-    assert.equal(u.searchParams.get('ics'), 'u1@google.com');
+    assert.equal(u.searchParams.get('ics'), 'u1@example.com');
     assert.equal(u.searchParams.get('cal'), 'x');
   }
   const google = addToCalendarUrl(event);
