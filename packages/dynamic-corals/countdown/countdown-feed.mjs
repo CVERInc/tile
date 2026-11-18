@@ -78,13 +78,26 @@ export function locationText(event) {
 export function eventHref(event, which, userAgent) {
   if (!event) return '';
   if (which === 'url') return httpUrl(event.url);
-  if (which === 'add') return addToCalendarUrl(event);
+  if (which === 'add') return addToCalendarUrl(calendarEntry(event));
   if (which !== 'location') return '';
   const kind = locationKind(event);
   if (kind === 'url') return httpUrl(event.location);
   return kind === 'place' ? mapHref(String(event.location).trim(), userAgent) : '';
 }
 export { mapsUrl };
+
+/**
+ * The event as an add-to-calendar link must state it. A timed event's `start`/`end` may be a wall
+ * clock with no zone (a zoned or floating time in the feed); read on the visitor's device that
+ * would become THEIR local time. The feed's exact instants are used instead. An all-day event keeps
+ * its dates: a date is the same date for everyone.
+ */
+function calendarEntry(event) {
+  if (event.allDay) return event;
+  const startsAt = instant(event.startsAt), endsAt = instant(event.endsAt);
+  if (Number.isNaN(startsAt)) return event;
+  return { ...event, start: event.startsAt, end: Number.isNaN(endsAt) ? event.startsAt : event.endsAt };
+}
 
 const DAY = 864e5;
 function formatRange(format, a, b) {

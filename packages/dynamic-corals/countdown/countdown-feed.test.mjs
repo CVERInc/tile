@@ -134,6 +134,16 @@ test('add to calendar is the events coral’s link for the same event', () => {
   assert.match(eventHref(event, 'add'), /^https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE&text=Open&dates=20261012%2F20261202/);
 });
 
+test('add to calendar states a timed event’s exact instants, whoever’s device builds the link', () => {
+  // 10:00 in Los Angeles: the feed keeps the wall clock in start/end and gives the instants beside it.
+  const zoned = { title: 'Talk', allDay: false, start: '2026-11-25T10:00:00', end: '2026-11-25T11:00:00', startsAt: '2026-11-25T18:00:00.000Z', endsAt: '2026-11-25T19:00:00.000Z' };
+  assert.match(eventHref(zoned, 'add'), /dates=20261125T180000Z%2F20261125T190000Z/, 'never the wall clock read in this machine’s zone');
+  assert.match(eventHref({ ...zoned, endsAt: null }, 'add'), /dates=20261125T180000Z%2F20261125T180000Z/);
+  // no instants (an older feed): the events coral's own reading, unchanged
+  const old = { title: 'Talk', allDay: false, start: '2026-11-25T18:00:00.000Z', end: null };
+  assert.equal(eventHref(old, 'add'), addToCalendarUrl(old));
+});
+
 test('whenText and unitText are the runtime’s words, in the page’s language', () => {
   const allDay = { allDay: true, start: '2026-10-12', end: '2026-12-02' };
   assert.equal(whenText(allDay, 'en'), new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', timeZone: 'UTC' }).formatRange(new Date(Date.UTC(2026, 9, 12)), new Date(Date.UTC(2026, 11, 1))));
@@ -143,7 +153,9 @@ test('whenText and unitText are the runtime’s words, in the page’s language'
   assert.notEqual(whenText(allDay, 'ja'), whenText(allDay, 'en'));
   const timed = { allDay: false, startsAt: '2026-11-25T05:00:00.000Z', endsAt: '2026-11-25T07:00:00.000Z' };
   assert.match(whenText(timed, 'en'), /Nov 2[45]/);
-  assert.match(whenText(timed, 'en'), /GMT|UTC|[A-Z]{2,5}/, 'a time on the reader’s clock names its zone');
+  const zoneName = new Intl.DateTimeFormat('en', { timeZoneName: 'short' }).formatToParts(new Date(Date.parse(timed.startsAt))).find((p) => p.type === 'timeZoneName').value;
+  assert.ok(whenText(timed, 'en').includes(zoneName), `a time on the reader’s clock names its zone (${zoneName})`);
+  assert.notEqual(whenText(timed, 'en'), new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).formatRange(new Date(Date.parse(timed.startsAt)), new Date(Date.parse(timed.endsAt))), 'and is not the same text without it');
   assert.equal(whenText({ allDay: false, startsAt: null }, 'en'), '');
   assert.equal(whenText(null, 'en'), '');
   assert.equal(whenText(allDay, 'not a locale!!'), '', 'a locale Intl refuses gives nothing rather than throwing');
@@ -286,6 +298,46 @@ test('paging: next and prev move through the events, stop at the ends, and never
   assert.equal(els.title.textContent, 'Workshop', 'a stopped root does not page');
 });
 
+test('paging onto an event that has ended meanwhile: it is let go, and no timer is orphaned', async () => {
+  // Only the event being viewed has a timer. A ends while the visitor is looking at B.
+  const a = ev('A', NOW + 10e3, NOW + 20e3), b = ev('B', NOW + 100e3, NOW + 200e3), c3 = ev('C', NOW + 300e3, NOW + 400e3);
+  const { doc, root, els } = page({ 'data-src': '/f' });
+  const clock = createClock(NOW);
+  const c = await mountFromFeed(root, env(doc, clock, feedOf({ events: [a, b, c3] }).fetch));
+  c.next();
+  assert.equal(els.title.textContent, 'B');
+  clock.advance(30e3);                      // A is over; B's timer has been ticking
+  assert.equal(c.count, 3, 'not yet noticed: nothing has asked');
+  els.prev.click();
+  assert.equal(els.title.textContent, 'B', 'there is nothing before B any more');
+  assert.equal(c.count, 2);
+  assert.equal(els.pos.textContent, '1/2');
+  assert.deepEqual([els.prev.disabled, els.next.disabled], [true, false]);
+  assert.ok(c.running);
+  assert.equal(clock.pending(), 1, 'one countdown, one timer');
+  c.next();
+  assert.equal(els.title.textContent, 'C');
+  assert.equal(clock.pending(), 1);
+  c.stop();
+  assert.equal(clock.pending(), 0, 'stop() reaches the only timer there is');
+  const seconds = els.hours.textContent;
+  clock.advance(5e3);
+  assert.equal(els.hours.textContent, seconds, 'and nothing writes after it');
+
+  // the event being viewed is the one that ended unwatched? It cannot: it has the timer. But the
+  // LAST other event can end, leaving one.
+  const p2 = page({ 'data-src': '/f' });
+  const clock2 = createClock(NOW);
+  const c2 = await mountFromFeed(p2.root, env(p2.doc, clock2, feedOf({ events: [a, b] }).fetch));
+  c2.next();
+  clock2.advance(30e3);
+  c2.prev();
+  assert.equal(c2.count, 1);
+  assert.equal(p2.els.pager.hidden, true, 'a single event has no pager');
+  assert.equal(clock2.pending(), 1);
+  c2.stop();
+});
+
 test('one event: no pager, no position', async () => {
   const { doc, root, els } = page({ 'data-src': '/f' });
   const c = await mountFromFeed(root, env(doc, createClock(NOW), feedOf({ events: [SEASON] }).fetch));
@@ -418,6 +470,20 @@ test('data-event-fit: the element is as tall as the tallest event needs, and pag
   assert.equal(root.style.minHeight, '284px');
   c.stop();
   assert.equal(resized, null, 'stop() lets go of the observer');
+
+  // the host's own min-height is a floor, never erased; and measuring never disables a control
+  const own = page({ 'data-src': '/f', 'data-event-fit': '' });
+  own.root.style.minHeight = '20rem';
+  own.root.getBoundingClientRect = () => ({ width: 352, height: 0 });
+  const c3 = await mountFromFeed(own.root, env(own.doc, createClock(NOW), feedOf({ events: [SEASON] }).fetch));
+  assert.equal(own.root.style.minHeight, '20rem', 'one event: the host’s value stands');
+  c3.stop();
+  const nav = page({ 'data-src': '/f', 'data-event-fit': '' });
+  let sawNextDisabled = false;
+  nav.root.getBoundingClientRect = () => { if (nav.els.next.disabled) sawNextDisabled = true; return { width: 352, height: 240 }; };
+  const c4 = await mountFromFeed(nav.root, env(nav.doc, createClock(NOW), feedOf(FEED).fetch));
+  assert.equal(sawNextDisabled, false, 'laying out the last event to measure it does not disable Next');
+  c4.stop();
 
   // with no box yet (a closed panel) nothing is set; one event needs no reserving
   const closed = page({ 'data-src': '/f', 'data-event-fit': '' });

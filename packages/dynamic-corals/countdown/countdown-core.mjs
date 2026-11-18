@@ -232,8 +232,12 @@ const CONDITIONS = {
   several: (event, ctx) => ctx.count > 1,
 };
 
-/** Write one event into the host's markup. Digits are not touched: that is mountAt's. */
-function fillSlots(root, event, ctx, env) {
+/**
+ * Write one event into the host's markup. Digits are not touched: that is mountAt's. `measuring`
+ * is the fit pass laying every event out in turn: it leaves the paging controls alone, because
+ * disabling a focused button — even for an instant — drops the visitor's focus to the page.
+ */
+function fillSlots(root, event, ctx, env, measuring = false) {
   for (const el of root.querySelectorAll('[data-event]')) {
     el.textContent = eventText(event, el.getAttribute('data-event'), ctx);
   }
@@ -246,11 +250,12 @@ function fillSlots(root, event, ctx, env) {
     const holds = CONDITIONS[el.getAttribute('data-event-if')];
     el.hidden = !(holds && holds(event, ctx));
   }
+  root.setAttribute('data-event-location', locationKind(event));
+  if (measuring) return;
   for (const el of root.querySelectorAll('[data-event-nav]')) {
     const dir = el.getAttribute('data-event-nav');
     el.disabled = dir === 'prev' ? ctx.index === 0 : dir === 'next' ? ctx.index === ctx.count - 1 : true;
   }
-  root.setAttribute('data-event-location', locationKind(event));
   root.setAttribute('data-event-index', String(ctx.index + 1));
   root.setAttribute('data-event-count', String(ctx.count));
 }
@@ -307,6 +312,8 @@ export async function mountFromFeed(root, deps = {}) {
   // It can only be measured while it has a box (a root inside a closed panel has none), so it is
   // measured again whenever the element's width changes — which is also what "became visible" is.
   const fitEl = root.getAttribute('data-event-fit') !== null ? root : root.querySelector('[data-event-fit]');
+  // The host's own min-height, if it wrote one, is the floor this never goes below or erases.
+  const authoredMinHeight = fitEl && fitEl.style ? fitEl.style.minHeight || '' : '';
   let fitWidth = -1, fitHeight = 0;
   function fit() {
     if (!fitEl || typeof fitEl.getBoundingClientRect !== 'function') return;
@@ -314,13 +321,13 @@ export async function mountFromFeed(root, deps = {}) {
     if (!(width > 0)) return;
     if (width !== fitWidth) fitHeight = 0;      // a new width is a new layout; the same one never shrinks
     fitWidth = width;
-    fitEl.style.minHeight = '';
+    fitEl.style.minHeight = authoredMinHeight;
     if (items.length > 1) {
       for (const item of items) {
-        fillSlots(root, item.event, ctxOf(item), env);
+        fillSlots(root, item.event, ctxOf(item), env, true);
         fitHeight = Math.max(fitHeight, fitEl.getBoundingClientRect().height);
       }
-      fillSlots(root, current.event, ctxOf(current), env);
+      fillSlots(root, current.event, ctxOf(current), env, true);
     }
     if (fitHeight > 0) fitEl.style.minHeight = Math.ceil(fitHeight) + 'px';
   }
@@ -337,12 +344,19 @@ export async function mountFromFeed(root, deps = {}) {
     fonts.ready.then(() => { if (!stopped) { fitWidth = -1; fit(); } }).catch(() => {});
   }
 
+  // 🔴 `show` can be re-entered: mounting ticks at once, and a tick that finds its moment already
+  // past calls onExpired, which shows something else. Only the LATEST call may keep its countdown —
+  // an outer call that overwrote `counting` with its own dead one would orphan the live timer, and
+  // stop() could then never reach it.
+  let shows = 0;
   function show(item) {
+    const mine = ++shows;
     current = item;
     if (counting) counting.stop();
     fillSlots(root, item.event, ctxOf(item), env);
     root.setAttribute('data-event-state', phaseOf(item, env.now()));
-    counting = mountAt(root, nextMoment(item, env.now()), env, { onExpired });
+    const mounted = mountAt(root, nextMoment(item, env.now()), env, { onExpired });
+    if (mine === shows) counting = mounted;
   }
 
   // At zero: what is still to come is worked out afresh (an event that has started now counts to
@@ -357,10 +371,22 @@ export async function mountFromFeed(root, deps = {}) {
     return true;
   }
 
+  // Paging first lets go of what has ended since the list was last worked out (only the event
+  // being viewed has a timer; the others end unwatched). The order is NOT re-sorted here — that
+  // happens at zero — so nothing but the ended ones moves.
   const go = (step) => {
     if (stopped) return;
+    const now = env.now();
+    const at = items.indexOf(current);
+    const live = items.filter((item) => item.endsAt > now);
+    if (live.length !== items.length) {
+      const before = items.slice(0, at).filter((item) => item.endsAt > now).length;
+      items = live;
+      if (!items.length) { onExpired(); return; }
+      if (!items.includes(current)) { show(items[Math.min(Math.max(before + (step > 0 ? 0 : -1), 0), items.length - 1)]); return; }
+    }
     const to = items.indexOf(current) + step;
-    if (to < 0 || to >= items.length) return;   // it stops at the ends; it does not wrap
+    if (to < 0 || to >= items.length) { fillSlots(root, current.event, ctxOf(current), env); return; }   // it stops at the ends; it does not wrap
     show(items[to]);
   };
   for (const el of root.querySelectorAll('[data-event-nav]')) {
