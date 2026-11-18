@@ -47,6 +47,35 @@ export function upcomingEvents(events, now) {
   });
 }
 
+/**
+ * The events as DATA: what another coral needs to act on an event without scraping the rendered
+ * HTML (the countdown coral reads the next one as its deadline). Plain fields only, in the Event
+ * shape's own names; `start`/`end` are the ISO strings the source gave — date-only for an all-day
+ * event, no offset for a floating one — because inventing a zone here would be a guess the reader
+ * could not see.
+ *
+ * 🔴 NOT the rendered list's filter, and not its `showCount`. This side reads a date-only or
+ * floating time as UTC; the reader places it in its own offset, where the same event can end up to
+ * half a day later (−12:00). So an event stays in the feed until a full day after it looks over
+ * here, and the reader does the real "still ahead" test. And the cap is this feed's own: a reader
+ * counting to the next START must be able to see past every event that is under way, which a
+ * caller's `show=1` would hide.
+ */
+export const FEED_GRACE_MS = 864e5;
+export const FEED_MAX = 20;
+export function feedEvents(events, opts = {}) {
+  const { now = Date.now() } = opts;
+  return upcomingEvents(events, ms(now) - FEED_GRACE_MS).slice(0, FEED_MAX).map((ev) => ({
+    title: ev.title || '',
+    start: ev.start,
+    end: ev.end || null,
+    allDay: !!ev.allDay,
+    location: ev.location || null,
+    description: ev.description || null,
+    url: ev.url || null,
+  }));
+}
+
 /** Human "when" — a live-countdown bucket: live / <1h ticking seconds / <24h / <7d / (date beyond).
  *  Seconds appear only inside the final hour, where they add real drama; days/hours out stay coarse.
  *
@@ -161,7 +190,9 @@ export function renderEvents(events, opts = {}) {
       ? `<p class="dc-ev-desc">${icon('info')}<span>${esc(ev.description.replace(/\s*\n\s*/g, ' · ').trim())}</span></p>`
       : '';
     const cdHtml = cd ? `<span class="dc-ev-cd" data-start="${esc(ev.start)}" data-end="${esc(ev.end || '')}">${esc(cd)}</span>` : `<span class="dc-ev-cd" data-start="${esc(ev.start)}" data-end="${esc(ev.end || '')}"></span>`;
-    const title = ev.url
+    // 🔴 http(s) only: `ev.url` is the feed's URL property, third-party text like the rest, and a
+    // `javascript:` value here would be a link that runs on the host page.
+    const title = /^https?:\/\//i.test(String(ev.url || '').trim())
       ? `<a class="dc-ev-title" href="${esc(ev.url)}" target="_blank" rel="noopener">${esc(ev.title)}</a>`
       : `<span class="dc-ev-title">${esc(ev.title)}</span>`;
     // The date tile (start month + day) is the glanceable left anchor; it's decorative (the full,
