@@ -38,40 +38,65 @@ language, layout, the card it sits in — is the host's own markup; the coral on
 
 Nothing stored, and no network call unless the root carries `data-src`.
 
-## The deadline from a calendar — `data-src`
+## The countdown from a calendar — `data-src`
 
 ```html
-<div data-dynamic-coral="countdown" hidden
-     data-src="https://<events feed>/v0/?cal=<public calendar>&show=3"
-     data-count-to="end" data-offset="+09:00">
-  <strong data-event="title">Applications open</strong>
-  <span data-part="days"></span> d <span data-part="hours"></span> h <span data-part="minutes"></span> m
-  <a data-event-href="location" href="/apply">Details</a>
+<div data-dynamic-coral="countdown" hidden data-event-fit
+     data-src="https://<events feed>/v0/?cal=<public calendar>">
+  <a data-event-href="add" aria-label="Add to calendar">
+    <span data-event="calendar"></span> <span data-event="when"></span>
+  </a>
+  <span data-part="days"></span> <span data-unit="days">d</span>
+  <span data-part="hours"></span> <span data-unit="hours">h</span>
+  <span data-part="minutes"></span> <span data-unit="minutes">m</span>
+  <a data-event="title" data-event-href="location"></a>
+  <a data-event-if="location" data-event-href="location"><span data-event="location"></span></a>
+  <p data-event-if="description"><span data-event="description"></span></p>
+  <div data-event-if="several">
+    <button data-event-nav="prev" aria-label="Previous event">‹</button>
+    <span data-event="position"></span>
+    <button data-event-nav="next" aria-label="Next event">›</button>
+  </div>
 </div>
 ```
 
+**The calendar is the source.** The owner writes an event in their calendar and the page says it:
+nothing about the event is written on the page, nothing is translated, and nothing is filtered by
+what an event says (an untitled event is shown untitled). What is left out is what cannot be shown
+or is not happening: an event the calendar marks cancelled; one the feed could not place in time
+(an all-day or zoneless event in a calendar that states no time zone); a second entry with the UID
+of an earlier one; and anything past the feed's own cap of 20 upcoming events.
+
 - `data-src` names an **events feed** — the events coral's (`../events/events-worker.mjs`), which
-  answers `{ html, events }`. The root makes one GET on load and counts to the **soonest event still
-  ahead** (by start or by end, whichever `data-count-to` says). Editing the calendar moves the countdown; the page is not rebuilt.
-- `data-count-to` is `start` (default) or `end`. A timed event with no end is counted to its start.
-  An all-day event's end is the midnight after its last day, so `end` on a one-day "closes on the
-  1st" event is the end of the 1st.
-- **An event's moment must name its offset, like a typed deadline.** A timed event the feed gives in
-  UTC is exact. An all-day event is only a date and a floating time only a wall clock, so each is
-  read in the root's `data-offset` (`Z` or `±hh:mm`) — and without one it is passed over, never read
-  in the visitor's zone. A time the calendar wrote with a named zone (a recurring event's `TZID`)
-  arrives as a wall clock as well, and is read in the same one fixed `data-offset`: right while that
-  zone sits at that offset, an hour out across a daylight-saving change.
-- `data-event="title|location|description"` on a child replaces its text with that field;
-  `data-event-href="location|url"` on a link sets its href. `location` is the location itself when
-  the author wrote an http(s) URL there (a sign-up page, an online event) and otherwise a map search
-  for the place — for a place, the same link the events coral gives that field. An empty field, or anything that
-  is not http(s), leaves the element as authored, so the host's own text and link are the defaults.
-- A feed that fails, does not answer within eight seconds, or holds no event the root can count to, falls back to `data-deadline` when the
-  root has a valid one; otherwise the root is left exactly as authored (a `hidden` root stays
-  unseen — the honest state for "nothing coming up").
-- The event is chosen once, on load. When its countdown ends, `data-expired` applies as usual; the
-  next page load picks the next event.
+  answers `{ html, calendar, events }`. One GET, on load.
+- **What's next.** Each event counts to its start while that is ahead and to its end once it is
+  under way; the events are shown in the order of those moments, soonest first, and every opening
+  starts at the first. `data-event-nav="prev|next"` pages through them, stopping at the ends.
+- **At zero nothing reloads.** An event that has started goes on to count to its end; one that has
+  ended gives way to the next. The order is worked out again at that moment and only then, and a
+  visitor paging through keeps the event they were looking at. When nothing is left, `data-expired`
+  applies as for a typed deadline.
+- **No time zone on the page.** The feed places every event with the calendar's own zone
+  (`X-WR-TIMEZONE`): an all-day event starts at that zone's midnight and ends at the midnight after
+  its last day. `data-event="when"` shows an all-day event's dates as the calendar wrote them, and
+  a timed event on the visitor's clock with the zone named.
+- **No words of ours.** `data-event="when"` and `data-unit` are the browser's own (Intl), in the
+  page's language (`<html lang>`). The accessible names of the controls are the host's markup.
+- **A location is a link.** When the whole field is an http(s) URL it is that URL (shown without its
+  scheme); anything else is a place and links to the platform's map. `data-event-if="url|place"`
+  and the root's `data-event-location` let the host draw the two differently. Text from the feed is
+  always written as text.
+- **`data-event-fit`** keeps one element as tall as the tallest event needs, so paging moves neither
+  the controls nor the edges. It is measured while the element has a box, and again when its width
+  changes.
+- **Recurring events are not expanded**: the feed's parser reads a repeating event's first
+  occurrence only. A timed event that states no end is treated as lasting an hour (the events
+  coral's long-standing reading), so it shows as under way for that hour; `DURATION` is not read. A calendar that shares only free/busy shows what it shares ("Busy").
+- A feed that fails, does not answer within eight seconds, or holds no event still to come falls
+  back to `data-deadline` when the root has a valid one; otherwise the root is left exactly as
+  authored (a `hidden` root stays unseen — the honest state for "nothing coming up").
+- Every root, typed or fed, carries `data-under-a-day` while less than a day is left: the hook for
+  trading the days for the seconds in CSS.
 
 ## The card — `shared/flip.mjs`
 
@@ -125,7 +150,7 @@ Font family, size and weight are inherited from the `data-part` element.
 ## Shape
 
 `countdown-core.mjs` is the page half and `countdown-client.mjs` mounts it. `countdown-feed.mjs` is
-the feed half — which event, and when — with no DOM and no I/O. The countdown arithmetic
+the feed half — which events, in what order, and the words for them — with no DOM and no I/O. The countdown arithmetic
 is `../shared/countdown-parts.mjs`, which `../events` agrees with to the second
 (`shared/countdown-parts.test.mjs`). `countdown.js` is BUILT from these, so do not edit it.
 
@@ -135,7 +160,7 @@ with the deployment's `--registry`, repoint the channel, then deploy the registr
 <!-- coral metadata: start (generated by catalog-readme.mjs) -->
 ## countdown metadata
 
-Counts down to a deadline in the visitor’s browser — typed on the element, or read from an events feed as the next event — as plain digits or split-flap cards, and hides or swaps itself at the deadline.
+Counts down to a deadline in the visitor’s browser — typed on the element, or read from a calendar’s events feed, paging through what’s next — as plain digits or split-flap cards, and hides or swaps itself when nothing is left.
 
 Author: `official`.
 
@@ -155,13 +180,15 @@ Requires one of: `data-deadline` or `data-src`.
 | Attribute | Type | Required | Default | Purpose |
 |---|---|---|---|---|
 | `data-dynamic-coral` | enum | yes | — | Selects the countdown coral. Values: `countdown`. |
-| `data-deadline` | string | no | — | ISO date-time WITH an explicit offset (Z or ±hh:mm) naming a real date; otherwise the root is left as authored. With data-src it is the fallback, used when the feed gives no event to count to. Pattern: `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z\|[+-]\d{2}:\d{2})$`. |
-| `data-src` | url | no | — | An events feed URL (the events coral’s feed). The root makes one GET to it on load and counts to the soonest event still ahead, instead of to a typed data-deadline. Without it the root makes no network call. |
-| `data-count-to` | enum | no | `start` | With data-src: which moment of the event is the deadline. A timed event with no end is counted to its start; an all-day event’s end is the midnight after its last day. Values: `start`, `end`. |
-| `data-offset` | string | no | — | With data-src: the UTC offset (Z or ±hh:mm) that all-day events and times without an offset are read in. Without it those events are passed over; an event the feed gives in UTC needs none. Pattern: `^(Z\|[+-]\d{2}:\d{2})$`. |
-| `data-event` | enum | no | — | With data-src, on a child element: replace its text with that field of the event being counted to. An empty field leaves the element as authored. Values: `title`, `location`, `description`. |
-| `data-event-href` | enum | no | — | With data-src, on a child link: set its href from the event. location is the location itself when it is an http(s) URL and otherwise a map search for it; url is the event’s own URL. Only http(s) is ever written; otherwise the link is left as authored. Values: `location`, `url`. |
-| `data-expired` | enum | no | `hide` | What the root does at the deadline: hide it, or replace its content with data-expired-text (text without a data-expired-text hides). Values: `hide`, `text`. |
+| `data-deadline` | string | no | — | ISO date-time WITH an explicit offset (Z or ±hh:mm) naming a real date; otherwise the root is left as authored. With data-src it is the fallback, used when the feed gives no event to show. Pattern: `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z\|[+-]\d{2}:\d{2})$`. |
+| `data-src` | url | no | — | An events feed URL (the events coral’s feed for one public calendar). The root makes one GET to it on load and shows the events still to come in what’s-next order: each counts to its start while that is ahead and to its end once it is under way, and at zero carries on to the next without a reload. The calendar’s own time zone places its all-day events; nothing about time is written on the page. Without data-src the root makes no network call. |
+| `data-event` | enum | no | — | With data-src, on a child element: its text becomes that part of the event being shown (emptied when the event has none). when is the date or range in the page’s language — an all-day event’s dates as the calendar wrote them, a timed event in the visitor’s zone with the zone named. location is the place, or a URL without its scheme. calendar is the calendar’s name. position is like 2/4, empty for a single event. Values: `title`, `location`, `description`, `when`, `calendar`, `position`. |
+| `data-event-href` | enum | no | — | With data-src, on a child link: its href (removed when there is none). location is the location itself when the whole field is an http(s) URL and otherwise the platform’s map for the place; url is the event’s own URL; add is an add-to-calendar link for the event. Only http(s), a map, or that add link is ever written. Values: `location`, `url`, `add`. |
+| `data-event-if` | enum | no | — | With data-src, on a child element: shown only while that holds for the event being shown, hidden otherwise. url and place are the two kinds of location; several is true when there is more than one event to page through. Values: `title`, `location`, `description`, `url`, `place`, `several`. |
+| `data-event-nav` | enum | no | — | With data-src, on a child button: pages to the previous or next event. Disabled at the first and the last; it does not wrap. Values: `prev`, `next`. |
+| `data-event-fit` | boolean | no | `false` | With data-src, on the root or one child: that element is kept at least as tall as the tallest event needs, measured again when its width changes, so paging moves nothing around it. |
+| `data-unit` | enum | no | — | With data-src, on a child element: its text becomes the page-language word for that unit, from the browser (日, hr, Tg.). Left as authored where the browser has none. Values: `days`, `hours`, `minutes`, `seconds`. |
+| `data-expired` | enum | no | `hide` | What the root does when nothing is left to count to (the deadline, or the last event of a feed): hide it, or replace its content with data-expired-text (text without a data-expired-text hides). Values: `hide`, `text`. |
 | `data-expired-text` | string | no | `` | Text shown in place of the countdown when data-expired is text. |
 | `data-part` | enum | yes | — | On a child element: which unit it shows, two digits minimum and as many as needed (no upper bound). The largest unit present also carries every unit above it (hours alone show 53 for 2 d 5 h). Values: `days`, `hours`, `minutes`, `seconds`. |
 | `data-flip` | boolean | no | `false` | On a data-part element: show one split-flap card per digit instead of plain text. data-flip="false" keeps plain text. |

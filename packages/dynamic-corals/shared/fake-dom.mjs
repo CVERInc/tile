@@ -24,6 +24,9 @@ class FakeElement {
     this._text = '';
     this.hidden = false;
     this.offsetWidth = 0;
+    this.disabled = false;
+    this.style = {};
+    this.listeners = new Map();
     const self = this;
     this.classList = {
       contains: (c) => self.className.split(/\s+/).includes(c),
@@ -33,6 +36,10 @@ class FakeElement {
   }
   get firstChild() { return this.children[0] || null; }
   setAttribute(n, v) { this.attrs.set(n, String(v)); if (n === 'hidden') this.hidden = true; }
+  removeAttribute(n) { this.attrs.delete(n); if (n === 'hidden') this.hidden = false; }
+  addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, []); this.listeners.get(type).push(fn); }
+  /** Test helper: fire the element's click listeners (a disabled control fires none, as in a browser). */
+  click() { if (this.disabled) return; for (const fn of this.listeners.get('click') || []) fn({ target: this, preventDefault() {} }); }
   getAttribute(n) { if (n === 'class') return this.className || null; return this.attrs.has(n) ? this.attrs.get(n) : null; }
   appendChild(c) { return this.insertBefore(c, null); }
   insertBefore(c, ref) {

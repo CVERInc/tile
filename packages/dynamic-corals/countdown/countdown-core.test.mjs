@@ -467,3 +467,19 @@ test('switching reduced motion on settles every fold in flight at once (drum and
     assert.ok(part('seconds').querySelectorAll('.dc-flip-flap').length > 0, `${drum ? 'drum' : 'plain'}: folds again once it is off`);
   }
 });
+
+test('data-under-a-day is on the root exactly while less than a day is left', () => {
+  const { doc, root } = page({ flip: false });
+  const clock = createClock(DL - (D + 2000));
+  mountCountdown(root, env(doc, clock));
+  assert.equal(root.getAttribute('data-under-a-day'), null, 'a day and two seconds: not yet');
+  clock.advance(1000);
+  assert.equal(root.getAttribute('data-under-a-day'), null, 'a day and one second: the days part still reads 01');
+  clock.advance(1000);
+  assert.equal(root.getAttribute('data-under-a-day'), null, 'exactly one day: 01 00 00 00');
+  clock.advance(1000);
+  assert.equal(root.getAttribute('data-under-a-day'), '', '23:59:59 — the days part reads 00');
+  clock.advance(D);
+  assert.equal(root.hidden, true);
+  assert.equal(root.getAttribute('data-under-a-day'), null, 'gone at expiry');
+});
