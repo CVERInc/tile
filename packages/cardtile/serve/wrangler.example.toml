@@ -196,6 +196,18 @@ PREVIEW = "false"
 # does nothing — so the staging deployment that uses it must not set PREVIEW = "false". Never set in
 # production all the same.
 # CARDS_HOST_STANDINS = "service=cards-staging.feelreef.com people=staging.reef.cards legacy=card-staging.feelreef.com"
+#
+# The Content-Security-Policy of a person's page (cardtile-page-csp.mjs): which scripts a page may run, so
+# that a script the renderer did not write does not run. Three stages, by ONE setting compared exactly:
+#   off          unset, or anything but the two values below. No header; every answer as before.
+#   report-only  `Content-Security-Policy-Report-Only`: the browser reports (in its console — there is
+#                no report endpoint) and refuses nothing.
+#   enforce      `Content-Security-Policy`: the same policy text, enforced.
+# Only a header is added, on a person's page and a preview; the page's bytes are the same in all three.
+# A page that carries an `embed` gets no policy in either stage (a srcdoc frame inherits its parent's).
+# Forward: "report-only", read what browsers report, then "enforce". Back: remove the line; the page is
+# cached for 60 s, so the header is gone within a minute.
+# CARDS_PAGE_CSP = "report-only"
 
 [[env.production.kv_namespaces]]
 binding = "CARDS"

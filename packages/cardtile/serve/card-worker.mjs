@@ -143,6 +143,7 @@ import { validHostOrigin } from '../w3/host-bridge.mjs';
 import { withDeck, DECK_CSS_PATH, DECK_JS_PATH, DECK_TRY_URL } from '../w3/deck-page.mjs';
 import { handleReport, REPORT_PATH } from './card-report.mjs';
 import { standIn } from './host-standins.mjs';
+import { pageCspHeaders } from './cardtile-page-csp.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -1388,11 +1389,14 @@ const router = {
         });
       }
       const videos = await resolveChannels(draft, ytFetch, channelShare);
-      return new Response(withServiceTry(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), env), {
+      const preview = withServiceTry(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), env);
+      return new Response(preview, {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
           'X-Robots-Tag': 'noindex, nofollow',
+          // what a person wrote, rendered on the people's origin: the page's policy (cardtile-page-csp.mjs; nothing unless CARDS_PAGE_CSP is set)
+          ...(await pageCspHeaders(env, preview)),
         },
       });
     }
@@ -1730,7 +1734,11 @@ const router = {
       const keeping = keepPictures(resolved.handle, gen, drawn.map((u) => byUrl.get(u)), prefillCalls(ytCalls));
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
     }
-    return html(page, 200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
+    // tile#372 — the page's Content-Security-Policy, from the finished page (cardtile-page-csp.mjs). Nothing unless
+    // CARDS_PAGE_CSP is exactly "report-only" or "enforce", and never a change to the page itself. A file served
+    // in windows is asked whole (a later window's tiles arrive in this document).
+    const csp = await pageCspHeaders(env, page, { windowedFile: win ? cardMd : null, afterPaint: plan.pictures ? plan.pictures.afterPaint : '' });
+    return html(page, 200, env, resolved.handle, at, blank, { ...probe, ...(chromeLang ? VARY_VISITOR_LANG : {}), ...csp });
   },
 };
 
