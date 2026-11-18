@@ -214,14 +214,21 @@ function gcalStamp(iso, allDay) {
 // The maps link lives in ../shared/map-link.mjs now — the countdown coral gives a place the same one.
 export { mapsUrl };
 
-/** An "add to Google Calendar" link carrying the event's title / range / location. */
+/**
+ * An "add to Google Calendar" link carrying the event's title / range / location — and what it
+ * says: the description as plain text, then the event's own URL. Without the description the copy
+ * in the visitor's calendar was an event with nothing in it; the place to read the whole of a long
+ * description is the calendar it was written for.
+ */
 export function addToCalendarUrl(ev) {
   const start = gcalStamp(ev.start, ev.allDay);
   const end = gcalStamp(ev.end || ev.start, ev.allDay);
   const p = new URLSearchParams({ action: 'TEMPLATE', text: ev.title || '' });
   if (start && end) p.set('dates', `${start}/${end}`);
   if (ev.location) p.set('location', ev.location);
-  if (ev.url) p.set('details', ev.url);
+  const details = [plainText(ev.description), /^https?:\/\//i.test(String(ev.url || '').trim()) ? String(ev.url).trim() : '']
+    .filter(Boolean).join('\n\n');
+  if (details) p.set('details', details);
   return 'https://calendar.google.com/calendar/render?' + p.toString();
 }
 
