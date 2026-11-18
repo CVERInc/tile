@@ -202,3 +202,79 @@ test('CONTROL 378-2: a Location in another scheme, or to a host that is no role,
     assert.equal(loc(s.answer(new Response(null, { status: 302, headers: { location: l } }))), l, l);
   }
 });
+
+// ── 2, r1: same-origin is decided on the request as sent ────────────────────────────────────────
+// A stand-in host with and without its trailing dot are two browser origins. The page a visitor
+// edits on is one of them, and it must be able to post to itself — and not to the other one.
+const OPEN_STAGING = { ...OPEN, ...STANDINS, PREVIEW: 'true' };
+const ROWS = [
+  // [request host, Origin host, same origin?]
+  (s) => [`${s}.`, `${s}.`, true],
+  (s) => [`${s}.`, s, false],
+  (s) => [s, s, true],
+  (s) => [s, `${s}.`, false],
+];
+const parkAt = (host, originHost, port, env) =>
+  ask(`https://${host}${port}`, '/try/park', env, { method: 'POST', headers: { origin: `https://${originHost}${port}` }, body: SEED.t });
+const reportAt = (host, originHost, port, env) => ask(`https://${host}${port}`, '/report', env, {
+  method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: `https://${originHost}${port}` },
+  body: 'card=https%3A%2F%2Freef.cards%2Ft&reason=other&_hp=bot',
+});
+const parked = (env) => [...env.CARDS.kv.keys()].filter((k) => k.startsWith('try:')).length;
+
+for (const [stage, setting] of [['split', STAGING], ['open', OPEN_STAGING]]) {
+  for (const port of ['', ':8443']) {
+    for (const [role, s] of [['service', S_SERVICE], ['legacy', S_LEGACY]]) {
+      test(`378-2 r1 ${stage}${port}: the ${role} stand-in parks for its own Origin, dotted or not, and for no other`, async () => {
+        for (const row of ROWS) {
+          const [host, from, same] = row(s);
+          const env = envFor(setting);
+          const res = await parkAt(host, from, port, env);
+          const label = `${host}${port} ← Origin ${from}${port}`;
+          assert.equal(res.status, same ? 200 : 403, label);
+          assert.equal(parked(env), same ? 1 : 0, label);
+        }
+      });
+      test(`378-2 r1 ${stage}${port}: the ${role} stand-in, dotted or not, refuses an Origin naming the real ${role} host`, async () => {
+        for (const host of [s, `${s}.`]) {
+          for (const from of [REAL[role], `${REAL[role]}.`]) {
+            const env = envFor(setting);
+            const res = await parkAt(host, from, port, env);
+            assert.equal(res.status, 403, `${host}${port} ← Origin ${from}${port}`);
+            assert.equal(parked(env), 0);
+          }
+        }
+      });
+    }
+  }
+}
+
+for (const port of ['', ':8443']) {
+  test(`378-2 r1 split${port}: the people's stand-in report form takes its own Origin, dotted or not, and no other`, async () => {
+    for (const row of ROWS) {
+      const [host, from, same] = row(S_PEOPLE);
+      const res = await reportAt(host, from, port, envFor(STAGING));
+      assert.equal(res.status, same ? 303 : 403, `${host}${port} ← Origin ${from}${port}`);
+    }
+    for (const host of [S_PEOPLE, `${S_PEOPLE}.`]) {
+      for (const from of [PEOPLE, `${PEOPLE}.`]) {
+        assert.equal((await reportAt(host, from, port, envFor(STAGING))).status, 403, `${host}${port} ← Origin ${from}${port}`);
+      }
+    }
+  });
+}
+
+test('378-2 r1: the adapter carries the verdict — same origin becomes the re-addressed origin, another one cannot equal it', () => {
+  const via = (url, origin) => standIn(new Request(url, { headers: { origin } }), STANDINS, REAL).request.headers.get('origin');
+  assert.equal(via(`https://${S_SERVICE}./x`, `https://${S_SERVICE}.`), `https://${SERVICE}`);
+  assert.equal(via(`https://${S_SERVICE}:8443/x`, `https://${S_SERVICE}:8443`), `https://${SERVICE}:8443`);
+  assert.equal(via(`http://${S_SERVICE}/x`, `http://${S_SERVICE}`), `http://${SERVICE}`);
+  // another origin is left as sent — unless, as sent, it would equal the re-addressed origin
+  assert.equal(via(`https://${S_SERVICE}./x`, `https://${S_SERVICE}`), `https://${S_SERVICE}`);
+  assert.equal(via(`https://${S_SERVICE}/x`, `https://${S_SERVICE}:8443`), `https://${S_SERVICE}:8443`);
+  assert.equal(via(`https://${S_SERVICE}/x`, `http://${S_SERVICE}`), `http://${S_SERVICE}`);
+  assert.equal(via(`https://${S_SERVICE}/x`, `https://${S_PEOPLE}`), `https://${S_PEOPLE}`);
+  assert.equal(via(`https://${S_SERVICE}/x`, `https://${SERVICE}`), 'null');
+  assert.equal(via(`https://${S_SERVICE}./x`, `https://${SERVICE}`), 'null');
+  assert.equal(via(`https://${S_SERVICE}/x`, 'null'), 'null');
+});
