@@ -850,6 +850,8 @@ const markdown = (body, { env, originalLength, alternate, handle, at, blank, ext
     status: 200,
     headers: {
       'Content-Type': 'text/markdown; charset=utf-8',
+      // tile#372 — a file is what a person wrote: a browser must never take it for anything but markdown
+      'X-Content-Type-Options': 'nosniff',
       'X-Markdown-Tokens': String(estTokens(body)),
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
