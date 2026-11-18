@@ -32,7 +32,7 @@ const MIME = {
 // `/_deck/` is the deck every served card page loads (w3/deck-page.mjs).
 // Without this line the only way to look at the sandbox is to deploy it, which is the shape of
 // every bug that gets found by a customer.
-const { default: worker, canonicalHost, cardOrigin } = await import('../serve/card-worker.mjs');
+const { default: worker, canonicalHost, cardOrigin, apiOrigin } = await import('../serve/card-worker.mjs');
 const EDGE = /^\/(_coral|_deck|_icon|_yt|try)\//;
 
 // 🔴 …and the card exits themselves (`/<handle>.md`, and Accept: text/markdown), backed by the repo
@@ -74,8 +74,14 @@ const isCardPath = (p) => {
 // own canonicalHost (exactly `reef.cards`, or today's host). `CARD_API_BASE` still overrides the API
 // alone. The editor is told the host over `/_w/can-save`. (The edge preview below needs nothing:
 // the Worker reads the request's own Host header, so there a card's URL is `127.0.0.1`'s, as before.)
-export const cardHosts = (env) => ({ cardHost: canonicalHost(env), api: env.CARD_API_BASE || cardOrigin(env) });
+// Once the service has its own host (CARDS_SERVICE_HOST, card-worker.mjs serviceHostStage) the two part:
+// the API is called on the service's host, and a handle's public `.md` exit is read from the host
+// people's pages answer on (reef.cards does not answer the API then, and the service host serves no
+// `.md`). Without that setting both are the one host they were. `CARD_API_BASE` names both, as before.
+export const cardHosts = (env) => ({ cardHost: canonicalHost(env), api: env.CARD_API_BASE || apiOrigin(env) });
+export const cardExit = (env) => env.CARD_API_BASE || cardOrigin(env);
 const { cardHost: CARD_HOST, api: CARD_API } = cardHosts(process.env);
+const CARD_EXIT = cardExit(process.env);
 
 let cachedToken;
 function cardToken() {
@@ -175,7 +181,7 @@ async function bridge(req, res, path) {
     // the pictures and that exit needs no credential.
     const meta = await api('GET', `/_api/card/${m[1]}`);
     if (meta.status !== 200) return send(meta.status, meta.json || { error: 'not found' }), true;
-    const fat = await fetch(`${CARD_API}/${m[1]}.md`, { headers: { 'cache-control': 'no-cache' } });
+    const fat = await fetch(`${CARD_EXIT}/${m[1]}.md`, { headers: { 'cache-control': 'no-cache' } });
     if (!fat.ok) return send(502, { error: 'the card exists but its .md exit did not answer' }), true;
     return send(200, { handle: m[1], version: meta.json.version, md: await fat.text() }), true;
   }
