@@ -14,6 +14,7 @@
 // --gd-* tokens, platform-branched map links, fetch + mount. Framework-agnostic: drop
 // `<div data-dynamic-coral="events" data-src="…">` on any host page, sitetile or not.
 import { countdownText } from './events-core.mjs';
+import { listRows, renderRows, rowsShape, showCount } from './events-list.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
 
 (function () {
@@ -66,6 +67,25 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
       '.dc-ev-ic{width:1em;height:1em;flex:0 0 auto;opacity:.85}',
       '.dc-ev-add{justify-self:start;margin-top:4px;font-size:.82rem;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:5px;color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)))}',
       '.dc-ev-add:hover{text-decoration:underline}',
+      // ── the live list (events-list.mjs): drawn here from the feed's `events` ──────────────────
+      // Colour says "this does something": the accent is on the tile and the badge (both doors to
+      // add-to-calendar) and on the ICON of a line that is a link. Text stays ink and muted.
+      '.dc-ev-list--live .dc-ev-main{align-items:flex-start}',
+      '.dc-ev-list--live .dc-ev-title{line-height:1.35;min-width:0;overflow-wrap:anywhere;hyphens:auto}',
+      'a.dc-ev-cal{text-decoration:none;transition:background .15s}',
+      'a.dc-ev-cal:hover{background:color-mix(in srgb,var(--gd-accent,#875fb6) 10%,var(--gd-bg,#fff))}',
+      // the badge: an outline while the event is ahead, filled once it is under way
+      '.dc-ev-list--live .dc-ev-cd{margin-top:.15em;text-decoration:none;background:transparent;border:1.5px solid var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)));padding:2px 9px}',
+      '.dc-ev-list--live a.dc-ev-cd:hover{background:color-mix(in srgb,var(--gd-accent,#875fb6) 12%,transparent)}',
+      '.dc-ev-list--live .dc-ev-item[data-state="during"] .dc-ev-cd{background:var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-ink,#fff)}',
+      '.dc-ev-list--live .dc-ev-line{display:flex;align-items:flex-start;gap:6px;justify-self:start;min-width:0;margin:0;font-size:.9rem;line-height:1.5;opacity:1;color:var(--gd-muted,rgba(0,0,0,.6));text-decoration:none}',
+      '.dc-ev-list--live .dc-ev-line>span{min-width:0;overflow-wrap:anywhere}',
+      '.dc-ev-list--live .dc-ev-line .dc-ev-ic{margin-top:.25em;opacity:.7}',
+      '.dc-ev-list--live a.dc-ev-line .dc-ev-ic{opacity:1;color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)))}',
+      '.dc-ev-list--live a.dc-ev-line:hover{color:var(--gd-muted,rgba(0,0,0,.6))}',
+      '.dc-ev-list--live a.dc-ev-line:hover>span{text-decoration:underline}',
+      '.dc-ev-list--live .dc-ev-desc>span{white-space:pre-line}',
+      '.dc-ev-list--live a:focus-visible{outline:2px solid var(--gd-accent-deep,var(--gd-accent,#875fb6));outline-offset:2px}',
       '.dc-ev--empty{padding:24px;text-align:center;color:var(--gd-muted,rgba(0,0,0,.55));font-style:italic}',
     ].join('');
     // Layered only for a site whose document root declares it (absent = legacy, unchanged);
@@ -112,6 +132,36 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
     });
   }
 
+  // The live list: the feed's `events`, drawn here (events-list.mjs). Repainted when WHICH rows are
+  // shown or their state changes; between those, only a badge's words are rewritten in place, so a
+  // link the visitor has focused is not replaced under them every half minute.
+  function live(root, feed, src, empty) {
+    var feedSrc = '';
+    try { feedSrc = new URL(src, document.baseURI).href; } catch (e) { feedSrc = ''; }
+    var shape = null;
+    function paint() {
+      var rows = listRows(feed, {
+        now: Date.now(),
+        locale: document.documentElement.getAttribute('lang') || navigator.language || '',
+        userAgent: ua,
+        feedSrc: feedSrc,
+        show: showCount(root.getAttribute('data-show'), src),
+        far: root.getAttribute('data-countdown') === 'always',
+      });
+      var next = rowsShape(rows);
+      if (next !== shape) { shape = next; root.innerHTML = renderRows(rows, { empty: empty }); return; }
+      var badges = root.querySelectorAll('.dc-ev-cd');
+      var at = 0;
+      rows.forEach(function (row) {
+        if (!row.badge) return;
+        var el = badges[at++];
+        if (el && el.textContent !== row.badge) el.textContent = row.badge;
+      });
+    }
+    paint();
+    setInterval(paint, 30000);
+  }
+
   injectStyles();
   roots.forEach(function (root) {
     var src = root.getAttribute('data-src') || '/events.json';
@@ -120,6 +170,9 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
     fetch(src, { headers: { Accept: 'application/json' } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
+        // A feed that carries the calendar as data is drawn here. One that carries only `html`
+        // (a static feed generated ahead of time) is shown as it came, as before.
+        if (data && Array.isArray(data.events)) { live(root, data, src, empty); return; }
         root.innerHTML = (data && data.html) || '<div class="dc-ev--empty">' + empty + '</div>';
         localizeMaps(root);
         tick(root);
