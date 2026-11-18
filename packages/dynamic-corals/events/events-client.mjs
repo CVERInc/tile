@@ -74,16 +74,18 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
       '.dc-ev-list--live .dc-ev-title{line-height:1.35;min-width:0;overflow-wrap:anywhere;hyphens:auto}',
       // The tile is a link now: without `color:inherit` its day number would take the browser's
       // link blue on a host that sets no --gd-text.
-      'a.dc-ev-cal{color:inherit;text-decoration:none}',
+      'a.dc-ev-cal{color:inherit;text-decoration:none;transition:background .15s}',
       // The tile: still a square. The month is a bar across its top; weekday and day sit centred
       // in the rest (a flex child that takes what the bar leaves).
       '.dc-ev-list--live .dc-ev-cal{padding:0;gap:0;justify-content:flex-start;overflow:hidden;background:var(--gd-bg,#fff)}',
       '.dc-ev-list--live .dc-ev-cal-mo{align-self:stretch;flex:none;padding:3px 0;font-size:.6rem;font-weight:800;letter-spacing:.06em;line-height:1.1;text-align:center;background:var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-ink,#fff)}',
-      '.dc-ev-cal-face{align-self:stretch;flex:1 1 0%;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:background .15s}',
+      // 0.95, not 1: the bar above is heavy, so the pair sits a hair above the true middle of the face.
+      '.dc-ev-cal-face{align-self:stretch;flex:.95 1 0%;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}',
       '.dc-ev-cal-wd{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;line-height:1;color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)))}',
-      '.dc-ev-list--live .dc-ev-cal-day{font-size:1.45rem}',
-      'a.dc-ev-cal:hover .dc-ev-cal-face{background:color-mix(in srgb,var(--gd-accent,#875fb6) 10%,transparent)}',
-      '@media (max-width:560px){.dc-ev-cal-face{gap:1px}.dc-ev-list--live .dc-ev-cal-mo{padding:2px 0;font-size:.56rem}.dc-ev-cal-wd{font-size:.62rem}.dc-ev-list--live .dc-ev-cal-day{font-size:1.15rem}}',
+      '.dc-ev-list--live .dc-ev-cal-day{font-size:2rem}',
+      // the same faint tint the badge takes: the whole tile is the door
+      '.dc-ev-list--live a.dc-ev-cal:hover{background:color-mix(in srgb,var(--gd-accent,#875fb6) 12%,var(--gd-bg,#fff))}',
+      '@media (max-width:560px){.dc-ev-cal-face{gap:1px}.dc-ev-list--live .dc-ev-cal-mo{padding:2px 0;font-size:.56rem}.dc-ev-cal-wd{font-size:.62rem}.dc-ev-list--live .dc-ev-cal-day{font-size:1.4rem}}',
       // the badge: an outline while the event is ahead, filled once it is under way
       '.dc-ev-list--live .dc-ev-cd{margin-top:.15em;text-decoration:none;background:transparent;border:1.5px solid var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-text,var(--gd-accent-deep,var(--gd-accent,#875fb6)));padding:2px 9px}',
       '.dc-ev-list--live a.dc-ev-cd:hover{background:color-mix(in srgb,var(--gd-accent,#875fb6) 12%,transparent)}',

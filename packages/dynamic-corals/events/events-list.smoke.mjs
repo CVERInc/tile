@@ -80,7 +80,8 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
         if (!tile || !face) return null;
         const t = tile.getBoundingClientRect(), f = face.getBoundingClientRect();
         const top = face.firstElementChild.getBoundingClientRect().top - f.top, bottom = f.bottom - face.lastElementChild.getBoundingClientRect().bottom;
-        return { square: Math.abs(t.width - t.height) <= 1, offCentre: Math.abs(top - bottom), fits: face.scrollHeight <= face.clientHeight + 1 && top >= 0 && bottom >= 0, text: [...tile.querySelectorAll('span > span, .dc-ev-cal-mo')].map((x) => x.textContent).join('/') };
+        const bar = tile.querySelector('.dc-ev-cal-mo').getBoundingClientRect();
+        return { square: Math.abs(t.width - t.height) <= 1, offCentre: Math.abs(top - bottom), faceShare: Math.round(100 * f.height / (t.bottom - bar.bottom)) / 100, fits: face.scrollHeight <= face.clientHeight + 1 && top >= 0 && bottom >= 0, text: [...tile.querySelectorAll('span > span, .dc-ev-cal-mo')].map((x) => x.textContent).join('/') };
       }),
       dayColour: root.querySelector('.dc-ev-cal-day') ? getComputedStyle(root.querySelector('.dc-ev-cal-day')).color : null, bodyColour: getComputedStyle(document.body).color,
     };
@@ -102,7 +103,7 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
   // the row under way runs from two days ago to two days ahead: over New Year those are two years
   const sameYear = new Date(now - 2 * D).getUTCFullYear() === new Date(now + 2 * D).getUTCFullYear() && new Date(now - 2 * D).getUTCFullYear() === new Date(now).getFullYear();
   check('a date in another year carries its year', /\d{4}/.test(s.whens[4]) && /\d{4}/.test(s.whens[2]) === !sameYear, JSON.stringify(s.whens));
-  check('the tile is a square with the month as a bar, weekday and day centred in the rest', s.tiles.every((t) => t && t.square && t.fits && t.offCentre <= 1), JSON.stringify(s.tiles));
+  check('the tile is a square with the month as a bar, weekday and day centred in the face under it', s.tiles.every((t) => t && t.square && t.fits && t.offCentre <= 1 && t.faceShare >= 0.9 && t.faceShare <= 0.99), JSON.stringify(s.tiles));
   check('on a page with no theme the tile, now a link, keeps the page’s text colour', s.dayColour === s.bodyColour, `${s.dayColour} vs ${s.bodyColour}`);
   check('no script error', s.errors.length === 0, s.errors.join(' | '));
 }
