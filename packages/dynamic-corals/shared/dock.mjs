@@ -94,9 +94,10 @@ const DOCK_CSS = `
   --dc-dock-margin:max(1rem,16px);--dc-dock-size:44px;--dc-dock-icon:20px;--dc-dock-w:var(--dc-dock-size);--dc-dock-gap:.5rem;
   --dc-dock-radius:50%;--dc-dock-shadow:${DOCK_SHADOW};--dc-dock-vh:100vh;
   --dc-dock-room:calc(var(--dc-dock-vh) - 2 * var(--dc-dock-margin) - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - var(--_dc-reserve,0px));
-  --dc-dock-panel-w:min(22rem,calc(100vw - 2 * var(--dc-dock-margin) - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)))}
+  --dc-dock-panel-max:22rem;
+  --dc-dock-panel-w:min(var(--dc-dock-panel-max),calc(100vw - 2 * var(--dc-dock-margin) - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)))}
 @supports (height:100dvh){:host{--dc-dock-vh:100dvh}}
-@media (min-width:700px){:host{--dc-dock-margin:max(1.25rem,20px);--dc-dock-size:52px;--dc-dock-icon:22px}}
+@media (min-width:700px){:host{--dc-dock-margin:max(1.25rem,20px);--dc-dock-size:52px;--dc-dock-icon:22px;--dc-dock-panel-max:440px}}
 :host([hidden]){display:none!important}
 :host(:not([name="left"])){right:calc(var(--dc-dock-margin) + env(safe-area-inset-right,0px));align-items:flex-end}
 :host([name="left"]){left:calc(var(--dc-dock-margin) + env(safe-area-inset-left,0px));align-items:flex-start}

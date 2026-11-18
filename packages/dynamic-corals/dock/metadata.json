@@ -33,7 +33,7 @@
       "type": "string",
       "required": false,
       "default": null,
-      "description": "The bubble's and the panel's accessible name. Without it, the text of the panel's first heading."
+      "description": "The bubble's and the panel's accessible name. Without it, the text of the panel's first heading. Read again whenever the panel’s content changes, so a heading a script fills in later names the bubble."
     },
     {
       "name": "data-color",
@@ -62,7 +62,14 @@
       "type": "boolean",
       "required": false,
       "default": false,
-      "description": "Set to 1 to open the panel once per visit (this tab, across pages), phones included, and never over another panel that is already open. Remembered by data-open-on-hash, or else by corner and label. When two items ask, the first in the document opens."
+      "description": "Set to 1 to open the panel once per visit (this tab, across pages), phones included, and never over another panel that is already open. Remembered by data-open-on-hash, or else by corner and label. When two items ask, the first in the document opens. With data-auto-open-by it is once per content instead."
+    },
+    {
+      "name": "data-auto-open-by",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "A CSS selector into the panel’s own content. With data-auto-open, the once-per-visit memory is kept per CONTENT: the text of what the selector finds is part of the remembered key, so when the panel is about something else (the next event) it opens once more. Until that text exists the item waits. A value that is not a selector never opens by itself."
     }
   ]
 }
