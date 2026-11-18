@@ -4,10 +4,16 @@
 // "Before" is a committed fixture, captured from the Worker that had no such code
 // (gen-service-host-off-fixture.mjs): 3 stages of reef.cards × 7 hosts × 34 requests, each with its
 // status, headers, body hash and store reads. This file asks THIS tree's Worker the same cases.
+//
+// And a wide grid beside it (wideCases: 2 deployments × 3 stages × 18 hosts × 18 paths × 6 methods =
+// 11,664), for what the 714 never asked: the stand-ins' own hostnames, hosts spelled with another
+// case, a port or a trailing dot, every method on every path, contradicting Host headers, and a
+// deployment that is not production.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker from './card-worker.mjs';
-import { gridCases, answerOf, answerDiff, atFixedClock, readFixture, GRID_STAGES, GRID_HOSTS, GRID_REQUESTS } from './gen-service-host-off-fixture.mjs';
+import { gridCases, answerOf, answerDiff, atFixedClock, readFixture, GRID_STAGES, GRID_HOSTS, GRID_REQUESTS,
+  wideCases, wideAnswerOf, WIDE_HOSTS, WIDE_PATHS, WIDE_METHODS, WIDE_DEPLOYMENTS, WIDE_STANDINS } from './gen-service-host-off-fixture.mjs';
 
 const FIXTURE = readFixture();
 const CASES = gridCases();
@@ -53,6 +59,10 @@ const OFF_VALUES = [
   ['reef.cards', { CARDS_SERVICE_HOST: 'reef.cards' }],
   ['stand-ins alone', { CARDS_HOST_STANDINS: 'service=cards-staging.feelreef.com people=staging.reef.cards legacy=card-staging.feelreef.com' }],
   ['a malformed stand-in list', { CARDS_HOST_STANDINS: 'service=evil.example, people, =x, legacy=cards.feelreef.com' }],
+  // not exactly the value: another case, a space around it, a line end after it
+  ['upper case', { CARDS_SERVICE_HOST: 'CARDS.FEELREEF.COM' }],
+  ['a space around it', { CARDS_SERVICE_HOST: ' cards.feelreef.com ' }],
+  ['a line end after it', { CARDS_SERVICE_HOST: 'cards.feelreef.com\n' }],
 ];
 for (const [name, extra] of OFF_VALUES) {
   test(`off (${name}): all 714 answers are the fixture's`, async () => {
@@ -90,4 +100,72 @@ test('CONTROL: the comparison can fail — with both settings on, answers differ
     }
   });
   assert.ok(pages > 0, 'no page outside the three hosts carries the new address');
+});
+
+// ── the wide grid ───────────────────────────────────────────────────────────────────────────────
+const WIDE = wideCases();
+const STANDIN_HOSTS = ['cards-staging.feelreef.com', 'card-staging.feelreef.com', 'staging.reef.cards'];
+
+/** every wide case under `extra` settings → the list of mismatches against the fixture */
+async function wideMismatches(extra) {
+  const out = [];
+  await atFixedClock(async () => {
+    for (let i = 0; i < WIDE.length; i++) {
+      const d = answerDiff(await wideAnswerOf(worker, WIDE[i], extra), FIXTURE.wide[i]);
+      if (d) out.push(`${WIDE[i].key}: ${d}`);
+    }
+  });
+  return out;
+}
+
+test('CONTROL: the fixture holds the whole wide grid, and it asks the stand-ins\' own hostnames under every method', () => {
+  assert.equal(WIDE.length, Object.keys(WIDE_DEPLOYMENTS).length * Object.keys(GRID_STAGES).length * WIDE_HOSTS.length * WIDE_PATHS.length * WIDE_METHODS.length);
+  assert.equal(WIDE.length, 11664);
+  assert.equal(FIXTURE.wide.length, WIDE.length, 'one answer per case');
+  assert.ok(FIXTURE.wide.every((a) => a && Number.isInteger(a.status)), 'an index in the fixture names no answer');
+  for (const h of STANDIN_HOSTS) {
+    assert.ok(WIDE_HOSTS.includes(h), `${h} is not asked`);
+    assert.ok(WIDE_STANDINS.split(' ').some((e) => e.split('=')[1] === h), `${h} is not in the stand-in list the grid sets`);
+  }
+  for (const m of ['GET', 'HEAD', 'POST', 'PUT', 'OPTIONS', 'PROPFIND']) assert.ok(WIDE_METHODS.includes(m), m);
+  assert.deepEqual(Object.keys(WIDE_DEPLOYMENTS), ['production', 'preview']);
+});
+
+// "off" on the wide grid: unset, a value that is not exactly the setting's, and a stand-in list
+// beside each of them — asked on the stand-ins' own hostnames too, in production and outside it
+const WIDE_OFF = [
+  ['unset', {}],
+  ['upper case', { CARDS_SERVICE_HOST: 'CARDS.FEELREEF.COM' }],
+  ['a space around it', { CARDS_SERVICE_HOST: ' cards.feelreef.com ' }],
+  ['stand-ins alone', { CARDS_HOST_STANDINS: WIDE_STANDINS }],
+  ['a typo, with stand-ins', { CARDS_SERVICE_HOST: 'typo', CARDS_HOST_STANDINS: WIDE_STANDINS }],
+];
+for (const [name, extra] of WIDE_OFF) {
+  test(`off, wide grid (${name}): all 11,664 answers are the fixture's`, async () => {
+    const bad = await wideMismatches(extra);
+    console.log(`# service host off, wide grid (${name}): ${WIDE.length} answers compared, ${bad.length} mismatches`);
+    assert.deepEqual(bad.slice(0, 20), [], `${bad.length} mismatches`);
+  });
+}
+
+test('the wide comparison can fail — switched on, a stand-in answers as its role outside production; in production the list changes no answer', async () => {
+  const ON = { CARDS_SERVICE_HOST: 'cards.feelreef.com' };
+  const WITH = { ...ON, CARDS_HOST_STANDINS: WIDE_STANDINS };
+  const moved = { production: new Set(), preview: new Set() };
+  let asked = 0, differ = 0;
+  await atFixedClock(async () => {
+    for (let i = 0; i < WIDE.length; i++) {
+      const c = WIDE[i];
+      if (!STANDIN_HOSTS.includes(c.host)) continue;
+      asked += 1;
+      const withList = await wideAnswerOf(worker, c, WITH);
+      // against the Worker that had no such setting
+      if (answerDiff(withList, FIXTURE.wide[i])) moved[c.deployment].add(c.host);
+      // against this Worker without the list: in production the list is not read at all
+      if (c.deployment === 'production' && answerDiff(withList, await wideAnswerOf(worker, c, ON))) differ += 1;
+    }
+  });
+  assert.equal(asked, 2 * 3 * STANDIN_HOSTS.length * WIDE_PATHS.length * WIDE_METHODS.length);
+  for (const h of STANDIN_HOSTS) assert.ok(moved.preview.has(h), `${h}: a stand-in outside production changed nothing — the grid is not looking at it`);
+  assert.equal(differ, 0, 'a stand-in list changed an answer in a production deployment');
 });

@@ -143,8 +143,9 @@ PREVIEW = "false"
 #   people's canonical host   reef.cards           CARD_CANONICAL_HOST, above
 #   the service's host        cards.feelreef.com   CARDS_SERVICE_HOST, below
 #   the legacy host           card.feelreef.com    no setting: it is the host both moved from
-# The setting is on only when it is exactly "cards.feelreef.com"; unset or ANY other value is off, and
-# then every answer is the one the settings above decide.
+# The setting is on only when it is exactly "cards.feelreef.com" — compared as written: another case, a
+# space around it or a trailing dot is off, like unset or ANY other value — and then every answer is
+# the one the settings above decide.
 #
 #   off     unset (today).
 #   open    CARDS_SERVICE_HOST alone. Check the new host before anything points at it:
@@ -171,6 +172,10 @@ PREVIEW = "false"
 #                                                  page framed by its parent and an editor already open
 #                                                  cannot follow a redirect
 #             cards.feelreef.com/_preview/<id>   → 302 https://reef.cards/_preview/<id>
+#             cards.feelreef.com, any method but GET/HEAD, on anything but /_api/… and /try/park
+#                                                → 405, empty: the service's host renders nothing a
+#                                                  person wrote, whatever the method (also in `open`,
+#                                                  where a preview goes to card.feelreef.com instead)
 #             every page                         → its "make your own" link names cards.feelreef.com;
 #                                                  reef.cards/feelreef is an ordinary address
 #
@@ -183,7 +188,10 @@ PREVIEW = "false"
 # Staging only — stand-ins for the three hosts (host-standins.mjs). The three names above route to
 # production, so a staging deployment is asked under names of its own and answers each as the role's
 # host; a redirect to a role's host names that role's stand-in. Only names strictly under feelreef.com
-# or reef.cards count. Never set in production.
+# or reef.cards count, written in lowercase. The list is read only while CARDS_SERVICE_HOST is on AND
+# PREVIEW is not "false": with the service host off, or in production (PREVIEW = "false", above), it
+# does nothing — so the staging deployment that uses it must not set PREVIEW = "false". Never set in
+# production all the same.
 # CARDS_HOST_STANDINS = "service=cards-staging.feelreef.com people=staging.reef.cards legacy=card-staging.feelreef.com"
 
 [[env.production.kv_namespaces]]

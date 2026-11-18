@@ -252,7 +252,7 @@ for (const [name, setting] of [['split', SPLIT], ['open', OPEN]]) {
   });
 
   test(`${name}: anything else on the service host is the nothing-here page, unread`, async () => {
-    for (const [path, init] of [['/robots.txt', {}], ['/.well-known/security.txt', {}], ['/report', {}], ['/try', {}], ['/t', { method: 'POST', body: 'x' }]]) {
+    for (const [path, init] of [['/robots.txt', {}], ['/.well-known/security.txt', {}], ['/report', {}], ['/try', {}], ['/_api', {}], ['/_preview/nope', {}], ['/try/edit/a/not-a-hash/nope.js', {}]]) {
       const env = envFor(setting);
       const res = await ask(SERVICE, path, env, init);
       assert.equal(res.status, 404, `${init.method || 'GET'} ${path}`);
@@ -287,15 +287,17 @@ test('serviceHostStage: only exactly "cards.feelreef.com" turns the service host
   assert.equal(W.serviceHostStage(OPEN), 'open');
   assert.equal(W.serviceHostStage({ ...OPEN, CARDS_HOST_OPEN: 'reef.cards' }), 'open');
   assert.equal(W.serviceHostStage(SPLIT), 'split');
-  assert.equal(W.serviceHostStage({ CARDS_SERVICE_HOST: ' Cards.FeelReef.com ', ...CANONICAL }), 'split', 'case and surrounding space aside');
+  // exactly the string: nothing is trimmed, lowercased or converted
   for (const typo of ['', ' ', 'true', '1', 'on', true, 1, null, 'card.feelreef.com', 'cards.feelreef.co', 'cards.feelreef.com.', 'https://cards.feelreef.com',
-    'cards.feelreef.com/', 'www.cards.feelreef.com', 'reef.cards', 'evil.example']) {
+    'cards.feelreef.com/', 'www.cards.feelreef.com', 'reef.cards', 'evil.example',
+    'CARDS.FEELREEF.COM', 'Cards.FeelReef.com', ' cards.feelreef.com', 'cards.feelreef.com ', ' cards.feelreef.com ', 'cards.feelreef.com\n', '\tcards.feelreef.com',
+    ['cards.feelreef.com'], new String('cards.feelreef.com'), { toString: () => 'cards.feelreef.com' }]) {
     assert.equal(W.serviceHostStage({ CARDS_SERVICE_HOST: typo, ...CANONICAL }), 'off', JSON.stringify(typo));
   }
 });
 
-test('CONTROL: a typo in CARDS_SERVICE_HOST redirects nothing to a host nobody serves', async () => {
-  for (const typo of ['true', 'cards.feelreef.co', 'card.feelreef.com']) {
+test('a typo in CARDS_SERVICE_HOST — another case and a space around it included — redirects nothing to a host nobody serves', async () => {
+  for (const typo of ['true', 'cards.feelreef.co', 'card.feelreef.com', 'CARDS.FEELREEF.COM', ' cards.feelreef.com ', 'cards.feelreef.com\n']) {
     const setting = { ...CANONICAL, CARDS_SERVICE_HOST: typo };
     assert.equal((await ask(PEOPLE, '/', envFor(setting))).status, 200, `${typo}: reef.cards/ is the page it was`);
     assert.equal(loc(await ask(LEGACY, '/try/edit', envFor(setting))), 'https://reef.cards/try/edit', typo);
@@ -320,9 +322,11 @@ test('the local editor\'s server calls the API on the service host and reads pub
 // ── staging: stand-ins for the three hosts (host-standins.mjs) ──────────────────────────────────
 const STANDINS = { CARDS_HOST_STANDINS: 'service=cards-staging.feelreef.com people=staging.reef.cards legacy=card-staging.feelreef.com' };
 const S_SERVICE = 'cards-staging.feelreef.com', S_PEOPLE = 'staging.reef.cards', S_LEGACY = 'card-staging.feelreef.com';
+// a deployment that is not production: the only kind the stand-ins run in (card-worker.mjs standInsOn)
+const NOT_PRODUCTION = { PREVIEW: 'true' };
 
 test('staging: each stand-in answers as its role\'s host, and every redirect of the ruling stays inside staging', async () => {
-  const setting = { ...SPLIT, ...STANDINS };
+  const setting = { ...SPLIT, ...STANDINS, ...NOT_PRODUCTION };
   for (const [host, path, status, want] of [
     [S_PEOPLE, '/', 302, 'https://cards-staging.feelreef.com/try/edit'],
     [S_PEOPLE, '/try/edit?lang=ja', 301, 'https://cards-staging.feelreef.com/try/edit?lang=ja'],
@@ -348,7 +352,7 @@ test('staging: each stand-in answers as its role\'s host, and every redirect of 
 });
 
 test('staging: a redirect to a host that is no role (a creator\'s domain) and a relative one are left alone', async () => {
-  const setting = { ...SPLIT, ...STANDINS };
+  const setting = { ...SPLIT, ...STANDINS, ...NOT_PRODUCTION };
   const own = await ask(S_PEOPLE, '/v', envFor(setting));
   assert.equal(own.status, 301);
   assert.equal(loc(own), 'https://own.example/', 'the page\'s own domain, untouched');
@@ -361,7 +365,7 @@ test('staging: a redirect to a host that is no role (a creator\'s domain) and a 
 });
 
 test('CONTROL staging: a browser on the stand-in passes the same-origin check, another site still does not, and a body travels', async () => {
-  const env = envFor({ ...SPLIT, ...STANDINS });
+  const env = envFor({ ...SPLIT, ...STANDINS, ...NOT_PRODUCTION });
   const park = await ask(S_SERVICE, '/try/park', env, { method: 'POST', headers: { origin: 'https://cards-staging.feelreef.com' }, body: SEED.t });
   assert.equal(park.status, 200);
   const other = await ask(S_SERVICE, '/try/park', env, { method: 'POST', headers: { origin: 'https://evil.example' }, body: SEED.t });
@@ -376,7 +380,9 @@ test('staging: only a name of ours can stand in — anything else in the setting
   const real = { service: SERVICE, people: PEOPLE, legacy: LEGACY };
   const hosts = (v) => Object.fromEntries(standIns({ CARDS_HOST_STANDINS: v }, real).byRole);
   assert.deepEqual(hosts(STANDINS.CARDS_HOST_STANDINS), { service: S_SERVICE, people: S_PEOPLE, legacy: S_LEGACY });
-  assert.deepEqual(hosts('Service=Cards-Staging.FeelReef.com, people=staging.reef.cards'), { service: S_SERVICE, people: S_PEOPLE }, 'comma or space, any case');
+  assert.deepEqual(hosts(`service=${S_SERVICE}, people=${S_PEOPLE}`), { service: S_SERVICE, people: S_PEOPLE }, 'comma or space');
+  // read as written: a role or a host in another case is ignored, not folded
+  assert.deepEqual(hosts('Service=cards-staging.feelreef.com, people=Staging.Reef.Cards legacy=card-staging.feelreef.com'), { legacy: S_LEGACY });
   for (const bad of [
     'service=evil.example',                 // a creator's domain
     'service=cards.feelreef.com',           // a role's real name
@@ -395,11 +401,214 @@ test('staging: only a name of ours can stand in — anything else in the setting
 });
 
 test('CONTROL staging: a host that is no stand-in is answered as itself, stand-ins or not', async () => {
-  const setting = { ...SPLIT, ...STANDINS };
+  const setting = { ...SPLIT, ...STANDINS, ...NOT_PRODUCTION };
   for (const [host, path] of [[PEOPLE, '/'], [LEGACY, '/try/edit'], [SERVICE, '/'], [PEOPLE, '/t'], ['own.example', '/']]) {
-    const a = await ask(host, path, envFor(setting)), b = await ask(host, path, envFor(SPLIT));
+    const a = await ask(host, path, envFor(setting)), b = await ask(host, path, envFor({ ...SPLIT, ...NOT_PRODUCTION }));
     assert.equal(a.status, b.status, `${host}${path}`);
     assert.deepEqual([...a.headers], [...b.headers], `${host}${path}`);
     assert.equal(await a.text(), await b.text(), `${host}${path}`);
   }
+});
+
+// ── the boundary, for every method (card-worker.mjs hostBoundary) ───────────────────────────────
+//
+// Two rules, each asked under every method — a browser can be sent anywhere by a cross-origin form
+// POST, so a rule that holds for GET alone does not hold:
+//
+//   the service's host never renders, reflects or reads anything a person wrote;
+//   the people's host never answers a service endpoint.
+//
+// A marker is planted in everything a person can have stored — a page's title and text, the
+// platform's own page, a page on its own domain, a parked preview, a parked sandbox draft.
+const MARKER = 'PERSON-WROTE-THIS-7f3a';
+const marked = (what) => ['---', `title: ${MARKER} ${what} title`, '---', '', '## grid', '', `- [ ] %% card: profile w=6 %% ${MARKER} ${what} text`, ''].join('\n');
+const PREVIEW_ID = 'a'.repeat(32);
+const PARKED_ID = '11111111-2222-4333-8444-555555555555';
+const MARKED_SEED = {
+  t: marked('page'), feelreef: marked('platform'), v: marked('own domain'), 'vanity:own.example': 'v', 'vanityof:v': 'own.example',
+  [`_preview:${PREVIEW_ID}`]: marked('preview'), [`try:${PARKED_ID}`]: marked('parked'),
+};
+const { BORROWED } = await import('./edit3-assets.mjs');
+const { DECK_JS_PATH, DECK_CSS_PATH } = await import('../w3/deck-page.mjs');
+const ASSET_NAME = Object.keys(BORROWED)[0];
+const ASSET_PATH = `/try/edit/a/${BORROWED[ASSET_NAME].hash}/${ASSET_NAME}`;
+const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'PROPFIND'];
+const READS = ['GET', 'HEAD'];
+
+// [class, path, what the service's host answers a GET/HEAD with]
+const SERVICE_TABLE = [
+  // what a person wrote, or an address shaped like it
+  ['person', '/t', 301], ['person', '/T', 301], ['person', '/t?utm=qr', 301], ['person', '/t.md', 301], ['person', '/t/avatar', 301], ['person', '/t/anything/else', 301],
+  ['person', '/feelreef', 301], ['person', '/feelreef.md', 301], ['person', '/v', 301], ['person', '/index.md', 301], ['person', '/favicon.ico', 301],
+  ['person', `/_preview/${PREVIEW_ID}`, 302], ['person', `/_preview/${PREVIEW_ID}?x=1`, 302],
+  // nothing of the service's and no handle's address
+  ['nothing', '/_preview/nope', 404], ['nothing', `/_preview/${PREVIEW_ID}/`, 404], ['nothing', '/report', 404], ['nothing', '/.well-known/security.txt', 404],
+  ['nothing', '/robots.txt', 404], ['nothing', '/try', 404], ['nothing', '/_api', 404], ['nothing', '/try/edit/a/not-a-hash/nope.js', 404],
+  ['nothing', `/try/${PARKED_ID}`, 404], ['nothing', '//evil.example', 404], ['nothing', '/%2f%2fevil.example', 404],
+  // the service's own pages and files: GET/HEAD only
+  ['service page', '/', 302], ['service page', `/?ref=${MARKER}`, 302], ['service page', '/try/edit', 200], ['service page', '/try/edit/', 200], ['service page', `/try/edit?lang=${MARKER}`, 200],
+  ['service page', '/try/edit2', 301], ['service page', '/edit', 400], ['service page', '/edit?host=https://feelreef.com', 200], ['service page', `/edit?host=${MARKER}`, 400],
+  ['service page', ASSET_PATH, 200], ['service page', '/try/edit/a/000000000000/nope.js', 404], ['service page', DECK_JS_PATH, 200], ['service page', DECK_CSS_PATH, 200],
+  ['service page', '/_icon/example.com.ico', 200], ['service page', '/_icon/%zz.ico', 400], ['service page', '/_yt/abcdefghijk.jpg', 200],
+];
+// the two endpoints: every method reaches the handler, and without a credential none of them answers with a stored word
+const SERVICE_ENDPOINTS = ['/try/park', '/_api/card/t', '/_api/cards', '/_api/card/t/preview', `/_api/try/${PARKED_ID}`, '/_api/nope'];
+
+/** run `fn` with the upstream fetch replaced by a counted raster stub (the image relays ask it) */
+async function withUpstream(fn) {
+  const fetch0 = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (u) => { calls.push(String(u)); return new Response('raster', { headers: { 'content-type': 'image/png' } }); };
+  try { return await fn(calls); } finally { globalThis.fetch = fetch0; }
+}
+const bodyOf = (method) => (READS.includes(method) ? {} : { body: MARKER });
+
+for (const [name, setting] of [['split', SPLIT], ['open', OPEN]]) {
+  test(`${name}: the service host renders, reflects and reads nothing a person wrote — every path class × every method`, async () => {
+    let rows = 0;
+    await withUpstream(async (upstream) => {
+      for (const [cls, path, readStatus] of SERVICE_TABLE) {
+        for (const method of METHODS) {
+          for (const headers of [{}, { origin: 'https://evil.example' }]) {
+            const row = `${method} ${path} (${cls})`;
+            const env = envFor(setting, { CARDS: store(MARKED_SEED) });
+            const asked = upstream.length;
+            const res = await ask(SERVICE, path, env, { method, headers, ...bodyOf(method) });
+            const body = await res.text();
+            rows += 1;
+            assert.ok(!body.includes(MARKER), `${row}: the answer carries what a person wrote`);
+            assert.deepEqual(env.CARDS.reads, [], `${row}: the store was read`);
+            if (READS.includes(method)) {
+              assert.equal(res.status, readStatus, row);
+              if (cls === 'person') {
+                const to = new URL(loc(res));
+                assert.equal(to.hostname, setting === SPLIT ? PEOPLE : LEGACY, `${row}: sent to the people's host`);
+                assert.equal(to.pathname, new URL(`https://x${path}`).pathname, row);
+              }
+            } else {
+              // no other method is answered at all, whatever the path is
+              assert.equal(res.status, 405, row);
+              assert.equal(body, '', row);
+              assert.equal(res.headers.get('allow'), 'GET, HEAD', row);
+              assert.equal(loc(res), null, row);
+              assert.equal(upstream.length, asked, `${row}: an upstream was asked`);
+            }
+          }
+        }
+      }
+    });
+    assert.equal(rows, SERVICE_TABLE.length * METHODS.length * 2);
+
+    // the endpoints, without a credential: never a page, never a stored word, never a read
+    for (const path of SERVICE_ENDPOINTS) {
+      for (const method of METHODS) {
+        const row = `${method} ${path}`;
+        const env = envFor(setting, { CARDS: store(MARKED_SEED) });
+        const res = await ask(SERVICE, path, env, { method, headers: { origin: 'https://evil.example' }, ...bodyOf(method) });
+        const body = await res.text();
+        assert.ok(!body.includes(MARKER), `${row}: the answer carries what a person wrote`);
+        assert.ok(!/^text\/html/.test(res.headers.get('content-type') || ''), `${row}: an endpoint answered with a page`);
+        assert.ok([400, 401, 403, 404, 405].includes(res.status), `${row}: ${res.status}`);
+        assert.deepEqual(env.CARDS.reads, [], `${row}: the store was read`);
+        assert.equal(env.CARDS.kv.size, Object.keys(MARKED_SEED).length, `${row}: something was stored`);
+      }
+    }
+  });
+}
+
+test('CONTROL split: the people\'s host answers no service endpoint — every service path × every method, with or without a credential', async () => {
+  const paths = ['/try/edit', '/try/edit/', '/try/edit?stay=1', '/try/edit2', '/try/edit2/', '/edit', '/edit/', '/edit?host=https://feelreef.com', '/try/park', ASSET_PATH,
+    '/try/edit/a/000000000000/nope.js', '/_api', '/_api/', '/_api/card/t', '/_api/cards', `/_api/try/${PARKED_ID}`];
+  let rows = 0;
+  for (const path of paths) {
+    for (const method of METHODS) {
+      for (const headers of [{}, AUTH, { ...AUTH, origin: 'https://reef.cards', 'content-type': 'application/json' }]) {
+        const row = `${method} ${path}`;
+        const env = envFor(SPLIT, { CARDS: store(MARKED_SEED) });
+        const res = await ask(PEOPLE, path, env, { method, headers, ...(READS.includes(method) ? {} : { body: SEED.t }) });
+        rows += 1;
+        assert.equal(await res.text(), '', `${row}: the people's host answered a service endpoint with a body`);
+        assert.deepEqual(env.CARDS.reads, [], `${row}: the store was read`);
+        assert.equal(env.CARDS.kv.size, Object.keys(MARKED_SEED).length, `${row}: something was stored`);
+        const api = path === '/_api' || path.startsWith('/_api/');
+        if (READS.includes(method) && !api) {
+          assert.equal(res.status, 301, row);
+          assert.equal(loc(res), `https://cards.feelreef.com${path}`, row);
+        } else {
+          assert.equal(res.status, 404, row);
+          assert.equal(loc(res), null, row);
+        }
+      }
+    }
+  }
+  assert.equal(rows, paths.length * METHODS.length * 3);
+});
+
+test('hostBoundary: off, it decides nothing — on any host, any path, any method', () => {
+  assert.equal(typeof W.hostBoundary, 'function', 'card-worker.mjs exports no hostBoundary');
+  for (const env of [undefined, {}, CANONICAL, { ...CANONICAL, CARDS_SERVICE_HOST: 'CARDS.FEELREEF.COM' }, { ...CANONICAL, CARDS_SERVICE_HOST: ' cards.feelreef.com ' }]) {
+    for (const host of [SERVICE, PEOPLE, LEGACY, 'own.example']) for (const path of ['/', '/t', '/try/edit', '/_api/card/t', `/_preview/${PREVIEW_ID}`]) for (const method of METHODS) {
+      assert.equal(W.hostBoundary(env, host, path, method), null, `${JSON.stringify(env)} ${method} ${host}${path}`);
+    }
+  }
+  // CONTROL: on, it does decide; and it never decides for a host that is neither of the two
+  assert.deepEqual(W.hostBoundary(SPLIT, SERVICE, `/_preview/${PREVIEW_ID}`, 'POST'), { answer: 'method' });
+  assert.deepEqual(W.hostBoundary(SPLIT, PEOPLE, '/_api/card/t', 'GET'), { answer: 'refused' });
+  for (const host of [LEGACY, 'own.example', 'saas.feelreef.com']) for (const method of METHODS) assert.equal(W.hostBoundary(SPLIT, host, '/try/edit', method), null);
+  // before the cutover the short domain is not the people's host yet: cardsHostStage answers for it
+  for (const method of METHODS) assert.equal(W.hostBoundary(OPEN, PEOPLE, '/_api/card/t', method), null);
+});
+
+// ── the stand-ins are inert unless the service host is on, and in production whatever is set ─────
+/** one answer, whole: status, headers, body, the store keys read */
+async function whole(host, path, env, init) {
+  const res = await ask(host, path, env, init);
+  return { status: res.status, headers: [...res.headers], body: await res.text(), reads: env.CARDS.reads };
+}
+const STANDIN_PATHS = ['/', '/t', '/t.md', '/feelreef', '/try/edit', '/try/edit2?lang=ja', '/try/park', '/edit?host=https://feelreef.com', '/_api/card/t', `/_preview/${PREVIEW_ID}`, '/report', '/robots.txt'];
+
+test('staging: with the service host off — unset or not exactly its value — a stand-in list changes no answer, on the stand-ins\' own hostnames', async () => {
+  let rows = 0;
+  for (const value of [undefined, '', 'typo', 'CARDS.FEELREEF.COM', ' cards.feelreef.com ', 'cards.feelreef.com.']) {
+    for (const stage of [{}, { CARDS_HOST_OPEN: 'reef.cards' }, CANONICAL]) {
+      for (const deployment of [NOT_PRODUCTION, { PREVIEW: 'false' }]) {
+        const setting = { ...stage, ...deployment, ...(value === undefined ? {} : { CARDS_SERVICE_HOST: value }) };
+        assert.equal(W.standInsOn({ ...setting, ...STANDINS }), false);
+        for (const host of [S_SERVICE, S_PEOPLE, S_LEGACY]) for (const path of STANDIN_PATHS) for (const method of ['GET', 'POST']) {
+          const init = { method, ...(method === 'POST' ? { body: 'x' } : {}) };
+          const withList = await whole(host, path, envFor({ ...setting, ...STANDINS }, { CARDS: store(MARKED_SEED) }), init);
+          const without = await whole(host, path, envFor(setting, { CARDS: store(MARKED_SEED) }), init);
+          rows += 1;
+          assert.deepEqual(withList, without, `${JSON.stringify(setting)} ${method} ${host}${path}`);
+        }
+      }
+    }
+  }
+  assert.equal(rows, 6 * 3 * 2 * 3 * STANDIN_PATHS.length * 2);
+});
+
+test('staging: in a production deployment (PREVIEW "false") a stand-in list changes no answer, the service host on or not', async () => {
+  assert.equal(typeof W.standInsOn, 'function', 'card-worker.mjs exports no standInsOn');
+  // the list is read only with the service host on AND outside production
+  assert.equal(W.standInsOn({ ...SPLIT, ...STANDINS, PREVIEW: 'true' }), true);
+  assert.equal(W.standInsOn({ ...OPEN, ...STANDINS, PREVIEW: 'true' }), true);
+  assert.equal(W.standInsOn({ ...SPLIT, ...STANDINS }), true, 'PREVIEW unset is a preview, as everywhere in this Worker');
+  assert.equal(W.standInsOn({ ...SPLIT, ...STANDINS, PREVIEW: 'false' }), false);
+  assert.equal(W.standInsOn({ ...CANONICAL, ...STANDINS, PREVIEW: 'true' }), false);
+  assert.equal(W.standInsOn(undefined), false);
+  let rows = 0;
+  for (const setting of [SPLIT, OPEN]) {
+    for (const host of [S_SERVICE, S_PEOPLE, S_LEGACY]) for (const path of STANDIN_PATHS) for (const method of ['GET', 'POST']) {
+      const init = { method, ...(method === 'POST' ? { body: 'x' } : {}) };
+      const withList = await whole(host, path, envFor({ ...setting, ...STANDINS }, { CARDS: store(MARKED_SEED) }), init);
+      const without = await whole(host, path, envFor(setting, { CARDS: store(MARKED_SEED) }), init);
+      rows += 1;
+      assert.deepEqual(withList, without, `${method} ${host}${path}`);
+    }
+  }
+  assert.equal(rows, 2 * 3 * STANDIN_PATHS.length * 2);
+  // CONTROL: the same request outside production is answered as the role's host
+  const res = await ask(S_LEGACY, '/t', envFor({ ...SPLIT, ...STANDINS, ...NOT_PRODUCTION }));
+  assert.equal(res.status, 301);
+  assert.equal(loc(res), 'https://staging.reef.cards/t');
 });

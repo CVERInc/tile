@@ -21,8 +21,14 @@
 //
 // 🔴 A stand-in is a name of OURS: strictly under feelreef.com or reef.cards, never a role's real
 // name, the apex or the fallback origin, and never a creator's domain. Anything else in the setting is
-// ignored, as is a role named twice or a host given to two roles. Unset (every deployment that is not
-// staging): nothing here runs.
+// ignored, as is a role named twice or a host given to two roles. Roles and hostnames are read as
+// written — lowercase, as a request's hostname is; `Service=` or an upper-case host is ignored, not
+// folded. Unset (every deployment that is not staging): nothing here runs.
+//
+// 🔴 The list alone turns nothing on. The Worker reads it only when BOTH hold (card-worker.mjs
+// standInsOn): CARDS_SERVICE_HOST is exactly its one value — unset or mistyped, a request to a
+// stand-in's hostname is answered as that hostname always was — and the deployment is not production
+// (`PREVIEW` is not "false"). This module does not check either: it is the mapping, not the switch.
 
 // One DNS label, as card-vanity.mjs reads it.
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -40,8 +46,8 @@ export function standIns(env, real) {
   for (const entry of raw.split(/[\s,]+/)) {
     const eq = entry.indexOf('=');
     if (eq < 1) continue;
-    const role = entry.slice(0, eq).trim().toLowerCase();
-    const h = entry.slice(eq + 1).trim().toLowerCase();
+    const role = entry.slice(0, eq);
+    const h = entry.slice(eq + 1);
     if (!Object.hasOwn(real, role) || byRole.has(role) || byHost.has(h)) continue;
     if (!h || h.length > 253 || taken.has(h)) continue;
     if (!ZONES.some((z) => h.endsWith('.' + z))) continue;

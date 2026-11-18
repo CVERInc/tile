@@ -29,7 +29,7 @@ import { dirname, join } from 'node:path';
 const DIR = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_PATH = join(DIR, 'service-host-off.fixture.json');
 
-// ── the grid: 3 stages × 7 hosts × 34 requests = 714 answers ──────────────────────────────────────
+// ── the grid: 3 stages × 7 hosts × 34 requests = 714 answers (and the wide grid, further down) ──────────────────────────────────────
 const cardsFile = (title) => `---\ncard-page: t\ntitle: ${title}\n---\n\n## grid\n\n- [ ] %% card: profile w=6 %% Public bio\n`;
 export const GRID_PREVIEW = 'b'.repeat(32);
 export const GRID_SEED = Object.freeze({
@@ -114,6 +114,48 @@ export function answerDiff(got, want) {
   return d.join('; ');
 }
 
+// ── the wide grid: 2 deployments × 3 stages × 18 hosts × 18 paths × 6 methods = 11,664 answers ────
+//
+// The grid above asks the hosts by their plain names, mostly with GET, in a production deployment.
+// This one adds what it lacked (each of these moved an answer once, with the switch "off"):
+//
+//   · the stand-ins' OWN hostnames, and a host named in CARD_PATH_HOSTS — a stand-in list re-addresses
+//     only requests to the names in it, so a grid that never asks them cannot see it run;
+//   · a host as a URL may spell it: another case, a port, a trailing dot;
+//   · every path under GET, HEAD, POST, PUT, OPTIONS and a method no route knows;
+//   · `Host` and `X-Forwarded-Host` headers that contradict the URL (the URL's host is the one read);
+//   · paths that try to name another authority;
+//   · a deployment that is not production (PREVIEW "true"), where the stand-ins are allowed to run.
+//
+// It is kept apart from the 714 so their keys and rows stay as they were captured. Its answers repeat
+// heavily (most are one of a few refusals), so the fixture keeps each distinct answer once and one
+// index per case, in wideCases() order.
+export const WIDE_STANDINS = 'service=cards-staging.feelreef.com people=staging.reef.cards legacy=card-staging.feelreef.com';
+export const WIDE_PATH_HOST = 'cards-alt.feelreef.com';
+export const WIDE_HOSTS = Object.freeze(['reef.cards', 'REEF.CARDS', 'reef.cards.', 'reef.cards:8443', 'card.feelreef.com', 'CARD.FEELREEF.COM:443', 'card.feelreef.com.',
+  'cards.feelreef.com', 'cards.feelreef.com.', 'cards.feelreef.com:8443', 'saas.feelreef.com', 'x.workers.dev', WIDE_PATH_HOST,
+  'cards-staging.feelreef.com', 'card-staging.feelreef.com', 'staging.reef.cards', 'own.example', 'unbound.example']);
+export const WIDE_PATHS = Object.freeze(['/', '/?lang=ja&ref=aster', '/aster', '/aster.md', '/aster/avatar', '/feelreef', '/try/edit', '/try/edit?stay=1', '/try/edit2?lang=ja',
+  '/try/park', '/edit?host=https://feelreef.com', '/_api/card/aster', '/_api', `/_preview/${GRID_PREVIEW}`, '/report', '/robots.txt', '//evil.example', '/%2f%2fevil.example']);
+export const WIDE_METHODS = Object.freeze(['GET', 'HEAD', 'POST', 'PUT', 'OPTIONS', 'PROPFIND']);
+export const WIDE_DEPLOYMENTS = Object.freeze({ production: { PREVIEW: 'false' }, preview: { PREVIEW: 'true' } });
+const WIDE_HEADERS = Object.freeze({ host: 'attacker.example', 'x-forwarded-host': 'evil.example' });
+
+/** every case of the wide grid, in a fixed order: { key, deployment, stage, host, path, method, init, settings } */
+export function wideCases() {
+  const out = [];
+  for (const deployment of Object.keys(WIDE_DEPLOYMENTS)) for (const stage of Object.keys(GRID_STAGES)) for (const host of WIDE_HOSTS) for (const path of WIDE_PATHS) for (const method of WIDE_METHODS) {
+    out.push({
+      key: `${deployment} ${stage} ${host} ${method} ${path}`, deployment, stage, host, path, method,
+      init: { method, headers: WIDE_HEADERS, ...(method === 'GET' || method === 'HEAD' ? {} : { body: 'x' }) },
+      settings: { ...WIDE_DEPLOYMENTS[deployment], CARD_PATH_HOSTS: WIDE_PATH_HOST },
+    });
+  }
+  return out;
+}
+/** one wide answer: answerOf under the case's deployment settings, with `extra` (the settings under test) over them */
+export const wideAnswerOf = (worker, c, extra = {}) => answerOf(worker, c, { ...c.settings, ...extra });
+
 // ── the capture (only when this file is run, never when it is imported) ───────────────────────────
 const git = (args, opts = {}) => execFileSync('git', args, { cwd: DIR, timeout: 120000, maxBuffer: 1 << 20, ...opts });
 
@@ -137,6 +179,17 @@ async function capture(ref) {
       if (!at.has(h)) { at.set(h, headerSets.length); headerSets.push(a.headers); }
       rows[c.key] = [a.status, a.bytes, a.sha, at.get(h), a.reads];
     }
+    // the wide grid: each distinct answer once, then one index per case
+    const wide = wideCases();
+    const wideAnswers = []; const wideAt = new Map(); const wideRows = [];
+    await atFixedClock(async () => {
+      for (const c of wide) {
+        const a = await wideAnswerOf(worker, c);
+        const k = JSON.stringify(a);
+        if (!wideAt.has(k)) { wideAt.set(k, wideAnswers.length); wideAnswers.push([a.status, a.bytes, a.sha, a.headers, a.reads]); }
+        wideRows.push(wideAt.get(k));
+      }
+    });
     const lines = [
       '{',
       `"about": ${JSON.stringify('GENERATED by gen-service-host-off-fixture.mjs — do not edit. What the cardtile worker answered before the service had a host of its own. Regenerate: node packages/cardtile/serve/gen-service-host-off-fixture.mjs <git ref>')},`,
@@ -147,22 +200,28 @@ async function capture(ref) {
       '],',
       '"answers": {',
       cases.map((c) => `${JSON.stringify(c.key)}: ${JSON.stringify(rows[c.key])}`).join(',\n'),
-      '}',
+      '},',
+      `"wide": ${JSON.stringify('the wide grid (wideCases(), in order): "wideAnswers" holds each distinct answer once as [status, body bytes, body sha256, headers, store keys read]; "wideRows" holds one index into it per case')},`,
+      '"wideAnswers": [',
+      wideAnswers.map((a) => JSON.stringify(a)).join(',\n'),
+      '],',
+      `"wideRows": ${JSON.stringify(wideRows)}`,
       '}',
       '',
     ];
     fs.writeFileSync(FIXTURE_PATH, lines.join('\n'));
-    console.log(`service-host-off.fixture.json: ${cases.length} answers of ${sha}, ${headerSets.length} distinct header lists`);
+    console.log(`service-host-off.fixture.json: ${cases.length} answers of ${sha}, ${headerSets.length} distinct header lists; wide grid ${wideRows.length} answers, ${wideAnswers.length} distinct`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 
-/** the committed fixture: { base, answers: key → { status, bytes, sha, headers, reads } } */
+/** the committed fixture: { base, answers: key → { status, bytes, sha, headers, reads }, wide: [answer per wideCases() case] } */
 export function readFixture(path = FIXTURE_PATH) {
   const f = JSON.parse(fs.readFileSync(path, 'utf8'));
   const answers = Object.fromEntries(Object.entries(f.answers).map(([k, [status, bytes, sha, h, reads]]) => [k, { status, bytes, sha, headers: f.headerSets[h], reads }]));
-  return { base: f.base, answers };
+  const distinct = (f.wideAnswers || []).map(([status, bytes, sha, headers, reads]) => ({ status, bytes, sha, headers, reads }));
+  return { base: f.base, answers, wide: (f.wideRows || []).map((i) => distinct[i]) };
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
