@@ -18,6 +18,34 @@
 import { mapsUrl, mapHref } from '../shared/map-link.mjs';
 import { addToCalendarUrl } from '../events/events-core.mjs';
 
+/**
+ * Which feed a root reads on a page in `language`: `data-src-<language>` when the root has one for
+ * the page's language, else `data-src`; '' when none applies. The page's tag is tried whole
+ * (`zh-TW` → `data-src-zh-tw`), then as language and region without what sits between them
+ * (`zh-Hant-TW` → `data-src-zh-tw`, what a host naturally writes), then shortened from the end one
+ * subtag at a time down to the language alone (`data-src-zh-hant`, `data-src-zh`).
+ *
+ * Why: one calendar is in one language. A site in several puts ONE countdown in the chrome every
+ * page shares, and each language's pages are to show that language's calendar. A root that names
+ * only some languages shows nothing on the others, which is the honest state for "no calendar here".
+ */
+export function feedSource(root, language) {
+  const tag = String(language || '').trim().toLowerCase();
+  const tries = [];
+  if (/^[a-z]{2,3}(-[a-z0-9]{1,8})*$/.test(tag)) {
+    const parts = tag.split('-');
+    tries.push(tag);
+    const region = parts.slice(1).find((p) => /^([a-z]{2}|\d{3})$/.test(p));
+    if (region) tries.push(`${parts[0]}-${region}`);
+    for (let n = parts.length - 1; n >= 1; n--) tries.push(parts.slice(0, n).join('-'));
+  }
+  for (const t of [...new Set(tries)]) {
+    const own = String(root.getAttribute(`data-src-${t}`) || '').trim();
+    if (own) return own;
+  }
+  return String(root.getAttribute('data-src') || '').trim();
+}
+
 const instant = (iso) => (typeof iso === 'string' && /Z$/.test(iso) ? Date.parse(iso) : NaN);
 
 /** What an item counts to at `now`: its start while that is ahead, its end once it is under way. */
