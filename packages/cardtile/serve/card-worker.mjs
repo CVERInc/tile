@@ -144,7 +144,7 @@ import { withDeck, DECK_CSS_PATH, DECK_JS_PATH, DECK_TRY_URL } from '../w3/deck-
 import { handleReport, REPORT_PATH } from './card-report.mjs';
 import { standIn } from './host-standins.mjs';
 import { pageCspHeaders, pageCspStage } from './cardtile-page-csp.mjs';
-import { embedDocuments, embedDocumentOf, embedDocumentHeaders, framesAsDocuments, hasSrcdocFrame, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
+import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, framesAsDocuments, hasSrcdocFrame, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -1394,7 +1394,8 @@ const router = {
       const draft = await previewDraft(pve[1]);
       const doc = draft ? embedDocumentOf(await embedDocuments(parseCard(draft), (k) => frontmatter(draft, k)), pve[2]) : null;
       if (doc == null) return new Response('', { status: 404, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
-      return new Response(doc, { headers: embedDocumentHeaders({ preview: true }) });
+      // its relative addresses resolve against the preview's own address, as in the srcdoc (r2)
+      return new Response(embedDocumentBody(doc, `/_preview/${pve[1]}`), { headers: embedDocumentHeaders({ preview: true }) });
     }
     const pv = /^\/_preview\/([0-9a-f]{32})$/.exec(url.pathname);
     if (pv) {
@@ -1614,8 +1615,11 @@ const router = {
         if (n >= 1 && n <= plan.count) model = windowOf(cardMd, index(), plan, n - 1, { front });
       } else if (cardMd != null) model = parseCard(cardMd);
       const doc = model ? embedDocumentOf(await embedDocuments(model, (k) => frontmatter(cardMd, k)), h) : null;
-      if (doc == null) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
-      return new Response(doc, { headers: embedDocumentHeaders() });
+      // r2: the visitor's language and the host they asked, as on every other missing page
+      if (doc == null) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
+      // its relative addresses resolve against the Cards' own address on this host, as in the srcdoc (r2):
+      // `/` on a one-card host (a person's domain, the root card), `/<handle>` on a shared one
+      return new Response(embedDocumentBody(doc, oneCardHost ? '/' : `/${resolved.handle}`), { headers: embedDocumentHeaders() });
     }
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.

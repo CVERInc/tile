@@ -206,8 +206,10 @@ PREVIEW = "false"
 # On, EVERY person's page and preview carries it, whatever it holds. An `embed` is then its own document
 # (cardtile-embed-document.mjs): its frame names `<page>/_embed/<hash>` instead of carrying the HTML as
 # srcdoc (a srcdoc frame would inherit the page's policy and its script would not run), and that address
-# answers with the same document under `sandbox allow-scripts; frame-ancestors 'self'`. Off, the frame is
-# srcdoc and the address is an unknown path, as before. Nothing else on the page changes in any stage.
+# answers with the same document, plus one `<base href>` naming the page (so its relative addresses
+# resolve as they did in srcdoc), under `sandbox allow-scripts`. Like the page, it may be framed by any
+# site. Off, the frame is srcdoc and the address is an unknown path, as before. Nothing else on the page
+# changes in any stage.
 # Forward: "report-only", read what browsers report, then "enforce". Back: remove the line; the page is
 # cached for 60 s, so the header is gone within a minute.
 # CARDS_PAGE_CSP = "report-only"

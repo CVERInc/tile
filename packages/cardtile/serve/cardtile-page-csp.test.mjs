@@ -33,7 +33,7 @@ import { WINDOW_TILES } from './size-tier.mjs';
 import { GRID_STAGES, GRID_HOSTS, GRID_PREVIEW } from './gen-service-host-off-fixture.mjs';
 import { DECK_HEAD_JS, DECK_JS_PATH } from '../w3/deck-page.mjs';
 import { ON_DEMAND_TILES } from './size-tier.mjs';
-import { PNG, EVERY_TILE, PLAIN, WITH_EMBED, HOSTILE_FRONT, long, proseNamingEmbed, wordsNamingEmbed, EMBED_ON_BACK, OTHER_EMBED } from './cardtile-page-csp-fixtures.mjs';
+import { PNG, EVERY_TILE, PLAIN, WITH_EMBED, HOSTILE_FRONT, long, proseNamingEmbed, wordsNamingEmbed, EMBED_ON_BACK, OTHER_EMBED, RELATIVE_EMBED } from './cardtile-page-csp-fixtures.mjs';
 
 const ENFORCED = 'content-security-policy';
 const REPORTED = 'content-security-policy-report-only';
@@ -41,7 +41,8 @@ const REPORTED = 'content-security-policy-report-only';
 const CARDS = { every: EVERY_TILE, plain: PLAIN, embedded: WITH_EMBED, hostile: HOSTILE_FRONT,
   long: long(ON_DEMAND_TILES + 40), longembedded: long(ON_DEMAND_TILES + 40, '- [ ] %% card: embed w=6 %% <script>1</script>\n'),
   prose: proseNamingEmbed(ON_DEMAND_TILES + 1), words: wordsNamingEmbed(ON_DEMAND_TILES + 5), onback: EMBED_ON_BACK, other: OTHER_EMBED,
-  [`_preview:${'c'.repeat(32)}`]: EVERY_TILE, [`_preview:${'d'.repeat(32)}`]: WITH_EMBED };
+  aster: RELATIVE_EMBED(DECK_JS_PATH),
+  [`_preview:${'c'.repeat(32)}`]: EVERY_TILE, [`_preview:${'d'.repeat(32)}`]: WITH_EMBED, [`_preview:${'f'.repeat(32)}`]: RELATIVE_EMBED(DECK_JS_PATH) };
 // the window of `longembedded` that holds its embed (its last tile)
 const EMBED_WINDOW = Math.ceil((ON_DEMAND_TILES + 41) / WINDOW_TILES);
 const store = () => ({ get: async (k) => CARDS[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } });
@@ -347,10 +348,11 @@ const fromSrcdoc = (s) => s.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replac
 const EMBED_HEADERS = [['cache-control', 'public, max-age=60'], ['content-security-policy', EMBED_DOCUMENT_POLICY], ['content-type', 'text/html; charset=utf-8'],
   ['cross-origin-resource-policy', 'same-origin'], ['x-content-type-options', 'nosniff'], ['x-robots-tag', 'noindex']];
 
-test('setting on: an embed is its own document — same sandbox, a same-origin address, exactly the srcdoc\'s document, its own policy', async () => {
-  assert.equal(EMBED_DOCUMENT_POLICY, "sandbox allow-scripts; frame-ancestors 'self'");
-  for (const [path, base, query] of [['/embedded', '/embedded/', ''], ['/onback', '/onback/', ''], [`/_preview/${'d'.repeat(32)}`, `/_preview/${'d'.repeat(32)}/`, ''],
-    [`/longembedded?w=${EMBED_WINDOW}`, '/longembedded/', `?w=${EMBED_WINDOW}`]]) {
+test('setting on: an embed is its own document — same sandbox, a same-origin address, the srcdoc\'s document plus one base element, its own policy', async () => {
+  assert.equal(EMBED_DOCUMENT_POLICY, 'sandbox allow-scripts');
+  for (const [path, base, query, pageAt] of [['/embedded', '/embedded/', '', '/embedded'], ['/onback', '/onback/', '', '/onback'],
+    [`/_preview/${'d'.repeat(32)}`, `/_preview/${'d'.repeat(32)}/`, '', `/_preview/${'d'.repeat(32)}`],
+    [`/longembedded?w=${EMBED_WINDOW}`, '/longembedded/', `?w=${EMBED_WINDOW}`, '/longembedded']]) {
     const off = await (await ask(path)).text();
     const offFrames = framesOf(off);
     assert.equal(offFrames.length, 1, `${path}: the fixture holds one embed`);
@@ -366,10 +368,11 @@ test('setting on: an embed is its own document — same sandbox, a same-origin a
       assert.ok(!/allow-same-origin/.test(on));
       // every other byte of the page is the page served with the setting off
       assert.equal(on, off.replace(` srcdoc="${offFrames[0].srcdoc}"`, ` src="${f.src}"`), `${path} ${stage}: the page changed elsewhere`);
-      // the address answers with exactly the document the srcdoc held, under its own policy
+      // the address answers with the document the srcdoc held — the author's bytes unchanged — plus exactly one
+      // `<base href>` naming the page (r2: so its relative addresses resolve as in the srcdoc), under its own policy
       const doc = await ask(f.src, { CARDS_PAGE_CSP: stage });
       assert.equal(doc.status, 200, `${path} ${stage}: ${f.src}`);
-      assert.equal(await doc.text(), fromSrcdoc(offFrames[0].srcdoc), `${path} ${stage}: not the srcdoc's document`);
+      assert.equal(await doc.text(), fromSrcdoc(offFrames[0].srcdoc).replace(DOC_HEAD, `${DOC_HEAD}<base href="${pageAt}">`), `${path} ${stage}: not the srcdoc's document plus one base element`);
       const preview = path.startsWith('/_preview/');
       assert.deepEqual([...doc.headers], preview
         ? EMBED_HEADERS.map(([k, v]) => [k, k === 'cache-control' ? 'no-store' : k === 'x-robots-tag' ? 'noindex, nofollow' : v])
@@ -428,6 +431,97 @@ test('the embed address cannot be made to answer with anything but an embed tile
     const r = await ask(p, ON);
     assert.equal(r.status, 404, p);
     assert.equal(await r.text(), '', p);
+  }
+});
+
+// ── r2: the second review's three findings, each with the review's own input ─────────────────────
+// what renderEmbedHtml writes first in every embed document (card-render.mjs)
+const DOC_HEAD = '<!doctype html><meta charset="utf-8">';
+/** the base a document's relative addresses resolve against: its first <base href>, else its own address */
+const baseOf = (body, docUrl) => { const m = /<base\b[^>]*?\shref="([^"]*)"/i.exec(body); return m ? new URL(unescape(m[1]), docUrl).href : docUrl; };
+// path-, dot-, query-, fragment-, empty-, scheme- and root-relative, and absolute
+const RELATIVE = ['aster/favicon.ico', DECK_JS_PATH.slice(1), '#x', '?q=1', '', './x', '../aster/favicon.ico', '//other.example/x', '/aster/favicon.ico', 'https://pictures.example/y.png'];
+
+test('r2 finding 1: an embed\'s relative addresses resolve as they did in its srcdoc — the review\'s `<img src="aster/favicon.ico">` at /aster', async () => {
+  const seed = { aster: RELATIVE_EMBED(DECK_JS_PATH), 'vanity:own.example': 'aster', 'vanityof:aster:0': 'own.example', 'vanitybind:aster:0:own.example': '1' };
+  const own = { CARDS: { get: async (k) => seed[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, PREVIEW: 'false' };
+  const pv = `/_preview/${'f'.repeat(32)}`;
+  const shapes = [
+    // [what, the page's address, its base element's address, ask(address, settings)]
+    ['a shared host', 'http://localhost/aster', '/aster', (u, s) => worker.fetch(new Request(u), { CARDS: store(), ...s })],
+    ['a preview', `http://localhost${pv}`, pv, (u, s) => worker.fetch(new Request(u), { CARDS: store(), ...s })],
+    ['a person\'s own domain', 'https://own.example/', '/', (u, s) => worker.fetch(new Request(u), { ...own, ...s })],
+  ];
+  let resolved = 0;
+  for (const [what, pageUrl, pageBase, get] of shapes) {
+    const offFrames = framesOf(await (await get(pageUrl, {})).text());
+    assert.equal(offFrames.length, 2, `${what}: two embeds`);
+    for (const stage of ['report-only', 'enforce']) {
+      const onFrames = framesOf(await (await get(pageUrl, { CARDS_PAGE_CSP: stage })).text());
+      for (const [i, f] of onFrames.entries()) {
+        const docUrl = new URL(f.src, pageUrl).href;
+        const r = await get(docUrl, { CARDS_PAGE_CSP: stage });
+        assert.equal(r.status, 200, `${what} ${stage}: ${docUrl}`);
+        const body = await r.text();
+        // off, the srcdoc document resolves against the page's address (a srcdoc's base is its parent's)
+        for (const ref of RELATIVE) {
+          assert.equal(new URL(ref, baseOf(body, docUrl)).href, new URL(ref, pageUrl).href, `${what} ${stage}: ${JSON.stringify(ref)} resolves elsewhere than in the srcdoc`);
+          resolved += 1;
+        }
+        // the claim, pinned: the srcdoc's document, author's bytes untouched, plus exactly one base element
+        // (an address only: no target, so an author's own `<base target>` and every link's target act as before)
+        const srcdocDoc = fromSrcdoc(offFrames[i].srcdoc);
+        assert.ok(srcdocDoc.startsWith(DOC_HEAD), `${what}: the document starts as the renderer writes it`);
+        assert.equal(body, srcdocDoc.replace(DOC_HEAD, `${DOC_HEAD}<base href="${pageBase}">`), `${what} ${stage}: not the srcdoc's document plus one base element`);
+      }
+      // what the review measured: the picture and the deck's script, at the addresses they resolve to, answer
+      if (what === 'a shared host') {
+        const [pic, deck] = onFrames.map((f) => new URL(f.src, pageUrl).href);
+        const picBody = await (await get(pic, { CARDS_PAGE_CSP: stage })).text();
+        assert.equal((await get(new URL('aster/favicon.ico', baseOf(picBody, pic)).href, { CARDS_PAGE_CSP: stage })).status, 200, `${stage}: the picture`);
+        const deckBody = await (await get(deck, { CARDS_PAGE_CSP: stage })).text();
+        assert.equal((await get(new URL(DECK_JS_PATH.slice(1), baseOf(deckBody, deck)).href, { CARDS_PAGE_CSP: stage })).status, 200, `${stage}: the deck script`);
+      }
+    }
+  }
+  console.log(`# cardtile page csp r2: ${resolved} relative addresses resolved as in the srcdoc`);
+});
+
+test('r2 finding 2: a Cards page framed by another site still shows its embeds — the embed document restricts its ancestors no more than the page does', async () => {
+  const ancestors = (r) => [r.headers.get(ENFORCED), r.headers.get(REPORTED)].filter(Boolean)
+    .flatMap((p) => p.split(';').map((d) => d.trim()).filter((d) => /^frame-ancestors\b/i.test(d)));
+  for (const path of ['/embedded', `/_preview/${'d'.repeat(32)}`]) {
+    for (const stage of ['report-only', 'enforce']) {
+      const page = await ask(path, { CARDS_PAGE_CSP: stage });
+      const src = framesOf(await page.text())[0].src;
+      const doc = await ask(src, { CARDS_PAGE_CSP: stage });
+      assert.equal(doc.status, 200);
+      // the page may be framed by any site (cardtile-page-csp.mjs): no frame-ancestors, no X-Frame-Options…
+      assert.deepEqual(ancestors(page), [], `${path} ${stage}: the page itself`);
+      assert.equal(page.headers.get('x-frame-options'), null);
+      // …and so may its embed's document, or a page framed elsewhere would lose its embeds (ancestors are ALL checked)
+      assert.deepEqual(ancestors(doc), [], `${path} ${stage}: the embed document restricts its ancestors`);
+      assert.equal(doc.headers.get('x-frame-options'), null);
+      // what isolates it is unchanged: an opaque origin by its own sandbox, the one token
+      assert.equal(doc.headers.get(ENFORCED), 'sandbox allow-scripts', `${path} ${stage}`);
+    }
+  }
+});
+
+test('r2 finding 3: a missed embed address answers in the visitor\'s language and names the host they asked, as any missing page does', async () => {
+  const env = { CARDS: store(), ...ON, CARD_CANONICAL_HOST: 'reef.cards' };
+  const miss = `/aster/_embed/${'0'.repeat(64)}`;
+  for (const [how, q, init] of [['?lang=ja', '?lang=ja', {}], ['Accept-Language: ja', '', { headers: { 'accept-language': 'ja' } }]]) {
+    const ordinary = await worker.fetch(new Request(`https://reef.cards/aster/nope${q}`, init), env);
+    const got = await worker.fetch(new Request(`https://reef.cards${miss}${q}`, init), env);
+    const [want, body] = [await ordinary.text(), await got.text()];
+    // the control: an ordinary missing page speaks Japanese and links the host asked
+    assert.ok(want.includes('lang="ja-JP"') && want.includes('https://reef.cards/'), `${how}: the ordinary missing page`);
+    assert.equal(got.status, 404, how);
+    assert.ok(body.includes('lang="ja-JP"'), `${how}: the missed embed address is not in the visitor's language`);
+    assert.ok(body.includes('https://reef.cards/') && !body.includes('https://feelreef.com/'), `${how}: the missed embed address names another host`);
+    assert.equal(body, want, `${how}: not the ordinary missing page`);
+    assert.deepEqual([...got.headers], [...ordinary.headers], how);
   }
 });
 

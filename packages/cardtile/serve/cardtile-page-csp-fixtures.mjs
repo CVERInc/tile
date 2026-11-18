@@ -38,3 +38,8 @@ export const wordsNamingEmbed = (n) => long(n)
 export const EMBED_ON_BACK = '---\ntitle: An embed on a back\n---\n\n## grid\n\n- [ ] %% card: text back=#more %% Turn me over.\n\n## back: more | More\n\n- [ ] %% card: embed w=6 %% <p id="b">back</p><script>b.textContent = "ran on the back"</script>\n';
 // somebody else's embed (an address made from it must not be answered under another handle)
 export const OTHER_EMBED = '---\ntitle: Somebody else\n---\n\n## grid\n\n- [ ] %% card: embed w=6 %% <p>somebody else</p><script>document.title = "theirs"</script>\n';
+// tile#372 r2 — embeds whose HTML names addresses relative to the page they are on (the review's input,
+// served as `/aster`): a picture, a relative address of the deck's own script, and a fragment link
+export const RELATIVE_EMBED = (deckPath) => '---\ntitle: Relative addresses in an embed\n---\n\n## grid\n\n'
+  + '- [ ] %% card: embed %% <img src="aster/favicon.ico">\n'
+  + `- [ ] %% card: embed w=6 %% <script src="${deckPath.replace(/^\//, '')}"></script><a id="f" href="#x">down</a><p id="x">x</p>\n`;

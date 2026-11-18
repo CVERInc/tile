@@ -28,7 +28,11 @@
 //   · an embed left as srcdoc under the page's policy: its script does NOT run (why it is its own document);
 //   · a script added to the PARENT of a page with an embed, and of a long file whose text says "embed"
 //     (the r1 review's escaping-failure model): refused under the policy, and runs with the setting off;
-//   · an embed's document framed by another site: refused (frame-ancestors).
+//   · a Cards page framed by another site (r2): its embed runs — and does NOT once the embed's document is
+//     given `frame-ancestors 'self'` again (an ancestor restriction is checked against every ancestor).
+// And (r2) an embed's relative addresses: a picture `aster/favicon.ico` loads, and `document.baseURI`, the
+// picture's and a `#x` link's addresses, a `#x` click, a `target=_blank` and a `target=_top` click all
+// come out as they do in the srcdoc with the setting off.
 //
 // Every step has a deadline (STEP_MS): an engine that stops answering fails the step, it does not stall
 // the run. Nothing here reaches the network: every other host is answered in this process.
@@ -67,7 +71,14 @@ const ON_BACK = EMBED_ON_BACK.replace('b.textContent = "ran on the back"', `b.te
 // a long file whose embed is in its SECOND window: it arrives by the deck's fetch, in the first window's document
 const AT = WINDOW_TILES + 200;
 const LONG_EMBED = inView(long(ON_DEMAND_TILES + 40), 'list').replace(`%% card: text %% Tile ${AT}.`, `%% card: embed w=6 %% <b id="t">x</b><script>t.textContent = "ran"; ${PROBE}</script>`);
-const cards = { plain: PLAIN, hostile: HOSTILE_FRONT, broken: BROKEN_MARK, embedded: EMBED, onback: ON_BACK,
+// r2: the review's nested input — a picture by an address relative to the page `/aster` — plus a fragment link
+// and two targets a sandbox without allow-popups / allow-top-navigation refuses; it says what it sees
+const RELATIVE = '---\ntitle: Relative addresses in an embed\nview: wall\n---\n\n## grid\n\n- [ ] %% card: embed w=6 %% '
+  + '<b id="t">before</b><img id="picture" src="aster/favicon.ico" alt=""><a id="f" href="#x">down</a> <a id="n" href="aster/favicon.ico" target="_blank">new</a> '
+  + '<a id="top" href="aster" target="_top">top</a><p id="x" style="margin-top:2000px">x</p><script>t.textContent="ran"; var p = document.getElementById("picture"); '
+  + 'function say() { parent.postMessage({ relative: { base: document.baseURI, picture: p.src, loaded: p.complete && p.naturalWidth > 0, link: document.getElementById("f").href } }, "*") } '
+  + 'addEventListener("load", say);</script>\n';
+const cards = { plain: PLAIN, hostile: HOSTILE_FRONT, broken: BROKEN_MARK, embedded: EMBED, onback: ON_BACK, aster: RELATIVE,
   long: inView(long(ON_DEMAND_TILES + 40), 'list'), longembed: LONG_EMBED, prose: inView(proseNamingEmbed(ON_DEMAND_TILES + 1), 'list'),
   [`_preview:${'c'.repeat(32)}`]: EVERY_TILE };
 for (const v of VIEWS) { cards[`every-${v}`] = inView(EVERY_TILE, v); cards[`embedded-${v}`] = inView(EMBED, v); }
@@ -96,7 +107,7 @@ const server = http.createServer(async (req, res) => {
     // so no browser refuses it for reaching a private address)
     if (url.pathname === '/__framer') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end(`<!doctype html><iframe id="f" src="${String(url.searchParams.get('src')).replace(/[<>"&]/g, '')}"></iframe>`);
+      res.end(`<!doctype html><iframe id="f" style="width:420px;height:900px" src="${String(url.searchParams.get('src')).replace(/[<>"&]/g, '')}"></iframe>`);
       return;
     }
     const arm = url.searchParams.get('arm') || '';
@@ -110,11 +121,7 @@ const server = http.createServer(async (req, res) => {
     // whether the Worker sent a policy at all is the Worker's decision, and an arm keeps it (it re-makes the hashes only)
     const sent = !!(headers['content-security-policy'] || headers['content-security-policy-report-only']);
     let body = Buffer.from(await r.arrayBuffer());
-    if (arm === 'no-ancestors') {
-      // an embed's document with frame-ancestors taken out: the twin of the framing control
-      if (headers['content-security-policy'] !== "sandbox allow-scripts; frame-ancestors 'self'") throw new Error('arm no-ancestors: not an embed document');
-      headers['content-security-policy'] = 'sandbox allow-scripts';
-    } else if (arm) {
+    if (arm) {
       let page = body.toString('utf8');
       delete headers['content-security-policy'];
       delete headers['content-security-policy-report-only'];
@@ -226,13 +233,22 @@ try {
     try { browser = await pw[name].launch(name === 'chromium' && process.env.PAGE_CSP_CHROMIUM ? { executablePath: process.env.PAGE_CSP_CHROMIUM } : {}); } catch (e) { console.log(`SKIPPED ${name}: it does not launch here — ${String(e.message).split('\n')[0]}`); continue; }
     ran += 1; engine = name; baselines.clear(); accepted.configuration = 0; accepted.baseline = 0; accepted.where.clear();
     console.log(`\n── ${name} ${browser.version()} ──`);
-    const context = await browser.newContext({ viewport: { width: 420, height: 900 } });
-    await context.addInitScript(() => {
-      window.__cspv = [];
-      document.addEventListener('securitypolicyviolation', (e) => window.__cspv.push(`${e.effectiveDirective} ${e.blockedURI} ${e.disposition}`));
-      window.__msgs = [];
-      addEventListener('message', (e) => window.__msgs.push({ origin: e.origin, data: e.data }));
-    });
+    const listening = async () => {
+      const c = await browser.newContext({ viewport: { width: 420, height: 900 } });
+      await c.addInitScript(() => {
+        window.__cspv = [];
+        document.addEventListener('securitypolicyviolation', (e) => window.__cspv.push(`${e.effectiveDirective} ${e.blockedURI} ${e.disposition}`));
+        window.__msgs = [];
+        addEventListener('message', (e) => window.__msgs.push({ origin: e.origin, data: e.data }));
+      });
+      return c;
+    };
+    const context = await listening();
+    // r2: a second context with NO request interception, for the relative picture. Measured on Chromium 151:
+    // while a context route is installed (even one that lets the request through), a picture requested by an
+    // embed's src document (an opaque origin) arrives with naturalWidth 0, and the same picture loads with no
+    // route. Nothing in it reaches the network: the section checks that every request it made was to this server.
+    const bare = await listening();
     // every other host a fixture or a click names is answered here
     const other = `http://127.0.0.1:${server.address().port}`;
     await context.route((u) => !u.href.startsWith(base) && !u.href.startsWith(other), (route) => {
@@ -244,6 +260,39 @@ try {
     });
 
     const section = async (label, fn) => { try { await fn(); } catch (e) { check(false, `${label}: ${String(e.message).split('\n')[0]}`); } };
+    /**
+     * `address` framed by ANOTHER site: this server asked as 127.0.0.1 (http like the page: an https framer
+     * would be refused as mixed content, and a public one for reaching a private address — neither proves
+     * anything). → { page: a Cards page loaded in it, embed: { text, origin, url } of the document holding #t }.
+     * `embedPolicy` replaces the Content-Security-Policy of every embed document the browser receives.
+     */
+    const framed = async (address, embedPolicy = null) => {
+      const f = await step(context.newPage(), 'new page');
+      if (embedPolicy) {
+        await f.route(/\/_embed\/[0-9a-f]{64}/, async (route) => {
+          const r = await route.fetch();
+          await route.fulfill({ response: r, headers: { ...r.headers(), 'content-security-policy': embedPolicy } });
+        });
+      }
+      await step(f.goto(`${other}/__framer?src=${encodeURIComponent(address)}`, { waitUntil: 'load', timeout: STEP_MS }), 'load the framer');
+      const child = f.frames().find((x) => x.parentFrame() === f.mainFrame());
+      let page = false;
+      if (child && !address.includes('/_embed/')) {
+        // the Cards page's embed frames are loading=lazy: start them (as eagerFrames does on a top-level page)
+        try { page = await step(child.evaluate(() => { document.querySelectorAll('iframe[loading]').forEach((x) => { x.removeAttribute('loading'); x.scrollIntoView(); }); return !!document.querySelector('main'); }), 'start the frames', 5000); } catch { page = false; }
+      }
+      await f.waitForTimeout(1500);
+      let embed = null;
+      for (const x of f.frames()) {
+        if (x === f.mainFrame()) continue;
+        try {
+          const r = await step(x.evaluate(() => ({ text: (document.getElementById('t') || {}).textContent || null, origin: self.origin })), 'read a frame', 5000);
+          if (r.text) embed = { ...r, url: x.url() };
+        } catch { /* refused or gone */ }
+      }
+      await step(f.close(), 'close');
+      return { page, embed };
+    };
 
     // 1. every tile type, in the three views, enforced and report-only
     await section('every tile', async () => {
@@ -422,24 +471,71 @@ try {
         }), 'read the document');
         check(top.origin === 'null' && top.text === 'ran' && top.cookie === 'SecurityError', `an embed's document opened directly: its script runs in an opaque origin, no cookie (${JSON.stringify(top)})`);
         await close(p);
-        // 🔴 CONTROL: another site framing it is refused (frame-ancestors 'self')
-        // The other site is this server asked as 127.0.0.1 (http like the page: an https framer would be refused
-        // as mixed content, and a public one for reaching a private address — neither proves anything).
-        // The twin is the same document with frame-ancestors taken out: it must load in the same framer.
-        const framed = async (address) => {
-          const f = await step(context.newPage(), 'new page');
-          await step(f.goto(`http://127.0.0.1:${server.address().port}/__framer?src=${encodeURIComponent(address)}`, { waitUntil: 'load', timeout: STEP_MS }), 'load the framer');
-          await f.waitForTimeout(1000);
-          const child = f.frames().find((x) => x !== f.mainFrame());
-          let inside = null;
-          try { inside = child ? await step(child.evaluate(() => (document.getElementById('t') || {}).textContent || null), 'read the framed document', 5000) : null; } catch { inside = null; }
-          const out = { url: child ? child.url().slice(0, 60) : null, inside };
-          await step(f.close(), 'close');
-          return out;
-        };
-        const refused = await framed(base + src);
-        const twin = await framed(`${base}${src}?arm=no-ancestors`);
-        check(refused.inside !== 'ran' && twin.inside === 'ran', `CONTROL: another site framing an embed's document is refused, and loads once frame-ancestors is taken out (${JSON.stringify({ refused, twin })})`);
+        // r2: another site framing the embed's document DIRECTLY may (as it may frame the page): what it gets
+        // is a sandboxed, opaque-origin document of HTML that is already public in the page it belongs to
+        const direct = await framed(base + src);
+        check(direct.embed && direct.embed.text === 'ran' && direct.embed.origin === 'null', `another site framing an embed's document directly: it loads in an opaque origin (${JSON.stringify(direct)})`);
+      }
+      // r2 — a Cards page framed by ANOTHER site: its embed runs, enforced and report-only (and off, as srcdoc)
+      for (const stage of ['enforce', 'report-only', 'off']) {
+        const n = await framed(`${base}/embedded-wall?stage=${stage}`);
+        check(n.page && n.embed && n.embed.text === 'ran' && n.embed.origin === 'null' && (stage === 'off' ? n.embed.url === 'about:srcdoc' : /\/embedded-wall\/_embed\/[0-9a-f]{64}$/.test(n.embed.url)),
+          `a Cards page framed by another site, ${stage}: its embed runs, in an opaque origin (${JSON.stringify(n)})`);
+      }
+      // 🔴 CONTROL: the same, with the embed's document given back the r1 header `frame-ancestors 'self'`: refused,
+      // because the ancestor check reaches the other site above the Cards page — what this check is there to catch
+      {
+        const n = await framed(`${base}/embedded-wall?stage=enforce`, "sandbox allow-scripts; frame-ancestors 'self'");
+        check(n.page && !(n.embed && n.embed.text === 'ran'), `CONTROL: with frame-ancestors 'self' on the embed's document, a Cards page framed by another site loses its embed (${JSON.stringify(n)})`);
+      }
+      // r2 — an embed's relative addresses: as in the srcdoc with the setting off, in every stage
+      {
+        const strip = (u) => String(u).replace(/\?stage=[a-z-]+/, '');   // the harness's own switch, not the page's address
+        const seen = {};
+        for (const stage of ['off', 'enforce', 'report-only']) {
+          const p = await open(bare, `/aster?stage=${stage}`);
+          await eagerFrames(p);
+          await p.page.waitForFunction(() => window.__msgs.some((m) => m.data && m.data.relative), null, { timeout: 8000 }).catch(() => {});
+          const said = ((await msgs(p)).find((m) => m.data && m.data.relative) || { data: {} }).data.relative || null;
+          const frame = p.page.frames().find((x) => x.parentFrame() === p.page.mainFrame() && (x.url() === 'about:srcdoc' || x.url().includes('/_embed/')));
+          const before = frame ? frame.url() : null;
+          // the page and its embed, loaded: quiet like every other page
+          await quiet(`relative addresses in an embed, ${stage}`, p, bare);
+          // target=_blank (no allow-popups) and target=_top (no allow-top-navigation): refused alike. The engine
+          // says so at error level; those lines are compared with the srcdoc's (the frame's own address aside)
+          const pages = bare.pages().length;
+          if (frame) await step(frame.evaluate(() => { document.getElementById('n').click(); document.getElementById('top').click(); }), 'click the targets', 5000).catch(() => {});
+          await p.page.waitForTimeout(500);
+          const targets = { popups: bare.pages().length - pages, top: strip(p.page.url()) === `${base}/aster` };
+          // a `#x` link: wherever it takes the frame, it takes it there in both
+          if (frame) await step(frame.evaluate(() => document.getElementById('f').click()), 'click #x', 5000).catch(() => {});
+          await p.page.waitForTimeout(1200);
+          let still = null;
+          try { still = frame ? await step(frame.evaluate(() => (document.getElementById('t') || {}).textContent || null), 'read the frame', 5000) : null; } catch { still = 'gone'; }
+          const fragment = { url: frame ? strip(frame.url()) : null, sameDocument: still === 'ran' };
+          // what the engine says about the refusals: the frame's own address and the harness's switch aside, the same
+          // (a page error is kept to 200 characters by `open`, so it is compared up to the frame's address)
+          const same = (list, upToFrame = false) => [...new Set(list.map((t) => strip(t).replace(/about:srcdoc|http:\/\/localhost:\d+\/aster\/_embed\/[0-9a-f]{0,64}/g, '<frame>').replace(/localhost:\d+/g, 'localhost:<port>'))
+            .map((t) => (upToFrame && t.includes('<frame>') ? t.slice(0, t.indexOf('<frame>') + 7) : t)))].sort();
+          const v = await violations(p.page);
+          seen[stage] = { said: said && { ...said, base: strip(said.base), link: strip(said.link) }, targets, fragment, before, lines: same(p.heard.console), violations: v, errors: same(p.heard.errors, true) };
+          const away = p.heard.requests.filter((u) => !u.startsWith(base) && !/^(about|data):/.test(u));
+          check(away.length === 0, `relative addresses in an embed, ${stage}: no request left this server (${JSON.stringify(away.slice(0, 3))})`);
+          await close(p);
+        }
+        for (const stage of ['enforce', 'report-only']) {
+          const s = seen[stage];
+          check(s.violations.length === 0 && JSON.stringify(s.lines) === JSON.stringify(seen.off.lines) && JSON.stringify(s.errors) === JSON.stringify(seen.off.errors),
+            `relative addresses in an embed, ${stage}: after the clicks, no violation, and the engine's console and page errors say what they say for the srcdoc (${JSON.stringify({ on: [s.lines, s.errors], off: [seen.off.lines, seen.off.errors], v: s.violations.slice(0, 2) }).slice(0, 900)})`);
+        }
+        for (const stage of ['off', 'enforce', 'report-only']) {
+          check(!!seen[stage].said && seen[stage].said.loaded && seen[stage].said.picture === `${base}/aster/favicon.ico`, `relative addresses in an embed, ${stage}: the picture aster/favicon.ico loads from /aster/favicon.ico (${JSON.stringify(seen[stage].said)})`);
+          check(seen[stage].targets.popups === 0 && seen[stage].targets.top, `relative addresses in an embed, ${stage}: target=_blank opens nothing and target=_top moves nothing (${JSON.stringify(seen[stage].targets)})`);
+        }
+        for (const stage of ['enforce', 'report-only']) {
+          check(JSON.stringify(seen[stage].said) === JSON.stringify(seen.off.said), `relative addresses in an embed, ${stage}: baseURI, picture and #x link as in the srcdoc (${JSON.stringify({ on: seen[stage].said, off: seen.off.said })})`);
+          check(JSON.stringify(seen[stage].fragment) === JSON.stringify(seen.off.fragment), `relative addresses in an embed, ${stage}: a #x click does what it does in the srcdoc (${JSON.stringify({ on: seen[stage].fragment, off: seen.off.fragment, before: [seen[stage].before, seen.off.before] })})`);
+        }
       }
       // 🔴 CONTROL: the same embed left as srcdoc under the page's policy — its script is refused
       {

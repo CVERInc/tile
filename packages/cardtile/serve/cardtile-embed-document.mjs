@@ -4,9 +4,10 @@
 // origin: no storage, cookie or DOM of the page). Written as `srcdoc`, the frame's document INHERITS
 // the parent's Content-Security-Policy, and the parent's script-src (cardtile-page-csp.mjs) refuses the
 // author's script. So while the page's policy is on (CARDS_PAGE_CSP "report-only" or "enforce"), every
-// embed frame of a page is written with `src` instead: a same-origin address that answers with exactly
-// the document the srcdoc held, under a policy of its own. The page's policy is then the same on every
-// page, whatever the page holds, and nothing a person writes decides whether it is sent.
+// embed frame of a page is written with `src` instead: a same-origin address that answers with the
+// document the srcdoc held plus one `<base href>` (embedDocumentBody, below), under a policy of its own.
+// The page's policy is then the same on every page, whatever the page holds, and nothing a person
+// writes decides whether it is sent.
 //
 // With the setting off none of this runs: the frame stays srcdoc and the address is an unknown path.
 //
@@ -18,6 +19,7 @@
 //             parsed file — tiles whose type is `embed`, front and backs — by the renderer's own function,
 //             never read out of the rendered page: an address cannot be made to answer with another
 //             person's embed (their file is not read) or with any HTML that is not an embed of this file.
+//   BODY      that document with one `<base href>` naming the page's address: embedDocumentBody, below.
 //   HEADERS   embedDocumentHeaders, below.
 import { renderEmbedHtml } from '../card-render.mjs';
 
@@ -81,25 +83,59 @@ export function framesAsDocuments(page, documents, base, query = '') {
 export const embedDocumentOf = (documents, h) => (documents.find((d) => d.hex === h) || {}).doc ?? null;
 
 /**
+ * 🔴 WHERE ITS RELATIVE ADDRESSES POINT (tile#372 r2). A srcdoc document's base is its parent's: an
+ * author's `<img src="aster/favicon.ico">` on `/aster` meant `/aster/favicon.ico`. Served at
+ * `/aster/_embed/<hash>` with nothing added, the same markup would mean `/aster/_embed/aster/favicon.ico`.
+ * So the served document is the srcdoc's document with exactly ONE element added: `<base href="<page>">`,
+ * right after the head every embed document starts with (EMBED_DOC_HEAD, card-render.mjs renderEmbedHtml),
+ * before the theme and before a byte the author wrote. The author's bytes are unchanged; the hash in the
+ * address is still the srcdoc document's (it names WHICH embed; the base follows from the address).
+ *
+ *   <page>  the Cards' own address on the host serving it, root-relative (so the document's own origin):
+ *           `/<handle>` on a shared host, `/` on a one-card host (a person's domain, the root card),
+ *           `/_preview/<id>` for a preview. Path-, dot-, root-, scheme-relative and absolute addresses,
+ *           `?q` and `#x` then resolve exactly as in the srcdoc on that page (cardtile-page-csp.test.mjs).
+ *           Not carried: the query of the visitor's own address (`?lang=`, a window's `?w=&r=`), which
+ *           only an empty, `?…` or `#…` address could see — those resolve against the bare page address.
+ *   href only, never `target`: an author's own `<base target>` and every link's target act as before.
+ *   🔴 The one known difference: an author's OWN `<base href>` is now the second one in the document,
+ *           and the first one wins, so it is ignored (in the srcdoc it was the first, and was honoured).
+ *           Telling a real one from the text `<base href` in a comment or a script means parsing the
+ *           author's HTML, which this module does not do.
+ */
+export const EMBED_DOC_HEAD = '<!doctype html><meta charset="utf-8">';
+const attr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** embedDocumentBody: (doc, page) → what the embed address answers: `doc` with `<base href="<page>">` after its head */
+export function embedDocumentBody(doc, page) {
+  const d = String(doc);
+  if (!d.startsWith(EMBED_DOC_HEAD)) throw new Error('an embed document that does not start with the renderer\'s head');
+  return `${EMBED_DOC_HEAD}<base href="${attr(page)}">${d.slice(EMBED_DOC_HEAD.length)}`;
+}
+
+/**
  * The headers of an embed document, and what each buys:
  *
- *   Content-Security-Policy: sandbox allow-scripts; frame-ancestors 'self'
- *     sandbox allow-scripts  the document is in an opaque origin wherever it is opened, as a top-level
- *                            page too: the same one token the frame's own attribute carries, so opening
- *                            the address directly gives its script no more than the frame does (no
- *                            cookie, storage or DOM of the page origin, no top navigation, popups, forms
- *                            or dialogs). Nothing else is restricted: an embed loads what it loads today.
- *     frame-ancestors 'self' only a page of this origin may frame it, so another site cannot dress
- *                            itself in a person's embed under this origin's address
+ *   Content-Security-Policy: sandbox allow-scripts
+ *     the document is in an opaque origin wherever it is opened, as a top-level page or framed by any
+ *     site: the same one token the frame's own attribute carries, so opening the address directly gives
+ *     its script no more than the frame does (no cookie, storage or DOM of the page origin, no top
+ *     navigation, popups, forms or dialogs). Nothing else is restricted: an embed loads what it loads today.
+ *     🔴 NO frame-ancestors (r2): it is checked against EVERY ancestor, not the frame's parent alone, so
+ *     `'self'` refused the embeds of a Cards page that another site frames — and a person's page may be
+ *     framed by any site (cardtile-page-csp.mjs sends no frame-ancestors). The embed restricts its
+ *     ancestors exactly as its page does: not at all. Another site framing the address directly gets a
+ *     sandboxed, opaque-origin document whose HTML is already public in the page it belongs to.
  *   X-Content-Type-Options: nosniff        it is HTML because the Worker says so, never by sniffing
- *   Cross-Origin-Resource-Policy: same-origin   another site cannot load it as a subresource
+ *   Cross-Origin-Resource-Policy: same-origin   another site cannot load it as a subresource (a frame's
+ *                                          navigation is not a subresource load: the policy is not
+ *                                          consulted for it unless the framer opts into COEP)
  *   X-Robots-Tag: noindex                 a part of a page, not a page to be found on its own
  *   Cache-Control                          the page's own (60 s), or no-store for a preview
  *
  * No Referrer-Policy: the srcdoc document's requests went out under the page's default policy, and so
  * do these (some players an author embeds refuse to play without a referrer).
  */
-export const EMBED_DOCUMENT_POLICY = "sandbox allow-scripts; frame-ancestors 'self'";
+export const EMBED_DOCUMENT_POLICY = 'sandbox allow-scripts';
 export const embedDocumentHeaders = ({ preview = false } = {}) => ({
   'Content-Type': 'text/html; charset=utf-8',
   'Content-Security-Policy': EMBED_DOCUMENT_POLICY,
