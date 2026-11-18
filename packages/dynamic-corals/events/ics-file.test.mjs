@@ -27,8 +27,8 @@ ok('folding: every physical line is at most 75 octets and no UTF-8 sequence is c
   assert.equal(foldLine('SUMMARY:short'), 'SUMMARY:short');
 });
 
-const allDay = { uid: 'a1@google.com', title: '秋の講座｜募集中', start: '2026-10-12', end: '2026-12-02', allDay: true, startsAt: '2026-10-11T15:00:00.000Z', endsAt: '2026-12-01T15:00:00.000Z', location: 'https://www.example.com/apply', description: '定員に達し次第終了', url: null };
-const timed = { uid: 't1@google.com', title: 'Panel; Q&A, signing', start: '2026-11-20T19:00:00', end: '2026-11-20T20:30:00', allDay: false, startsAt: '2026-11-20T10:00:00.000Z', endsAt: '2026-11-20T11:30:00.000Z', location: 'Hall 4, Tokyo', description: 'Line one\nLine two', url: 'https://example.com/e' };
+const allDay = { uid: 'a1@example.com', title: '秋の講座｜募集中', start: '2026-10-12', end: '2026-12-02', allDay: true, startsAt: '2026-10-11T15:00:00.000Z', endsAt: '2026-12-01T15:00:00.000Z', location: 'https://www.example.com/apply', description: '定員に達し次第終了', url: null };
+const timed = { uid: 't1@example.com', title: 'Panel; Q&A, signing', start: '2026-11-20T19:00:00', end: '2026-11-20T20:30:00', allDay: false, startsAt: '2026-11-20T10:00:00.000Z', endsAt: '2026-11-20T11:30:00.000Z', location: 'Hall 4, Tokyo', description: 'Line one\nLine two', url: 'https://example.com/e' };
 
 ok('an all-day event keeps its dates, end exclusive, and no time or zone', () => {
   const ics = eventIcs(allDay, { now: NOW });
@@ -118,8 +118,8 @@ ok('opensIcs: Safari on an Apple device, and nothing else', () => {
 
 ok('icsUrl: the feed\'s own address plus the uid, encoded; nothing for a relative or odd address', () => {
   const src = 'https://events-coral.example/v0/?cal=https%3A%2F%2Fcalendar.google.com%2Fx.ics&show=6';
-  const u = new URL(icsUrl(src, 'a b+c@google.com'));
-  assert.equal(u.searchParams.get('ics'), 'a b+c@google.com');
+  const u = new URL(icsUrl(src, 'a b+c@example.com'));
+  assert.equal(u.searchParams.get('ics'), 'a b+c@example.com');
   assert.equal(u.searchParams.get('cal'), 'https://calendar.google.com/x.ics');
   assert.equal(u.searchParams.get('show'), '6');
   assert.equal(icsUrl(src, ''), '');
