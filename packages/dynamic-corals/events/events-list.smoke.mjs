@@ -39,12 +39,15 @@ const FEED = { ics: true, calendar: { name: 'Stress', timeZone: 'Asia/Tokyo' }, 
   { uid: 'far', title: 'Next year', start: day(now + 400 * D), end: day(now + 403 * D), allDay: true, startsAt: iso(now + 400 * D), endsAt: iso(now + 403 * D), location: 'Harbor Hall', description: null },
 ] };
 const LEGACY = { html: '<ul class="dc-ev-list"><li class="dc-ev-item"><div class="dc-ev-body"><div class="dc-ev-main"><span class="dc-ev-title">From a static feed</span><span class="dc-ev-cd" data-start="2999-01-01" data-end=""></span></div></div></li></ul>' };
+// The default is pinned: the map link and the .ics link both go by platform, and the browser's own
+// user agent is whatever machine this runs on.
+const DESKTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const SAFARI_IOS = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 const page = (lang, src, extra = '') => `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;padding:16px;font-family:system-ui,sans-serif}</style></head><body><div data-dynamic-coral="events" data-src="${src}" data-countdown="always" data-empty="Nothing right now." ${extra}></div></body></html>`;
 
 const browser = await lib.chromium.launch();
-async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent, extra = '' }) {
-  const ctx = await browser.newContext({ viewport: { width, height: 900 }, timezoneId: 'Asia/Taipei', ...(userAgent ? { userAgent } : {}) });
+async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent = DESKTOP, extra = '' }) {
+  const ctx = await browser.newContext({ viewport: { width, height: 900 }, timezoneId: 'Asia/Taipei', userAgent });
   const p = await ctx.newPage();
   const errors = [];
   p.on('pageerror', (e) => errors.push(e.message));
