@@ -1,6 +1,7 @@
 // REEF with Countdown — the page half. A root names a deadline; the elements inside it that carry
-// `data-part` show how much of it is left. No network, nothing stored, no copy of its own: every
-// word around the numbers is the host's markup, so a page in any language is just that page.
+// `data-part` show how much of it is left. Nothing stored, no copy of its own: every word around the
+// numbers is the host's markup, so a page in any language is just that page. No network either,
+// unless the root asks for it with `data-src` (below).
 //
 //   <div data-dynamic-coral="countdown" data-deadline="2026-12-01T23:59:59+09:00" hidden>
 //     <span data-part="days" data-flip></span> d <span data-part="hours" data-flip></span> …
@@ -23,6 +24,15 @@
 // without an explicit offset, or one that does not exist, is refused (see shared/countdown-parts.mjs)
 // and the root is left exactly as authored.
 //
+// `data-src` — the deadline comes from a calendar instead of being typed. It names an events feed
+// (the events coral's: `{ events: [...] }`); the root makes ONE GET to it on load and counts to the
+// first event still ahead (countdown-feed.mjs: `data-count-to` start|end, `data-offset` for all-day
+// and floating events). Elements inside the root may ask for the event's words — `data-event`
+// (title | location | description) as text, `data-event-href` (location | url) as a link's href —
+// and an empty field leaves that element as authored. A feed that fails, or holds no event the root
+// can count to, falls back to `data-deadline` when the root has one and otherwise leaves the root
+// exactly as authored. A root WITHOUT `data-src` never touches the network.
+//
 // `data-flip-mode="drum"` turns each card into a mechanical counter wheel (shared/flip.mjs): every
 // place carries the same 0–9 wheel, turning DOWNWARD (9, 8, … 0, then 9 again), because a countdown
 // only counts down. Every ordinary decrement is then exactly one step, and a place that wraps folds
@@ -41,6 +51,7 @@
 // subscribes again.
 //
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
+import { pickEvent, eventText, eventHref } from './countdown-feed.mjs';
 import { createFlip, setFlip, settleFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
 
@@ -72,6 +83,7 @@ function globals() {
     now: () => Date.now(),
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (id) => clearTimeout(id),
+    fetch: typeof fetch === 'function' ? (url, init) => fetch(url, init) : null,
     motion: w.matchMedia ? w.matchMedia('(prefers-reduced-motion: reduce)') : null,
   };
 }
@@ -117,8 +129,10 @@ function showFlip(part, text, env) {
  * Returns { stop, tick } or null when the root is not configured.
  */
 export function mountCountdown(root, deps = {}) {
-  const env = { ...globals(), ...deps };
-  const deadline = parseDeadline(root.getAttribute('data-deadline'));
+  return mountAt(root, parseDeadline(root.getAttribute('data-deadline')), { ...globals(), ...deps });
+}
+
+function mountAt(root, deadline, env) {
   if (Number.isNaN(deadline)) return null;
   const expiredText = root.getAttribute('data-expired-text') || '';
   const expiredMode = root.getAttribute('data-expired') === 'text' && expiredText ? 'text' : 'hide';
@@ -188,10 +202,42 @@ export function mountCountdown(root, deps = {}) {
   return { stop, tick, get running() { return timer !== null; } };
 }
 
+function fillSlots(root, event) {
+  for (const el of root.querySelectorAll('[data-event]')) {
+    const text = eventText(event, el.getAttribute('data-event'));
+    if (text) el.textContent = text;
+  }
+  for (const el of root.querySelectorAll('[data-event-href]')) {
+    const href = eventHref(event, el.getAttribute('data-event-href'));
+    if (href) el.setAttribute('href', href);
+  }
+}
+
+/**
+ * Mount a root whose deadline comes from its `data-src` feed. Resolves to what mountCountdown
+ * returns: { stop, tick } once it is counting, or null when the root was left as authored. Never
+ * rejects — a feed is a third party, and its failure is the fallback's business, not the page's.
+ */
+export async function mountFromFeed(root, deps = {}) {
+  const env = { ...globals(), ...deps };
+  let picked = null;
+  try {
+    const res = env.fetch ? await env.fetch(root.getAttribute('data-src'), { headers: { Accept: 'application/json' } }) : null;
+    const data = res && res.ok ? await res.json() : null;
+    picked = pickEvent(data && data.events, env.now(), root.getAttribute('data-count-to'), root.getAttribute('data-offset'));
+  } catch {
+    picked = null;
+  }
+  if (!picked) return mountAt(root, parseDeadline(root.getAttribute('data-deadline')), env);
+  fillSlots(root, picked.event);
+  return mountAt(root, picked.deadline, env);
+}
+
 export function mountAll(doc, deps = {}) {
   doc.querySelectorAll(SELECTOR).forEach((root) => {
     if (root.getAttribute('data-dynamic-coral-mounted') === '1') return;
     root.setAttribute('data-dynamic-coral-mounted', '1');
-    mountCountdown(root, { document: doc, ...deps });
+    if (root.getAttribute('data-src')) mountFromFeed(root, { document: doc, ...deps });
+    else mountCountdown(root, { document: doc, ...deps });
   });
 }
