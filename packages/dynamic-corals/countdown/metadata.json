@@ -1,7 +1,7 @@
 {
   "id": "countdown",
   "author": "official",
-  "summary": "Counts down to a deadline in the visitor’s browser — typed on the element, or read from an events feed as the next event — as plain digits or split-flap cards, and hides or swaps itself at the deadline.",
+  "summary": "Counts down to a deadline in the visitor’s browser — typed on the element, or read from a calendar’s events feed, paging through what’s next — as plain digits or split-flap cards, and hides or swaps itself when nothing is left.",
   "embed": "<div data-dynamic-coral=\"countdown\" data-deadline=\"2026-12-01T23:59:59+09:00\" hidden>\n  <span data-part=\"days\" data-flip></span> <span data-part=\"hours\" data-flip></span> <span data-part=\"minutes\" data-flip></span> <span data-part=\"seconds\" data-flip></span>\n</div>\n<script type=\"module\" src=\"https://feelreef.com/corals/countdown/v0/countdown.js\"></script>",
   "attributes": [
     {
@@ -19,7 +19,7 @@
       "type": "string",
       "required": false,
       "default": null,
-      "description": "ISO date-time WITH an explicit offset (Z or ±hh:mm) naming a real date; otherwise the root is left as authored. With data-src it is the fallback, used when the feed gives no event to count to.",
+      "description": "ISO date-time WITH an explicit offset (Z or ±hh:mm) naming a real date; otherwise the root is left as authored. With data-src it is the fallback, used when the feed gives no event to show.",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,3})?)?(Z|[+-]\\d{2}:\\d{2})$"
     },
     {
@@ -27,37 +27,21 @@
       "type": "url",
       "required": false,
       "default": null,
-      "description": "An events feed URL (the events coral’s feed). The root makes one GET to it on load and counts to the soonest event still ahead, instead of to a typed data-deadline. Without it the root makes no network call."
-    },
-    {
-      "name": "data-count-to",
-      "type": "enum",
-      "required": false,
-      "default": "start",
-      "description": "With data-src: which moment of the event is the deadline. A timed event with no end is counted to its start; an all-day event’s end is the midnight after its last day.",
-      "values": [
-        "start",
-        "end"
-      ]
-    },
-    {
-      "name": "data-offset",
-      "type": "string",
-      "required": false,
-      "default": null,
-      "description": "With data-src: the UTC offset (Z or ±hh:mm) that all-day events and times without an offset are read in. Without it those events are passed over; an event the feed gives in UTC needs none.",
-      "pattern": "^(Z|[+-]\\d{2}:\\d{2})$"
+      "description": "An events feed URL (the events coral’s feed for one public calendar). The root makes one GET to it on load and shows the events still to come in what’s-next order: each counts to its start while that is ahead and to its end once it is under way, and at zero carries on to the next without a reload. The calendar’s own time zone places its all-day events; nothing about time is written on the page. Without data-src the root makes no network call."
     },
     {
       "name": "data-event",
       "type": "enum",
       "required": false,
       "default": null,
-      "description": "With data-src, on a child element: replace its text with that field of the event being counted to. An empty field leaves the element as authored.",
+      "description": "With data-src, on a child element: its text becomes that part of the event being shown (emptied when the event has none). when is the date or range in the page’s language — an all-day event’s dates as the calendar wrote them, a timed event in the visitor’s zone with the zone named. location is the place, or a URL without its scheme. calendar is the calendar’s name. position is like 2/4, empty for a single event.",
       "values": [
         "title",
         "location",
-        "description"
+        "description",
+        "when",
+        "calendar",
+        "position"
       ]
     },
     {
@@ -65,10 +49,57 @@
       "type": "enum",
       "required": false,
       "default": null,
-      "description": "With data-src, on a child link: set its href from the event. location is the location itself when it is an http(s) URL and otherwise a map search for it; url is the event’s own URL. Only http(s) is ever written; otherwise the link is left as authored.",
+      "description": "With data-src, on a child link: its href (removed when there is none). location is the location itself when the whole field is an http(s) URL and otherwise the platform’s map for the place; url is the event’s own URL; add is an add-to-calendar link for the event. Only http(s), a map, or that add link is ever written.",
       "values": [
         "location",
-        "url"
+        "url",
+        "add"
+      ]
+    },
+    {
+      "name": "data-event-if",
+      "type": "enum",
+      "required": false,
+      "default": null,
+      "description": "With data-src, on a child element: shown only while that holds for the event being shown, hidden otherwise. url and place are the two kinds of location; several is true when there is more than one event to page through.",
+      "values": [
+        "title",
+        "location",
+        "description",
+        "url",
+        "place",
+        "several"
+      ]
+    },
+    {
+      "name": "data-event-nav",
+      "type": "enum",
+      "required": false,
+      "default": null,
+      "description": "With data-src, on a child button: pages to the previous or next event. Disabled at the first and the last; it does not wrap.",
+      "values": [
+        "prev",
+        "next"
+      ]
+    },
+    {
+      "name": "data-event-fit",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "With data-src, on the root or one child: that element is kept at least as tall as the tallest event needs, measured again when its width changes, so paging moves nothing around it."
+    },
+    {
+      "name": "data-unit",
+      "type": "enum",
+      "required": false,
+      "default": null,
+      "description": "With data-src, on a child element: its text becomes the page-language word for that unit, from the browser (日, hr, Tg.). Left as authored where the browser has none.",
+      "values": [
+        "days",
+        "hours",
+        "minutes",
+        "seconds"
       ]
     },
     {
@@ -76,7 +107,7 @@
       "type": "enum",
       "required": false,
       "default": "hide",
-      "description": "What the root does at the deadline: hide it, or replace its content with data-expired-text (text without a data-expired-text hides).",
+      "description": "What the root does when nothing is left to count to (the deadline, or the last event of a feed): hide it, or replace its content with data-expired-text (text without a data-expired-text hides).",
       "values": [
         "hide",
         "text"
