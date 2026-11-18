@@ -9,6 +9,9 @@
 //                                  before it, dark or a noindex mirror of the old host — cardsHostStage)
 //   <creator's own domain>/      → handle via the store's vanity: binding (one domain = one card)
 //   reef.cards/report            → the report door, reef.cards only (reef#2758, card-report.mjs)
+//   cards.feelreef.com/…         → the service's own host, once CARDS_SERVICE_HOST says so: the editor,
+//                                  the park, host mode and the API live there, and reef.cards holds only
+//                                  what people wrote (serviceHostStage)
 //   /_coral/<coral>-<ver>.js     → a coral client (served here so the page can <script src> it)
 //
 // The render path (resolveHandle → renderCardHTML) is pure and node-testable; the fetch handler is
@@ -137,8 +140,9 @@ import { EDIT3_BODY_HTML, EDIT3_BASE_CSS, EDIT3_CSS, EDIT3_JS, BORROWED, FONT_FI
 import { DECK_CSS, DECK_JS } from './deck-assets.mjs';
 import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
 import { validHostOrigin } from '../w3/host-bridge.mjs';
-import { withDeck, DECK_CSS_PATH, DECK_JS_PATH } from '../w3/deck-page.mjs';
+import { withDeck, DECK_CSS_PATH, DECK_JS_PATH, DECK_TRY_URL } from '../w3/deck-page.mjs';
 import { handleReport, REPORT_PATH } from './card-report.mjs';
+import { standIn } from './host-standins.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -220,6 +224,44 @@ export function cardsHostStage(env) {
 export const canonicalHost = (env) => (cardsHostStage(env) === 'canonical' ? CARDS_HOST : CANON_HOST);
 const movedToCardsHost = (env) => cardsHostStage(env) === 'canonical';
 
+// ── three roles, three hosts ─────────────────────────────────────────────────────────────────────
+//
+// The service (the editor, the park, host mode, the API) and what people write live on different
+// registrable domains, so the two share no cookies and no browser storage:
+//
+//   the service's host        cards.feelreef.com   CARDS_SERVICE_HOST = "cards.feelreef.com"
+//   people's canonical host   reef.cards           CARD_CANONICAL_HOST = "reef.cards"  (cardsHostStage)
+//   the legacy host           card.feelreef.com    no setting: the host both moved from
+//
+/**
+ * serviceHostStage: env → 'off' | 'open' | 'split'. Pure, and the ONLY reader of CARDS_SERVICE_HOST.
+ *
+ *   'off'    unset, or anything that is not exactly the string `cards.feelreef.com` — another case,
+ *            a space before or after it, a trailing dot or newline are all off (compared with `===`,
+ *            nothing is trimmed or lowercased). Every answer is the one cardsHostStage alone decides:
+ *            nothing in this block runs, and neither do the stand-ins (standInsOn).
+ *   'open'   the setting alone. cards.feelreef.com answers as the service's home (its root goes to the
+ *            editor, a handle's address goes to the people's host, anything else is the nothing-here
+ *            page). Nothing redirects TO it and no address the Worker writes changes.
+ *   'split'  with the cutover (cardsHostStage 'canonical'):
+ *              cards.feelreef.com   the service pages
+ *              reef.cards/<handle>  what a person wrote, and nothing of the service: its root is a
+ *                                   temporary redirect to the editor, the editor's paths redirect to
+ *                                   the service host, the API and the park do not answer
+ *              card.feelreef.com    a service page → the same path on cards.feelreef.com; everything
+ *                                   else → reef.cards, as the cutover alone already sends it
+ *
+ * The same rule as cardsHostStage: a typo must never redirect the editor to a host nobody serves.
+ */
+export const SERVICE_HOST = 'cards.feelreef.com';
+export function serviceHostStage(env) {
+  if (env?.CARDS_SERVICE_HOST !== SERVICE_HOST) return 'off';
+  return movedToCardsHost(env) ? 'split' : 'open';
+}
+const splitHosts = (env) => serviceHostStage(env) === 'split';
+/** where the write API is called: the service's host once it is on, the host Cards answer on before */
+export const apiOrigin = (env) => `https://${serviceHostStage(env) === 'off' ? canonicalHost(env) : SERVICE_HOST}`;
+
 // `feelreef.com/<handle>`: one segment in the handle grammar (card-api VALID_HANDLE, any case —
 // the path is preserved as written). Anything else on the apex is the marketing site's, never a Card.
 const APEX_HANDLE_PATH = /^\/[a-z0-9][a-z0-9-]{0,62}\/?$/i;
@@ -240,13 +282,29 @@ const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, ''
  *            moves when that page does, not before
  *   /try/edit/a/…  the editor's hashed files: host mode on this host imports them as modules, and a
  *            module that redirects to another origin needs CORS it does not have
+ *
+ * With the service on its own host (serviceHostStage 'split') a service page moves to
+ * cards.feelreef.com instead — the sandbox, its retired path and the park's address — and one address
+ * is answered in place: `/try/edit?stay=1` (staysOnLegacy).
  */
 export function movedTo(host, url, method, env) {
   if (!movedToCardsHost(env) || (method !== 'GET' && method !== 'HEAD')) return null;
   const p = url.pathname;
   if (host !== CANON_HOST || p === '/_api' || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/` || p.startsWith(EDITOR_ASSET_BASE)) return null;
+  if (splitHosts(env) && isServicePath(p)) return staysOnLegacy(url) ? null : `https://${SERVICE_HOST}${p}${url.search}`;
   return `https://${CARDS_HOST}${p}${url.search}`;
 }
+/**
+ * `/try/edit?stay=1` on the legacy host: the sandbox, served in place after the split.
+ *
+ * 🔴 WHY. The sandbox keeps a visitor's draft in the browser's storage, and storage belongs to an
+ * origin: a draft made on card.feelreef.com does not follow its author to cards.feelreef.com, and the
+ * 301 means the page that could read it is never served again. The draft is not deleted — it is out of
+ * reach. This address is the way back to it (exactly `stay=1`, nothing else): the old editor opens on
+ * the old origin with the draft in it, and its Save still parks the whole file and opens the door.
+ * Nothing links here; it is what support hands to someone who asks where their draft went.
+ */
+const staysOnLegacy = (url) => (url.pathname === SANDBOX_PATH || url.pathname === `${SANDBOX_PATH}/`) && url.searchParams.get('stay') === '1';
 // cacheable at the edge and in the browser; a day, so a correction does not wait a year to arrive
 const MOVED_CACHE = 'public, max-age=86400';
 
@@ -277,15 +335,18 @@ export const routesByPath = (host, extra = new Set()) =>
 // tile-lab#51 (product owner 2026-10-29): the old card host too. A visitor who cuts the handle off a
 // shared link is asking "what is this?", and the Card answers by being one — feelreef's own.
 const hasRootCard = (host) => host === CARDS_HOST || host === CANON_HOST;
-const isRootPath = (host, seg) =>
-  hasRootCard(host) && (!seg || seg.toLowerCase() === ROOT_HANDLE || !!iconKind('/' + seg));
+// `rootPage: false` (the caller's, for reef.cards once the service has its own host — serviceHostStage
+// 'split'): the bare root is no page there (it redirects to the editor), so `/<ROOT_HANDLE>` is an
+// ordinary handle with an ordinary address, and only the origin's icon files are still the root's.
+const isRootPath = (host, seg, rootPage = true) =>
+  hasRootCard(host) && ((rootPage && (!seg || seg.toLowerCase() === ROOT_HANDLE)) || !!iconKind('/' + seg));
 
-export function resolveHandle(host, pathname, vanity = {}, extra = new Set()) {
+export function resolveHandle(host, pathname, vanity = {}, extra = new Set(), { rootPage = true } = {}) {
   host = (host || '').toLowerCase().replace(/:\d+$/, '');
   const seg = (pathname || '/').replace(/^\/+|\/+$/g, '').split('/')[0] || '';
   if (vanity[host]) return { handle: vanity[host], cardUrl: 'https://' + host };            // vanity domain = one card
   if (!routesByPath(host, extra)) return null;                                                // a creator's domain, unbound → nothing
-  if (isRootPath(host, seg)) return { handle: ROOT_HANDLE, cardUrl: 'https://' + host, root: true };
+  if (isRootPath(host, seg, rootPage)) return { handle: ROOT_HANDLE, cardUrl: 'https://' + host, root: true };
   if (seg) return { handle: seg.toLowerCase(), cardUrl: 'https://' + (host || CANON_HOST) + '/' + seg.toLowerCase() };
   return null;                                                                                // canonical host, no handle → directory
 }
@@ -383,12 +444,15 @@ const assetBase = (handle, oneCardDomain) => (oneCardDomain ? '/' : `/${handle}/
  * routing reads, so the inverse moves when resolveHandle does: the root card is the bare origin of
  * either host, as resolveHandle says (tile-lab#51). No env = today's host. A browser has no Worker env; whoever
  * serves the editor says which host it is (w/serve.mjs's `/_w/can-save`).
+ *
+ * Once the service has its own host (serviceHostStage 'split') the bare root of reef.cards is a
+ * redirect, not a page, so the root handle's address is `/<ROOT_HANDLE>` like any other.
  */
 export const cardUrlFor = (handle, vanity = {}, env) => {
   const host = Object.keys(vanity).find((h) => vanity[h] === handle);
   if (host) return `https://${host}`;
   const canon = canonicalHost(env);
-  return handle === ROOT_HANDLE ? `https://${canon}` : `https://${canon}/${handle}`;
+  return handle === ROOT_HANDLE && !splitHosts(env) ? `https://${canon}` : `https://${canon}/${handle}`;
 };
 /** the configured card host as an origin — where a handle's public exits (`/<h>.md`) are read. */
 export const cardOrigin = (env) => `https://${canonicalHost(env)}`;
@@ -736,7 +800,28 @@ const SMALL_404 = '<!doctype html><meta charset=utf-8><title>Not found</title><p
 // `who` = { locale, face }: the visitor's language and the host they asked. `handle` and `at` reach
 // the robots header only (robotsTag), never the body.
 const notFound = (env, handle = '', at = {}, who = {}) =>
-  html(renderCardHTML(notFoundSource(who.locale, who.face), { handle: '', cardUrl: '' }), 404, env, handle, at, false, VARY_VISITOR_LANG);
+  html(withServiceTry(renderCardHTML(notFoundSource(who.locale, who.face), { handle: '', cardUrl: '' }), env), 404, env, handle, at, false, VARY_VISITOR_LANG);
+
+/**
+ * withServiceTry: (a rendered page, env) → the same page whose "make your own" address is the editor
+ * on the service host. Only in serviceHostStage 'split'; otherwise the page is returned as it is.
+ *
+ * 🔴 WHY HERE AND NOT IN THE RENDERER. The address is written by w3/deck-page.mjs withDeck
+ * (`window.__deckTry`, from DECK_TRY_URL), and the renderer is part of the editor's own inline module
+ * (gen-edit3-assets.mjs bundles it for the preview). A setting threaded through the renderer changes
+ * that module, and with it `/try/edit` on every host whatever the setting says. So the Worker rewrites
+ * the one line, after the render: the LAST boot line of the page. withDeck writes it before the page's
+ * own closing `</body>`, after everything a person wrote — and what a person wrote can never hold the
+ * line anyway (in the page it is escaped; in the boot script it is inside a JSON string).
+ * When the split is permanent, DECK_TRY_URL becomes the service address and this function goes.
+ */
+const SERVICE_TRY_URL = 'https://cards.feelreef.com/try/edit';   // SERVICE_HOST + SANDBOX_PATH, as one literal
+function withServiceTry(page, env) {
+  if (!splitHosts(env)) return page;
+  const was = `window.__deckTry=${JSON.stringify(DECK_TRY_URL)};`;
+  const i = page.lastIndexOf(was);
+  return i < 0 ? page : `${page.slice(0, i)}window.__deckTry=${JSON.stringify(SERVICE_TRY_URL)};${page.slice(i + was.length)}`;
+}
 
 // tile#340 — the reef.cards origin's own icon files, for when the platform's page is not there to
 // lend its picture (not saved yet, or stopped). `/favicon.ico` and `/apple-touch-icon.png` are asked
@@ -802,6 +887,113 @@ const ASSET_MIME = {
   '.woff2': 'font/woff2',
 };
 const editorAssetUrl = (name) => `${EDITOR_ASSET_BASE}${BORROWED[name].hash}/${name}`;
+// where the sandbox's Save parks the file on its way out (the route is further down)
+const PARK_PATH = '/try/park';
+/**
+ * isServicePath: is this path a page or a door of the SERVICE, as opposed to something a person wrote?
+ * The sandbox, its retired path, host mode, the park and the editor's hashed files. (`/_api/…` is the
+ * service's too and is decided on its own; `/_preview/<id>` is what a person wrote.)
+ */
+const isServicePath = (p) => p === SANDBOX_PATH || p === `${SANDBOX_PATH}/` || p === LEGACY_EDIT2_PATH || p === `${LEGACY_EDIT2_PATH}/`
+  || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/` || p === PARK_PATH || p.startsWith(EDITOR_ASSET_BASE);
+/** the temporary redirect a bare root gets while there is no home page: the editor, with the query carried */
+const toServiceEditor = (url) => new Response(null, { status: 302, headers: { Location: `${SERVICE_TRY_URL}${url.search}`, 'Cache-Control': 'no-store' } });
+const PREVIEW_RE = /^\/_preview\/([0-9a-f]{32})$/;
+const API_PATH = '/_api';
+// GET and HEAD may be answered with a page or a redirect; nothing else may
+const isRead = (method) => method === 'GET' || method === 'HEAD';
+
+/**
+ * hostBoundary: (env, host, pathname, method) → null | verdict. Pure — it reads no store and no body.
+ * The ONE decision about what the service's host, the people's host and (after the split) the legacy
+ * host may answer, taken before any handler runs, for every method. null = this request is not the
+ * boundary's to refuse: the handlers below answer it as they answer it on any host.
+ *
+ * 🔴 TWO RULES, each for EVERY method (a browser can be sent anywhere with a cross-origin form POST,
+ * and a route that only checks GET is open to it):
+ *
+ *   the service's host never renders, reflects or reads anything a person wrote;
+ *   the people's host never answers a service endpoint.
+ *
+ * The service's host (serviceHostStage 'open' and 'split') is an ALLOWLIST — a path that is not named
+ * here never reaches a handler:
+ *
+ *   /_api/…, /try/park           the two endpoints: passed whatever the method (each refuses the
+ *                                methods and callers it does not take, and neither answers with a page)
+ *   any other method than GET/HEAD   405, empty
+ *   /                            302 → the editor
+ *   the editor's pages and hashed files, the deck's and the corals' files, the two image relays
+ *                                passed (none of them reads the store)
+ *   /_preview/<id>               302 → the same path on the people's host. A preview is what a person
+ *                                wrote: it is rendered there, never here
+ *   a handle-shaped path, or one of the origin's icon files
+ *                                301 → the same address on the people's host, which knows
+ *   anything else                the nothing-here page
+ *
+ * The people's host (reef.cards, 'split' only — before the cutover it is dark or a read-only mirror,
+ * see cardsHostStage):
+ *
+ *   /_api, /_api/…               404, empty, before auth: it does not say whether a caller was authorised
+ *   the editor's pages and files, the park
+ *                                GET/HEAD: 301 → the same path on the service's host; else 404, empty
+ *   /  (GET/HEAD)                302 → the editor
+ *   anything else                null: what people wrote, and this host's own doors
+ *
+ * The legacy host (card.feelreef.com, 'split' only). It still serves the editor in place — host mode,
+ * and the sandbox at `?stay=1` — so the first rule is its rule too:
+ *
+ *   GET/HEAD                     null: movedTo redirects it, or it is one of the answers in place
+ *   /_api/…, the editor's pages and hashed files, the park
+ *                                null: answered in place, as before the split, whatever the method
+ *   any other method, any other path   405, empty — a page, a preview and every other address that
+ *                                moved are not rendered or read here for a POST
+ *
+ * Before the split (serviceHostStage 'off' and 'open') the legacy host is none of this function's.
+ *
+ * verdict: { answer: 'refused' }            404, empty
+ *          { answer: 'method' }             405, empty
+ *          { answer: 'editor' }             302 → the editor on the service's host, query carried
+ *          { answer: 'moved', status, to, query }   → https://<to><same path>(+ query)
+ *          { answer: 'nothing' }            the nothing-here page
+ */
+export function hostBoundary(env, host, pathname, method) {
+  const stage = serviceHostStage(env);
+  if (stage === 'off') return null;
+  const p = String(pathname || '/');
+  const reading = isRead(method);
+  if (host === SERVICE_HOST) {
+    if (p.startsWith(`${API_PATH}/`) || p === PARK_PATH) return null;
+    if (!reading) return { answer: 'method' };
+    if (p === '/') return { answer: 'editor' };
+    if (isServiceRead(p)) return null;
+    if (PREVIEW_RE.test(p)) return { answer: 'moved', status: 302, to: canonicalHost(env), query: false };
+    const seg = p.split('/')[1] || '';
+    const named = (CARD_SEGMENT_RE.test(seg) && !notCardSegment(seg.replace(/\.md$/i, ''))) || (!!iconKind('/' + seg) && p === '/' + seg);
+    return named ? { answer: 'moved', status: 301, to: canonicalHost(env), query: true } : { answer: 'nothing' };
+  }
+  if (stage === 'split' && host === CARDS_HOST) {
+    if (p === API_PATH || p.startsWith(`${API_PATH}/`)) return { answer: 'refused' };
+    // a page goes to the same path on the service host; a write (the park) is not carried there
+    if (isServicePath(p)) return reading ? { answer: 'moved', status: 301, to: SERVICE_HOST, query: true } : { answer: 'refused' };
+    // no handle: temporary, because a home page will stand here later
+    if (p === '/' && reading) return { answer: 'editor' };
+  }
+  if (stage === 'split' && host === CANON_HOST) {
+    if (reading || p.startsWith(`${API_PATH}/`) || isServicePath(p)) return null;
+    return { answer: 'method' };
+  }
+  return null;
+}
+/**
+ * isServiceRead: the paths the service's host answers a GET/HEAD on with a handler of its own — each
+ * matched EXACTLY as its handler matches it, so nothing passes the boundary and then finds no handler.
+ * (The relays carry a brand's mark and a video's poster, raster only: the editor's preview draws them.)
+ */
+const isServiceRead = (p) => p === SANDBOX_PATH || p === `${SANDBOX_PATH}/` || p === LEGACY_EDIT2_PATH || p === `${LEGACY_EDIT2_PATH}/`
+  || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/` || EDITOR_ASSET_RE.test(p)
+  || p === QR_PATH || p === DRAWER_PATH || p === DECK_JS_PATH || p === DECK_CSS_PATH
+  || ICON_RELAY_RE.test(p) || YT_RELAY_RE.test(p);
+const METHOD_REFUSED = () => new Response(null, { status: 405, headers: { Allow: 'GET, HEAD', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' } });
 
 const escLite = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -873,7 +1065,10 @@ async function reportedHandle(u, env) {
     return APEX_HANDLE_PATH.test(u.pathname) && !isApexSitePath(u.pathname)
       ? u.pathname.replace(/^\/|\/$/g, '').toLowerCase() : null;
   }
-  if (host === CARDS_HOST || host === CANON_HOST) return resolveHandle(host, u.pathname)?.handle ?? null;
+  if (host === CARDS_HOST || host === CANON_HOST) {
+    // once reef.cards' bare root is a redirect (serviceHostStage 'split') it names no handle
+    return resolveHandle(host, u.pathname, {}, new Set(), { rootPage: !(host === CARDS_HOST && splitHosts(env)) })?.handle ?? null;
+  }
   const store = env && env.CARDS;
   if (!store || !vanityHost(host)) return null;
   const pointer = await store.get(VANITY_KEY(host));
@@ -966,6 +1161,25 @@ const router = {
       if (stage === 'open') return openStageMirrors(url.pathname, request.method) ? openStageAnswer(request, url, env, ctx) : NOT_RELAYED();
     }
 
+    // ── the service has a host of its own (serviceHostStage; 'off' in every deployment that has not
+    // set it, and then nothing between here and the Cards exits is different) ────────────────────
+    // 🔴 ONE decision, before the API and before every handler, for every method: hostBoundary.
+    const hosts = serviceHostStage(env);
+    const verdict = hostBoundary(env, reqHost, url.pathname, request.method);
+    if (verdict) {
+      if (verdict.answer === 'refused') return NOT_RELAYED();
+      if (verdict.answer === 'method') return METHOD_REFUSED();
+      if (verdict.answer === 'editor') return toServiceEditor(url);
+      if (verdict.answer === 'moved') {
+        return new Response(null, { status: verdict.status, headers: {
+          Location: `https://${verdict.to}${url.pathname}${verdict.query ? url.search : ''}`,
+          'Cache-Control': verdict.status === 301 ? MOVED_CACHE : 'no-store',
+        } });
+      }
+      return notFound(env, '', {}, { locale: visitorLocale(url.searchParams, request), face });
+    }
+    const onService = hosts !== 'off' && reqHost === SERVICE_HOST;
+
     // 🔴 FIRST, and before any host resolution. The write API is host-agnostic — reef-MCP calls the
     // canonical host, and a vanity domain must never expose it under a creator's own name. Putting
     // it after resolveHandle would mean `<a-creator's-domain>/_api/card/<someone-else>` resolved the
@@ -1023,7 +1237,8 @@ const router = {
 
     // reef#2758 — the report door, on reef.cards only (and only with the switch on: the host is dark
     // otherwise, above, and so is this route in the open stage). On the old card host `/report` 301s here like every other path (GET), and a
-    // POST there falls through to handle routing — `report` is a reserved handle, so it is no card.
+    // POST there falls through to handle routing — `report` is a reserved handle, so it is no card
+    // (after the split hostBoundary has refused that POST already).
     if (reqHost === CARDS_HOST && (url.pathname === REPORT_PATH || url.pathname === `${REPORT_PATH}/`)) {
       return handleReport(request, env, { handleOf: (u) => reportedHandle(u, env) });
     }
@@ -1171,7 +1386,7 @@ const router = {
         });
       }
       const videos = await resolveChannels(draft, ytFetch, channelShare);
-      return new Response(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), {
+      return new Response(withServiceTry(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), env), {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
@@ -1243,6 +1458,11 @@ const router = {
     const host = reqHost; // the URL's (see the top of fetch)
     // who is asking, for the nothing-here page: their language and the host they asked (see notFound)
     const who = { locale: visitorLocale(url.searchParams, request), face };
+
+    // 🔴 The service host serves nothing a person wrote, and reads nothing to find out whether there
+    // is anything. hostBoundary answered everything that has no handler above, so nothing arrives
+    // here; this line is what keeps a route added above from falling into people's pages unnoticed.
+    if (onService) return notFound(env, '', {}, who);
     const md = /^(.*)\.md$/.exec(url.pathname);
 
     // CARDS store: card:<handle>:<gen> → card.md (card-api genKey), plus the vanity bindings. Missing
@@ -1269,7 +1489,7 @@ const router = {
     const boundGen = pointer != null ? await generationOf(store, pointer) : null;
     const vanityHandle = boundGen != null && (await isBound(store, pointer, boundGen, host)) ? pointer : null;
     const resolved = resolveHandle(host, md ? (md[1] || '/') : url.pathname,
-      vanityHandle ? { [host]: vanityHandle } : {}, extraHosts);
+      vanityHandle ? { [host]: vanityHandle } : {}, extraHosts, { rootPage: !(hosts === 'split' && host === CARDS_HOST) });
     // a host of ours with no root card and no handle in the path: the nothing-here page. An unbound
     // creator's domain keeps the small 404 (see SMALL_404) — it is not our door to put our page on.
     if (!resolved) return routesByPath(host, extraHosts) ? notFound(env, '', {}, who) : html(SMALL_404, 404, env);
@@ -1496,7 +1716,7 @@ const router = {
       : win ? await picturePlan(windowPicturesText(win.src.model, frontmatter(cardMd, 'backdrop')), win.src.model.assets, assetBase(resolved.handle, !!vanityHandle), pictures)
         : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
     const pageCtx = { ...resolved, canonicalUrl, ...(windowUrl ? { windowUrl } : {}), videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) };
-    const page = win ? renderSource(win.src, { ...pageCtx, pager: win.pager, ...(win.last ? {} : { poolTile: false }) }) : renderCardHTML(cardMd, pageCtx);
+    const page = withServiceTry(win ? renderSource(win.src, { ...pageCtx, pager: win.pager, ...(win.last ? {} : { poolTile: false }) }) : renderCardHTML(cardMd, pageCtx), env);
     // tile#339 step 1: what this render decoded and hashed for the plan is kept for the picture requests
     // the page is about to cause (picture-cache.mjs keepPictures; one cache read when all are kept already):
     // only the pictures the rendered page names, in the order it draws them (a reference the page never
@@ -1525,9 +1745,25 @@ export const withNoindexAll = (res, env) => {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 };
 
+/**
+ * standInsOn: env → may CARDS_HOST_STANDINS re-address a request? Both, or the list is not read:
+ *
+ *   · the service host is on (serviceHostStage is not 'off'). Unset or mistyped, every answer is the
+ *     one the Worker gave before the setting existed — on the stand-ins' own hostnames too.
+ *   · this deployment is not production: `PREVIEW` is not exactly "false" (isPreview — the marker this
+ *     Worker already has; production is the one deployment that sets it "false"). A stand-in list that
+ *     reaches production's settings does nothing there.
+ */
+export const standInsOn = (env) => serviceHostStage(env) !== 'off' && isPreview(env);
+
 export default {
   async fetch(request, env, ctx) {
-    return withNoindexAll(await router.fetch(request, env, ctx), env);
+    // A staging deployment's stand-in for one of the three hosts (host-standins.mjs, CARDS_HOST_STANDINS):
+    // answered as that host, with redirects kept inside staging. null in every other deployment —
+    // the list alone turns nothing on (standInsOn).
+    const stood = standInsOn(env) ? standIn(request, env, { service: SERVICE_HOST, people: CARDS_HOST, legacy: CANON_HOST }) : null;
+    const res = stood ? stood.answer(await router.fetch(stood.request, env, ctx)) : await router.fetch(request, env, ctx);
+    return withNoindexAll(res, env);
   },
 };
 

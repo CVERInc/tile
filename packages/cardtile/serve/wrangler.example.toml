@@ -102,6 +102,10 @@ routes = [
   # already has a CNAME, so check the apex has none first (a plain route over a proxied record is the
   # fallback, as for card.feelreef.com above). Routing it changes nothing by itself: CARD_CANONICAL_HOST does.
   # { pattern = "reef.cards", custom_domain = true },
+  # The service's own host (CARDS_SERVICE_HOST, below). A plain route on our own zone, like
+  # card.feelreef.com above. Routing it changes little by itself — the editor already answers on any
+  # routed host — and nothing redirects to it until the setting is on.
+  # { pattern = "cards.feelreef.com/*", zone_name = "feelreef.com" },
 ]
 
 [env.production.vars]
@@ -134,6 +138,64 @@ PREVIEW = "false"
 # mirror, but a moved /try/edit, /report or security.txt gets the open stage's 404 until that day is up.
 # CARDS_HOST_OPEN = "reef.cards"
 # CARD_CANONICAL_HOST = "reef.cards"
+#
+# The service's own host (card-worker.mjs `serviceHostStage`). Three roles, three hosts:
+#   people's canonical host   reef.cards           CARD_CANONICAL_HOST, above
+#   the service's host        cards.feelreef.com   CARDS_SERVICE_HOST, below
+#   the legacy host           card.feelreef.com    no setting: it is the host both moved from
+# The setting is on only when it is exactly "cards.feelreef.com" — compared as written: another case, a
+# space around it or a trailing dot is off, like unset or ANY other value — and then every answer is
+# the one the settings above decide.
+#
+#   off     unset (today).
+#   open    CARDS_SERVICE_HOST alone. Check the new host before anything points at it:
+#             cards.feelreef.com/try/edit, /edit, /try/park, /_api/…  → served (as on any host)
+#             cards.feelreef.com/                → 302 https://cards.feelreef.com/try/edit (+ query)
+#             cards.feelreef.com/<handle>…       → 301 to the same path on the host Cards answer on
+#             cards.feelreef.com: anything else  → the nothing-here page (404)
+#             every other host                   → unchanged, byte for byte
+#   split   CARDS_SERVICE_HOST and CARD_CANONICAL_HOST — the service on its host, people's pages on theirs:
+#             reef.cards/<handle>                → the page (canonical); /report and security.txt stay
+#             reef.cards/                        → 302 https://cards.feelreef.com/try/edit (+ query);
+#                                                  temporary, until a home page stands there
+#             reef.cards/try/edit, /try/edit2, /edit, /try/park (GET)
+#                                                → 301 to the same path on cards.feelreef.com
+#             reef.cards/_api/…, POST /try/park  → 404: the service does not answer on this host
+#             card.feelreef.com/try/edit, /try/edit2, /try/park (GET)
+#                                                → 301 to the same path on cards.feelreef.com
+#             card.feelreef.com/try/edit?stay=1  → the editor, in place: the way back to a draft kept in
+#                                                  a browser under the old origin (storage does not
+#                                                  follow a redirect)
+#             card.feelreef.com/<anything else>  → 301 https://reef.cards/<same path + query>, as before
+#             card.feelreef.com/_api/…, /edit, POST /try/park, /try/edit/a/…
+#                                                → still answered in place: a caller holding a bearer, a
+#                                                  page framed by its parent and an editor already open
+#                                                  cannot follow a redirect
+#             cards.feelreef.com/_preview/<id>   → 302 https://reef.cards/_preview/<id>
+#             cards.feelreef.com, any method but GET/HEAD, on anything but /_api/… and /try/park
+#                                                → 405, empty: the service's host renders nothing a
+#                                                  person wrote, whatever the method (also in `open`,
+#                                                  where a preview goes to card.feelreef.com instead)
+#             card.feelreef.com, any method but GET/HEAD, on anything but what it answers in place
+#                                                → 405, empty: it still serves the editor, so it renders
+#                                                  nothing a person wrote either (this stage only)
+#             every page                         → its "make your own" link names cards.feelreef.com;
+#                                                  reef.cards/feelreef is an ordinary address
+#
+# Forward: route cards.feelreef.com (below), set CARDS_SERVICE_HOST, check, then set CARD_CANONICAL_HOST.
+# Callers of the API move their base URL to https://cards.feelreef.com before `split`: after it the API
+# answers there and on the legacy host, not on reef.cards. Back: remove CARDS_SERVICE_HOST — the 301s it
+# sent carry max-age=86400, and cards.feelreef.com still serves the editor with the setting off.
+# CARDS_SERVICE_HOST = "cards.feelreef.com"
+#
+# Staging only — stand-ins for the three hosts (host-standins.mjs). The three names above route to
+# production, so a staging deployment is asked under names of its own and answers each as the role's
+# host; a redirect to a role's host names that role's stand-in. Only names strictly under feelreef.com
+# or reef.cards count, written in lowercase. The list is read only while CARDS_SERVICE_HOST is on AND
+# PREVIEW is not "false": with the service host off, or in production (PREVIEW = "false", above), it
+# does nothing — so the staging deployment that uses it must not set PREVIEW = "false". Never set in
+# production all the same.
+# CARDS_HOST_STANDINS = "service=cards-staging.feelreef.com people=staging.reef.cards legacy=card-staging.feelreef.com"
 
 [[env.production.kv_namespaces]]
 binding = "CARDS"
