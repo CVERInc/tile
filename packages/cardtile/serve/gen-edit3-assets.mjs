@@ -74,6 +74,9 @@ const bundled = await esbuild.build({
   write: false,
   metafile: true,
   logLevel: 'silent',
+  // the `// <path>` comment above each module, and the metafile keys, are relative to this — so the
+  // bundle is the same wherever the generator is run from
+  absWorkingDir: ROOT,
 });
 if (bundled.errors?.length) {
   throw new Error('gen-edit3-assets: bundle failed:\n' + bundled.errors.map((e) => e.text).join('\n'));
@@ -86,11 +89,11 @@ for (const k of Object.keys(bundled.metafile.inputs)) {
   // 🔴 This generator's OWN previous output may be in the graph (card-worker.mjs imports
   // edit3-assets.mjs) but esbuild must keep none of it: a bundle carrying bytes of the file being
   // written would embed a previous copy of itself.
-  if (isOwnOutput(join(process.cwd(), k), DIR)) {
+  if (isOwnOutput(join(ROOT, k), DIR)) {
     if (OUT_INPUTS[k] && OUT_INPUTS[k].bytesInOutput > 0) throw new Error('gen-edit3-assets: the bundle carries bytes of edit3-assets.mjs — it would embed its own previous output');
     continue;
   }
-  READ.add(relative(DIR, join(process.cwd(), k)).split('\\').join('/'));   // metafile keys are relative to esbuild's cwd
+  READ.add(relative(DIR, join(ROOT, k)).split('\\').join('/'));   // metafile keys are relative to absWorkingDir
 }
 
 // ── 3. the borrowed files and the faces, each under its content hash ─────────────────────────────
