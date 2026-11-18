@@ -45,7 +45,7 @@ async function twin(host, path, setting, init = {}) {
 
 // ── 1. the trailing dot ─────────────────────────────────────────────────────────────────────────
 test('378-1: the URL parser keeps a trailing dot in the hostname (the premise)', () => {
-  assert.equal(new URL('https://cards.feelreef.com./x').hostname, 'cards.feelreef.com.');
+  assert.equal(new URL(`https://${SERVICE}./x`).hostname, `${SERVICE}.`);
 });
 
 test('378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people\'s host', async () => {
@@ -79,7 +79,7 @@ test('378-1 split: the people\'s host with a trailing dot answers no service end
   for (const [path, init] of [
     ['/_api/card/t', {}],
     ['/_api/cards', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"handles":["t"]}' }],
-    ['/try/park', { method: 'POST', headers: { origin: 'https://reef.cards.' }, body: SEED.t }],
+    ['/try/park', { method: 'POST', headers: { origin: `https://${PEOPLE}.` }, body: SEED.t }],
     ['/try/edit', {}], ['/edit?host=https://feelreef.com', {}], ['/', {}],
   ]) {
     const row = `${init.method || 'GET'} ${path}`;
@@ -94,7 +94,7 @@ test('378-1 open: the people\'s host with a trailing dot is as dark as without i
   // the service host on, the people's host not yet (cardsHostStage 'dark'): reef.cards answers nothing
   for (const [path, init] of [
     ['/_api/card/t', {}], ['/_api/nope', { method: 'POST', body: 'x' }],
-    ['/try/park', { method: 'POST', headers: { origin: 'https://reef.cards.' }, body: SEED.t }], ['/try/park', {}],
+    ['/try/park', { method: 'POST', headers: { origin: `https://${PEOPLE}.` }, body: SEED.t }], ['/try/park', {}],
     ['/t', {}], ['/_icon/x.ico', {}],
   ]) {
     const row = `${init.method || 'GET'} ${path}`;
