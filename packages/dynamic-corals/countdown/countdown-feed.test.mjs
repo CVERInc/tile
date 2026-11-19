@@ -681,6 +681,58 @@ test('feedSource: the page’s language picks its own feed, then its primary sub
   assert.deepEqual(read, ['data-src-zh-hant-tw', 'data-src-zh-tw', 'data-src-zh-hant', 'data-src-zh', 'data-src'], 'the order it looks in');
 });
 
+// A Lingo site writes <html lang> as the BCP-47 tag (zh-Hant) while its locale is spelled zh-TW in
+// `locales:` and /zh-tw/ in its paths — and the docs say `data-src-zh-tw`. Both spellings are read.
+test('feedSource: the site’s own locale spelling is read too — exact tag, locale, language, default', () => {
+  const root = (attrs) => ({ getAttribute: (n) => (n in attrs ? attrs[n] : null) });
+  // the documented spelling, on the page a Lingo zh-TW edition really builds
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-tw': '/tw' }), 'zh-Hant'), '/tw', 'zh-Hant finds data-src-zh-tw');
+  assert.equal(feedSource(root({ 'data-src-zh-tw': '/tw' }), 'zh-Hant'), '/tw', 'and without a default too');
+  // the exact tag still wins when both are written
+  assert.equal(feedSource(root({ 'data-src-zh-tw': '/tw', 'data-src-zh-hant': '/hant' }), 'zh-Hant'), '/hant');
+  // …and the locale spelling outranks the bare language
+  assert.equal(feedSource(root({ 'data-src-zh': '/zh', 'data-src-zh-tw': '/tw' }), 'zh-Hant'), '/tw');
+  assert.equal(feedSource(root({ 'data-src-zh': '/zh' }), 'zh-Hant'), '/zh', 'the language alone still applies');
+  // Simplified is its own edition: zh-Hans is zh-cn, never zh-tw
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-cn': '/cn', 'data-src-zh-tw': '/tw' }), 'zh-Hans'), '/cn');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-tw': '/tw' }), 'zh-Hans'), '/d', 'a Simplified page is not fed the Traditional calendar');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-cn': '/cn' }), 'zh-Hant'), '/d', 'nor the other way round');
+  // ja / en / ko: what worked keeps working, and the locale spelling is read after it
+  for (const [lang, key] of [['ja', 'ja-jp'], ['en', 'en-us'], ['ko', 'ko-kr']]) {
+    assert.equal(feedSource(root({ 'data-src': '/d', [`data-src-${lang}`]: '/own' }), lang), '/own', lang);
+    assert.equal(feedSource(root({ 'data-src': '/d', [`data-src-${key}`]: '/key' }), lang), '/key', `${lang} finds data-src-${key}`);
+    assert.equal(feedSource(root({ 'data-src': '/d', [`data-src-${key}`]: '/key', [`data-src-${lang}`]: '/own' }), lang), '/own', `${lang}: the exact tag wins`);
+  }
+  // what is read, in order — the locale spelling sits between the exact tag and the language alone
+  const order = (lang) => { const read = []; feedSource({ getAttribute: (n) => { read.push(n); return null; } }, lang); return read; };
+  assert.deepEqual(order('zh-Hant'), ['data-src-zh-hant', 'data-src-zh-tw', 'data-src-zh', 'data-src']);
+  assert.deepEqual(order('zh-Hans'), ['data-src-zh-hans', 'data-src-zh-cn', 'data-src-zh', 'data-src']);
+  assert.deepEqual(order('ja'), ['data-src-ja', 'data-src-ja-jp', 'data-src']);
+  // a tag the locale table does not emit gains nothing: no guessed locale spelling
+  assert.deepEqual(order('zh-HK'), ['data-src-zh-hk', 'data-src-zh', 'data-src']);
+  assert.deepEqual(order('de'), ['data-src-de', 'data-src']);
+  assert.deepEqual(order('zh-Hant-TW'), ['data-src-zh-hant-tw', 'data-src-zh-tw', 'data-src-zh-hant', 'data-src-zh', 'data-src'], 'unchanged');
+});
+
+// A site may declare a regional locale the table folds: `locales: en-GB, zh-HK` builds /en-gb/ and
+// /zh-hk/, but toBcp47 writes their <html lang> as `en` and `zh-Hant`. The coral is handed only that
+// tag — nothing on the page names the declared entry it came from — so what it can find is pinned
+// here, misses included: an author keying such a site writes the language (data-src-en) or the
+// tag (data-src-zh-hant), and the docs say so.
+test('feedSource: regional locales (en-GB, zh-HK) — what the page tag can and cannot reach', () => {
+  const root = (attrs) => ({ getAttribute: (n) => (n in attrs ? attrs[n] : null) });
+  // a host that writes the regional tag itself is matched exactly, as before
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-en-gb': '/gb' }), 'en-GB'), '/gb');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-hk': '/hk' }), 'zh-HK'), '/hk');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-hk': '/hk', 'data-src-zh-tw': '/tw' }), 'zh-HK'), '/hk', 'zh-HK is not folded into zh-TW by the coral');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-tw': '/tw' }), 'zh-HK'), '/d', 'and no edition spelling is guessed for it');
+  // a Lingo en-GB / zh-HK edition: the page says `en` / `zh-Hant`
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-en': '/en' }), 'en'), '/en', 'en-GB site: data-src-en works');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-hant': '/hant' }), 'zh-Hant'), '/hant', 'zh-HK site: data-src-zh-hant works');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-en-gb': '/gb' }), 'en'), '/d', 'KNOWN GAP: the declared en-GB entry is not visible from `en`');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-zh-hk': '/hk' }), 'zh-Hant'), '/d', 'KNOWN GAP: the declared zh-HK entry is not visible from `zh-Hant`');
+});
+
 test('a root reads the feed for the page’s language, and a page with no feed for it is not fed', async () => {
   const mount = async (lang, attrs) => {
     const { doc, root, els } = page(attrs);
