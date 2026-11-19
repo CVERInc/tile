@@ -490,7 +490,7 @@ function renderSlides(p, size, ctx = {}, legacy = false) {
 // the accent family the page's #cp-accent block declares, for the same accent (card.css's defaults
 // when the card names none) — the tokens below are color-mix()es of `--cp-accent`, so it must be here
 const embedAccentCss = (a) => `--cp-accent:${a};--cp-accent-bg:color-mix(in srgb,${a} 12%,transparent);--cp-accent-border:color-mix(in srgb,${a} 25%,transparent);--cp-accent-glow:color-mix(in srgb,${a} 35%,transparent)`;
-function renderEmbedHtml(body, size, ctx = {}) {
+export function renderEmbedHtml(body, size, ctx = {}) {
   const html = String(body || '');
   if (!html.trim()) return '';
   // 🔴 refused by name: an embed whose HTML alone is over the card's ceiling never reaches the page.

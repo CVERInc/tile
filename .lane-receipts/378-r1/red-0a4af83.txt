@@ -1,0 +1,391 @@
+TAP version 13
+# Subtest: 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+ok 1 - 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+  ---
+  duration_ms: 0.885516
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+ok 2 - 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+  ---
+  duration_ms: 19.962173
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot answers every boundary row as without it
+ok 3 - 378-1 split: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 16.051527
+  type: 'test'
+  ...
+# Subtest: 378-1 open: the service host with a trailing dot answers every boundary row as without it
+ok 4 - 378-1 open: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 6.928936
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the people's host with a trailing dot answers no service endpoint
+ok 5 - 378-1 split: the people's host with a trailing dot answers no service endpoint
+  ---
+  duration_ms: 1.489044
+  type: 'test'
+  ...
+# Subtest: 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+ok 6 - 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+  ---
+  duration_ms: 1.496945
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+ok 7 - 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+  ---
+  duration_ms: 1.428122
+  type: 'test'
+  ...
+# Subtest: 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+ok 8 - 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+  ---
+  duration_ms: 0.599368
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+ok 9 - CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+  ---
+  duration_ms: 0.355811
+  type: 'test'
+  ...
+# Subtest: 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+ok 10 - 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+  ---
+  duration_ms: 2.943828
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+ok 11 - 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+  ---
+  duration_ms: 4.394421
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+ok 12 - CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+  ---
+  duration_ms: 4.3679
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+ok 13 - 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+  ---
+  duration_ms: 0.705521
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+ok 14 - CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+  ---
+  duration_ms: 0.276918
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the service stand-in parks for its own Origin, dotted or not, and for no other
+not ok 15 - 378-2 r1 split: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.207896
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:228:7'
+  failureType: 'testCodeFailure'
+  error: |-
+    cards-staging.feelreef.com. ← Origin cards-staging.feelreef.com.
+    
+    403 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:234:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 split: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 16 - 378-2 r1 split: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 4.077241
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+not ok 17 - 378-2 r1 split: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 0.817524
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:228:7'
+  failureType: 'testCodeFailure'
+  error: |-
+    card-staging.feelreef.com. ← Origin card-staging.feelreef.com.
+    
+    403 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:234:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 split: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 18 - 378-2 r1 split: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.894086
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+not ok 19 - 378-2 r1 split:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 0.512515
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:228:7'
+  failureType: 'testCodeFailure'
+  error: |-
+    cards-staging.feelreef.com.:8443 ← Origin cards-staging.feelreef.com.:8443
+    
+    403 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:234:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 split:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 20 - 378-2 r1 split:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 1.628398
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+not ok 21 - 378-2 r1 split:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 0.465514
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:228:7'
+  failureType: 'testCodeFailure'
+  error: |-
+    card-staging.feelreef.com.:8443 ← Origin card-staging.feelreef.com.:8443
+    
+    403 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:234:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 split:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 22 - 378-2 r1 split:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.531255
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the service stand-in parks for its own Origin, dotted or not, and for no other
+not ok 23 - 378-2 r1 open: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 0.572926
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:228:7'
+  failureType: 'testCodeFailure'
+  error: |-
+    cards-staging.feelreef.com. ← Origin cards-staging.feelreef.com.
+    
+    403 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:234:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 open: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 24 - 378-2 r1 open: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 1.377941
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+not ok 25 - 378-2 r1 open: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 0.487475
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:228:7'
+  failureType: 'testCodeFailure'
+  error: |-
+    card-staging.feelreef.com. ← Origin card-staging.feelreef.com.
+    
+    403 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:234:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 open: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 26 - 378-2 r1 open: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.052171
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+not ok 27 - 378-2 r1 open:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 0.433823
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:228:7'
+  failureType: 'testCodeFailure'
+  error: |-
+    cards-staging.feelreef.com.:8443 ← Origin cards-staging.feelreef.com.:8443
+    
+    403 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:234:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 open:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 28 - 378-2 r1 open:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 0.940148
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+not ok 29 - 378-2 r1 open:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 0.419112
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:228:7'
+  failureType: 'testCodeFailure'
+  error: |-
+    card-staging.feelreef.com.:8443 ← Origin card-staging.feelreef.com.:8443
+    
+    403 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:234:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 open:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 30 - 378-2 r1 open:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.01261
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the people's stand-in report form takes its own Origin, dotted or not, and no other
+not ok 31 - 378-2 r1 split: the people's stand-in report form takes its own Origin, dotted or not, and no other
+  ---
+  duration_ms: 0.872146
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:253:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    staging.reef.cards. ← Origin staging.reef.cards.
+    
+    403 !== 303
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 303
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:257:14)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1 split:8443: the people's stand-in report form takes its own Origin, dotted or not, and no other
+not ok 32 - 378-2 r1 split:8443: the people's stand-in report form takes its own Origin, dotted or not, and no other
+  ---
+  duration_ms: 0.454884
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:253:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    staging.reef.cards.:8443 ← Origin staging.reef.cards.:8443
+    
+    403 !== 303
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 303
+  actual: 403
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:257:14)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 r1: the adapter carries the verdict — same origin becomes the re-addressed origin, another one cannot equal it
+not ok 33 - 378-2 r1: the adapter carries the verdict — same origin becomes the re-addressed origin, another one cannot equal it
+  ---
+  duration_ms: 0.502835
+  type: 'test'
+  location: '<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:267:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'https://cards-staging.feelreef.com.'
+    - 'https://cards.feelreef.com'
+                    ^
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'https://cards.feelreef.com'
+  actual: 'https://cards-staging.feelreef.com.'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<repo>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:269:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..33
+# tests 33
+# suites 0
+# pass 22
+# fail 11
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 191.05487

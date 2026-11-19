@@ -83,8 +83,13 @@ ok('inbox-bubble is not covered (bundle:false — hand-written, stamp only, not 
   !BUNDLED.includes('inbox-bubble'));
 
 mkdirSync(join(REPO, 'out'), { recursive: true });
-const sandbox = mkdtempSync(join(REPO, 'out', 'generated-bundles-'));
-const sandboxResolved = resolve(sandbox) + sep;
+// The sandbox keeps the repo's own layout — <box>/packages/dynamic-corals beside
+// <box>/packages/sitetile — because a coral may import a leaf module of sitetile's
+// (countdown reads the locale table, ../../sitetile/locale-tags.mjs), and that relative path has to
+// resolve here exactly as it does in the repo.
+const box = mkdtempSync(join(REPO, 'out', 'generated-bundles-'));
+const sandbox = join(box, 'packages', 'dynamic-corals');
+const sandboxResolved = resolve(box) + sep;
 
 try {
   // Copy the whole dynamic-corals tree in, EXCEPT registry/ (private/live distribution data — never
@@ -94,6 +99,14 @@ try {
   for (const entry of readdirSync(HERE, { withFileTypes: true })) {
     if (entry.name === 'registry' || entry.name === 'node_modules' || entry.name === 'out') continue;
     cpSync(join(HERE, entry.name), join(sandbox, entry.name), { recursive: true });
+  }
+  // …and sitetile's top-level modules (files only: not astro/, not its node_modules, not tests), so
+  // an import of one of them resolves to the same bytes it does in the repo.
+  const SITETILE = join(REPO, 'packages', 'sitetile');
+  mkdirSync(join(box, 'packages', 'sitetile'), { recursive: true });
+  for (const entry of readdirSync(SITETILE, { withFileTypes: true })) {
+    if (!entry.isFile() || /\.test\.m?js$/.test(entry.name)) continue;
+    cpSync(join(SITETILE, entry.name), join(box, 'packages', 'sitetile', entry.name));
   }
 
   // 🩸 --registry EXPLICITLY per build, and CORAL_REGISTRY stripped from the child's environment —
@@ -208,7 +221,7 @@ try {
   // inside it: process.exit() does not unwind the stack the way a thrown exception does, so a call
   // to it from inside the try would skip this finally entirely and leave the sandbox on disk even
   // on a fully green run. Measured while writing this file.
-  rmSync(sandbox, { recursive: true, force: true });
+  rmSync(box, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

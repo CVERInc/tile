@@ -183,3 +183,19 @@ test('three locales zh-TW, zh-CN, ja-JP: the zh-CN page keeps its own html lang,
     assert.deepEqual(b.options.map((o) => o.id), ['zh-tw', 'ja-jp'], lang);
   }
 });
+
+// locale-tags.mjs is the table on its own, for a browser bundle (the countdown coral). urlLocaleOfTag
+// is toBcp47 read backwards: it must agree with locale.mjs for every edition, and guess nothing else.
+test('urlLocaleOfTag: the tag each edition is written as maps back to that edition, and nothing else does', async () => {
+  const T = await import('./locale-tags.mjs');
+  assert.deepEqual(T.LINGO_LOCALES, L.LINGO_LOCALES, 'one table: locale.mjs re-exports the leaf');
+  assert.equal(L.urlLocaleOfTag, T.urlLocaleOfTag);
+  for (const edition of [...L.LINGO_LOCALES, 'zh-CN']) {
+    assert.equal(T.urlLocaleOfTag(L.toBcp47(edition)), L.toUrlLocale(edition), edition);
+    assert.equal(T.urlLocaleOfTag(L.toBcp47(edition).toUpperCase()), L.toUrlLocale(edition), `${edition}, any case`);
+  }
+  assert.deepEqual(['zh-Hant', 'zh-Hans', 'en', 'ja', 'ko'].map(T.urlLocaleOfTag), ['zh-tw', 'zh-cn', 'en-us', 'ja-jp', 'ko-kr']);
+  for (const other of ['', null, 'zh', 'zh-HK', 'zh-Hant-TW', 'zh-TW', 'en-GB', 'en-US', 'de', 'fr-FR']) {
+    assert.equal(T.urlLocaleOfTag(other), '', String(other));
+  }
+});

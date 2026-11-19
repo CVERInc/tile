@@ -1,0 +1,135 @@
+MISSING-MODULE packages/sitetile/agent-artifacts.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/agent-list-twins.test.mjs
+PASS packages/sitetile/announce.test.mjs
+PASS packages/sitetile/appbar.test.mjs
+PASS packages/sitetile/archive-month-names.test.mjs
+PASS packages/sitetile/astro-section-anchor.test.mjs
+MISSING-MODULE packages/sitetile/author-text-run-cost.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/base-paint.test.mjs
+PASS packages/sitetile/block-scalar-indicators.test.mjs
+PASS packages/sitetile/blog-date-badge.test.mjs
+PASS packages/sitetile/blog-date-format.test.mjs
+PASS packages/sitetile/blog-defaults.test.mjs
+PASS packages/sitetile/blog-entry-hooks.test.mjs
+MISSING-MODULE packages/sitetile/blog-excerpt-plain.test.mjs :: Cannot find module 'parse5' 
+MISSING-MODULE packages/sitetile/blog-locale-archives.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/blog-search-overlay.test.mjs
+MISSING-MODULE packages/sitetile/blog-tag-prototype-names.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/blog-tenancy.test.mjs
+MISSING-MODULE packages/sitetile/blog-unlisted.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/blog-url-gating.test.mjs
+MISSING-MODULE packages/sitetile/blog-video-poster-thumb.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/bracket-run-cost.test.mjs
+PASS packages/sitetile/bubble-kaito.test.mjs
+MISSING-MODULE packages/sitetile/bubble-search-index.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/button-radius-1888.test.mjs
+MISSING-MODULE packages/sitetile/card-image-size.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/card-img-coverage.test.mjs
+PASS packages/sitetile/cascade-layers.test.mjs
+PASS packages/sitetile/chrome-copy.test.mjs
+PASS packages/sitetile/chrome-links-render.test.mjs
+PASS packages/sitetile/chrome-links.test.mjs
+PASS packages/sitetile/clean-import.test.mjs
+PASS packages/sitetile/collection-band.test.mjs
+PASS packages/sitetile/collection-base-rendering.test.mjs
+PASS packages/sitetile/color-scheme.test.mjs
+PASS packages/sitetile/coral-params.test.mjs
+MISSING-MODULE packages/sitetile/dialogue-sides.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/discoverability.test.mjs
+PASS packages/sitetile/dynamic-coral-css.test.mjs
+PASS packages/sitetile/eyebrow-coverage.test.mjs
+PASS packages/sitetile/footer-cols.test.mjs
+PASS packages/sitetile/form-copy-default-locale.test.mjs
+PASS packages/sitetile/form-home-locale.test.mjs
+PASS packages/sitetile/generator-provenance.test.mjs
+PASS packages/sitetile/grid-cell-list.test.mjs
+PASS packages/sitetile/header-overlay-headingless.test.mjs
+PASS packages/sitetile/hero-title-presentation.test.mjs
+PASS packages/sitetile/hreflang.test.mjs
+PASS packages/sitetile/icon-core.test.mjs
+PASS packages/sitetile/inbox-bubble-loader.test.mjs
+PASS packages/sitetile/inbox-bubble.test.mjs
+PASS packages/sitetile/inbox-form-copy.test.mjs
+PASS packages/sitetile/inbox-form-locales.test.mjs
+PASS packages/sitetile/inbox-form-not-claimed.test.mjs
+PASS packages/sitetile/inbox-form-refusal-copy.test.mjs
+PASS packages/sitetile/inbox-form-thanks-caller.test.mjs
+PASS packages/sitetile/index-date-lang.test.mjs
+MISSING-MODULE packages/sitetile/inline-code-literal.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/lang-default.test.mjs
+PASS packages/sitetile/lang-page-isolation.test.mjs
+PASS packages/sitetile/lingo-simplified.test.mjs
+PASS packages/sitetile/lingo-switch.test.mjs
+PASS packages/sitetile/links-coral.test.mjs
+PASS packages/sitetile/locale-404.test.mjs
+PASS packages/sitetile/native-email-field-presentation.test.mjs
+PASS packages/sitetile/no-second-copy.test.mjs
+MISSING-MODULE packages/sitetile/noindex.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/not-found-locale.test.mjs
+PASS packages/sitetile/og-card-file.test.mjs
+PASS packages/sitetile/og-card-reuse.test.mjs
+PASS packages/sitetile/og-card.test.mjs
+PASS packages/sitetile/og-cards-policy.test.mjs
+PASS packages/sitetile/pagetile-blurb.test.mjs
+PASS packages/sitetile/pagetile-photobook.test.mjs
+PASS packages/sitetile/param-names.test.mjs
+PASS packages/sitetile/post-body-marks.test.mjs
+PASS packages/sitetile/post-chrome-lang.test.mjs
+PASS packages/sitetile/post-share-meta.test.mjs
+MISSING-MODULE packages/sitetile/private-artifacts.test.mjs :: Cannot find module 'parse5' 
+PASS packages/sitetile/prose-btn-base-style-1933.test.mjs
+PASS packages/sitetile/prose-multi-image-figure-1933.test.mjs
+PASS packages/sitetile/prose-renderer-parity.test.mjs
+PASS packages/sitetile/query-redirects.test.mjs
+PASS packages/sitetile/render-run-cost.test.mjs
+PASS packages/sitetile/revision-stamp.test.mjs
+PASS packages/sitetile/route-title-site-name.test.mjs
+PASS packages/sitetile/runtime-presentation.test.mjs
+PASS packages/sitetile/search-filter.test.mjs
+PASS packages/sitetile/search-route.test.mjs
+PASS packages/sitetile/section-anchor.test.mjs
+FAIL(1) packages/sitetile/section-contract.test.mjs
+    section-contract
+      ok  the fixture parsed into the section types it was written as
+      ok  🔴 string render: a linked cell holds no YouTube player (no <a> inside its <a>)
+      ok  🔴 string render: a text-free hero emits no heading (every variant); a titled/logo hero that is not the owner writes one <h2>
+      ok  CONTROL string render: a logo hero that IS the page h1 owner is byte-identical to origin/main
+      ok  🔴 string render: a logo hero that is not the owner differs from its pin only by <h1> → <h2>
+      ok  heroHeadingless: whitespace counts as empty; a logo keeps the heading only where the variant draws it
+      ok  🔴 string render: a page opening with a text-free hero takes its <h1> from the next section
+      ok  🔴 pageH1Index, h1-empty-layers: owner 1
+      ok  🔴 pageH1Index, h1-gallery-first: owner -1
+      ok  🔴 pageH1Index, h1-untitled-prose: owner 2
+      ok  🔴 pageH1Index, h1-review-gallery-hero: owner -1
+      ok  🔴 pageH1Index, h1-hero-middle: owner 0
+      ok  🔴 pageH1Index, h1-hero-first: owner 0
+      ok  pageH1Index: embed / h2-only types / unknown type / logo hero / empty page
+      ok  🔴 heroHeadingless reads the variant the renderers draw (zero parsed layers = legacy)
+      ok  🔴 string render, h1-empty-layers: headings per section
+      ok  🔴 string render, h1-gallery-first: headings per section
+      ok  🔴 string render, h1-untitled-prose: headings per section
+      ok  🔴 string render, h1-review-gallery-hero: headings per section
+      ok  🔴 string render, h1-hero-middle: headings per section
+      ok  🔴 string render, h1-hero-first: headings per section
+      ok  CONTROL: class tokens are compared as a list — `a.b` and `a b` differ
+      ok  CONTROL: a duplicate section id fails instead of being overwritten, and a wrapper difference is seen
+      FAIL 🔴 the built page was compared (astro/node_modules is present)
+           no packages/sitetile/astro/node_modules — run npm ci there (or set SECTION_CONTRACT_ALLOW_NO_ASTRO=1 to skip knowingly)
+      23 passed
+PASS packages/sitetile/section-copy-default-locale.test.mjs
+PASS packages/sitetile/section-inset.test.mjs
+PASS packages/sitetile/share-image.test.mjs
+PASS packages/sitetile/site-core-roundtrip.test.mjs
+PASS packages/sitetile/site-embed.test.mjs
+PASS packages/sitetile/site-name-source.test.mjs
+PASS packages/sitetile/sitemap.test.mjs
+PASS packages/sitetile/source-spans.test.mjs
+PASS packages/sitetile/style-text.test.mjs
+PASS packages/sitetile/surface-band.test.mjs
+PASS packages/sitetile/svg-attachment-headers.test.mjs
+PASS packages/sitetile/tagcloud-coral.test.mjs
+PASS packages/sitetile/theme-imports.test.mjs
+PASS packages/sitetile/whitespace-run-cost.test.mjs
+PASS packages/sitetile/youtube-line.test.mjs
+PASS packages/sitetile/site-core.test.js
+done

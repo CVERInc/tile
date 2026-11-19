@@ -48,8 +48,9 @@
 // root exactly as authored. A root WITHOUT `data-src` never touches the network.
 //
 // One calendar is in one language, so a root may name a feed per language: `data-src-<language>`
-// (`data-src-zh-tw`, `data-src-en`) is used on a page in that language (`<html lang>`), `data-src`
-// on every other. A root that names feeds only for some languages is not fed on the rest.
+// (`data-src-zh-tw`, `data-src-en`) is used on a page in that language (`<html lang>`, spelled as
+// the tag or as the site's locale code — `zh-Hant` reads `data-src-zh-tw` too; see feedSource),
+// `data-src` on every other. A root that names feeds only for some languages is not fed on the rest.
 //
 // Every root, typed or fed, carries `data-under-a-day` while less than a day is left — the hook a
 // host uses to trade its days for its seconds.
@@ -72,9 +73,10 @@
 // subscribes again.
 //
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
-import { upcoming, nextMoment, phaseOf, locationKind, eventText, eventHref, unitText, feedSource } from './countdown-feed.mjs';
+import { upcoming, nextMoment, phaseOf, locationKind, eventText, eventHref, eventFile, unitText, feedSource } from './countdown-feed.mjs';
 import { createFlip, setFlip, settleFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
+import { wireAddMenu, ADD_FILE_ATTR } from '../shared/add-menu.mjs';
 
 export const SELECTOR = '[data-dynamic-coral="countdown"]';
 const UNITS = ['days', 'hours', 'minutes', 'seconds'];
@@ -162,6 +164,7 @@ function mountAt(root, deadline, env, hooks = {}) {
   const expiredMode = root.getAttribute('data-expired') === 'text' && expiredText ? 'text' : 'hide';
   const parts = partsOf(root);
   injectStyles(env.document);
+  wireAddMenu(env.document);
   // The largest unit present absorbs every unit above it (see the header).
   const largest = UNITS.find((u) => parts.some((p) => p.unit === u));
 
@@ -250,9 +253,14 @@ function fillSlots(root, event, ctx, env, measuring = false) {
     el.textContent = eventText(event, el.getAttribute('data-event'), ctx);
   }
   for (const el of root.querySelectorAll('[data-event-href]')) {
-    const href = eventHref(event, el.getAttribute('data-event-href'), env.userAgent, ctx.src);
+    const which = el.getAttribute('data-event-href');
+    const href = eventHref(event, which, env.userAgent);
     if (href) el.setAttribute('href', href);
     else el.removeAttribute('href');
+    // an add-to-calendar link that also knows the event as a file opens the shared two-row menu
+    const file = which === 'add' && href ? eventFile(event, ctx.src) : '';
+    if (file) el.setAttribute(ADD_FILE_ATTR, file);
+    else el.removeAttribute(ADD_FILE_ATTR);
   }
   for (const el of root.querySelectorAll('[data-event-if]')) {
     const holds = CONDITIONS[el.getAttribute('data-event-if')];

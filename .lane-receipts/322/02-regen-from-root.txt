@@ -1,0 +1,14 @@
+<worktree>
+wrote deck-assets.mjs — deck 4e2d6f894033 | js 108514 | css 71413
+wrote edit3-assets.mjs — body 7345 | css 40184 + 38051 | edit3.js bundle 572313 | borrowed editor-core.js:221417 obsidian-shim.js:10340 web-host.js:1008 family.css:69951 modaltile.css:13138 Sortable.min.js:45092 | fonts 158640 base64 chars | sources 88
+gen exit=0
+ packages/cardtile/serve/edit3-assets.mjs     | 2 +-
+ packages/cardtile/serve/gen-edit3-assets.mjs | 7 +++++--
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+diff --git a/packages/cardtile/serve/edit3-assets.mjs b/packages/cardtile/serve/edit3-assets.mjs
+index 7557e01..10788d1 100644
+--- a/packages/cardtile/serve/edit3-assets.mjs
++++ b/packages/cardtile/serve/edit3-assets.mjs
+@@ -15 +15 @@ export const FONT_FILES = {"fonts/NunitoVariable-latin.woff2":{"hash":"ba344451e
+-export const SOURCE_STAMP = "28e77d8d9ce7ba76";
++export const SOURCE_STAMP = "4b05e452efd77cdb";

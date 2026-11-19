@@ -17,14 +17,22 @@
 // of the controls) is the host's markup.
 import { mapsUrl, mapHref } from '../shared/map-link.mjs';
 import { addToCalendarUrl } from '../events/events-core.mjs';
-import { icsUrl, opensIcs } from '../events/ics-file.mjs';
+import { icsUrl } from '../events/ics-file.mjs';
+import { urlLocaleOfTag } from '../../sitetile/locale-tags.mjs';
 
 /**
  * Which feed a root reads on a page in `language`: `data-src-<language>` when the root has one for
  * the page's language, else `data-src`; '' when none applies. The page's tag is tried whole
- * (`zh-TW` → `data-src-zh-tw`), then as language and region without what sits between them
- * (`zh-Hant-TW` → `data-src-zh-tw`, what a host naturally writes), then shortened from the end one
- * subtag at a time down to the language alone (`data-src-zh-hant`, `data-src-zh`).
+ * (`zh-TW` → `data-src-zh-tw`, `zh-Hant` → `data-src-zh-hant`), then as the site's own spelling of
+ * the locale that tag is for (`zh-Hant` → `data-src-zh-tw`, `zh-Hans` → `data-src-zh-cn`,
+ * `ja` → `data-src-ja-jp` — read from the locale table, see urlLocaleOfTag), then as language and
+ * region without what sits between them (`zh-Hant-TW` → `data-src-zh-tw`, what a host naturally
+ * writes), then shortened from the end one subtag at a time down to the language alone
+ * (`data-src-zh-hant`, `data-src-zh`).
+ *
+ * Why the locale spelling: a site with Lingo writes `<html lang="zh-Hant">` on its zh-TW edition (the
+ * standards tag) while the same locale is `zh-TW` in its `locales:` and `/zh-tw/` in its paths, and
+ * an author keys the feed by the spelling they see. Reading only the tag left that page unfed.
  *
  * Why: one calendar is in one language. A site in several puts ONE countdown in the chrome every
  * page shares, and each language's pages are to show that language's calendar. A root that names
@@ -36,6 +44,8 @@ export function feedSource(root, language) {
   if (/^[a-z]{2,3}(-[a-z0-9]{1,8})*$/.test(tag)) {
     const parts = tag.split('-');
     tries.push(tag);
+    const locale = urlLocaleOfTag(tag);
+    if (locale) tries.push(locale);
     const region = parts.slice(1).find((p) => /^([a-z]{2}|\d{3})$/.test(p));
     if (region) tries.push(`${parts[0]}-${region}`);
     for (let n = parts.length - 1; n >= 1; n--) tries.push(parts.slice(0, n).join('-'));
@@ -102,22 +112,26 @@ export function locationText(event) {
  *   location → the location itself when it is a URL; a map for a place (the platform's own, by
  *              `userAgent` — the same link the events coral gives a place).
  *   url      → the event's own URL property.
- *   add      → an add-to-calendar link for this event (the events coral's). In Safari on an Apple
- *              device (opensIcs), when the feed's address is known (`feedSrc`) and the event has a
- *              uid, the event as an .ics file from that feed instead: the device's own calendar
- *              opens it, where the Google link would ask for a Google sign-in first.
+ *   add      → the Google Calendar link for this event (the events coral's). Always that one: the
+ *              same event as a file is `eventFile`, and which of the two the visitor takes is
+ *              theirs to choose (shared/add-menu.mjs), never guessed from the device.
  */
-export function eventHref(event, which, userAgent, feedSrc) {
+export function eventHref(event, which, userAgent) {
   if (!event) return '';
   if (which === 'url') return httpUrl(event.url);
-  if (which === 'add') {
-    const file = opensIcs(userAgent) ? icsUrl(feedSrc, event.uid) : '';
-    return file || addToCalendarUrl(calendarEntry(event), { descriptionIsText: true });   // the feed's description is already text
-  }
+  if (which === 'add') return addToCalendarUrl(calendarEntry(event), { descriptionIsText: true });   // the feed's description is already text
   if (which !== 'location') return '';
   const kind = locationKind(event);
   if (kind === 'url') return httpUrl(event.location);
   return kind === 'place' ? mapHref(String(event.location).trim(), userAgent) : '';
+}
+/**
+ * The event as an .ics file: the feed's own address with the event's uid (the events worker answers
+ * it). '' when the feed does not serve files (`feedSrc` empty), is not an absolute http(s) address,
+ * or the event has no uid.
+ */
+export function eventFile(event, feedSrc) {
+  return event && feedSrc ? icsUrl(feedSrc, event.uid) : '';
 }
 export { mapsUrl };
 
