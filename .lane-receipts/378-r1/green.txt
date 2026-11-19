@@ -1,0 +1,208 @@
+TAP version 13
+# Subtest: 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+ok 1 - 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+  ---
+  duration_ms: 0.843556
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+ok 2 - 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+  ---
+  duration_ms: 16.955054
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot answers every boundary row as without it
+ok 3 - 378-1 split: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 14.79987
+  type: 'test'
+  ...
+# Subtest: 378-1 open: the service host with a trailing dot answers every boundary row as without it
+ok 4 - 378-1 open: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 5.440962
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the people's host with a trailing dot answers no service endpoint
+ok 5 - 378-1 split: the people's host with a trailing dot answers no service endpoint
+  ---
+  duration_ms: 1.311899
+  type: 'test'
+  ...
+# Subtest: 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+ok 6 - 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+  ---
+  duration_ms: 1.552627
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+ok 7 - 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+  ---
+  duration_ms: 1.302778
+  type: 'test'
+  ...
+# Subtest: 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+ok 8 - 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+  ---
+  duration_ms: 0.524525
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+ok 9 - CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+  ---
+  duration_ms: 0.289338
+  type: 'test'
+  ...
+# Subtest: 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+ok 10 - 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+  ---
+  duration_ms: 2.35852
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+ok 11 - 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+  ---
+  duration_ms: 2.952767
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+ok 12 - CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+  ---
+  duration_ms: 3.931377
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+ok 13 - 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+  ---
+  duration_ms: 0.568157
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+ok 14 - CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+  ---
+  duration_ms: 0.224536
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the service stand-in parks for its own Origin, dotted or not, and for no other
+ok 15 - 378-2 r1 split: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 3.187725
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 16 - 378-2 r1 split: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 1.563016
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+ok 17 - 378-2 r1 split: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.34386
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 18 - 378-2 r1 split: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.172185
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+ok 19 - 378-2 r1 split:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.171705
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 20 - 378-2 r1 split:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 0.916787
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+ok 21 - 378-2 r1 split:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.408592
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 22 - 378-2 r1 split:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 0.873116
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the service stand-in parks for its own Origin, dotted or not, and for no other
+ok 23 - 378-2 r1 open: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.183106
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 24 - 378-2 r1 open: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 1.481375
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+ok 25 - 378-2 r1 open: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.119463
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 26 - 378-2 r1 open: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 0.757603
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+ok 27 - 378-2 r1 open:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.224086
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 28 - 378-2 r1 open:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 0.892287
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+ok 29 - 378-2 r1 open:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.165745
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 30 - 378-2 r1 open:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.01544
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the people's stand-in report form takes its own Origin, dotted or not, and no other
+ok 31 - 378-2 r1 split: the people's stand-in report form takes its own Origin, dotted or not, and no other
+  ---
+  duration_ms: 2.874175
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the people's stand-in report form takes its own Origin, dotted or not, and no other
+ok 32 - 378-2 r1 split:8443: the people's stand-in report form takes its own Origin, dotted or not, and no other
+  ---
+  duration_ms: 2.636068
+  type: 'test'
+  ...
+# Subtest: 378-2 r1: the adapter carries the verdict — same origin becomes the re-addressed origin, another one cannot equal it
+ok 33 - 378-2 r1: the adapter carries the verdict — same origin becomes the re-addressed origin, another one cannot equal it
+  ---
+  duration_ms: 0.68832
+  type: 'test'
+  ...
+1..33
+# tests 33
+# suites 0
+# pass 33
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 176.703924
