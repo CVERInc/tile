@@ -58,8 +58,11 @@
 //                page alone. Anything but an array of strings throws.
 // Both sides are compared through one normaliser (pageKey below), so every spelling the site worker
 // and the static server answer as one page is one page here: the directory spelling, an explicit
-// `/index.html`, an encoded separator, a run of slashes, a dot segment, any escape. A page path whose
-// escape does not decode is withheld. Case is kept: a case-different path is another page (see
+// `/index.html`, an encoded separator, a run of slashes, a dot segment, any escape. pageKey only
+// MATCHES: an entry's `path` is the page's own path as the caller passed it (the sitemap's spelling,
+// canonicalPath's directory form), never the decoded key, so `/q%3Fa/` stays `/q%3Fa/` and is not
+// turned into `/q?a/`, which a browser would ask for as `/q`. A page path whose escape does not
+// decode is withheld. Case is kept: a case-different path is another page (see
 // pageKey). A withheld page is in neither `entries` nor `excluded`: it is not the owner's to tick.
 // When one spelling of a page is withheld, every spelling of it is. The menu still walks through a
 // withheld item to its children.
@@ -119,15 +122,38 @@ function pageKey(href) {
   return '/' + segs.join('/');
 }
 
-// spinePath: a nav href (or a page path) → the page path it names, spelled the way the sitemap
-// spells a page (canonicalPath in sitetile/astro/src/lib/sitemap.mjs: directory form with a trailing
-// slash, unless the last segment is a file), from its pageKey. '' when it names no page of this site
-// or does not decode. `/about#team`, `/about`, `/about//` and `/about/index.html` are all `/about/`.
+// ownPath: a page's path as the caller passed it → the spelling its entry carries: the sitemap's
+// (canonicalPath in sitetile/astro/src/lib/sitemap.mjs: directory form with a trailing slash, unless
+// the last segment is a file). Nothing is decoded or resolved here; that is pageKey's job, and only
+// for matching.
+function ownPath(path) {
+  const s = String(path).trim();
+  if (s === HOME || s.endsWith('/') || /\.[a-z0-9]{1,8}$/i.test(s)) return s;
+  return s + '/';
+}
+
+// spinePath: a nav href → the page path it names, spelled the way the sitemap spells a page (ownPath's
+// directory form). '' when it names no page of this site or does not decode (pageKey). The path's
+// shape is resolved (query and fragment dropped, `\` is `/`, slash runs, dot segments, a last
+// `index.html`), so `/about#team`, `/about`, `/about//` and `/about/index.html` are all `/about/`.
+// Escapes are read the way decodeURI reads them, `%25` included: one that would decode to a reserved
+// character (`%3F`, `%23`, `%2F`, `%26`, `%2B`, ...) or to `%` stays escaped, so the spelling still
+// names the same page (`/q%3Fa` is `/q%3Fa/`, not `/q?a/`); `/caf%C3%A9` is `/café/`. The book itself
+// does not spell entries with this: an entry is the page's own path (ownPath).
 function spinePath(href) {
-  const key = pageKey(href);
-  if (!key) return '';
-  if (key === HOME || /\.[a-z0-9]{1,8}$/i.test(key)) return key;
-  return key + '/';
+  if (!pageKey(href)) return '';
+  const s = String(href).trim().replace(/\\/g, '/').replace(/[?#].*$/, '').replace(/\/{2,}/g, '/');
+  const segs = [];
+  for (const raw of s.split('/').slice(1)) {
+    let seg;
+    try { seg = decodeURI(raw.replace(/%25/gi, '%2525')); } catch { return ''; }
+    if (seg === '.') continue;
+    if (seg === '..') { segs.pop(); continue; }
+    segs.push(seg);
+  }
+  if (segs[segs.length - 1] === '') segs.pop();
+  if (segs[segs.length - 1] === 'index.html') segs.pop();
+  return ownPath('/' + segs.join('/'));
 }
 
 // keysOf: a path the build wrote as TEXT (a verdict path, a redirect `from`) → the page keys it can
@@ -179,24 +205,24 @@ function redirectMatcher(rules) {
   return (key) => exact.has(key) || patterns.some((re) => re.test(key) || (key !== HOME && re.test(key + '/')));
 }
 
-// publicPages: pages → Map(path → page) of the pages a book may hold: one entry per page (its first
-// spelling wins), none of them withheld (see WITHHELD above). Input order is kept.
+// publicPages: pages → Map(page key → { path, meta, tags }) of the pages a book may hold: one entry
+// per page (its first spelling wins, and `path` is that spelling: ownPath), none of them withheld
+// (see WITHHELD above). Input order is kept.
 function publicPages(pages, { gated, redirected = [] }) {
   const gatedSet = gatedKeys(gated);
   const shadowed = redirectMatcher(redirected);
-  const byPath = new Map();
+  const byKey = new Map();
   const withheld = new Set();
   for (const pg of pages || []) {
     // '' names no page of this site; null does not decode and is withheld (fail closed): neither
     // enters the book.
     const key = pageKey(pg && pg.path);
     if (!key) continue;
-    const path = spinePath(pg.path);
-    if (gatedSet.has(key) || shadowed(key)) { withheld.add(path); continue; }
-    if (!byPath.has(path)) byPath.set(path, { path, meta: pg.meta || {}, tags: pg.tags });
+    if (gatedSet.has(key) || shadowed(key)) { withheld.add(key); continue; }
+    if (!byKey.has(key)) byKey.set(key, { path: ownPath(pg.path), meta: pg.meta || {}, tags: pg.tags });
   }
-  for (const path of withheld) byPath.delete(path);
-  return byPath;
+  for (const key of withheld) byKey.delete(key);
+  return byKey;
 }
 
 const titleOf = (meta) => (meta.title == null ? '' : String(meta.title));
@@ -204,15 +230,17 @@ const titleOf = (meta) => (meta.title == null ? '' : String(meta.title));
 // buildSiteSpine: pages + nav + what is withheld (+ this book's home path) → the whole-site spine.
 // Pure. `gated` is required (see WITHHELD).
 function buildSiteSpine(pages, nav, { home = HOME, gated, redirected } = {}) {
-  const byPath = new Map([...publicPages(pages, { gated, redirected })].map(([p, pg]) => [p, pg.meta]));
+  // keyed by pageKey: a menu href, the home path and a page meet there; an entry is spelled with the
+  // page's own path.
+  const book = publicPages(pages, { gated, redirected });
 
   const entries = [];
   const excluded = [];
   const placed = new Set();
-  const place = (path, depth, navLabel) => {
-    if (!byPath.has(path) || placed.has(path)) return;
-    placed.add(path);
-    const meta = byPath.get(path);
+  const place = (key, depth, navLabel) => {
+    if (!book.has(key) || placed.has(key)) return;
+    placed.add(key);
+    const { path, meta } = book.get(key);
     if (!bookFlag(meta[OPT_OUT_KEY])) { excluded.push(path); return; }
     entries.push({ path, depth, navLabel, title: titleOf(meta) });
   };
@@ -221,27 +249,31 @@ function buildSiteSpine(pages, nav, { home = HOME, gated, redirected } = {}) {
   // the menu hangs from, not one of its items. It keeps the label of the first menu item that
   // names it, and that item's later place in the walk is skipped (place() places a path once).
   // An unchecked home page goes to `excluded` here, so nothing else is pulled to the front.
-  const homePath = spinePath(home);
+  const homeKey = pageKey(home);
   let homeLabel = '';
   (function findHome(items) {
+    if (!homeKey) return false;
     for (const it of items || []) {
       if (!it) continue;
-      if (spinePath(it.href) === homePath) { homeLabel = it.label == null ? '' : String(it.label); return true; }
+      if (pageKey(it.href) === homeKey) { homeLabel = it.label == null ? '' : String(it.label); return true; }
       if (findHome(it.children)) return true;
     }
     return false;
   })(nav);
-  if (homePath) place(homePath, 0, homeLabel);
+  if (homeKey) place(homeKey, 0, homeLabel);
 
   (function walk(items, depth) {
     for (const it of items || []) {
       if (!it) continue;
-      place(spinePath(it.href), depth, it.label == null ? '' : String(it.label));
+      place(pageKey(it.href), depth, it.label == null ? '' : String(it.label));
       walk(it.children, depth + 1);
     }
   })(nav, 0);
 
-  [...byPath.keys()].filter((p) => !placed.has(p)).sort().forEach((p) => place(p, 0, ''));
+  // the rest, sorted by the spelling the entry carries
+  [...book].filter(([key]) => !placed.has(key))
+    .sort(([, a], [, b]) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .forEach(([key]) => place(key, 0, ''));
   return { entries, excluded };
 }
 

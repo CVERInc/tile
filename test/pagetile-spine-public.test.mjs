@@ -168,6 +168,14 @@ eq(() => splitFrontmatter(FR_POSTS['/s/blog/fr/paid.md']).meta.visibility, undef
   eq(() => sitemapPages(POSTS).some((p) => p.path === '/devlog/staff'), true, '4: control — the full corpus does hold it, so the caller must pass the listed one');
   eq(() => contentUrls(CONTENT, META, isSiteFile).includes('/notes/'), false, '4: an unclaimed content file (a draft) is not a page (isSiteFile)');
   eq(() => contentUrls(CONTENT, META).includes('/notes/'), true, '4: control — without isSiteFile it is listed, so the caller must pass it');
+  // The spine cannot tell an unlisted post from a listed one (its header: the caller owns this edge),
+  // so this is the caller contract, pinned rather than guarded: hand it every post and the unlisted
+  // one is in both books.
+  const allPages = sitemapPages(POSTS).filter((p) => !p.path.startsWith('/fr/'));
+  eq(() => [paths(buildSiteSpine(defaultPages(), NAV, OPTS)).includes('/devlog/staff/'), paths(buildSiteSpine(allPages, NAV, OPTS)).includes('/devlog/staff/')], [false, true],
+    '4: caller contract — a site book built from every post (not listedPosts) holds the unlisted post');
+  eq(() => [LISTED, POSTS].map((c) => paths(buildTagSpine(c.map((p) => postEntry(p, META)), 'essays', OPTS)).includes('/devlog/staff/')), [false, true],
+    '4: caller contract — a tag book built from every post (not listedPosts) holds the unlisted post');
 }
 
 // ── 5. a tag book ────────────────────────────────────────────────────────────────────────────────
@@ -236,7 +244,8 @@ eq(() => splitFrontmatter(FR_POSTS['/s/blog/fr/paid.md']).meta.visibility, undef
   eq(() => [one('/devlog/paid/', ['/devlog/paid/index.html']), one('/devlog/paid/', ['/devlog//paid//']), one('/devlog/paid/', ['/devlog/x/../paid'])], [[], [], []],
     '6 P2-1: the verdict\'s side goes through the same normaliser');
   // controls: the gate is one exact page, as the worker's is
-  eq(() => [one('/devlog/paidx/', G), one('/devlog/paid/more/', G), one('/devlog%252Fpaid/', G)], [['/devlog/paidx/'], ['/devlog/paid/more/'], ['/devlog%2Fpaid/']],
+  // (the double-escaped page keeps its own spelling: `/devlog%2Fpaid/` would be the gated page's address)
+  eq(() => [one('/devlog/paidx/', G), one('/devlog/paid/more/', G), one('/devlog%252Fpaid/', G)], [['/devlog/paidx/'], ['/devlog/paid/more/'], ['/devlog%252Fpaid/']],
     '6 P2-1: a neighbour, a child and a double-escaped separator are other pages (controls)');
   // case: the worker compares exactly and the renderer writes one case-sensitive directory per route,
   // so a case-different path is another page — kept, not folded.
@@ -299,6 +308,43 @@ eq(() => splitFrontmatter(FR_POSTS['/s/blog/fr/paid.md']).meta.visibility, undef
   eq(() => r(['/a'], '/a/index.html'), [], '6 P2-5: a /a rule shadows the page spelled /a/index.html');
   eq(() => [r(['/old//'], '/old/'), r(['/x/../old'], '/old/'), r(['/q%26a'], '/q&a/')], [[], [], []], '6 P2-5: slash runs, dot segments and escapes in a `from`');
   eq(() => r(['/Old'], '/old/'), ['/old/'], '6 P2-5: case is kept in a `from` too');
+}
+
+// ── 7. an entry is spelled the way the sitemap spells its page; the normaliser only matches ──────
+// (PR 389 review r3: an entry built from the decoded key turned `/q%3Fa/` into `/q?a/`, which a
+// browser asks for as `/q`. The entry carries the page's own canonicalPath; pageKey decides which
+// page a path, an href, a verdict path or a redirect names, and nothing else.)
+{
+  const SPELLED = [
+    ['an escaped ?', '/q%3Fa/'],
+    ['an escaped #', '/h%23a/'],
+    ['an escaped /', '/sl%2Fa/'],
+    ['a CJK path as the sitemap writes it from a file name (contentUrls)', '/文章/'],
+    ['a CJK path as the URL parser escapes it', new URL('http://x/文章/').pathname],
+    ['an escaped +', '/devlog/c%2B%2B/'],
+    ['a double-escaped separator', '/devlog%252Fpaid/'],
+  ];
+  const site = (path, nav = []) => buildSiteSpine([{ path, meta: {} }], nav, { gated: [] }).entries;
+  const tag = (path) => paths(buildTagSpine([{ path, meta: {}, tags: ['essays'] }], 'essays', { gated: [] }));
+  const asked = (p) => new URL(p, 'http://x').pathname; // what a browser requests for an href
+  const one = (path, gated) => paths(buildSiteSpine([{ path, meta: {} }], [], { gated }));
+  for (const [name, p] of SPELLED) {
+    eq(() => site(p).map((e) => e.path), [p], `7: ${name} (${p}) keeps its sitemap spelling in the site book`);
+    eq(() => tag(p), [p], `7: ${name} (${p}) keeps its sitemap spelling in a tag book`);
+    eq(() => site(p).map((e) => asked(e.path)), [asked(p)], `7: ${name}: a browser following the entry asks for the page itself`);
+  }
+  eq(() => site('/q%3Fa'), [{ path: '/q%3Fa/', depth: 0, navLabel: '', title: '' }], '7: a page passed without its slash gets the sitemap\'s directory form (canonicalPath)');
+  eq(() => [canonicalPath('/q%3Fa'), canonicalPath('/文章')], ['/q%3Fa/', '/文章/'], '7: control — canonicalPath itself decodes nothing');
+  // a menu item in another spelling still names the page, and the entry is the page's spelling
+  eq(() => site('/q%3Fa/', navMenuOf('Q /q%3fa')), [{ path: '/q%3Fa/', depth: 0, navLabel: 'Q', title: '' }], '7: a menu href in another escape case names the page; the entry keeps the page\'s spelling');
+  eq(() => site('/文章/', navMenuOf('Posts /%E6%96%87%E7%AB%A0')), [{ path: '/文章/', depth: 0, navLabel: 'Posts', title: '' }], '7: an escaped CJK menu href names the raw-spelled page');
+  eq(() => buildSiteSpine([{ path: '/%E6%96%87/', meta: {} }], [], { home: '/文/', gated: [] }).entries.map((e) => e.path), ['/%E6%96%87/'], '7: a home passed in another spelling opens the book with the page\'s spelling');
+  // matching is unchanged: each spelling is still withheld by a verdict path naming its page
+  eq(() => [one('/q%3Fa/', ['/q%3Fa']), one('/h%23a/', ['/h%23a']), one('/sl%2Fa/', ['/sl/a']), one(new URL('http://x/文章/').pathname, ['/文章'])], [[], [], [], []],
+    '7: the same pages are still withheld when the verdict names them');
+  // spinePath (the exported href → spelling helper) keeps reserved escapes too
+  eq(() => ['/q%3Fa', '/h%23a', '/sl%2Fa', '/devlog%252Fpaid', '/caf%C3%A9', '/devlog//paid/index.html'].map(spine.spinePath),
+    ['/q%3Fa/', '/h%23a/', '/sl%2Fa/', '/devlog%252Fpaid/', '/café/', '/devlog/paid/'], '7: spinePath keeps escaped reserved characters and %25 (decodeURI\'s reading), and still resolves the path\'s shape');
 }
 
 console.log(`\npagetile spine (public): ${pass} passed, ${fail} failed`);
