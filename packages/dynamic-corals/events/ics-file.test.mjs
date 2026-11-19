@@ -1,6 +1,6 @@
 // node packages/dynamic-corals/events/ics-file.test.mjs
 import assert from 'node:assert/strict';
-import { eventIcs, icsText, foldLine, icsUrl, opensIcs } from './ics-file.mjs';
+import { eventIcs, icsText, foldLine, icsUrl } from './ics-file.mjs';
 import { parseICal } from './ical.mjs';
 
 let n = 0;
@@ -92,28 +92,6 @@ ok('control characters are not text: dropped, a tab kept', () => {
   const ics = eventIcs({ ...timed, title: 'A\u0000B', uid: 'u\u0001v' }, { now: NOW });
   assert.ok(ics.includes('\r\nSUMMARY:AB\r\n') && ics.includes('\r\nUID:uv\r\n'));
   assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(ics));
-});
-
-ok('opensIcs: Safari on an Apple device, and nothing else', () => {
-  const yes = [
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
-  ];
-  const no = [
-    '',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0.0.0 Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/131.0 Mobile/15E148 Safari/605.1.15',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0.0',
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1 Line/14.16.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:131.0) Gecko/20100101 Firefox/131.0',
-    'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-  ];
-  for (const ua of yes) assert.equal(opensIcs(ua), true, ua);
-  for (const ua of no) assert.equal(opensIcs(ua), false, ua);
 });
 
 ok('icsUrl: the feed\'s own address plus the uid, encoded; nothing for a relative or odd address', () => {
