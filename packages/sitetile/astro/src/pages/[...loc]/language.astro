@@ -12,7 +12,7 @@
 //   • the suggestion banner is suppressed here (SiteLayout's localeBanner.excludePath = '/language').
 import SiteLayout from '../../layouts/SiteLayout.astro';
 import { localeEditions, editionMeta } from '../../lib/locale-editions.mjs';
-import { toUrlLocale, label, languageCopy, rootLangMismatch, localesSourceOf } from '../../packages/lingo/locale.mjs';
+import { toUrlLocale, toBcp47, label, languageCopy, rootLangMismatch, localesSourceOf } from '../../packages/lingo/locale.mjs';
 // As TEXT, for SiteLayout to place ahead of the site's theme. A plain `import '….css'` arrives
 // through Astro's own <style>, after the theme — see `routeCss` in SiteLayout.
 import languagePageCss from '../../packages/lingo/language-page.css?raw';
@@ -69,6 +69,9 @@ const rows = locales.map((L) => {
   const home = homed.includes(L);
   return {
     url,
+    // hreflang is the BCP-47 tag, as SiteLayout writes it for this locale's <head> alternates
+    // (zh-TW → zh-Hant); `url` stays the path form, which data-locale and the script below need.
+    tag: toBcp47(L),
     name: label(L),
     href: home ? (L === defaultLocale ? '/' : `/${url}/`) : undefined,
     home,
@@ -93,7 +96,7 @@ const twinMark = recordListTwin({
           the list's own `display: block` on each row — and any theme's display rule — beats `hidden`. */}
       {rows.map((r) => (
         <li hidden={!r.home} style={r.home ? undefined : 'display:none'}>
-          <a href={r.href} hreflang={r.url} data-language-link data-locale={r.url}
+          <a href={r.href} hreflang={r.tag} data-language-link data-locale={r.url}
              aria-current={r.current ? 'true' : undefined} data-no-home={r.home ? undefined : ''}>
             <span class="rf-lang-name">{r.name}</span>
             <span class="rf-lang-action">
