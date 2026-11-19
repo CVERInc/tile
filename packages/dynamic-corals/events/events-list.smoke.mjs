@@ -185,7 +185,7 @@ for (const [device, userAgent, width] of [['a desktop', DESKTOP, 1280], ['an iPh
     out.modal = await p.evaluate(async () => {
       const d = document.createElement('dialog'); const a = document.createElement('a'); a.href = 'https://calendar.google.com/x'; a.setAttribute('data-dc-add-file', 'https://feed.example/?ics=1'); a.textContent = 'door'; d.append(a); document.body.append(d); d.showModal(); a.click();
       const m = document.querySelector('.dc-add-menu'); const r = { open: m.matches(':popover-open'), inDialog: m.parentNode === d }; m.hidePopover(); d.close(); d.remove(); return r; });
-    out.pages = ctx.pages().length; out.url = p.url().split('#')[0];   // the hostile door above is followed as the plain link it is: a fragment on this page out.left = await p.evaluate(() => window.__left === true);
+    out.pages = ctx.pages().length; out.url = p.url().split('#')[0]; out.left = await p.evaluate(() => window.__left === true);   // (the hostile door above is followed as the plain link it is: a fragment on this page)
     out.style = await p.evaluate(() => document.querySelectorAll('style[data-dc="add-menu"]').length);
     return out;
   } });
