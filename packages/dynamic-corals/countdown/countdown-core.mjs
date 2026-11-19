@@ -48,8 +48,9 @@
 // root exactly as authored. A root WITHOUT `data-src` never touches the network.
 //
 // One calendar is in one language, so a root may name a feed per language: `data-src-<language>`
-// (`data-src-zh-tw`, `data-src-en`) is used on a page in that language (`<html lang>`), `data-src`
-// on every other. A root that names feeds only for some languages is not fed on the rest.
+// (`data-src-zh-tw`, `data-src-en`) is used on a page in that language (`<html lang>`, spelled as
+// the tag or as the site's locale code — `zh-Hant` reads `data-src-zh-tw` too; see feedSource),
+// `data-src` on every other. A root that names feeds only for some languages is not fed on the rest.
 //
 // Every root, typed or fed, carries `data-under-a-day` while less than a day is left — the hook a
 // host uses to trade its days for its seconds.

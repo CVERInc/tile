@@ -18,13 +18,21 @@
 import { mapsUrl, mapHref } from '../shared/map-link.mjs';
 import { addToCalendarUrl } from '../events/events-core.mjs';
 import { icsUrl } from '../events/ics-file.mjs';
+import { urlLocaleOfTag } from '../../sitetile/locale-tags.mjs';
 
 /**
  * Which feed a root reads on a page in `language`: `data-src-<language>` when the root has one for
  * the page's language, else `data-src`; '' when none applies. The page's tag is tried whole
- * (`zh-TW` → `data-src-zh-tw`), then as language and region without what sits between them
- * (`zh-Hant-TW` → `data-src-zh-tw`, what a host naturally writes), then shortened from the end one
- * subtag at a time down to the language alone (`data-src-zh-hant`, `data-src-zh`).
+ * (`zh-TW` → `data-src-zh-tw`, `zh-Hant` → `data-src-zh-hant`), then as the site's own spelling of
+ * the locale that tag is for (`zh-Hant` → `data-src-zh-tw`, `zh-Hans` → `data-src-zh-cn`,
+ * `ja` → `data-src-ja-jp` — read from the locale table, see urlLocaleOfTag), then as language and
+ * region without what sits between them (`zh-Hant-TW` → `data-src-zh-tw`, what a host naturally
+ * writes), then shortened from the end one subtag at a time down to the language alone
+ * (`data-src-zh-hant`, `data-src-zh`).
+ *
+ * Why the locale spelling: a site with Lingo writes `<html lang="zh-Hant">` on its zh-TW edition (the
+ * standards tag) while the same locale is `zh-TW` in its `locales:` and `/zh-tw/` in its paths, and
+ * an author keys the feed by the spelling they see. Reading only the tag left that page unfed.
  *
  * Why: one calendar is in one language. A site in several puts ONE countdown in the chrome every
  * page shares, and each language's pages are to show that language's calendar. A root that names
@@ -36,6 +44,8 @@ export function feedSource(root, language) {
   if (/^[a-z]{2,3}(-[a-z0-9]{1,8})*$/.test(tag)) {
     const parts = tag.split('-');
     tries.push(tag);
+    const locale = urlLocaleOfTag(tag);
+    if (locale) tries.push(locale);
     const region = parts.slice(1).find((p) => /^([a-z]{2}|\d{3})$/.test(p));
     if (region) tries.push(`${parts[0]}-${region}`);
     for (let n = parts.length - 1; n >= 1; n--) tries.push(parts.slice(0, n).join('-'));

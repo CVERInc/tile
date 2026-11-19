@@ -10,8 +10,10 @@
  *              abbreviation is right). This is what a live Lingo site's <head> emits.
  * Never ABBREVIATE the data/URL code (no bare `zh`/`en`).
  */
-export const LINGO_LOCALES = ['en-US', 'ja-JP', 'zh-TW', 'ko-KR'];
-const LINGO_BCP47 = { 'en-US': 'en', 'ja-JP': 'ja', 'zh-TW': 'zh-Hant', 'ko-KR': 'ko' };
+// The table itself (editions and their tags) is locale-tags.mjs: a leaf a browser bundle can import.
+import { LINGO_LOCALES, SIMPLIFIED, EDITION_TAGS, urlLocaleOfTag } from './locale-tags.mjs';
+export { LINGO_LOCALES, urlLocaleOfTag };
+const LINGO_BCP47 = Object.fromEntries(LINGO_LOCALES.map((l) => [l, EDITION_TAGS[l]]));
 export const LINGO_LABELS = {
   'en-US': 'English', 'ja-JP': '日本語', 'zh-TW': '繁體中文', 'ko-KR': '한국어',
 };
@@ -50,7 +52,6 @@ const _canon = (raw) => {
 // else Chinese (zh-TW, zh-Hant*, zh-HK, zh-MO, bare zh) stays zh-TW. _canon is untouched on
 // purpose — uiCopy/dateHeading still key their chrome copy by it, so a Simplified spelling keeps
 // reading the zh-TW row — and _ident is what the identity-bearing helpers below ask instead.
-const SIMPLIFIED = 'zh-CN';
 const _isSimplified = (raw) => {
   const p = String(raw || '').trim().toLowerCase().split('-');
   return p[0] === 'zh' && !p.includes('hant') && (p.includes('hans') || p.includes('cn') || p.includes('sg'));
@@ -59,7 +60,7 @@ const _ident = (raw) => (_isSimplified(raw) ? SIMPLIFIED : _canon(raw));
 /** mixed-case data code → lowercase URL form (zh-TW → zh-tw). */
 export function toUrlLocale(locale) { return String(locale).toLowerCase(); }
 /** any locale-ish string → BCP-47 attr tag (zh-TW / zh-tw → zh-Hant); unknown passes through. */
-export function toBcp47(code) { const f = _ident(code); return f ? (f === SIMPLIFIED ? 'zh-Hans' : LINGO_BCP47[f]) : String(code); }
+export function toBcp47(code) { const f = _ident(code); return f ? EDITION_TAGS[f] : String(code); }
 /** human label for the locale picker. */
 export function label(locale) { const f = _ident(locale); return f ? (f === SIMPLIFIED ? '简体中文' : LINGO_LABELS[f]) : String(locale); }
 
