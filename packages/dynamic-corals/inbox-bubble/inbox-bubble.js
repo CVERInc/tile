@@ -308,9 +308,10 @@ const DOCK_CSS = `
   --dc-dock-margin:max(1rem,16px);--dc-dock-size:44px;--dc-dock-icon:20px;--dc-dock-w:var(--dc-dock-size);--dc-dock-gap:.5rem;
   --dc-dock-radius:50%;--dc-dock-shadow:${DOCK_SHADOW};--dc-dock-vh:100vh;
   --dc-dock-room:calc(var(--dc-dock-vh) - 2 * var(--dc-dock-margin) - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - var(--_dc-reserve,0px));
-  --dc-dock-panel-w:min(22rem,calc(100vw - 2 * var(--dc-dock-margin) - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)))}
+  --dc-dock-panel-max:22rem;
+  --dc-dock-panel-w:min(var(--dc-dock-panel-max),calc(100vw - 2 * var(--dc-dock-margin) - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)))}
 @supports (height:100dvh){:host{--dc-dock-vh:100dvh}}
-@media (min-width:700px){:host{--dc-dock-margin:max(1.25rem,20px);--dc-dock-size:52px;--dc-dock-icon:22px}}
+@media (min-width:700px){:host{--dc-dock-margin:max(1.25rem,20px);--dc-dock-size:52px;--dc-dock-icon:22px;--dc-dock-panel-max:440px}}
 :host([hidden]){display:none!important}
 :host(:not([name="left"])){right:calc(var(--dc-dock-margin) + env(safe-area-inset-right,0px));align-items:flex-end}
 :host([name="left"]){left:calc(var(--dc-dock-margin) + env(safe-area-inset-left,0px));align-items:flex-start}
@@ -3529,17 +3530,21 @@ function styleElement() {
 /* The open panel grows up and to the left from the same corner, so what keeps it on screen is the
    room left of and above that corner, less 1rem and the opposite inset. With no offset and no inset
    both reduce to the old calc(100vw - 2rem) and min(30rem,70vh). dvh after vh: a phone's toolbar. */
-.${PREFIX}-panel{width:min(22rem,calc(100vw - var(--${PREFIX}-right) - 1rem - env(safe-area-inset-left,0px)));
+.${PREFIX}-panel{width:min(var(--_reef-inbox-panel-max,22rem),calc(100vw - var(--${PREFIX}-right) - 1rem - env(safe-area-inset-left,0px)));
   max-height:min(30rem,70vh,calc(100vh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px) - 4rem));
   max-height:min(30rem,70dvh,calc(100dvh - var(--${PREFIX}-bottom) - 1rem - env(safe-area-inset-top,0px) - 4rem));
   display:flex;flex-direction:column;border-radius:.9rem;overflow-x:hidden;overflow-y:auto;
   background:var(--reef-inbox-bg,#fff);color:var(--reef-inbox-fg,#111);
   box-shadow:${DOCK_SHADOW};visibility:visible}
+/* The panel is as wide as the dock's panels are: 22rem, and 440px from 700px wide (the dock's
+   --dc-dock-panel-max; the same breakpoint as the bubble's size). Outside a dock it follows the same
+   rule by itself. */
+@media (min-width:700px){.${PREFIX}-panel{--_reef-inbox-panel-max:440px}}
 /* In the dock the panel sits directly above its own bubble (reef#2790), so the room it may take is the
    dock's visible height less the bubble and every item below it (--_dc-below, counted on open: every
    item is the same size, so counting is exact — no measuring). The 30rem / 70vh caps are unchanged. */
 :host([data-docked]) .${PREFIX}-panel{
-  width:min(22rem,calc(var(--dc-dock-panel-w,100vw) - clamp(0px,var(--_reef-inbox-ox,0px),50vw)));
+  width:min(var(--dc-dock-panel-max,22rem),calc(var(--dc-dock-panel-w,100vw) - clamp(0px,var(--_reef-inbox-ox,0px),50vw)));
   max-height:min(30rem,70vh,calc(var(--dc-dock-room,100vh) - clamp(0px,var(--_reef-inbox-oy,0px),50vh) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,44px) + var(--dc-dock-gap,.5rem))));
   max-height:min(30rem,70dvh,calc(var(--dc-dock-room,100dvh) - clamp(0px,var(--_reef-inbox-oy,0px),50vh) - (var(--_dc-below,0) + 1) * (var(--dc-dock-size,44px) + var(--dc-dock-gap,.5rem))));
   box-shadow:var(--dc-dock-shadow,${DOCK_SHADOW})}

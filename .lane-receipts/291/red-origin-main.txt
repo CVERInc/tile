@@ -1,0 +1,79 @@
+# origin/main 8c1b8d1, test file only, site-core.js untouched
+post-body-marks (tile#291)
+  ✗ `---` between blank lines is a rule, not the text "---"
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>above</p>\n<p>---</p>\n<p>below</p>'
+    - '<p>above</p>\n<hr>\n<p>below</p>'
+                      ^
+    
+  ✗ a longer run of hyphens is a rule too, and a following line starts a new paragraph
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>above</p>\n<p>----- below</p>'
+    - '<p>above</p>\n<hr>\n<p>below</p>'
+                      ^
+    
+  ✗ `---` right after a list ends the list and draws a rule
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<ul class="st-list"><li>a</li></ul>\n<p>---</p>'
+    - '<ul class="st-list"><li>a</li></ul>\n<hr>'
+    
+  ✓ unchanged: `---` directly under a paragraph line stays inside that paragraph
+  ✓ unchanged: `---` indented four spaces stays literal text
+  ✓ unchanged: `***`, `___` and `- - -` render as they did
+  ✓ unchanged: `---` inside a fenced block is code
+  ✗ the rule carries a source span like its neighbours when asked
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p data-src="1-1">a</p>\n<p data-src="3-3">---</p>'
+    - '<p data-src="1-1">a</p>\n<hr data-src="3-3">'
+    
+  ✗ `~~b~~` is struck through, markers kept in the hidden marker span like bold
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>a ~~b~~ c</p>'
+    - '<p>a <span class="st-s"><span class="st-mk">~~</span>b<span class="st-mk">~~</span></span> c</p>'
+    
+  ✗ strike nests with bold and works inside a link label
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>~~<span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span>~~</p>'
+    - '<p><span class="st-s"><span class="st-mk">~~</span><span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span><span class="st-mk">~~</span></span></p>'
+    
+  ✓ unchanged: `~~` inside a code span stays literal
+  ✓ unchanged: `~~` in a link destination is not touched
+  ✓ unchanged: a single `~`, an unclosed `~~` and an empty `~~~~` stay as typed
+  ✓ unchanged: `~~` in an image alt does not put markup inside the attribute
+  ✗ `- [ ]` and `- [x]` are task items with a checkbox, not the text "[ ]"
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<ul class="st-list"><li>[ ] todo</li><li>[x] done</li></ul>'
+    - '<ul class="st-list"><li class="st-task"><input type="checkbox" disabled> todo</li><li class="st-task"><input type="checkbox" disabled checked> done</li></ul>'
+    
+  ✗ an upper-case `[X]` is done too, and inline marks still render in the item
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<ul class="st-list"><li>[X] <span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span></li></ul>'
+    - '<ul class="st-list"><li class="st-task"><input type="checkbox" disabled checked> <span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span></li></ul>'
+    
+  ✗ a nested task item keeps its parent
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<ul class="st-list"><li>a<ul class="st-list"><li>[ ] b</li></ul></li></ul>'
+    - '<ul class="st-list"><li>a<ul class="st-list"><li class="st-task"><input type="checkbox" disabled> b</li></ul></li></ul>'
+    
+  ✓ unchanged: plain items, `[]`, `[ ]x` and a link item render as they did
+
+9 passed, 9 failed
+exit=1

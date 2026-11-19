@@ -80,7 +80,9 @@ corner reach up the screen, and that is what the page asked for.
   When two items ask to open once per visit, the first in the document opens. Nothing ever moves by
   itself: no badge, no pulse. One panel is open at a time across every dock item on the page. Esc
   closes it and returns focus to the bubble; the bubble carries `aria-expanded`/`aria-controls`, and
-  its name comes from `data-label` or the panel's first heading. Hidden in print.
+  its name comes from `data-label` or the panel's first heading — read again whenever the panel's
+  content changes, so a heading a script fills in later (a countdown naming the calendar it reads)
+  names the bubble. Hidden in print.
 - **The panel sits directly above its own bubble**, inside the dock, so the items above it are
   pushed up and come back down when it closes. Its height never exceeds the visible viewport minus
   the bubbles below it; past that it scrolls inside.
@@ -99,7 +101,11 @@ corner reach up the screen, and that is what the page asked for.
 | `--dc-dock-bar-bg` / `--dc-dock-bar-fg` | the installed-app bar's background and ink |
 
 `--dc-dock-margin`, `--dc-dock-size`, `--dc-dock-icon`, `--dc-dock-gap`, `--dc-dock-radius`, `--dc-dock-shadow`,
-`--dc-dock-room` and `--dc-dock-panel-w` are the dock's own, set on the dock for its items to read.
+`--dc-dock-room`, `--dc-dock-panel-max` and `--dc-dock-panel-w` are the dock's own, set on the dock
+for its items to read. A panel is `--dc-dock-panel-max` wide — 22rem, and 440px from 700px wide, the
+same breakpoint as the bubble's size — or as wide as the screen leaves room for
+(`--dc-dock-panel-w`). Every corner coral's panel reads it, so the left and the right open to the
+same width.
 
 ## Shadows
 
@@ -131,6 +137,19 @@ sheet (below). Esc closes it too and returns the focus to the bubble.
 and never over something already open: a panel the visitor opened, one a `#name` opened, the inbox
 opened by `reef-inbox:open`, whichever bundle drew it (read from the `aria-expanded="true"` every
 open item shows).
+
+`data-auto-open-by="<selector>"` makes that once per **content** instead of once per item: the text
+of what the selector finds inside the panel is part of the remembered key, so a panel that is now
+about something else — the next event of a calendar — opens once more in the same visit. The dock
+knows nothing of what the content is; the host names what identifies it.
+
+Such an item cannot decide when it is mounted, so it **waits** for that text — and waiting takes
+nothing from anyone. It does not hold the page's one auto-open turn: an item after it opens as
+usual, and one whose content never comes (or whose selector is not one) simply never opens by
+itself. When its text arrives it opens only if nothing has opened by itself on this page and nothing
+is open; if it does not open, it is not remembered as shown. The visitor outranks the wait: once
+they have opened or closed it themselves it will not move by itself on this page, and what they
+opened is remembered as shown as soon as it can be named.
 
 ## In an installed app — only on the renderer's bar
 
@@ -192,10 +211,11 @@ Author: `official`.
 | `data-dynamic-coral` | enum | yes | — | Selects the dock coral. The element itself becomes the item and moves into the corner dock; a comment marks where it was written. Values: `dock`. |
 | `data-dock` | string | no | `right` | Which corner: right or left (a lowercase name; unknown names sit where right does). Items in one corner stack in document order, the earliest nearest the corner. Ignored where the page's renderer has switched its installed-app bottom bar on (sitetile: an installed app on a narrow screen): there every item joins that bar. |
 | `data-href` | url | no | — | Makes the item a link instead of a panel: http(s), mailto, tel, a #fragment or a same-site path. Any other scheme leaves the bubble without a destination. |
-| `data-label` | string | no | — | The bubble's and the panel's accessible name. Without it, the text of the panel's first heading. |
+| `data-label` | string | no | — | The bubble's and the panel's accessible name. Without it, the text of the panel's first heading. Read again whenever the panel’s content changes, so a heading a script fills in later names the bubble. |
 | `data-color` | string | no | `#111` | The bubble's colour, any CSS colour. |
 | `data-icon-color` | string | no | — | The icon's colour. Without it, black or white, whichever the bubble colour's luminance calls for. |
 | `data-open-on-hash` | string | no | — | A name (letters, digits, _ or -): #name in the URL opens this panel, at load and on a later hashchange. Also the key that remembers this item's once-per-visit auto-open. Pattern: `^[A-Za-z0-9_-]{1,64}$`. |
-| `data-auto-open` | boolean | no | `false` | Set to 1 to open the panel once per visit (this tab, across pages), phones included, and never over another panel that is already open. Remembered by data-open-on-hash, or else by corner and label. When two items ask, the first in the document opens. |
+| `data-auto-open` | boolean | no | `false` | Set to 1 to open the panel once per visit (this tab, across pages), phones included, and never over another panel that is already open. Remembered by data-open-on-hash, or else by corner and label. When two items ask, the first in the document opens. With data-auto-open-by it is once per content instead. |
+| `data-auto-open-by` | string | no | — | A CSS selector into the panel’s own content. With data-auto-open, the once-per-visit memory is kept per CONTENT: the text of what the selector finds is part of the remembered key, so when the panel is about something else (the next event) it opens once more. Until that text exists the item waits. A value that is not a selector never opens by itself. |
 
 <!-- coral metadata: end -->

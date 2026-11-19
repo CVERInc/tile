@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: gen-edit3-assets writes the same bundle from the root, a subdirectory and a parent folder
+not ok 1 - gen-edit3-assets writes the same bundle from the root, a subdirectory and a parent folder
+  ---
+  duration_ms: 933.617938
+  type: 'test'
+  location: '<worktree>/packages/cardtile/serve/gen-edit3-assets-cwd.test.mjs:30:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+    + [
+    +   'packages/cardtile/serve/edit3-assets.mjs differs when generated from /repo/packages/cardtile, first at byte 87843:\n' +
+    +     '  root: "onst EDIT3_JS = \\"// packages/tugtile/board-core.js\\\\nfunction tileRenderText(tile"\n' +
+    +     '  here: "onst EDIT3_JS = \\"// ../tugtile/board-core.js\\\\nfunction tileRenderText(tileLines)"',
+    +   'packages/cardtile/serve/edit3-assets.mjs differs when generated from (parent folder), first at byte 87843:\n' +
+    +     '  root: "onst EDIT3_JS = \\"// packages/tugtile/board-core.js\\\\nfunction tileRenderText(tile"\n' +
+    +     '  here: "onst EDIT3_JS = \\"// repo/packages/tugtile/board-core.js\\\\nfunction tileRenderText"'
+    + ]
+    - []
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual:
+    0: |-
+      packages/cardtile/serve/edit3-assets.mjs differs when generated from /repo/packages/cardtile, first at byte 87843:
+        root: "onst EDIT3_JS = \"// packages/tugtile/board-core.js\\nfunction tileRenderText(tile"
+        here: "onst EDIT3_JS = \"// ../tugtile/board-core.js\\nfunction tileRenderText(tileLines)"
+    1: |-
+      packages/cardtile/serve/edit3-assets.mjs differs when generated from (parent folder), first at byte 87843:
+        root: "onst EDIT3_JS = \"// packages/tugtile/board-core.js\\nfunction tileRenderText(tile"
+        here: "onst EDIT3_JS = \"// repo/packages/tugtile/board-core.js\\nfunction tileRenderText"
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file://<worktree>/packages/cardtile/serve/gen-edit3-assets-cwd.test.mjs:63:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 984.571533
+exit=1

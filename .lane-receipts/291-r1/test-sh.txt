@@ -1,0 +1,739 @@
+→ syntax check
+→ i18n JSON valid
+→ forbidden terms
+  ✓ forbidden-terms: 1102 tracked files, 6 handle hashes, 7 private entries, 0 hits
+→ build (inlines core + i18n; needs python3 + bash)
+→ generated artifacts in sync (committed == fresh build)
+→ built plugins parse
+→ tests
+  · test/archive-cap.test.cjs
+PASS  cap=3 ：5 張只留 3 張
+PASS  cap=3 ：丟最舊 (card 1/2 不在)
+PASS  cap=3 ：留最新 (card 3/4/5 都在)
+PASS  cap=3 ：最新仍在最後
+PASS  cap=3 ：保留 archive 標題
+PASS  cap=-1 ：不刪 (5 張全留)
+PASS  cap=0 ：視同無限 (4 張全留)
+PASS  cap=2 ：剛好 2 張全留
+PASS  cap=2 ：第 3 張進來→剩 2 張
+PASS  cap=2 ：b1 被擠掉
+PASS  多行牌算 1 張：cap=2 留 2 張
+PASS  多行牌算 1 張：first 整張被擠掉(含明細)
+PASS  多行牌算 1 張：third 在
+
+✅ archive-cap all pass (13)
+  · test/archive-home.test.cjs
+PASS  tileRenderText 藏 home token
+PASS  home 藏掉、blockId 留
+PASS  無 token 不受影響
+PASS  home token 在 archive round-trip 後保留
+PASS  round-trip 冪等
+PASS  復原解析出 home 欄名
+PASS  復原 strip 後乾淨（blockId 留）
+
+✅ archive-home all pass (7)
+  · test/archive-restore-e2e.test.cjs
+PASS  token 有寫進 archive
+PASS  簡單欄名：復原回「進行中」(非第一欄)
+PASS  全形空格欄名：復原回「進　行　中」(非第一欄)
+PASS  老家欄消失：退回第一欄
+PASS  backupWhen 解析時間戳
+PASS  listBackups 只挑這塊板的 .md（2 份）
+PASS  listBackups 最新在前
+
+✅ archive-restore-e2e all pass (7)
+  · test/backup-naming.test.cjs
+all 9 backup-naming cases pass
+  · test/blockscan.test.cjs
+PASS plain lines are markdown
+PASS fenced block: the fences and everything between
+PASS tilde fences work too
+PASS a ~~~ does not close a ``` block
+PASS a shorter run does not close a longer fence
+PASS a fence with an info string opens, never closes
+PASS an unclosed fence runs to the end of the document
+PASS frontmatter is the block at the very top
+PASS ... closes frontmatter, as YAML allows
+PASS a --- below the first line is NOT frontmatter
+PASS an unterminated leading --- is a thematic break, not frontmatter
+PASS a fence inside frontmatter belongs to the frontmatter
+PASS indented fences (up to 3 spaces) still open a block
+PASS a single line document
+PASS = underline makes the line above an h1
+PASS - underline makes it an h2, beating the thematic break
+PASS the heading is the whole paragraph, not the last line
+PASS a rule after a blank line is still a rule
+PASS a list item is not setext heading text
+PASS an ATX heading is not setext heading text
+PASS an underline inside a fence is just text
+PASS frontmatter still wins at the top of the file
+
+✅ blockscan all pass (22)
+  · test/book-core.test.cjs
+
+pagetile book-core: 19 passed, 0 failed
+  · test/cjk.test.cjs
+PASS  displayWidth latin-only ("hello"→5)
+PASS  displayWidth CJK ("理牌"→4)
+PASS  displayWidth mixed ("a理b"→4)
+PASS  displayWidth fullwidth punctuation ("：，"→4)
+PASS  displayWidth empty→0
+PASS  displayWidth kana ("あ"→2, "カ"→2)
+PASS  displayWidth hangul ("한"→2)
+PASS  displayWidth ideographic space U+3000 →2
+PASS  displayWidth surrogate-pair CJK ("𠀀"→2, not 4)
+PASS  latin 60 chars = width 60 (not long)
+PASS  latin 61 chars = width 61 (>60, long)
+PASS  29 CJK chars = width 58 (≤60, not long)
+PASS  31 CJK chars = width 62 (>60, would collapse)
+PASS  parseFile tolerates fullwidth checkbox mark (no crash)
+PASS  fullwidth checkbox card parsed
+PASS  fullwidth checkbox mark captured verbatim
+PASS  raw line preserved verbatim (round-trip fidelity)
+PASS  parse→serialize keeps the fullwidth checkbox line
+PASS  round-trip idempotent
+PASS  homeKey collapses fullwidth space U+3000
+PASS  homeKey fullwidth-space == ascii-space twin
+PASS  homeKey trims + collapses mixed whitespace
+
+✅ cjk all pass (22)
+  · test/commonmark.test.cjs
+PASS ATX heading levels
+PASS 7 hashes is not a heading
+PASS hash needs a space
+PASS strong
+PASS emphasis
+PASS intraword _ is literal
+PASS inline code
+PASS bullet list
+PASS star bullet
+PASS ordered list
+PASS ordered with )
+PASS a number alone is not a list
+PASS task list
+PASS checked task
+PASS blockquote
+PASS inline link
+PASS image
+PASS link with empty label
+PASS link with empty target
+PASS brackets without a target
+PASS thematic break -
+PASS thematic break *
+PASS thematic break _
+PASS two dashes are not a rule
+PASS fenced code
+PASS indented code
+PASS indent under prose is not code
+PASS list continuation is not code
+PASS code inside a list needs 4 MORE
+PASS autolink
+PASS email autolink
+PASS a bare tag is not a link
+PASS footnote reference
+PASS reference link
+PASS reference definition
+PASS hard line break
+PASS one trailing space is not a break
+PASS backslash escape is not emphasis
+PASS escaped backtick is not code
+PASS a real emphasis still emphasises
+PASS C:\path is left alone
+PASS tilde fence
+PASS frontmatter
+PASS setext h1
+PASS setext h2 beats the rule
+PASS setext spans the paragraph
+PASS a rule after a blank stays a rule
+PASS a list is not setext text
+PASS setext keeps its inline marks
+PASS no strong inside a fence
+PASS no emphasis inside a fence
+PASS no heading inside a fence
+PASS no link inside a fence
+PASS no list inside a fence
+PASS no rule inside a fence
+PASS no markdown in frontmatter
+
+— known gaps (asserted still missing) —
+GAP  html block
+GAP  reference link resolution
+
+✅ commonmark: 57 claims kept, 2 gaps declared, 0 broken
+  · test/compat.test.cjs
+PASS  A2 只解析出 2 個真欄（Archive 不算欄）
+PASS  A2 欄名是 待辦/進行中（沒有 Archive 欄）
+PASS  A2 archive 區被擷取且以 *** 開頭
+PASS  A2 archive 含被封存的卡
+PASS  A2 archive 含 ## Archive 標題
+PASS  A2 *** 未黏進進行中最後一張牌
+PASS  A3 待辦欄 (3) WIP 上限保留在 header
+PASS  A3 **Complete** 保留在進行中欄 lead
+PASS  A4 <br> 換行標題原樣保留
+PASS  blockId ^block123 保留在 raw
+PASS  [x] 勾選狀態保留在 raw
+PASS  @{日期} 保留
+PASS  #標籤 保留
+PASS  A1 4空白卡 text 去縮排
+PASS  tab 多行卡 text 去一層縮排
+PASS  往返後結構/內容完全一致
+PASS  serialize 冪等（out1 === out2）
+PASS  封存內容仍在輸出
+PASS  settings 只出現一次
+PASS  list-collapse 設定原樣保留
+PASS  B2 已勾選牌 check === x
+PASS  B2 未勾選牌 check === 空白
+PASS  settings 被解析成物件
+PASS  壞 JSON 不爆（回空物件、不毀檔）
+PASS  B1 封存追加後仍在 archive
+PASS  B1 封存追加未變成欄
+PASS  B1 封存追加後冪等
+PASS  收合：list-collapse 被改寫
+PASS  收合：其他設定原樣保留
+PASS  收合：無鍵時插入 list-collapse
+PASS  收合：插入後 JSON 仍可解析
+PASS  收合：空物件插入正確
+PASS  WIP：解析 (3)
+PASS  WIP：無上限
+PASS  WIP：含全形空格標題
+PASS  WIP：(0) 也算上限
+PASS  WIP：括號非數字不誤判
+PASS  日期：抽出 date、clean 去 token
+PASS  時間：date+time 都抽出
+PASS  時間：只有 @@{} 不被當 date
+PASS  日期：無 token 時 date/time 為 null、clean 不變
+PASS  日期：多行牌也抽得到、保留其餘行
+PASS  日期：多個 token 取首個值、殘留全清（不裸露）
+PASS  日期：@[[..]] (link-date-to-daily-note) 也辨識
+PASS  標籤：英數 + CJK
+PASS  標籤：遇全形標點停
+PASS  標籤：無標籤回空陣列
+PASS  setSetting：插入新鍵
+PASS  setSetting：其他鍵不動
+PASS  setSetting：改寫既有字串值
+PASS  setSetting：JSON 仍合法
+PASS  blockId：text 隱藏 ^id
+PASS  blockId：raw 保留 ^id
+PASS  blockId：往返後 ^id 仍在
+PASS  date-format：DD/MM/YYYY 解析
+PASS  date-format：ISO 解析
+PASS  date-format：非法日期回 null
+PASS  date-format：格式化 DD/MM/YYYY
+PASS  date-format：含時間格式化
+
+✅ compat all pass (59)
+  · test/core.test.cjs
+PASS  空看板（只有 frontmatter，0 欄）
+PASS  沒有 frontmatter（直接 ## 開頭）
+PASS  沒有 settings 區塊（有 frontmatter 與欄）
+PASS  空欄（0 牌）
+PASS  牌只有標題、沒有內文
+PASS  牌內文含多個空行 / 段落
+PASS  `- [x]` 已勾選的牌
+PASS  欄標題含全形空格「　」
+PASS  中文 + emoji 內容
+PASS  完整看板（frontmatter + 多欄 + settings）
+PASS  欄位重排：左移（A B C → B A C）後序列化反映新順序且內容不變
+PASS  欄位重排：右移最右欄不變（夾邊 → 順序不動）
+
+✅ all pass (12/12)
+  · test/cssmd.test.cjs
+✓ tile-cssmd: 61 passed, 0 failed
+  · test/data-safety.test.cjs
+data-safety: 116 passed, 0 failed
+  · test/edit-roundtrip.cjs
+all 40 round-trips exact
+  · test/editor-undo-words.test.cjs
+editor-undo-words: ok
+  · test/emphasis.test.cjs
+PASS italic nested inside bold (was: all italic, bold lost)
+PASS bold nested inside italic (was: two separate italics)
+PASS three delimiters are em wrapping strong (was: bold only)
+PASS italic containing bold (was: three italics)
+PASS the rule of 3 refuses the middle run — one bold, four literal asterisks
+PASS spec example 427 — strong inside strong
+PASS spec example 464
+PASS spec example 445 — the leftovers stay literal
+PASS spec example 447
+PASS spec example 421 — a run cannot match itself
+PASS spec example 439
+PASS underscore emphasis still works
+PASS INTRAWORD: an identifier is not emphasis
+PASS INTRAWORD: still literal in running prose
+PASS INTRAWORD: an opener that cannot open leaves the closer stranded
+PASS asterisks DO work intraword — the asymmetry is deliberate
+PASS an escaped delimiter never opens
+PASS the first asterisk is escaped; the rest is real emphasis
+PASS an escaped BACKSLASH, then real emphasis
+PASS a backslash before a non-escapable char is just a backslash
+PASS delimiters surrounded by space open nothing
+PASS arithmetic is not emphasis
+PASS an opener with no closer is literal text
+PASS a closer with no opener is literal text
+PASS CJK emphasis with no spaces around it
+PASS the sentence from his own corpus that rendered entirely italic
+PASS a bullet asterisk cannot pair with emphasis later on the line
+PASS a thematic break already wrapped as a marker is left alone
+PASS an asterisk inside a code span is not a delimiter
+PASS backslashes inside a code span stay visible
+PASS control — outside a code span the backslash still hides
+PASS a code span holds the syntax it documents, unrendered
+PASS emphasis still spans ACROSS a code span
+PASS a `**` inside an <autolink> URL finds no partner
+
+✅ emphasis all pass (34)
+  · test/highlight.test.cjs
+
+✓ highlightCode: 29 passed
+  · test/i18n-coverage.test.cjs
+✓ i18n coverage: 16 key(s) × 4 locale(s), none missing
+  · test/kitchensink.test.cjs
+PASS  只 2 真欄（Archive 不算欄）
+PASS  待辦 4 牌 / 進行中 1 牌
+PASS  WIP (3) 保留
+PASS  <br> 標題保留
+PASS  **Complete** 在 lead
+PASS  欄首說明保留
+PASS  blockId ^blk1 保留
+PASS  [x] 勾選保留
+PASS  tab 多行去縮排
+PASS  4 空白多行去縮排
+PASS  archive 含兩張封存牌
+PASS  未知設定鍵保留
+PASS  連結/嵌入/URL#frag 原樣保留
+PASS  冪等 out1===out2
+PASS  內容零變動（去空白完全相等）
+
+✅ kitchensink all pass (15)
+  · test/link-rule-tools.test.cjs
+✅ link/rule tools: 17 passed
+  · test/list-continue.test.cjs
+all 15 list-continue cases pass
+  · test/list-kind.test.cjs
+list-kind: 31 passed, 0 failed
+  · test/marktile-load.test.cjs
+✅ marktile/main.js loads, constructs, onload()+onunload() run; exports MarktilePlugin
+  · test/migrate.test.cjs
+✅ migrate all pass (16)
+  · test/parity-highlightLineParts.test.cjs
+✓ highlightLineParts parity: 68 byte-identical, 0 diverged (of 68)
+  · test/pill-placement.test.cjs
+pill-placement: 10 passed, 0 failed
+  · test/public-paths.test.cjs
+  public paths: 16 declared, all present; root scripts: 2 file(s), no strays
+  · test/regression.test.cjs
+PASS  C1 空看板：pre 不含 settings
+PASS  C1 空看板：post 含 settings
+PASS  C1 空看板：0 欄
+PASS  C1 新增欄後 settings 只出現一次
+PASS  C1 重開後欄還在（1 欄、未被吞）
+PASS  C1 重開後牌還在
+PASS  M1 lead 被保留（非丟棄）
+PASS  M1 serialize 仍含欄首文字
+PASS  M1 round-trip 後 lead 一致
+PASS  M1 serialize 冪等
+PASS  A1 4空白續行被去縮排（text 無前導空白）
+
+✅ regression all pass (11)
+  · test/renumber.test.cjs
+all 14 renumber cases pass
+  · test/review-phaseA.test.cjs
+PASS  C1 CRLF 牌 text 去掉前綴與 \r
+PASS  C1 重建 raw 無雙重前綴
+PASS  C2 真牌仍在 Todo 欄（沒被封存）
+PASS  C2 archive 為空（孤立 *** 不算分隔）
+PASS  C2 *** 與 more 留在 lead
+PASS  C2b *** + ## Archive 仍正確當封存
+PASS  H1 只有一欄（fence 內 ## 不成欄）
+PASS  H1 牌正常解析
+PASS  H1 code block 保留在 lead
+PASS  H1 round-trip 冪等
+PASS  M1 *** 當封存分隔
+PASS  M1 --- 不當封存（Archive 成普通欄、不吞）
+PASS  M1 ___ 不當封存（Archive 成普通欄、不吞）
+PASS  M2 純封存板：0 真欄
+PASS  M2 純封存板：封存牌不復活成活躍
+PASS  M3 輸出全 CRLF（無裸 \n）
+PASS  M3 CRLF 往返冪等
+PASS  M3 LF 檔仍輸出 LF（無 \r）
+PASS  L1 3 空白續行被去縮排
+
+✅ review-phaseA all pass (19)
+  · test/seasoned-look.test.cjs
+seasoned-look: ok
+  · test/shim-icons.test.cjs
+✅ shim-icons all pass (2) — 40 requested, 49 provided
+  · test/strip-formatting.test.cjs
+strip-formatting: 49 passed, 0 failed
+  · test/tab-edit.test.cjs
+all tab-edit assertions pass (9)
+  · test/table-transform.test.cjs
+table-transform: 31 passed, 0 failed
+  · test/toc.test.cjs
+all toc assertions pass
+  · test/toggle-wrap.test.cjs
+toggle-wrap: 28 passed, 0 failed
+  · test/ui-state.test.cjs
+all ui-state assertions pass (fold cycle + plain + lock)
+  · test/whitespace.test.cjs
+PASS NBSP after a bullet: not a list item
+PASS control — a real space after a bullet IS a list item
+PASS control — a tab indent still works
+PASS NBSP after an ordered marker: not a list item
+PASS control — ordered list
+PASS NBSP after a hash run: not a heading
+PASS control — heading
+PASS NBSP after a thematic break: not a break
+PASS control — thematic break
+PASS NBSP indent: not a list item
+PASS U+3000 after a bullet: not a list item
+PASS U+3000 after a hash run: not a heading
+PASS control — a half-width space still makes a list item
+PASS NBSP after > is still a blockquote — the > is the whole marker
+PASS NBSP after a checkbox: a list item, but not a task
+PASS an NBSP-indented fence does not open a code block
+PASS control — a space-indented fence still opens one
+PASS NBSP after a frontmatter --- does not close it
+
+✅ whitespace all pass (18)
+→ every test file in the tree is actually run
+  · packages/build END-TO-END SKIPPED — no packages/sitetile/astro/node_modules
+    (this run did NOT prove IR in → static HTML out; run npm install there, or see
+     .github/workflows/ci.yml, which installs them)
+→ site renderer tests
+  · packages/sitetile/agent-artifacts.test.mjs
+TAP version 13
+# Subtest: the build gate is one neutral flag, and no policy vocabulary crosses into this renderer
+ok 1 - the build gate is one neutral flag, and no policy vocabulary crosses into this renderer
+  ---
+  duration_ms: 1.093533
+  type: 'test'
+  ...
+# Subtest: gate off emits nothing at all
+not ok 2 - gate off emits nothing at all
+  ---
+  duration_ms: 2.498275
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:185:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: a hand-written llms.txt suppresses ours and nothing else
+not ok 3 - a hand-written llms.txt suppresses ours and nothing else
+  ---
+  duration_ms: 0.544126
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:194:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: llms.txt opens with the site name, lists every public route, and names its own producer
+not ok 4 - llms.txt opens with the site name, lists every public route, and names its own producer
+  ---
+  duration_ms: 0.476884
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:209:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: a private post is named in llms.txt and described nowhere
+not ok 5 - a private post is named in llms.txt and described nowhere
+  ---
+  duration_ms: 0.31052
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:226:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: llms-full.txt carries the public corpus whole, each document behind its own provenance
+not ok 6 - llms-full.txt carries the public corpus whole, each document behind its own provenance
+  ---
+  duration_ms: 0.282538
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:241:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: llms-full.txt has no private body, description or excerpt in it
+not ok 7 - llms-full.txt has no private body, description or excerpt in it
+  ---
+  duration_ms: 0.237707
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:251:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: over the size guard the full dump is absent, not truncated, and the catalog says so
+not ok 8 - over the size guard the full dump is absent, not truncated, and the catalog says so
+  ---
+  duration_ms: 0.270648
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:264:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: the catalog states version, producer and only targets this build produced
+not ok 9 - the catalog states version, producer and only targets this build produced
+  ---
+  duration_ms: 0.426113
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:280:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: every non-null catalog target exists in the same build output
+not ok 10 - every non-null catalog target exists in the same build output
+  ---
+  duration_ms: 0.64146
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:301:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: page markdown keeps what a reader sees and drops what only the build reads
+not ok 11 - page markdown keeps what a reader sees and drops what only the build reads
+  ---
+  duration_ms: 0.35216
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:322:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: a private post has no markdown twin, and the public control does
+not ok 12 - a private post has no markdown twin, and the public control does
+  ---
+  duration_ms: 0.235737
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:341:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: the markdown asset path mirrors the HTML output shape
+ok 13 - the markdown asset path mirrors the HTML output shape
+  ---
+  duration_ms: 0.267058
+  type: 'test'
+  ...
+# Subtest: the mapping holds exactly the public static routes of this build
+not ok 14 - the mapping holds exactly the public static routes of this build
+  ---
+  duration_ms: 0.245178
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:361:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+# Subtest: a generator-owned path already in the site's assets fails the build by name
+not ok 15 - a generator-owned path already in the site's assets fails the build by name
+  ---
+  duration_ms: 0.231707
+  type: 'test'
+  location: '<worktree>/packages/sitetile/agent-artifacts.test.mjs:383:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Cannot find module 'parse5'
+    Require stack:
+    - <worktree>/packages/sitetile/astro/src/lib/blog.mjs
+  code: 'MODULE_NOT_FOUND'
+  stack: |-
+    Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    Function._load (node:internal/modules/cjs/loader:1216:25)
+    wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    Module.require (node:internal/modules/cjs/loader:1527:12)
+    require (node:internal/modules/helpers:147:16)
+    parseFragment (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:20:75)
+    pageSegments (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:263:58)
+    excerptOfBody (file://<worktree>/packages/sitetile/astro/src/lib/blog.mjs:302:39)
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 2
+# fail 13
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 17.900299
+exit=1

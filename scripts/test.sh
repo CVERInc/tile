@@ -147,6 +147,7 @@ SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs
              packages/dynamic-corals/inbox-bubble/*.smoke.mjs
              # reef#2790: the corner dock — order, version skew, shadow reach, safe areas, the bar.
              packages/dynamic-corals/dock/*.smoke.mjs
+             packages/dynamic-corals/events/*.smoke.mjs
              # grid `filter=` over plain cards, with and without `pack=masonry`, at 390 and 1440 px:
              # the emitter's markup driven by the built grid-filter and grid-masonry corals.
              packages/dynamic-corals/grid-filter/*.smoke.mjs

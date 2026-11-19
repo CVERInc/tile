@@ -2,7 +2,7 @@
 //   run: node --test packages/dynamic-corals/countdown/countdown-feed.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { upcoming, nextMoment, phaseOf, httpUrl, locationKind, locationText, eventHref, eventText, whenText, unitText } from './countdown-feed.mjs';
+import { upcoming, nextMoment, phaseOf, httpUrl, locationKind, locationText, eventHref, eventText, whenText, unitText, feedSource } from './countdown-feed.mjs';
 import { mountFromFeed, mountAll, FEED_TIMEOUT_MS } from './countdown-core.mjs';
 import { feedEvents, eventInstants, plainText, renderEvents, addToCalendarUrl, FEED_MAX, DETAILS_MAX } from '../events/events-core.mjs';
 import { parseICal, parseICalCalendar } from '../events/ical.mjs';
@@ -641,4 +641,141 @@ test('mountAll: only a root that carries data-src touches the network', async ()
   await flush();
   assert.equal(b.calls.length, 1, 'mounted once, fetched once');
   assert.equal(fed.els.title.textContent, 'Workshop');
+});
+
+// ── one calendar per language ───────────────────────────────────────────────────────────────────
+test('feedSource: the page’s language picks its own feed, then its primary subtag, then data-src', () => {
+  const root = (attrs) => ({ getAttribute: (n) => (n in attrs ? attrs[n] : null) });
+  const all = root({ 'data-src': '/ja', 'data-src-zh-tw': '/zh', 'data-src-en': '/en' });
+  assert.equal(feedSource(all, 'ja'), '/ja');
+  assert.equal(feedSource(all, 'zh-TW'), '/zh', 'attribute names are lower-case; the tag is matched so');
+  assert.equal(feedSource(all, 'en-US'), '/en', 'no data-src-en-us: the primary subtag');
+  assert.equal(feedSource(all, 'en'), '/en');
+  assert.equal(feedSource(all, 'zh-CN'), '/ja', 'another Chinese is not that Chinese: the default');
+  assert.equal(feedSource(all, 'de'), '/ja');
+  assert.equal(feedSource(all, ''), '/ja');
+  assert.equal(feedSource(all, null), '/ja');
+  // the exact tag wins over the primary subtag
+  assert.equal(feedSource(root({ 'data-src-zh': '/zh', 'data-src-zh-tw': '/tw' }), 'zh-TW'), '/tw');
+  assert.equal(feedSource(root({ 'data-src-zh': '/zh', 'data-src-zh-tw': '/tw' }), 'zh-HK'), '/zh');
+  // only some languages named: nothing on the others
+  assert.equal(feedSource(root({ 'data-src-zh-tw': '/zh' }), 'ja'), '');
+  assert.equal(feedSource(root({ 'data-src-zh-tw': '  ' , 'data-src': '/ja' }), 'zh-TW'), '/ja', 'an empty one is not one');
+  // a script subtag between the language and the region: what the host wrote for the region applies
+  assert.equal(feedSource(all, 'zh-Hant-TW'), '/zh', 'zh-Hant-TW finds data-src-zh-tw');
+  const chain = root({ 'data-src': '/d', 'data-src-zh-hant': '/hant', 'data-src-zh': '/zh' });
+  assert.equal(feedSource(chain, 'zh-Hant-TW'), '/hant', 'no region match: shortened from the end');
+  assert.equal(feedSource(chain, 'zh-Hans-CN'), '/zh');
+  assert.equal(feedSource(root({ 'data-src': '/d', 'data-src-es-419': '/latam' }), 'es-419'), '/latam', 'a numeric region is a region');
+  assert.equal(feedSource(all, 'en-x-private'), '/en');
+  // a language tag that is not one never becomes an attribute name: watch what is READ, because a
+  // root that simply has no such attribute would answer the same either way
+  for (const bad of ['zh tw', '"><x', 'a', '../x', 'zh_TW', 'zh-', '-tw', 'zh--tw']) {
+    const read = [];
+    const spy = { getAttribute: (n) => { read.push(n); return n === 'data-src' ? '/ja' : null; } };
+    assert.equal(feedSource(spy, bad), '/ja', bad);
+    assert.deepEqual(read, ['data-src'], `${JSON.stringify(bad)} read ${read.join(', ')}`);
+  }
+  const read = [];
+  feedSource({ getAttribute: (n) => { read.push(n); return null; } }, 'zh-Hant-TW');
+  assert.deepEqual(read, ['data-src-zh-hant-tw', 'data-src-zh-tw', 'data-src-zh-hant', 'data-src-zh', 'data-src'], 'the order it looks in');
+});
+
+test('a root reads the feed for the page’s language, and a page with no feed for it is not fed', async () => {
+  const mount = async (lang, attrs) => {
+    const { doc, root, els } = page(attrs);
+    if (lang === null) doc.documentElement.removeAttribute('lang'); else doc.documentElement.setAttribute('lang', lang);
+    const feeds = { '/ja': { calendar: { name: 'イベント' }, events: [SEASON] }, '/zh': { calendar: { name: '活動公告' }, events: [WORKSHOP] } };
+    const calls = [];
+    const fetch = async (url) => { calls.push(url); return { ok: !!feeds[url], json: async () => feeds[url] }; };
+    const c = await mountFromFeed(root, { ...env(doc, createClock(NOW), fetch), language: 'zh-TW' });
+    return { c, els, calls, root };
+  };
+  const both = { 'data-src': '/ja', 'data-src-zh-tw': '/zh' };
+  let r = await mount('ja', both);
+  assert.deepEqual(r.calls, ['/ja']);
+  assert.equal(r.els.calendar.textContent, 'イベント');
+  r.c.stop();
+  r = await mount('zh-TW', both);
+  assert.deepEqual(r.calls, ['/zh'], 'one request, to that language’s feed only');
+  assert.equal(r.els.calendar.textContent, '活動公告');
+  assert.equal(r.els.title.textContent, 'Workshop');
+  r.c.stop();
+  // the page declares no language: the default feed, whatever the visitor's browser speaks
+  r = await mount(null, both);
+  assert.deepEqual(r.calls, ['/ja'], 'the browser’s language (zh-TW here) does not pick the calendar');
+  r.c.stop();
+  // only a zh-TW feed, on a Japanese page: not fed, no request, left as authored
+  r = await mount('ja', { 'data-src-zh-tw': '/zh' });
+  assert.equal(r.c, null);
+  assert.deepEqual(r.calls, []);
+  assert.equal(r.root.hidden, true);
+  assert.equal(r.els.title.textContent, 'authored title');
+});
+
+test('mountAll: a root with only per-language feeds is fed on that language’s pages and typed on the rest', async () => {
+  for (const [lang, fed] of [['zh-TW', true], ['ja', false]]) {
+    const p = page({ 'data-src-zh-tw': '/zh', 'data-deadline': '2026-11-20T00:00:00Z' });
+    p.doc.documentElement.setAttribute('lang', lang);
+    const f = feedOf({ events: [WORKSHOP] });
+    mountAll(p.doc, env(p.doc, createClock(NOW), f.fetch));
+    await flush();
+    assert.equal(f.calls.length, fed ? 1 : 0, lang);
+    assert.equal(p.els.days.textContent, fed ? '07' : '02', `${lang}: ${fed ? 'the feed' : 'the typed deadline'}`);
+  }
+});
+
+// ── add to calendar on an Apple device: the event as a file, from the feed that says it serves one ──
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const IPHONE_IN_APP = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0.0';
+const MAC_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel)';
+
+test('eventHref add: an .ics link in Safari on Apple devices only, and only with a feed address and a uid', () => {
+  const event = { uid: 'u1@example.com', title: 'Open', start: '2026-10-12', end: '2026-12-02', allDay: true };
+  const src = 'https://feed.example/v0/?cal=x';
+  for (const ua of [IPHONE, MAC]) {
+    const u = new URL(eventHref(event, 'add', ua, src));
+    assert.equal(u.origin + u.pathname, 'https://feed.example/v0/');
+    assert.equal(u.searchParams.get('ics'), 'u1@example.com');
+    assert.equal(u.searchParams.get('cal'), 'x');
+  }
+  const google = addToCalendarUrl(event);
+  assert.equal(eventHref(event, 'add', ANDROID, src), google, 'Android keeps the Google link');
+  assert.equal(eventHref(event, 'add', IPHONE_IN_APP, src), google, 'an app’s built-in browser keeps the Google link');
+  assert.equal(eventHref(event, 'add', MAC_CHROME, src), google, 'Chrome on a Mac keeps the Google link');
+  assert.equal(eventHref(event, 'add', '', src), google, 'an unknown device keeps the Google link');
+  assert.equal(eventHref(event, 'add', IPHONE), google, 'no feed address: the Google link');
+  assert.equal(eventHref(event, 'add', IPHONE, '/events.json'), google, 'a relative feed address: the Google link');
+  assert.equal(eventHref({ ...event, uid: null }, 'add', IPHONE, src), google, 'no uid: the Google link');
+});
+
+test('a mounted root links to the file only when the feed says it serves one', async () => {
+  const apple = (doc, clock, fetch) => ({ ...env(doc, clock, fetch), userAgent: IPHONE });
+  // the feed says so
+  let p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
+  let c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
+  let u = new URL(p.els.when.getAttribute('href'));
+  assert.equal(u.searchParams.get('ics'), 'Workshop');
+  assert.equal(u.searchParams.get('cal'), 'x');
+  p.els.next.click();
+  assert.equal(new URL(p.els.when.getAttribute('href')).searchParams.get('ics'), 'Applications open', 'paging re-points the link at the event shown');
+  c.stop();
+  // the feed does not say so (a static feed, an older worker): the Google link, even on an iPhone
+  p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
+  c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf(FEED).fetch));
+  assert.equal(p.els.when.getAttribute('href'), addToCalendarUrl(WORKSHOP));
+  c.stop();
+  // the feed says so, on a device that is not Apple's: the Google link
+  p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
+  c = await mountFromFeed(p.root, env(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
+  assert.equal(p.els.when.getAttribute('href'), addToCalendarUrl(WORKSHOP));
+  c.stop();
+  // the language's own feed address is the one the file comes from
+  p = page({ 'data-src': 'https://feed.example/v0/?cal=x', 'data-src-ja': 'https://feed.example/v0/?cal=ja' });
+  p.doc.documentElement.setAttribute('lang', 'ja');
+  c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
+  assert.equal(new URL(p.els.when.getAttribute('href')).searchParams.get('cal'), 'ja');
+  c.stop();
 });

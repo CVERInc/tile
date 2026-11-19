@@ -1,0 +1,9 @@
+# origin/main cards-service-host.test.mjs (the A || !B assertion) against QR mutants
+=== M3a QR address missing: exit 0
+  ok 1 - split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+  # pass 1
+  # fail 0
+=== M3b QR address wrong: exit 0
+  ok 1 - split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+  # pass 1
+  # fail 0

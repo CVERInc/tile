@@ -17,6 +17,35 @@
 // of the controls) is the host's markup.
 import { mapsUrl, mapHref } from '../shared/map-link.mjs';
 import { addToCalendarUrl } from '../events/events-core.mjs';
+import { icsUrl, opensIcs } from '../events/ics-file.mjs';
+
+/**
+ * Which feed a root reads on a page in `language`: `data-src-<language>` when the root has one for
+ * the page's language, else `data-src`; '' when none applies. The page's tag is tried whole
+ * (`zh-TW` → `data-src-zh-tw`), then as language and region without what sits between them
+ * (`zh-Hant-TW` → `data-src-zh-tw`, what a host naturally writes), then shortened from the end one
+ * subtag at a time down to the language alone (`data-src-zh-hant`, `data-src-zh`).
+ *
+ * Why: one calendar is in one language. A site in several puts ONE countdown in the chrome every
+ * page shares, and each language's pages are to show that language's calendar. A root that names
+ * only some languages shows nothing on the others, which is the honest state for "no calendar here".
+ */
+export function feedSource(root, language) {
+  const tag = String(language || '').trim().toLowerCase();
+  const tries = [];
+  if (/^[a-z]{2,3}(-[a-z0-9]{1,8})*$/.test(tag)) {
+    const parts = tag.split('-');
+    tries.push(tag);
+    const region = parts.slice(1).find((p) => /^([a-z]{2}|\d{3})$/.test(p));
+    if (region) tries.push(`${parts[0]}-${region}`);
+    for (let n = parts.length - 1; n >= 1; n--) tries.push(parts.slice(0, n).join('-'));
+  }
+  for (const t of [...new Set(tries)]) {
+    const own = String(root.getAttribute(`data-src-${t}`) || '').trim();
+    if (own) return own;
+  }
+  return String(root.getAttribute('data-src') || '').trim();
+}
 
 const instant = (iso) => (typeof iso === 'string' && /Z$/.test(iso) ? Date.parse(iso) : NaN);
 
@@ -73,12 +102,18 @@ export function locationText(event) {
  *   location → the location itself when it is a URL; a map for a place (the platform's own, by
  *              `userAgent` — the same link the events coral gives a place).
  *   url      → the event's own URL property.
- *   add      → an add-to-calendar link for this event (the events coral's).
+ *   add      → an add-to-calendar link for this event (the events coral's). In Safari on an Apple
+ *              device (opensIcs), when the feed's address is known (`feedSrc`) and the event has a
+ *              uid, the event as an .ics file from that feed instead: the device's own calendar
+ *              opens it, where the Google link would ask for a Google sign-in first.
  */
-export function eventHref(event, which, userAgent) {
+export function eventHref(event, which, userAgent, feedSrc) {
   if (!event) return '';
   if (which === 'url') return httpUrl(event.url);
-  if (which === 'add') return addToCalendarUrl(calendarEntry(event), { descriptionIsText: true });   // the feed's description is already text
+  if (which === 'add') {
+    const file = opensIcs(userAgent) ? icsUrl(feedSrc, event.uid) : '';
+    return file || addToCalendarUrl(calendarEntry(event), { descriptionIsText: true });   // the feed's description is already text
+  }
   if (which !== 'location') return '';
   const kind = locationKind(event);
   if (kind === 'url') return httpUrl(event.location);
@@ -110,20 +145,29 @@ function formatRange(format, a, b) {
  * An all-day event is its DATES as the calendar wrote them (its end is exclusive, so the last day is
  * the one before): "Oct 12 – Dec 1", or one date. A timed event is its instants in the VISITOR's
  * zone, with the zone named, because a time read on a screen is a time on the reader's clock.
+ * With `now`, a date that is not in the year `now` is in carries its year ("Feb 13 – 14, 2027"): a
+ * list that runs past December would otherwise show next year's dates as if they were this year's.
  */
-export function whenText(event, locale) {
+export function whenText(event, locale, now) {
   if (!event) return '';
   const lang = locale || undefined;
+  // "This year" is the year on the VISITOR's calendar; an all-day date's own year is read in UTC,
+  // where it was parsed (`zone`), a timed one's on the visitor's clock.
+  const year = (ms, zone) => (now == null ? {} : (() => {
+    const y = (t, z) => Number(new Intl.DateTimeFormat('en', { year: 'numeric', ...(z ? { timeZone: z } : {}) }).format(new Date(t)));
+    const thisYear = y(now);
+    return ms.some((t) => y(t, zone) !== thisYear) ? { year: 'numeric' } : {};
+  })());
   try {
     if (event.allDay && /^\d{4}-\d{2}-\d{2}$/.test(String(event.start))) {
       const first = Date.parse(`${event.start}T00:00:00Z`);
       const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(event.end)) ? Date.parse(`${event.end}T00:00:00Z`) - DAY : first;
-      const format = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      const format = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', timeZone: 'UTC', ...year([first, endDate], 'UTC') });
       return endDate > first ? formatRange(format, new Date(first), new Date(endDate)) : format.format(new Date(first));
     }
     const startsAt = instant(event.startsAt), endsAt = instant(event.endsAt);
     if (Number.isNaN(startsAt)) return '';
-    const format = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+    const format = new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short', ...year(endsAt > startsAt ? [startsAt, endsAt] : [startsAt]) });
     return endsAt > startsAt ? formatRange(format, new Date(startsAt), new Date(endsAt)) : format.format(new Date(startsAt));
   } catch { return ''; }
 }

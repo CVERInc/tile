@@ -1,0 +1,109 @@
+MISSING-MODULE packages/sitetile/agent-artifacts.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/agent-list-twins.test.mjs
+PASS packages/sitetile/announce.test.mjs
+PASS packages/sitetile/appbar.test.mjs
+PASS packages/sitetile/archive-month-names.test.mjs
+PASS packages/sitetile/astro-section-anchor.test.mjs
+MISSING-MODULE packages/sitetile/author-text-run-cost.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/base-paint.test.mjs
+PASS packages/sitetile/block-scalar-indicators.test.mjs
+PASS packages/sitetile/blog-date-badge.test.mjs
+PASS packages/sitetile/blog-date-format.test.mjs
+PASS packages/sitetile/blog-defaults.test.mjs
+PASS packages/sitetile/blog-entry-hooks.test.mjs
+MISSING-MODULE packages/sitetile/blog-excerpt-plain.test.mjs :: Cannot find module 'parse5'
+MISSING-MODULE packages/sitetile/blog-locale-archives.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/blog-search-overlay.test.mjs
+MISSING-MODULE packages/sitetile/blog-tag-prototype-names.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/blog-tenancy.test.mjs
+MISSING-MODULE packages/sitetile/blog-unlisted.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/blog-url-gating.test.mjs
+MISSING-MODULE packages/sitetile/blog-video-poster-thumb.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/bracket-run-cost.test.mjs
+PASS packages/sitetile/bubble-kaito.test.mjs
+MISSING-MODULE packages/sitetile/bubble-search-index.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/button-radius-1888.test.mjs
+MISSING-MODULE packages/sitetile/card-image-size.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/card-img-coverage.test.mjs
+PASS packages/sitetile/cascade-layers.test.mjs
+PASS packages/sitetile/chrome-copy.test.mjs
+PASS packages/sitetile/chrome-links-render.test.mjs
+PASS packages/sitetile/chrome-links.test.mjs
+PASS packages/sitetile/clean-import.test.mjs
+PASS packages/sitetile/collection-band.test.mjs
+PASS packages/sitetile/collection-base-rendering.test.mjs
+PASS packages/sitetile/color-scheme.test.mjs
+PASS packages/sitetile/coral-params.test.mjs
+MISSING-MODULE packages/sitetile/dialogue-sides.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/discoverability.test.mjs
+PASS packages/sitetile/dynamic-coral-css.test.mjs
+PASS packages/sitetile/eyebrow-coverage.test.mjs
+PASS packages/sitetile/footer-cols.test.mjs
+PASS packages/sitetile/form-copy-default-locale.test.mjs
+PASS packages/sitetile/form-home-locale.test.mjs
+PASS packages/sitetile/generator-provenance.test.mjs
+PASS packages/sitetile/grid-cell-list.test.mjs
+PASS packages/sitetile/header-overlay-headingless.test.mjs
+PASS packages/sitetile/hero-title-presentation.test.mjs
+PASS packages/sitetile/hreflang.test.mjs
+PASS packages/sitetile/icon-core.test.mjs
+PASS packages/sitetile/inbox-bubble-loader.test.mjs
+PASS packages/sitetile/inbox-bubble.test.mjs
+PASS packages/sitetile/inbox-form-copy.test.mjs
+PASS packages/sitetile/inbox-form-locales.test.mjs
+PASS packages/sitetile/inbox-form-not-claimed.test.mjs
+PASS packages/sitetile/inbox-form-refusal-copy.test.mjs
+PASS packages/sitetile/inbox-form-thanks-caller.test.mjs
+PASS packages/sitetile/index-date-lang.test.mjs
+MISSING-MODULE packages/sitetile/inline-code-literal.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/lang-default.test.mjs
+PASS packages/sitetile/lang-page-isolation.test.mjs
+PASS packages/sitetile/lingo-simplified.test.mjs
+PASS packages/sitetile/lingo-switch.test.mjs
+PASS packages/sitetile/links-coral.test.mjs
+PASS packages/sitetile/locale-404.test.mjs
+PASS packages/sitetile/native-email-field-presentation.test.mjs
+PASS packages/sitetile/no-second-copy.test.mjs
+MISSING-MODULE packages/sitetile/noindex.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/not-found-locale.test.mjs
+PASS packages/sitetile/og-card-file.test.mjs
+PASS packages/sitetile/og-card-reuse.test.mjs
+PASS packages/sitetile/og-card.test.mjs
+PASS packages/sitetile/og-cards-policy.test.mjs
+PASS packages/sitetile/pagetile-blurb.test.mjs
+PASS packages/sitetile/pagetile-photobook.test.mjs
+PASS packages/sitetile/param-names.test.mjs
+PASS packages/sitetile/post-body-marks.test.mjs
+PASS packages/sitetile/post-chrome-lang.test.mjs
+PASS packages/sitetile/post-share-meta.test.mjs
+MISSING-MODULE packages/sitetile/private-artifacts.test.mjs :: Cannot find module 'parse5'
+PASS packages/sitetile/prose-btn-base-style-1933.test.mjs
+PASS packages/sitetile/prose-multi-image-figure-1933.test.mjs
+PASS packages/sitetile/prose-renderer-parity.test.mjs
+PASS packages/sitetile/query-redirects.test.mjs
+PASS packages/sitetile/real-render/verdicts.test.mjs
+PASS packages/sitetile/render-run-cost.test.mjs
+PASS packages/sitetile/revision-stamp.test.mjs
+PASS packages/sitetile/route-title-site-name.test.mjs
+PASS packages/sitetile/runtime-presentation.test.mjs
+PASS packages/sitetile/search-filter.test.mjs
+PASS packages/sitetile/search-route.test.mjs
+PASS packages/sitetile/section-anchor.test.mjs
+FAIL rc=1 packages/sitetile/section-contract.test.mjs
+        FAIL 🔴 the built page was compared (astro/node_modules is present)
+PASS packages/sitetile/section-copy-default-locale.test.mjs
+PASS packages/sitetile/section-inset.test.mjs
+PASS packages/sitetile/share-image.test.mjs
+PASS packages/sitetile/site-core-roundtrip.test.mjs
+PASS packages/sitetile/site-core.test.js
+PASS packages/sitetile/site-embed.test.mjs
+PASS packages/sitetile/site-name-source.test.mjs
+PASS packages/sitetile/sitemap.test.mjs
+PASS packages/sitetile/source-spans.test.mjs
+PASS packages/sitetile/style-text.test.mjs
+PASS packages/sitetile/surface-band.test.mjs
+PASS packages/sitetile/svg-attachment-headers.test.mjs
+PASS packages/sitetile/tagcloud-coral.test.mjs
+PASS packages/sitetile/theme-imports.test.mjs
+PASS packages/sitetile/whitespace-run-cost.test.mjs
+PASS packages/sitetile/youtube-line.test.mjs

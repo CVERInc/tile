@@ -104,7 +104,9 @@ test('split: the platform\'s own handle is an ordinary handle on reef.cards — 
   assert.equal(res.status, 200);
   const html = await res.text();
   assert.ok(html.includes('<link rel="canonical" href="https://reef.cards/feelreef">'), 'the bare origin redirects now, so it cannot be a canonical address');
-  assert.ok(html.includes('data-url="https://reef.cards/feelreef"') || !html.includes('data-url="https://reef.cards"'), 'the QR does not carry the bare origin');
+  // tile#378: two assertions, not `A || !B` — that one passed with the QR's address missing or wrong
+  assert.ok(html.includes('data-url="https://reef.cards/feelreef"'), 'the QR carries the platform\'s own address');
+  assert.ok(!html.includes('data-url="https://reef.cards"'), 'the QR does not carry the bare origin');
   assert.equal(W.cardUrlFor('feelreef', {}, SPLIT), 'https://reef.cards/feelreef');
   assert.equal(W.cardUrlFor('t', {}, SPLIT), 'https://reef.cards/t');
   // CONTROL: without the service host the root address is the bare origin, as before

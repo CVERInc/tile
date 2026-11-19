@@ -1,0 +1,8 @@
+split cards-staging.feelreef.com. <- dotless Origin: 200
+split cards-staging.feelreef.com.:8443 <- dotless Origin: 200
+split card-staging.feelreef.com. <- dotless Origin: 200
+split card-staging.feelreef.com.:8443 <- dotless Origin: 200
+open cards-staging.feelreef.com. <- dotless Origin: 200
+open cards-staging.feelreef.com.:8443 <- dotless Origin: 200
+open card-staging.feelreef.com. <- dotless Origin: 200
+open card-staging.feelreef.com.:8443 <- dotless Origin: 200

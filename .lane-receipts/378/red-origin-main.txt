@@ -1,0 +1,509 @@
+# base: 8c1b8d12f6a382918024763fa3a9b6bf60711906 (code as on origin/main; the lane's test files copied in)
+TAP version 13
+# Subtest: 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+ok 1 - 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+  ---
+  duration_ms: 1.594057
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+not ok 2 - 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+  ---
+  duration_ms: 54.036924
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:51:1'
+  failureType: 'testCodeFailure'
+  error: 'what a person wrote is not rendered on the service host'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:55:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot answers every boundary row as without it
+not ok 3 - 378-1 split: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 3.927468
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:62:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    GET /t
+    
+    404 !== 301
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 301
+  actual: 404
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:70:14)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-1 open: the service host with a trailing dot answers every boundary row as without it
+not ok 4 - 378-1 open: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 4.330749
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:62:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    GET /t
+    
+    404 !== 301
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 301
+  actual: 404
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:70:14)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-1 split: the people's host with a trailing dot answers no service endpoint
+not ok 5 - 378-1 split: the people's host with a trailing dot answers no service endpoint
+  ---
+  duration_ms: 5.857535
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:78:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    GET /_api/card/t
+    
+    503 !== 404
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 404
+  actual: 503
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:87:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+not ok 6 - 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+  ---
+  duration_ms: 2.029211
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:93:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    GET /_api/card/t
+    
+    503 !== 404
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 404
+  actual: 503
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:102:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+not ok 7 - 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+  ---
+  duration_ms: 10.582566
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:108:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    GET /try/edit
+    
+    200 !== 301
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 301
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:112:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+not ok 8 - 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+  ---
+  duration_ms: 1.871086
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:118:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    cards.feelreef.com. GET /_preview/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    + actual - expected
+    
+    + null
+    - {
+    -   answer: 'moved',
+    -   query: false,
+    -   status: 302,
+    -   to: 'reef.cards'
+    - }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    answer: 'moved'
+    status: 302
+    to: 'reef.cards'
+    query: false
+  actual: ~
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:122:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+ok 9 - CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+  ---
+  duration_ms: 0.650139
+  type: 'test'
+  ...
+# Subtest: 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+not ok 10 - 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+  ---
+  duration_ms: 3.645989
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:151:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    cards-staging.feelreef.com/t
+    
+    404 !== 301
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 301
+  actual: 404
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:154:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+not ok 11 - 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+  ---
+  duration_ms: 9.355539
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:161:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    200 !== 403
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 403
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:164:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+ok 12 - CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+  ---
+  duration_ms: 4.978388
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+not ok 13 - 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+  ---
+  duration_ms: 1.166735
+  type: 'test'
+  location: '<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:185:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'http://cards.feelreef.com/try/edit?lang=ja'
+    - 'http://cards-staging.feelreef.com/try/edit?lang=ja'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'http://cards-staging.feelreef.com/try/edit?lang=ja'
+  actual: 'http://cards.feelreef.com/try/edit?lang=ja'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (<main>/packages/cardtile/serve/cards-service-host-normalise.test.mjs:189:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+ok 14 - CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+  ---
+  duration_ms: 0.712182
+  type: 'test'
+  ...
+# Subtest: split: reef.cards/ is a temporary redirect to the editor on the service host, and reads nothing
+ok 15 - split: reef.cards/ is a temporary redirect to the editor on the service host, and reads nothing
+  ---
+  duration_ms: 7.335788
+  type: 'test'
+  ...
+# Subtest: split: reef.cards/ carries its query to the editor (a language, a referrer)
+ok 16 - split: reef.cards/ carries its query to the editor (a language, a referrer)
+  ---
+  duration_ms: 1.643069
+  type: 'test'
+  ...
+# Subtest: CONTROL split: reef.cards/<handle> is served, canonical on reef.cards
+ok 17 - CONTROL split: reef.cards/<handle> is served, canonical on reef.cards
+  ---
+  duration_ms: 16.208895
+  type: 'test'
+  ...
+# Subtest: split: a page's "make your own" goes to the service host; outside split it is the address it was
+ok 18 - split: a page's "make your own" goes to the service host; outside split it is the address it was
+  ---
+  duration_ms: 17.552385
+  type: 'test'
+  ...
+# Subtest: split: only the page's own boot line is rewritten, never the same text inside what a person wrote
+ok 19 - split: only the page's own boot line is rewritten, never the same text inside what a person wrote
+  ---
+  duration_ms: 3.262167
+  type: 'test'
+  ...
+# Subtest: split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+ok 20 - split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+  ---
+  duration_ms: 54.695684
+  type: 'test'
+  ...
+# Subtest: split: reef.cards answers no service page — the editor paths redirect to the service host, a write is refused
+ok 21 - split: reef.cards answers no service page — the editor paths redirect to the service host, a write is refused
+  ---
+  duration_ms: 1.69819
+  type: 'test'
+  ...
+# Subtest: split: the write API does not answer on reef.cards
+ok 22 - split: the write API does not answer on reef.cards
+  ---
+  duration_ms: 1.677671
+  type: 'test'
+  ...
+# Subtest: CONTROL split: reef.cards keeps its report door and its security.txt
+ok 23 - CONTROL split: reef.cards keeps its report door and its security.txt
+  ---
+  duration_ms: 2.649699
+  type: 'test'
+  ...
+# Subtest: split: a service page on the legacy host redirects to the same path on the service host
+ok 24 - split: a service page on the legacy host redirects to the same path on the service host
+  ---
+  duration_ms: 1.33109
+  type: 'test'
+  ...
+# Subtest: CONTROL split: what a person wrote on the legacy host redirects to reef.cards/<handle>
+ok 25 - CONTROL split: what a person wrote on the legacy host redirects to reef.cards/<handle>
+  ---
+  duration_ms: 0.861525
+  type: 'test'
+  ...
+# Subtest: split: an editor left open on the legacy host keeps working — its draft can still be opened there, and Save still parks
+ok 26 - split: an editor left open on the legacy host keeps working — its draft can still be opened there, and Save still parks
+  ---
+  duration_ms: 10.673619
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the legacy host still answers what cannot follow a redirect — the API, the park, host mode, the editor's files
+ok 27 - CONTROL split: the legacy host still answers what cannot follow a redirect — the API, the park, host mode, the editor's files
+  ---
+  duration_ms: 26.852022
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the service host serves the service pages
+ok 28 - CONTROL split: the service host serves the service pages
+  ---
+  duration_ms: 19.679658
+  type: 'test'
+  ...
+# Subtest: split: the service host's root is a temporary redirect to its editor
+ok 29 - split: the service host's root is a temporary redirect to its editor
+  ---
+  duration_ms: 0.526145
+  type: 'test'
+  ...
+# Subtest: split: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+ok 30 - split: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+  ---
+  duration_ms: 1.33254
+  type: 'test'
+  ...
+# Subtest: split: anything else on the service host is the nothing-here page, unread
+ok 31 - split: anything else on the service host is the nothing-here page, unread
+  ---
+  duration_ms: 13.223195
+  type: 'test'
+  ...
+# Subtest: CONTROL open: the service host serves the service pages
+ok 32 - CONTROL open: the service host serves the service pages
+  ---
+  duration_ms: 20.440441
+  type: 'test'
+  ...
+# Subtest: open: the service host's root is a temporary redirect to its editor
+ok 33 - open: the service host's root is a temporary redirect to its editor
+  ---
+  duration_ms: 0.531596
+  type: 'test'
+  ...
+# Subtest: open: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+ok 34 - open: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+  ---
+  duration_ms: 1.104003
+  type: 'test'
+  ...
+# Subtest: open: anything else on the service host is the nothing-here page, unread
+ok 35 - open: anything else on the service host is the nothing-here page, unread
+  ---
+  duration_ms: 18.850522
+  type: 'test'
+  ...
+# Subtest: split: a parked preview is what a person wrote — the service host sends it to reef.cards, which renders it
+ok 36 - split: a parked preview is what a person wrote — the service host sends it to reef.cards, which renders it
+  ---
+  duration_ms: 3.948168
+  type: 'test'
+  ...
+# Subtest: serviceHostStage: only exactly "cards.feelreef.com" turns the service host on
+ok 37 - serviceHostStage: only exactly "cards.feelreef.com" turns the service host on
+  ---
+  duration_ms: 0.461654
+  type: 'test'
+  ...
+# Subtest: a typo in CARDS_SERVICE_HOST — another case and a space around it included — redirects nothing to a host nobody serves
+ok 38 - a typo in CARDS_SERVICE_HOST — another case and a space around it included — redirects nothing to a host nobody serves
+  ---
+  duration_ms: 23.535903
+  type: 'test'
+  ...
+# Subtest: the local editor's server calls the API on the service host and reads public exits from the people's host
+ok 39 - the local editor's server calls the API on the service host and reads public exits from the people's host
+  ---
+  duration_ms: 0.448053
+  type: 'test'
+  ...
+# Subtest: staging: each stand-in answers as its role's host, and every redirect of the ruling stays inside staging
+ok 40 - staging: each stand-in answers as its role's host, and every redirect of the ruling stays inside staging
+  ---
+  duration_ms: 11.73954
+  type: 'test'
+  ...
+# Subtest: staging: a redirect to a host that is no role (a creator's domain) and a relative one are left alone
+ok 41 - staging: a redirect to a host that is no role (a creator's domain) and a relative one are left alone
+  ---
+  duration_ms: 3.922637
+  type: 'test'
+  ...
+# Subtest: CONTROL staging: a browser on the stand-in passes the same-origin check, another site still does not, and a body travels
+ok 42 - CONTROL staging: a browser on the stand-in passes the same-origin check, another site still does not, and a body travels
+  ---
+  duration_ms: 18.308237
+  type: 'test'
+  ...
+# Subtest: staging: a stand-in keeps the scheme and the port of an Origin — the same-origin check answers as on the real host, for every port pair
+ok 43 - staging: a stand-in keeps the scheme and the port of an Origin — the same-origin check answers as on the real host, for every port pair
+  ---
+  duration_ms: 15.102991
+  type: 'test'
+  ...
+# Subtest: staging: only a name of ours can stand in — anything else in the setting is ignored
+ok 44 - staging: only a name of ours can stand in — anything else in the setting is ignored
+  ---
+  duration_ms: 0.817375
+  type: 'test'
+  ...
+# Subtest: CONTROL staging: a host that is no stand-in is answered as itself, stand-ins or not
+ok 45 - CONTROL staging: a host that is no stand-in is answered as itself, stand-ins or not
+  ---
+  duration_ms: 16.144552
+  type: 'test'
+  ...
+# Subtest: split: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 46 - split: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 322.697388
+  type: 'test'
+  ...
+# Subtest: open: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 47 - open: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 266.337814
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the people's host answers no service endpoint — every service path × every method, with or without a credential
+ok 48 - CONTROL split: the people's host answers no service endpoint — every service path × every method, with or without a credential
+  ---
+  duration_ms: 63.477365
+  type: 'test'
+  ...
+# Subtest: split: the legacy host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 49 - split: the legacy host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 60.493647
+  type: 'test'
+  ...
+# Subtest: CONTROL split: what the legacy host answers in place is answered as before the split, for every method — the API, the park, host mode, the editor's files
+ok 50 - CONTROL split: what the legacy host answers in place is answered as before the split, for every method — the API, the park, host mode, the editor's files
+  ---
+  duration_ms: 1762.624955
+  type: 'test'
+  ...
+# Subtest: the legacy host's rule is the split's alone — off, open and at the cutover the boundary decides nothing there
+ok 51 - the legacy host's rule is the split's alone — off, open and at the cutover the boundary decides nothing there
+  ---
+  duration_ms: 2.232027
+  type: 'test'
+  ...
+# Subtest: hostBoundary: off, it decides nothing — on any host, any path, any method
+ok 52 - hostBoundary: off, it decides nothing — on any host, any path, any method
+  ---
+  duration_ms: 0.958068
+  type: 'test'
+  ...
+# Subtest: staging: with the service host off — unset or not exactly its value — a stand-in list changes no answer, on the stand-ins' own hostnames
+ok 53 - staging: with the service host off — unset or not exactly its value — a stand-in list changes no answer, on the stand-ins' own hostnames
+  ---
+  duration_ms: 7347.918573
+  type: 'test'
+  ...
+# Subtest: staging: in a production deployment (PREVIEW "false") a stand-in list changes no answer, the service host on or not
+ok 54 - staging: in a production deployment (PREVIEW "false") a stand-in list changes no answer, the service host on or not
+  ---
+  duration_ms: 421.075657
+  type: 'test'
+  ...
+1..54
+# tests 54
+# suites 0
+# pass 44
+# fail 10
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10808.969725
+exit=1

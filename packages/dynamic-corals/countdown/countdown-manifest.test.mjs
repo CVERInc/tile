@@ -23,7 +23,8 @@ test('countdown manifest.json passes validateCoralManifest at its own stored ide
 test('declares one conditional call, no storage, no requirement, no capability — and the bundle agrees', () => {
   assert.equal(manifest.calls.length, 1);
   assert.match(manifest.calls[0], /^GET <data-src> — only for a root that carries `data-src`/);
-  assert.match(manifest.calls[0], /A root without `data-src` makes no network call at all/);
+  assert.match(manifest.calls[0], /`data-src-<language>`/);
+  assert.match(manifest.calls[0], /A root with no feed for the page's language makes no network call at all/);
   assert.deepEqual(manifest.stores, ['none']);
   assert.deepEqual(manifest.requires, []);
   assert.deepEqual(manifest.capabilities, []);
@@ -38,8 +39,13 @@ test('the bundle has exactly one place a request can leave from, and it is the d
   // (countdown-feed.test.mjs drives that: a typed-deadline root makes no request).
   const uses = code.split('\n').filter((l) => /\bfetch\(/.test(l));
   assert.equal(uses.length, 2, uses.join('\n'));
-  assert.ok(uses.some((l) => /getAttribute\("data-src"\)/.test(l)), 'the request URL is the root’s data-src and nothing else');
-  assert.equal((code.match(/getAttribute\("data-src"\)/g) || []).length, 2, 'data-src is read to branch and to fetch, nowhere else');
+  // The URL it is sent to is `src`, and `src` is feedSource(root, <the page's language>): the root's
+  // data-src, or its data-src-<language>. Those two attribute reads live in feedSource and nowhere else.
+  assert.ok(uses.some((l) => /env\.fetch\(src,/.test(l)), 'the request goes to `src`');
+  assert.match(code, /const src = feedSource\(root, documentLanguage\(env\)\);/, '`src` is the root’s feed for the page’s language');
+  assert.equal((code.match(/getAttribute\("data-src"\)/g) || []).length, 1, 'data-src is read in one place');
+  assert.equal((code.match(/getAttribute\(`data-src-\$\{t\}`\)/g) || []).length, 1, 'and so is data-src-<language>');
+  assert.equal((code.match(/data-src/g) || []).length, 2, 'and nothing else in the bundle names a data-src attribute');
 });
 
 test('the bundle carries the shared card and the shared arithmetic (one copy, bundled in)', () => {

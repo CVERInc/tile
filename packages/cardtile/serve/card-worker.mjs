@@ -142,7 +142,7 @@ import { localeFromAcceptLanguage, primaryLocale, SANDBOX_LOCALES } from '../w/s
 import { validHostOrigin } from '../w3/host-bridge.mjs';
 import { withDeck, DECK_CSS_PATH, DECK_JS_PATH, DECK_TRY_URL } from '../w3/deck-page.mjs';
 import { handleReport, REPORT_PATH } from './card-report.mjs';
-import { standIn } from './host-standins.mjs';
+import { standIn, hostName } from './host-standins.mjs';
 import { pageCspHeaders, pageCspStage } from './cardtile-page-csp.mjs';
 import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, framesAsDocuments, hasSrcdocFrame, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
 
@@ -292,6 +292,7 @@ const isApexSitePath = (path) => APEX_SITE_PATHS.has(path.replace(/^\/|\/$/g, ''
 export function movedTo(host, url, method, env) {
   if (!movedToCardsHost(env) || (method !== 'GET' && method !== 'HEAD')) return null;
   const p = url.pathname;
+  if (splitHosts(env)) host = hostName(host);   // tile#378: one name, whatever the dot (hostName)
   if (host !== CANON_HOST || p === '/_api' || p === HOST_EDIT_PATH || p === `${HOST_EDIT_PATH}/` || p.startsWith(EDITOR_ASSET_BASE)) return null;
   if (splitHosts(env) && isServicePath(p)) return staysOnLegacy(url) ? null : `https://${SERVICE_HOST}${p}${url.search}`;
   return `https://${CARDS_HOST}${p}${url.search}`;
@@ -967,6 +968,7 @@ const isRead = (method) => method === 'GET' || method === 'HEAD';
 export function hostBoundary(env, host, pathname, method) {
   const stage = serviceHostStage(env);
   if (stage === 'off') return null;
+  host = hostName(host);   // tile#378: one name, whatever the case, port or trailing dot (hostName)
   const p = String(pathname || '/');
   const reading = isRead(method);
   if (host === SERVICE_HOST) {
@@ -1156,7 +1158,11 @@ const router = {
     // 🔴 The domain asked for is the request URL's, never a `Host` header that disagrees with it. On
     // Cloudflare the two are the same; but X-Card-Handle is a promise about WHICH domain serves which
     // card, so its identity comes from one authority. (`hostname` is lowercase and port-free.)
-    const reqHost = url.hostname;
+    // tile#378: with the service host on, the three roles are decided by name, so the trailing dot of
+    // a fully qualified name is dropped once, here, before every comparison (hostName). Off, the host
+    // is read exactly as before.
+    const hosts = serviceHostStage(env);
+    const reqHost = hosts === 'off' ? url.hostname : hostName(url.hostname);
     // tile#340 — the host whose name the nothing-here page and the origin's icon files wear. It decides
     // those words and nothing else: routing, the store and every address a page carries read reqHost.
     const face = askedOn || reqHost;
@@ -1172,7 +1178,6 @@ const router = {
     // ── the service has a host of its own (serviceHostStage; 'off' in every deployment that has not
     // set it, and then nothing between here and the Cards exits is different) ────────────────────
     // 🔴 ONE decision, before the API and before every handler, for every method: hostBoundary.
-    const hosts = serviceHostStage(env);
     const verdict = hostBoundary(env, reqHost, url.pathname, request.method);
     if (verdict) {
       if (verdict.answer === 'refused') return NOT_RELAYED();

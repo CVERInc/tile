@@ -2490,19 +2490,90 @@ function matchForwardRule(rules, pathname, method) {
 // The verdict bucket matches on PATH ALONE — deliberately unlike forward. The
 // gate exists to stop paid content leaving this origin, so a verb the contract
 // did not enumerate must still be judged rather than waved through to ASSETS.
+//
+// Both sides are compared as the asset server will read the request: the request path and
+// each rule's value go through verdictPathKey, so any spelling ASSETS would resolve to a
+// gated file meets that file's rule. A request path with a malformed escape has no such key;
+// it is matched only by its exact renderer spelling (normalizeVerdictPath), and the fetch
+// handler refuses it otherwise (verdictPathUnreadable) rather than handing it to ASSETS.
 function matchVerdictRule(rules, pathname) {
-	const normalized = normalizeVerdictPath(pathname);
+	const key = verdictPathKey(pathname);
 	for (const rule of rules || []) {
-		if (pathMatchesRule(rule, normalized)) return rule;
+		if (key === null) {
+			if (pathMatchesRule(rule, normalizeVerdictPath(pathname))) return rule;
+			continue;
+		}
+		const ruleKey = verdictRuleKey(rule);
+		if (ruleKey !== null && pathMatchesRule({ match: rule.match, value: ruleKey }, key)) return rule;
 	}
 	return null;
 }
 
-// The renderer emits one canonical path, while Pages may hand the worker an equivalent spelling:
-// an encoded separator, the directory spelling, or the explicit index file. Decode only encoded
-// separators before consulting the generated set; the original request still goes to ASSETS after
-// an allow, so static serving keeps its normal alias behavior. Malformed and unrelated escapes
-// remain unmatched site paths.
+// The path the verdict endpoint is asked about. An exact rule answers with its own value: the
+// renderer's canonical spelling, which is what every request it matched before already sent.
+function verdictPathFor(rule, pathname) {
+	return rule.match === 'exact' ? rule.value : normalizeVerdictPath(pathname);
+}
+
+// A request path the asset server cannot decode is refused whenever the site gates anything:
+// it cannot be compared with the gated set, so it is never handed to ASSETS.
+function verdictPathUnreadable(rules, pathname) {
+	return (rules || []).length > 0 && verdictPathKey(pathname) === null;
+}
+
+// The build ships its members-only path list beside the pages, at GATED_MANIFEST_PATH: the
+// preview uploader reads it from the build output to withhold the same pages, and this worker
+// carries the same list baked in. Nothing reads it over HTTP, so on a site that gates anything it
+// is answered as absent, for every spelling the asset server would resolve to that file. Case is
+// folded here, unlike the gate itself: the path is fixed and no page of the site lives there.
+const GATED_MANIFEST_PATH = '/_reef/verdict.json';
+
+function isGatedManifestPath(rules, pathname) {
+	if ((rules || []).length === 0) return false;
+	const key = verdictPathKey(pathname);
+	return key !== null && key.toLowerCase() === GATED_MANIFEST_PATH;
+}
+
+function gatedManifestAbsentResponse() {
+	return new Response('Not Found', {
+		status: 404,
+		headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'private, no-store' }
+	});
+}
+
+// The comparison key for the verdict gate. The Pages asset server decodes the WHOLE pathname
+// once with decodeURIComponent before it looks a file up, and a trailing slash serves the
+// directory's index.html (workers-sdk pages-shared/asset-server/handler.ts, generateResponse).
+// The key repeats that decode, then folds the spellings that reach the same file: repeated
+// slashes, `.` and `..` segments (resolved after decoding, never above the root), a trailing
+// slash and an explicit /index.html. Case is kept: that handler passes the decoded path to its
+// lookup without folding case. Returns null for a malformed escape.
+function verdictPathKey(pathname) {
+	let decoded;
+	try { decoded = decodeURIComponent(pathname); } catch (e) { return null; }
+	const segments = [];
+	for (const segment of decoded.split('/')) {
+		if (segment === '' || segment === '.') continue;
+		if (segment === '..') { segments.pop(); continue; }
+		segments.push(segment);
+	}
+	let key = '/' + segments.join('/');
+	if (key.endsWith('/index.html')) key = key.slice(0, -'/index.html'.length) || '/';
+	return key;
+}
+
+// A rule's value in the same key space. A prefix keeps the trailing slash it was written with,
+// so /members/ still never claims /membersx.
+function verdictRuleKey(rule) {
+	const key = verdictPathKey(rule.value);
+	if (key === null) return null;
+	return rule.match !== 'exact' && key !== '/' && rule.value.endsWith('/') ? key + '/' : key;
+}
+
+// The renderer's own spelling of a path, as the markdown route map and the gated manifest are
+// written: an encoded separator decoded, the directory spelling and the explicit index file
+// folded. The markdown negotiation looks routes up in this spelling; the verdict gate compares
+// in verdictPathKey's and uses this only for a request path that cannot be decoded.
 function normalizeVerdictPath(pathname) {
 	let normalized = pathname.replace(/%2f/gi, '/');
 	if (normalized.length > 1 && normalized.endsWith('/')) normalized = normalized.slice(0, -1);
@@ -2946,6 +3017,7 @@ const siteWorker = {
 		// result keeps this site's shell; old contracts, provider-only sites and
 		// malformed returns retain the existing RSP fallback.
 		const transport = CFG.apiTransport;
+		if (transport && isGatedManifestPath(transport.verdict, pathname)) return gatedManifestAbsentResponse();
 		const nativeCheckoutSuccess = matchNativeCheckoutSuccess(request, shopDescriptors, transport && transport.checkoutResult);
 		if (nativeCheckoutSuccess) return renderCompletion(request, env, CFG, nativeCheckoutSuccess, transport.checkoutResult);
 
@@ -2995,7 +3067,10 @@ const siteWorker = {
 				return binding.fetch(request);   // verbatim: method, path, query, headers, body
 			}
 			if (gated && !reader) return verdictRefusal(request, env, transport, 'retry', verdictBindingMissingResponse());
-			if (gated && reader) return serveVerdictGatedPath(request, env, reader, transport, normalizeVerdictPath(pathname));
+			if (!gated && verdictPathUnreadable(transport.verdict, pathname)) {
+				return verdictRefusal(request, env, transport, 'members-only', verdictBlockedResponse());
+			}
+			if (gated && reader) return serveVerdictGatedPath(request, env, reader, transport, verdictPathFor(gated, pathname));
 		}
 
 		let match = null;
@@ -3027,7 +3102,7 @@ export {
 	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchCheckoutResultFallback, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	matchSubscribeResult, renderSubscribeResult,
-	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath,
+	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath, verdictPathKey, verdictPathUnreadable, isGatedManifestPath,
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse,
 	YT_POSTER_PATH, relayYoutubePoster,
 	platformReader,

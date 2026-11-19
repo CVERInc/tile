@@ -130,6 +130,7 @@ img { max-width: 100%; height: auto; }
 .st-mk { display: none; }
 .st-b { font-weight: 700; }
 .st-i { font-style: italic; }
+.st-s { text-decoration: line-through; }
 
 /* ── platform chrome ───────────────────────────────────────────────────────── */
 .rf-header {
@@ -824,6 +825,7 @@ p .st-img { display: inline; vertical-align: middle; }
 /* ── base-content blocks: lists / blockquote / code / table (reef-token styled, zero JS) ── */
 .st-list { margin: 0 0 1rem; padding-left: 1.4rem; }
 .st-list li { margin: 0.25rem 0; }
+.st-list .st-task { list-style: none; }
 .st-quote { margin: 0 0 1rem; padding: 0.4rem 0 0.4rem 1rem; border-left: 3px solid var(--gd-accent); color: var(--gd-muted); }
 .st-quote p { margin: 0; }
 /* ── dialogue (`> **NAME**` + speech) — a record of an exchange that happened, so it is drawn
