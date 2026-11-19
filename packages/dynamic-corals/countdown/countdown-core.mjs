@@ -72,9 +72,10 @@
 // subscribes again.
 //
 import { parseDeadline, remainingParts, pad2 } from '../shared/countdown-parts.mjs';
-import { upcoming, nextMoment, phaseOf, locationKind, eventText, eventHref, unitText, feedSource } from './countdown-feed.mjs';
+import { upcoming, nextMoment, phaseOf, locationKind, eventText, eventHref, eventFile, unitText, feedSource } from './countdown-feed.mjs';
 import { createFlip, setFlip, settleFlip, parseFaces, FLIP_CSS } from '../shared/flip.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
+import { wireAddMenu, ADD_FILE_ATTR } from '../shared/add-menu.mjs';
 
 export const SELECTOR = '[data-dynamic-coral="countdown"]';
 const UNITS = ['days', 'hours', 'minutes', 'seconds'];
@@ -162,6 +163,7 @@ function mountAt(root, deadline, env, hooks = {}) {
   const expiredMode = root.getAttribute('data-expired') === 'text' && expiredText ? 'text' : 'hide';
   const parts = partsOf(root);
   injectStyles(env.document);
+  wireAddMenu(env.document);
   // The largest unit present absorbs every unit above it (see the header).
   const largest = UNITS.find((u) => parts.some((p) => p.unit === u));
 
@@ -250,9 +252,14 @@ function fillSlots(root, event, ctx, env, measuring = false) {
     el.textContent = eventText(event, el.getAttribute('data-event'), ctx);
   }
   for (const el of root.querySelectorAll('[data-event-href]')) {
-    const href = eventHref(event, el.getAttribute('data-event-href'), env.userAgent, ctx.src);
+    const which = el.getAttribute('data-event-href');
+    const href = eventHref(event, which, env.userAgent);
     if (href) el.setAttribute('href', href);
     else el.removeAttribute('href');
+    // an add-to-calendar link that also knows the event as a file opens the shared two-row menu
+    const file = which === 'add' && href ? eventFile(event, ctx.src) : '';
+    if (file) el.setAttribute(ADD_FILE_ATTR, file);
+    else el.removeAttribute(ADD_FILE_ATTR);
   }
   for (const el of root.querySelectorAll('[data-event-if]')) {
     const holds = CONDITIONS[el.getAttribute('data-event-if')];

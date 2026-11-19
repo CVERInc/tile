@@ -80,19 +80,6 @@ export function eventIcs(event, opts = {}) {
 }
 
 /**
- * Whether this browser hands a text/calendar response to the device's own calendar: Safari on an
- * Apple device. Chrome or Firefox there, and an app's built-in browser (a chat or social app's web
- * view), are not it — one saves a file the visitor then has to find, the other may show nothing —
- * so they keep the link that opens in any browser. Safari is the one whose user agent carries both
- * `Version/…` and `Safari/…`; the others drop one or the other.
- */
-export function opensIcs(userAgent) {
-  const ua = String(userAgent || '');
-  if (/Android/.test(ua) || !/iPhone|iPad|iPod|Macintosh/.test(ua)) return false;
-  return /Version\/[\d.]+.*Safari\//.test(ua) && !/CriOS|FxiOS|EdgiOS|EdgA?\/|OPiOS|OPR\/|Chrome\//.test(ua);
-}
-
-/**
  * Where that file is served: the feed's own address with `ics=<uid>` (the events worker answers
  * it). '' when there is no uid or the feed's address is not an absolute http(s) URL.
  */

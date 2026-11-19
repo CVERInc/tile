@@ -16,6 +16,7 @@
 import { countdownText } from './events-core.mjs';
 import { listRows, renderRows, rowsShape, showCount, farBadges } from './events-list.mjs';
 import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
+import { wireAddMenu } from '../shared/add-menu.mjs';
 
 (function () {
   var roots = document.querySelectorAll('[data-dynamic-coral="events"]');
@@ -160,6 +161,7 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
   // shown or their state changes; between those, only a badge's words are rewritten in place, so a
   // link the visitor has focused is not replaced under them every half minute.
   function live(root, feed, src, empty) {
+    wireAddMenu(document);   // the doors open the two-row add-to-calendar menu; once per page, whoever asks first
     var feedSrc = '';
     try { feedSrc = new URL(src, document.baseURI).href; } catch (e) { feedSrc = ''; }
     var shape = null;
