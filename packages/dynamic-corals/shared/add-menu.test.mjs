@@ -1,6 +1,6 @@
 // node packages/dynamic-corals/shared/add-menu.test.mjs
 import assert from 'node:assert/strict';
-import { menuPlace, wireAddMenu, ADD_MENU_ROWS, ADD_MENU_CSS } from './add-menu.mjs';
+import { menuPlace, wireAddMenu, httpHref, focusTarget, ADD_MENU_ROWS, ADD_MENU_CSS } from './add-menu.mjs';
 
 let n = 0;
 const ok = (name, fn) => { fn(); n++; console.log('PASS ' + name); };
@@ -37,6 +37,27 @@ ok('a document without popovers is left alone: the doors stay ordinary links', (
   assert.equal(noPopover.__dcAddMenu, undefined);
   assert.equal(wireAddMenu(null), false);
   assert.equal(wireAddMenu({}), false, 'no body yet');
+});
+
+ok('only an http(s) address becomes a row: a javascript: or data: attribute on someone else’s markup is not vouched for', () => {
+  assert.equal(httpHref('https://feed.example/v0/?ics=a', 'https://site.example/'), 'https://feed.example/v0/?ics=a');
+  assert.equal(httpHref('/v0/?ics=a', 'https://site.example/x/'), 'https://site.example/v0/?ics=a');
+  for (const bad of ['javascript:alert(1)', ' JavaScript:alert(1)', 'java\tscript:alert(1)', 'data:text/html,<script>1</script>', 'vbscript:x', 'blob:https://site.example/1', 'file:///etc/passwd', 'webcal://feed.example/x.ics', '', null, undefined]) {
+    assert.equal(httpHref(bad, 'https://site.example/'), '', String(bad));
+  }
+  assert.equal(httpHref('//[', 'https://site.example/'), '', 'unparseable');
+});
+
+ok('focus goes back to a door a screen reader can name: the door itself, or the row’s named one when the door is hidden', () => {
+  const el = (attrs, row) => ({ isConnected: true, getAttribute: (k) => (k in attrs ? attrs[k] : null), closest: () => row || null });
+  const named = el({});
+  const row = { querySelector: (q) => (q === 'a[data-dc-add-file]:not([aria-hidden="true"])' ? named : null) };
+  assert.equal(focusTarget(named), named);
+  assert.equal(focusTarget(el({ 'aria-hidden': 'true', tabindex: '-1' }, row)), named);
+  assert.equal(focusTarget(el({ tabindex: '-1' }, row)), named);
+  assert.equal(focusTarget(el({ 'aria-hidden': 'true' })), null, 'a hidden door outside any row: nowhere better, leave focus alone');
+  assert.equal(focusTarget({ isConnected: false }), null);
+  assert.equal(focusTarget(null), null);
 });
 
 ok('the style reads the site’s tokens and guesses no colour of its own for the surface', () => {

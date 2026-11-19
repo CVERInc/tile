@@ -164,13 +164,28 @@ for (const [device, userAgent, width] of [['a desktop', DESKTOP, 1280], ['an iPh
       const m = await menu(); out.byDoor.push(m);
       await p.keyboard.press('Escape'); await p.waitForTimeout(120);
       out.closedByEscape = (out.closedByEscape !== false) && !(await menu()).open;
-      out.focusReturned = (out.focusReturned !== false) && await p.evaluate((q) => document.activeElement === document.querySelector(q), sel);
+      // focus comes back to a door a screen reader can name: the date line of that row (the tile and the badge are hidden from it)
+      out.focusReturned = (out.focusReturned !== false) && await p.evaluate(() => document.activeElement === document.querySelector('a.dc-ev-when'));
     }
     await p.focus('a.dc-ev-when'); await p.keyboard.press('Enter'); await p.waitForTimeout(120);
     out.byKeyboard = await menu();
     await p.keyboard.press('ArrowDown'); out.afterArrow = (await menu()).focus;
-    await p.keyboard.press('Escape');
-    out.pages = ctx.pages().length; out.url = p.url(); out.left = await p.evaluate(() => window.__left === true);
+    await p.keyboard.press('Tab'); await p.waitForTimeout(120);
+    out.tabCloses = !(await menu()).open && await p.evaluate(() => document.activeElement === document.querySelector('a.dc-ev-when'));
+    await p.click('a.dc-ev-when'); await p.waitForTimeout(120);
+    await p.evaluate(() => window.dispatchEvent(new Event('scroll'))); await p.waitForTimeout(120);
+    out.scrollCloses = !(await menu()).open;
+    // markup the coral did not write: a door whose file is not an http(s) address is left an ordinary link
+    out.hostile = await p.evaluate(async () => {
+      // nothing here stops the click itself: an earlier version of this probe did, and so passed with the check removed
+      const a = document.createElement('a'); a.href = '#elsewhere'; a.setAttribute('data-dc-add-file', 'javascript:window.__pwned=1'); a.textContent = 'x';
+      document.body.append(a); a.click();
+      const m = document.querySelector('.dc-add-menu'); const r = { menuOpen: m.matches(':popover-open'), jsRows: [...m.querySelectorAll('a')].filter((x) => /^javascript:/i.test(x.getAttribute('href') || '')).length }; if (r.menuOpen) m.hidePopover(); a.remove(); return r; });
+    // inside a host's modal dialog the menu is the dialog's child, so its rows can be clicked
+    out.modal = await p.evaluate(async () => {
+      const d = document.createElement('dialog'); const a = document.createElement('a'); a.href = 'https://calendar.google.com/x'; a.setAttribute('data-dc-add-file', 'https://feed.example/?ics=1'); a.textContent = 'door'; d.append(a); document.body.append(d); d.showModal(); a.click();
+      const m = document.querySelector('.dc-add-menu'); const r = { open: m.matches(':popover-open'), inDialog: m.parentNode === d }; m.hidePopover(); d.close(); d.remove(); return r; });
+    out.pages = ctx.pages().length; out.url = p.url().split('#')[0];   // the hostile door above is followed as the plain link it is: a fragment on this page out.left = await p.evaluate(() => window.__left === true);
     out.style = await p.evaluate(() => document.querySelectorAll('style[data-dc="add-menu"]').length);
     return out;
   } });
@@ -179,7 +194,9 @@ for (const [device, userAgent, width] of [['a desktop', DESKTOP, 1280], ['an iPh
   check(`on ${device}: every door is the Google link, with the event as a file beside it`, s.doors.every((d) => d.join() === 'google,google,google') && s.files.every((n) => n === 3), JSON.stringify([s.doors, s.files]));
   check(`on ${device}: each of the three doors opens the same menu — Apple · Outlook (the file), then Google Calendar — on screen`, a.byDoor.length === 3 && a.byDoor.every((m) => m && m.open && m.onScreen && JSON.stringify(m.rows) === ROWS), JSON.stringify(a.byDoor));
   check(`on ${device}: a pointer leaves no row looking chosen; the keyboard lands on the first row and the arrow moves to the second`, a.byDoor.every((m) => m.focus === 'menu') && a.byKeyboard.open && a.byKeyboard.focus === 'Apple · Outlook' && a.afterArrow === 'Google Calendar', JSON.stringify([a.byDoor.map((m) => m.focus), a.byKeyboard.focus, a.afterArrow]));
-  check(`on ${device}: Escape closes it and gives focus back to the door; nothing navigated, no tab opened, one stylesheet`, a.closedByEscape && a.focusReturned && !a.left && a.pages === 1 && a.url === 'http://events.test/' && a.style === 1, JSON.stringify([a.closedByEscape, a.focusReturned, a.left, a.pages, a.url, a.style]));
+  check(`on ${device}: Tab closes it and returns to the door; it closes when the page scrolls under it`, a.tabCloses && a.scrollCloses, JSON.stringify([a.tabCloses, a.scrollCloses]));
+  check(`on ${device}: a door with a javascript: file (markup we did not write) opens no menu and makes no such row; in a modal dialog the menu is the dialog’s own`, !a.hostile.menuOpen && a.hostile.jsRows === 0 && a.modal.open && a.modal.inDialog, JSON.stringify([a.hostile, a.modal]));
+  check(`on ${device}: Escape closes it and gives focus back to the row’s named door; nothing navigated, no tab opened, one stylesheet`, a.closedByEscape && a.focusReturned && !a.left && a.pages === 1 && a.url === 'http://events.test/' && a.style === 1, JSON.stringify([a.closedByEscape, a.focusReturned, a.left, a.pages, a.url, a.style]));
 }
 
 // ── 4: the feeds that are not a calendar as data ─────────────────────────────────────────────────

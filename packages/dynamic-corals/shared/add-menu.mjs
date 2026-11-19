@@ -7,7 +7,9 @@
 //     Apple · Outlook   → the event as an .ics file (whatever calendar the device opens it with)
 //     Google Calendar   → the Google link
 //
-// in that order (A–Z) on every device. We do not guess from the device which one the visitor uses:
+// in that order (A–Z) on every device, including an app's built-in browser, where a file may do
+// nothing: that visitor has the second row, and we cannot tell them apart from the outside.
+// We do not guess from the device which one the visitor uses:
 // a phone says nothing about whose calendar is on it, and a wrong guess fails silently — the event
 // lands in a calendar the visitor never opens.
 //
@@ -39,6 +41,26 @@ export function menuPlace(door, menu, view, pointerX) {
   const below = door.bottom + gap;
   const top = below + menu.height > view.height - edge ? Math.max(edge, door.top - menu.height - gap) : below;
   return { left, top };
+}
+
+/**
+ * `value` as an absolute http(s) address, or '' — the only kind the menu will turn into a link.
+ * The doors the corals write are already that; but the listener honours ANY `a[data-dc-add-file]`
+ * on the page, and a page may carry markup its owner did not write (a sanitised comment keeps
+ * `data-*` attributes): a `javascript:` there must not become a row someone can click.
+ */
+export function httpHref(value, base) {
+  if (!value) return '';
+  try { const u = new URL(String(value), base || undefined); return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : ''; } catch (e) { return ''; }
+}
+
+/** Where focus goes when the menu closes: the door, or — when the door is hidden from assistive tech — the row's own named door. */
+export function focusTarget(door) {
+  if (!door || !door.isConnected) return null;
+  const hidden = door.getAttribute('aria-hidden') === 'true' || door.getAttribute('tabindex') === '-1';
+  if (!hidden) return door;
+  const row = door.closest ? door.closest('.dc-ev-item') : null;
+  return (row && row.querySelector('a[' + ADD_FILE_ATTR + ']:not([aria-hidden="true"])')) || null;
 }
 
 const WIRED = '__dcAddMenu';
@@ -82,6 +104,7 @@ export function wireAddMenu(doc) {
 
   menu.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('a')) menu.hidePopover(); });
   menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') { e.preventDefault(); menu.hidePopover(); return; }   // a menu is left by closing it: focus goes back to the door
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     const items = Array.prototype.slice.call(menu.querySelectorAll('a'));
     const at = items.indexOf(doc.activeElement);
@@ -92,17 +115,25 @@ export function wireAddMenu(doc) {
     if (e.newState !== 'closed') return;
     const door = from; from = null;
     // give focus back only if it was still in the menu: a click elsewhere has already moved it
-    if (door && door.isConnected && (doc.activeElement === menu || menu.contains(doc.activeElement) || doc.activeElement === doc.body)) door.focus({ preventScroll: true });
+    const back = focusTarget(door);
+    // (the browser itself hands focus back to whatever had it before the popover: the door that was clicked)
+    const at = doc.activeElement;
+    if (back && (at === door || at === menu || menu.contains(at) || at === doc.body)) back.focus({ preventScroll: true });
   });
 
   doc.addEventListener('click', (e) => {
-    const target = e.target;
+    // composedPath: a door inside a shadow root reaches the document retargeted to its host
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    const target = path[0] && path[0].closest ? path[0] : e.target;
     const door = target && target.closest ? target.closest('a[' + ADD_FILE_ATTR + ']') : null;
     if (!door || e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    const file = door.getAttribute(ADD_FILE_ATTR), google = door.getAttribute('href');
-    if (!file || !google) return;
+    const file = httpHref(door.getAttribute(ADD_FILE_ATTR), doc.baseURI), google = httpHref(door.getAttribute('href'), doc.baseURI);
+    if (!file || !google) return;                   // not ours to vouch for: the door stays an ordinary link
     e.preventDefault();
-    if (!menu.isConnected) doc.body.appendChild(menu);
+    // Inside a host's modal dialog or popover the menu must be ITS child: appended to body it would be inert under
+    // a modal, and as an unrelated auto popover it would close the host's panel under the visitor.
+    const home = door.closest('dialog[open],[popover]') || doc.body;
+    if (menu.parentNode !== home) home.appendChild(menu);
     menu.replaceChildren(row(ADD_MENU_ROWS[0], file, false), row(ADD_MENU_ROWS[1], google, true));
     from = door;
     menu.showPopover();
@@ -114,5 +145,9 @@ export function wireAddMenu(doc) {
     // by keyboard, land on the first row; by pointer, hold focus on the menu so no row looks chosen
     (byPointer ? menu : menu.querySelector('a')).focus({ preventScroll: true });
   });
+  // It is placed once, in viewport coordinates: when the page moves under it, close it rather than let it drift from its door.
+  const shut = () => { if (menu.isConnected && menu.matches(':popover-open')) menu.hidePopover(); };
+  const view = doc.defaultView;
+  if (view && view.addEventListener) { view.addEventListener('scroll', shut, { passive: true, capture: true }); view.addEventListener('resize', shut, { passive: true }); }
   return true;
 }
