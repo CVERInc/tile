@@ -81,7 +81,7 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
         const t = tile.getBoundingClientRect(), f = face.getBoundingClientRect();
         const top = face.firstElementChild.getBoundingClientRect().top - f.top, bottom = f.bottom - face.lastElementChild.getBoundingClientRect().bottom;
         const bar = tile.querySelector('.dc-ev-cal-mo').getBoundingClientRect();
-        return { size: Math.round(t.width), square: Math.abs(t.width - t.height) <= 1, offCentre: Math.abs(top - bottom), faceShare: Math.round(100 * f.height / (t.bottom - bar.bottom)) / 100, fits: face.scrollHeight <= face.clientHeight + 1 && top >= 0 && bottom >= 0, text: [...tile.querySelectorAll('span > span, .dc-ev-cal-mo')].map((x) => x.textContent).join('/') };
+        return { size: Math.round(t.width), square: Math.abs(t.width - t.height) <= 1, offCentre: Math.abs(top - bottom), faceShare: Math.round(100 * f.height / (t.bottom - bar.bottom)) / 100, fits: face.scrollHeight <= face.clientHeight + 1 && top >= 0 && bottom >= 0, flush: Math.abs(bar.left - t.left) < 0.01 && Math.abs(bar.right - t.right) < 0.01 && Math.abs(bar.top - t.top) < 0.01 && parseFloat(getComputedStyle(tile).borderTopWidth) === 0, ring: /\b1\.5px\b/.test(getComputedStyle(tile, '::after').boxShadow) && !/rgba\([^)]*,\s*0\)/.test(getComputedStyle(tile, '::after').boxShadow), text: [...tile.querySelectorAll('span > span, .dc-ev-cal-mo')].map((x) => x.textContent).join('/') };
       }),
       tileBackground: root.querySelector('.dc-ev-cal') ? getComputedStyle(root.querySelector('.dc-ev-cal')).backgroundColor : null,
       dayColour: root.querySelector('.dc-ev-cal-day') ? getComputedStyle(root.querySelector('.dc-ev-cal-day')).color : null, bodyColour: getComputedStyle(document.body).color,
@@ -105,6 +105,8 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
   const sameYear = new Date(now - 2 * D).getUTCFullYear() === new Date(now + 2 * D).getUTCFullYear() && new Date(now - 2 * D).getUTCFullYear() === new Date(now).getFullYear();
   check('a date in another year carries its year', /\d{4}/.test(s.whens[4]) && /\d{4}/.test(s.whens[2]) === !sameYear, JSON.stringify(s.whens));
   check('the tile is a square with the month as a bar, weekday and day centred in the face under it', s.tiles.every((t) => t && t.square && t.fits && t.offCentre <= 1 && t.faceShare >= 0.9 && t.faceShare <= 0.99), JSON.stringify(s.tiles));
+  // A bar clipped inside a real border leaves a hairline of the face showing between the two curves on a phone screen.
+  check('the month bar runs to the very edge of the tile, under an outline painted over it (no border to leave a seam)', s.tiles.every((t) => t && t.flush && t.ring), JSON.stringify(s.tiles));
   check('on a page with no theme the tile, now a link, keeps the page’s text colour', s.dayColour === s.bodyColour, `${s.dayColour} vs ${s.bodyColour}`);
   check('no script error', s.errors.length === 0, s.errors.join(' | '));
 }
@@ -113,7 +115,7 @@ async function open({ lang = 'en', src = '/feed.json', width = 1280, userAgent =
 for (const [lang, width] of [['zh-Hant', 390], ['de', 340], ['ja', 320]]) {
   const s = await open({ lang, width });
   check(`${lang} at ${width}px: no row is wider than the viewport`, !s.overflowX && s.widest <= s.viewport, `widest ${s.widest} of ${s.viewport}`);
-  check(`${lang} at ${width}px: every tile is square and its weekday and day fit, centred`, s.tiles.every((t) => t && t.square && t.fits && t.offCentre <= 1), JSON.stringify(s.tiles));
+  check(`${lang} at ${width}px: every tile is square and its weekday and day fit, centred`, s.tiles.every((t) => t && t.square && t.fits && t.flush && t.ring && t.offCentre <= 1), JSON.stringify(s.tiles));
 }
 {
   const s = await open({ lang: 'en_US' });
