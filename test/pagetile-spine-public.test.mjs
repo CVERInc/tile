@@ -138,8 +138,8 @@ eq(() => splitFrontmatter(FR_POSTS['/s/blog/fr/paid.md']).meta.visibility, undef
   eq(() => paths(buildSiteSpine(defaultPages(), NAV, { gated: GATED })).filter((p) => p === '/old-shop/' || p.startsWith('/archive/')),
     ['/old-shop/', '/archive/2019/'], '2: without the redirect rules the shadowed pages are in (the control)');
   eq(() => ['/old-shop', '/old-shop/'].map((r) => one([r], '/old-shop/')), [0, 0], '2: a literal `from`, in either slash spelling, withholds its page');
-  eq(() => [one(['/archive/*'], '/archive/2019/'), one(['/archive/*'], '/archive/'), one(['/archive/*'], '/archived/')], [0, 0, 1],
-    '2: a splat withholds every page under it, and only those');
+  eq(() => [one(['/archive/*'], '/archive/2019/'), one(['/archive/*'], '/archive/2019/may/'), one(['/archive/*'], '/archive/'), one(['/archive/*'], '/archived/')], [0, 0, 0, 1],
+    '2: a splat withholds every page under it, at any depth, and only those');
   eq(() => [one(['/blog/:slug'], '/blog/hello/'), one(['/blog/:slug'], '/blog/a/b/'), one(['/caf%C3%A9'], '/café/')], [0, 1, 0],
     '2: `:name` is one segment; a percent-encoded `from` names its page');
   eq(() => [one(['/old-shop?id=1'], '/old-shop/'), one(['https://example.com/old-shop'], '/old-shop/'), one([''], '/'), one(['/x'], '/')], [1, 1, 1, 1],
