@@ -12,7 +12,7 @@
 // changed, the sitemap it must stay out of, and a `_redirects` it must not have touched.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -51,11 +51,14 @@ await test('off unless the site says so: absent and "false" make nothing', () =>
   assert.deepEqual(fwd(undefined, 5), []);
 });
 await test('on: /page/2../page/<last> forward to the pager\'s own hrefs, and nothing else', () => {
-  assert.deepEqual(fwd(ON, 3), [{ path: 'page/2', to: '/blog/page/2' }, { path: 'page/3', to: '/blog/page/3' }]);
+  // With the trailing slash: the directory form the build writes, which is the target's own canonical.
+  assert.deepEqual(fwd(ON, 3), [{ path: 'page/2', to: '/blog/page/2/' }, { path: 'page/3', to: '/blog/page/3/' }]);
   // Any present value but "false" is on — the blog-date-routes rule.
-  assert.deepEqual(fwd({ ...ON, 'blog-home-paging-redirects': 'on' }, 2), [{ path: 'page/2', to: '/blog/page/2' }]);
+  assert.deepEqual(fwd({ ...ON, 'blog-home-paging-redirects': 'on' }, 2), [{ path: 'page/2', to: '/blog/page/2/' }]);
   // The target is indexUrl's, so it follows blog-path (the historic default included).
-  assert.deepEqual(fwd({ 'blog-home-paging-redirects': 'true' }, 2), [{ path: 'page/2', to: '/devlog/page/2' }]);
+  assert.deepEqual(fwd({ 'blog-home-paging-redirects': 'true' }, 2), [{ path: 'page/2', to: '/devlog/page/2/' }]);
+  // A blog-path written with a trailing slash still makes one slash, not two.
+  assert.deepEqual(fwd({ ...ON, 'blog-path': '/blog/' }, 2), [{ path: 'page/2', to: '/blog/page/2/' }]);
 });
 await test('a one-page blog has no page <n> to forward to', () => {
   assert.deepEqual(fwd(ON, 1), []);
@@ -66,7 +69,7 @@ await test('🔴 a root-mounted blog makes nothing: its pager already IS /page/<
   assert.deepEqual(fwd({ ...ON, 'blog-path': '/' }, 5), []);
 });
 await test('🔴 a path another route claims keeps its page — no forward is made there', () => {
-  assert.deepEqual(fwd(ON, 4, (p) => p === 'page/3'), [{ path: 'page/2', to: '/blog/page/2' }, { path: 'page/4', to: '/blog/page/4' }]);
+  assert.deepEqual(fwd(ON, 4, (p) => p === 'page/3'), [{ path: 'page/2', to: '/blog/page/2/' }, { path: 'page/4', to: '/blog/page/4/' }]);
 });
 
 // ── the build half ───────────────────────────────────────────────────────────────────────────
@@ -104,12 +107,19 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
   }
   const site = (name) => { if (built[name] instanceof Error) throw built[name]; return built[name]; };
 
-  await test('🔴 on: /page/2 is a forward to /blog/page/2 — 0-second refresh, noindex, canonical to the target', () => {
+  await test('🔴 on: /page/2 is a forward to /blog/page/2/ — 0-second refresh, noindex, canonical to the target', () => {
     const html = site('on').read('page/2/index.html');
     assert.ok(html, 'no page/2/index.html was written');
-    assert.match(html, /<meta http-equiv="refresh" content="0;url=\/blog\/page\/2">/);
+    assert.match(html, /<meta http-equiv="refresh" content="0;url=\/blog\/page\/2\/">/);
     assert.match(html, /<meta name="robots" content="noindex">/);
-    assert.match(html, /<link rel="canonical" href="https:\/\/example\.com\/blog\/page\/2">/);
+    assert.match(html, /<link rel="canonical" href="https:\/\/example\.com\/blog\/page\/2\/">/);
+  });
+  await test('🔴 on: the forward names exactly the URL the target page calls its own canonical (no second hop)', () => {
+    const canon = (html) => (html.match(/<link rel="canonical" href="([^"]*)"/) || [])[1];
+    const target = site('on').read('blog/page/2/index.html');
+    assert.ok(target && canon(target), 'control: blog/page/2/index.html carries a canonical');
+    assert.equal(canon(site('on').read('page/2/index.html')), canon(target));
+    assert.match(site('on').read('page/2/index.html'), new RegExp(`content="0;url=${new URL(canon(target)).pathname.replace(/\//g, '\\/')}"`));
   });
   await test('🔴 on: the content page at /page/3 is still that page, not a forward', () => {
     const html = site('on').read('page/3/index.html');
@@ -137,6 +147,7 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     assert.equal(site('off').read('page/2/index.html'), null);
     assert.ok(site('off').read('blog/page/2/index.html'), 'control: the off site has a page 2');
   });
+  rmSync(work, { recursive: true, force: true });
 }
 
 console.log(`\nblog-home-paging: ${passed} passed`);
