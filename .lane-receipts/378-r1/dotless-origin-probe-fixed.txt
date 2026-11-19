@@ -1,0 +1,8 @@
+split cards-staging.feelreef.com. <- dotless Origin: 403
+split cards-staging.feelreef.com.:8443 <- dotless Origin: 403
+split card-staging.feelreef.com. <- dotless Origin: 403
+split card-staging.feelreef.com.:8443 <- dotless Origin: 403
+open cards-staging.feelreef.com. <- dotless Origin: 403
+open cards-staging.feelreef.com.:8443 <- dotless Origin: 403
+open card-staging.feelreef.com. <- dotless Origin: 403
+open card-staging.feelreef.com.:8443 <- dotless Origin: 403

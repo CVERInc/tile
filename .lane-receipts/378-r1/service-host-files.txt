@@ -1,0 +1,591 @@
+TAP version 13
+# Subtest: 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+ok 1 - 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+  ---
+  duration_ms: 0.881016
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+ok 2 - 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+  ---
+  duration_ms: 16.928173
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot answers every boundary row as without it
+ok 3 - 378-1 split: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 15.482271
+  type: 'test'
+  ...
+# Subtest: 378-1 open: the service host with a trailing dot answers every boundary row as without it
+ok 4 - 378-1 open: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 6.364489
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the people's host with a trailing dot answers no service endpoint
+ok 5 - 378-1 split: the people's host with a trailing dot answers no service endpoint
+  ---
+  duration_ms: 1.66861
+  type: 'test'
+  ...
+# Subtest: 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+ok 6 - 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+  ---
+  duration_ms: 1.271018
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+ok 7 - 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+  ---
+  duration_ms: 1.383631
+  type: 'test'
+  ...
+# Subtest: 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+ok 8 - 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+  ---
+  duration_ms: 0.578368
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+ok 9 - CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+  ---
+  duration_ms: 0.315669
+  type: 'test'
+  ...
+# Subtest: 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+ok 10 - 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+  ---
+  duration_ms: 2.608028
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+ok 11 - 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+  ---
+  duration_ms: 3.647499
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+ok 12 - CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+  ---
+  duration_ms: 3.791802
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+ok 13 - 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+  ---
+  duration_ms: 0.598768
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+ok 14 - CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+  ---
+  duration_ms: 0.239167
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the service stand-in parks for its own Origin, dotted or not, and for no other
+ok 15 - 378-2 r1 split: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 2.229487
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 16 - 378-2 r1 split: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 2.590127
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+ok 17 - 378-2 r1 split: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 2.052681
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 18 - 378-2 r1 split: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.392932
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+ok 19 - 378-2 r1 split:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.426092
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 20 - 378-2 r1 split:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 1.627179
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+ok 21 - 378-2 r1 split:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 2.016389
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 22 - 378-2 r1 split:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 0.99336
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the service stand-in parks for its own Origin, dotted or not, and for no other
+ok 23 - 378-2 r1 open: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.281118
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 24 - 378-2 r1 open: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 1.200676
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+ok 25 - 378-2 r1 open: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.578888
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 26 - 378-2 r1 open: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.02955
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+ok 27 - 378-2 r1 open:8443: the service stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.802204
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+ok 28 - 378-2 r1 open:8443: the service stand-in, dotted or not, refuses an Origin naming the real service host
+  ---
+  duration_ms: 1.094872
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+ok 29 - 378-2 r1 open:8443: the legacy stand-in parks for its own Origin, dotted or not, and for no other
+  ---
+  duration_ms: 1.462803
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 open:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+ok 30 - 378-2 r1 open:8443: the legacy stand-in, dotted or not, refuses an Origin naming the real legacy host
+  ---
+  duration_ms: 1.292439
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split: the people's stand-in report form takes its own Origin, dotted or not, and no other
+ok 31 - 378-2 r1 split: the people's stand-in report form takes its own Origin, dotted or not, and no other
+  ---
+  duration_ms: 3.542115
+  type: 'test'
+  ...
+# Subtest: 378-2 r1 split:8443: the people's stand-in report form takes its own Origin, dotted or not, and no other
+ok 32 - 378-2 r1 split:8443: the people's stand-in report form takes its own Origin, dotted or not, and no other
+  ---
+  duration_ms: 3.035721
+  type: 'test'
+  ...
+# Subtest: 378-2 r1: the adapter carries the verdict — same origin becomes the re-addressed origin, another one cannot equal it
+ok 33 - 378-2 r1: the adapter carries the verdict — same origin becomes the re-addressed origin, another one cannot equal it
+  ---
+  duration_ms: 0.724661
+  type: 'test'
+  ...
+# Subtest: split: reef.cards/ is a temporary redirect to the editor on the service host, and reads nothing
+ok 34 - split: reef.cards/ is a temporary redirect to the editor on the service host, and reads nothing
+  ---
+  duration_ms: 5.715489
+  type: 'test'
+  ...
+# Subtest: split: reef.cards/ carries its query to the editor (a language, a referrer)
+ok 35 - split: reef.cards/ carries its query to the editor (a language, a referrer)
+  ---
+  duration_ms: 1.178516
+  type: 'test'
+  ...
+# Subtest: CONTROL split: reef.cards/<handle> is served, canonical on reef.cards
+ok 36 - CONTROL split: reef.cards/<handle> is served, canonical on reef.cards
+  ---
+  duration_ms: 10.055359
+  type: 'test'
+  ...
+# Subtest: split: a page's "make your own" goes to the service host; outside split it is the address it was
+ok 37 - split: a page's "make your own" goes to the service host; outside split it is the address it was
+  ---
+  duration_ms: 8.40511
+  type: 'test'
+  ...
+# Subtest: split: only the page's own boot line is rewritten, never the same text inside what a person wrote
+ok 38 - split: only the page's own boot line is rewritten, never the same text inside what a person wrote
+  ---
+  duration_ms: 2.619738
+  type: 'test'
+  ...
+# Subtest: split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+ok 39 - split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+  ---
+  duration_ms: 22.263492
+  type: 'test'
+  ...
+# Subtest: split: reef.cards answers no service page — the editor paths redirect to the service host, a write is refused
+ok 40 - split: reef.cards answers no service page — the editor paths redirect to the service host, a write is refused
+  ---
+  duration_ms: 0.742862
+  type: 'test'
+  ...
+# Subtest: split: the write API does not answer on reef.cards
+ok 41 - split: the write API does not answer on reef.cards
+  ---
+  duration_ms: 0.768002
+  type: 'test'
+  ...
+# Subtest: CONTROL split: reef.cards keeps its report door and its security.txt
+ok 42 - CONTROL split: reef.cards keeps its report door and its security.txt
+  ---
+  duration_ms: 1.571276
+  type: 'test'
+  ...
+# Subtest: split: a service page on the legacy host redirects to the same path on the service host
+ok 43 - split: a service page on the legacy host redirects to the same path on the service host
+  ---
+  duration_ms: 0.982439
+  type: 'test'
+  ...
+# Subtest: CONTROL split: what a person wrote on the legacy host redirects to reef.cards/<handle>
+ok 44 - CONTROL split: what a person wrote on the legacy host redirects to reef.cards/<handle>
+  ---
+  duration_ms: 0.485324
+  type: 'test'
+  ...
+# Subtest: split: an editor left open on the legacy host keeps working — its draft can still be opened there, and Save still parks
+ok 45 - split: an editor left open on the legacy host keeps working — its draft can still be opened there, and Save still parks
+  ---
+  duration_ms: 4.517505
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the legacy host still answers what cannot follow a redirect — the API, the park, host mode, the editor's files
+ok 46 - CONTROL split: the legacy host still answers what cannot follow a redirect — the API, the park, host mode, the editor's files
+  ---
+  duration_ms: 5.905635
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the service host serves the service pages
+ok 47 - CONTROL split: the service host serves the service pages
+  ---
+  duration_ms: 7.947556
+  type: 'test'
+  ...
+# Subtest: split: the service host's root is a temporary redirect to its editor
+ok 48 - split: the service host's root is a temporary redirect to its editor
+  ---
+  duration_ms: 0.270638
+  type: 'test'
+  ...
+# Subtest: split: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+ok 49 - split: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+  ---
+  duration_ms: 0.781274
+  type: 'test'
+  ...
+# Subtest: split: anything else on the service host is the nothing-here page, unread
+ok 50 - split: anything else on the service host is the nothing-here page, unread
+  ---
+  duration_ms: 8.221725
+  type: 'test'
+  ...
+# Subtest: CONTROL open: the service host serves the service pages
+ok 51 - CONTROL open: the service host serves the service pages
+  ---
+  duration_ms: 11.590444
+  type: 'test'
+  ...
+# Subtest: open: the service host's root is a temporary redirect to its editor
+ok 52 - open: the service host's root is a temporary redirect to its editor
+  ---
+  duration_ms: 0.346021
+  type: 'test'
+  ...
+# Subtest: open: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+ok 53 - open: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+  ---
+  duration_ms: 0.769433
+  type: 'test'
+  ...
+# Subtest: open: anything else on the service host is the nothing-here page, unread
+ok 54 - open: anything else on the service host is the nothing-here page, unread
+  ---
+  duration_ms: 6.960067
+  type: 'test'
+  ...
+# Subtest: split: a parked preview is what a person wrote — the service host sends it to reef.cards, which renders it
+ok 55 - split: a parked preview is what a person wrote — the service host sends it to reef.cards, which renders it
+  ---
+  duration_ms: 1.577767
+  type: 'test'
+  ...
+# Subtest: serviceHostStage: only exactly "cards.feelreef.com" turns the service host on
+ok 56 - serviceHostStage: only exactly "cards.feelreef.com" turns the service host on
+  ---
+  duration_ms: 0.263078
+  type: 'test'
+  ...
+# Subtest: a typo in CARDS_SERVICE_HOST — another case and a space around it included — redirects nothing to a host nobody serves
+ok 57 - a typo in CARDS_SERVICE_HOST — another case and a space around it included — redirects nothing to a host nobody serves
+  ---
+  duration_ms: 7.40952
+  type: 'test'
+  ...
+# Subtest: the local editor's server calls the API on the service host and reads public exits from the people's host
+ok 58 - the local editor's server calls the API on the service host and reads public exits from the people's host
+  ---
+  duration_ms: 0.298479
+  type: 'test'
+  ...
+# Subtest: staging: each stand-in answers as its role's host, and every redirect of the ruling stays inside staging
+ok 59 - staging: each stand-in answers as its role's host, and every redirect of the ruling stays inside staging
+  ---
+  duration_ms: 8.443841
+  type: 'test'
+  ...
+# Subtest: staging: a redirect to a host that is no role (a creator's domain) and a relative one are left alone
+ok 60 - staging: a redirect to a host that is no role (a creator's domain) and a relative one are left alone
+  ---
+  duration_ms: 2.312648
+  type: 'test'
+  ...
+# Subtest: CONTROL staging: a browser on the stand-in passes the same-origin check, another site still does not, and a body travels
+ok 61 - CONTROL staging: a browser on the stand-in passes the same-origin check, another site still does not, and a body travels
+  ---
+  duration_ms: 6.575576
+  type: 'test'
+  ...
+# Subtest: staging: a stand-in keeps the scheme and the port of an Origin — the same-origin check answers as on the real host, for every port pair
+ok 62 - staging: a stand-in keeps the scheme and the port of an Origin — the same-origin check answers as on the real host, for every port pair
+  ---
+  duration_ms: 6.084711
+  type: 'test'
+  ...
+# Subtest: staging: only a name of ours can stand in — anything else in the setting is ignored
+ok 63 - staging: only a name of ours can stand in — anything else in the setting is ignored
+  ---
+  duration_ms: 0.475614
+  type: 'test'
+  ...
+# Subtest: CONTROL staging: a host that is no stand-in is answered as itself, stand-ins or not
+ok 64 - CONTROL staging: a host that is no stand-in is answered as itself, stand-ins or not
+  ---
+  duration_ms: 4.648668
+  type: 'test'
+  ...
+# Subtest: split: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 65 - split: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 134.204101
+  type: 'test'
+  ...
+# Subtest: open: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 66 - open: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 144.070614
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the people's host answers no service endpoint — every service path × every method, with or without a credential
+ok 67 - CONTROL split: the people's host answers no service endpoint — every service path × every method, with or without a credential
+  ---
+  duration_ms: 17.797339
+  type: 'test'
+  ...
+# Subtest: split: the legacy host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 68 - split: the legacy host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 21.873171
+  type: 'test'
+  ...
+# Subtest: CONTROL split: what the legacy host answers in place is answered as before the split, for every method — the API, the park, host mode, the editor's files
+ok 69 - CONTROL split: what the legacy host answers in place is answered as before the split, for every method — the API, the park, host mode, the editor's files
+  ---
+  duration_ms: 811.165369
+  type: 'test'
+  ...
+# Subtest: the legacy host's rule is the split's alone — off, open and at the cutover the boundary decides nothing there
+ok 70 - the legacy host's rule is the split's alone — off, open and at the cutover the boundary decides nothing there
+  ---
+  duration_ms: 1.274357
+  type: 'test'
+  ...
+# Subtest: hostBoundary: off, it decides nothing — on any host, any path, any method
+ok 71 - hostBoundary: off, it decides nothing — on any host, any path, any method
+  ---
+  duration_ms: 0.727942
+  type: 'test'
+  ...
+# Subtest: staging: with the service host off — unset or not exactly its value — a stand-in list changes no answer, on the stand-ins' own hostnames
+ok 72 - staging: with the service host off — unset or not exactly its value — a stand-in list changes no answer, on the stand-ins' own hostnames
+  ---
+  duration_ms: 4288.802384
+  type: 'test'
+  ...
+# Subtest: staging: in a production deployment (PREVIEW "false") a stand-in list changes no answer, the service host on or not
+ok 73 - staging: in a production deployment (PREVIEW "false") a stand-in list changes no answer, the service host on or not
+  ---
+  duration_ms: 221.595449
+  type: 'test'
+  ...
+# Subtest: CONTROL: the fixture holds the whole grid, and the grid reaches every kind of answer
+ok 74 - CONTROL: the fixture holds the whole grid, and the grid reaches every kind of answer
+  ---
+  duration_ms: 0.942748
+  type: 'test'
+  ...
+# \# service host off (unset): 714 answers compared, 0 mismatches
+# Subtest: unset: all 714 answers are the fixture's, byte for byte, headers and store reads included
+ok 75 - unset: all 714 answers are the fixture's, byte for byte, headers and store reads included
+  ---
+  duration_ms: 640.272558
+  type: 'test'
+  ...
+# \# service host off (empty): 714 answers compared, 0 mismatches
+# Subtest: off (empty): all 714 answers are the fixture's
+ok 76 - off (empty): all 714 answers are the fixture's
+  ---
+  duration_ms: 525.66097
+  type: 'test'
+  ...
+# \# service host off ("true"): 714 answers compared, 0 mismatches
+# Subtest: off ("true"): all 714 answers are the fixture's
+ok 77 - off ("true"): all 714 answers are the fixture's
+  ---
+  duration_ms: 483.27704
+  type: 'test'
+  ...
+# \# service host off ("1"): 714 answers compared, 0 mismatches
+# Subtest: off ("1"): all 714 answers are the fixture's
+ok 78 - off ("1"): all 714 answers are the fixture's
+  ---
+  duration_ms: 552.469477
+  type: 'test'
+  ...
+# \# service host off (the legacy host): 714 answers compared, 0 mismatches
+# Subtest: off (the legacy host): all 714 answers are the fixture's
+ok 79 - off (the legacy host): all 714 answers are the fixture's
+  ---
+  duration_ms: 496.913166
+  type: 'test'
+  ...
+# \# service host off (a typo): 714 answers compared, 0 mismatches
+# Subtest: off (a typo): all 714 answers are the fixture's
+ok 80 - off (a typo): all 714 answers are the fixture's
+  ---
+  duration_ms: 485.137495
+  type: 'test'
+  ...
+# \# service host off (reef.cards): 714 answers compared, 0 mismatches
+# Subtest: off (reef.cards): all 714 answers are the fixture's
+ok 81 - off (reef.cards): all 714 answers are the fixture's
+  ---
+  duration_ms: 512.180189
+  type: 'test'
+  ...
+# \# service host off (stand-ins alone): 714 answers compared, 0 mismatches
+# Subtest: off (stand-ins alone): all 714 answers are the fixture's
+ok 82 - off (stand-ins alone): all 714 answers are the fixture's
+  ---
+  duration_ms: 521.700622
+  type: 'test'
+  ...
+# \# service host off (a malformed stand-in list): 714 answers compared, 0 mismatches
+# Subtest: off (a malformed stand-in list): all 714 answers are the fixture's
+ok 83 - off (a malformed stand-in list): all 714 answers are the fixture's
+  ---
+  duration_ms: 487.906058
+  type: 'test'
+  ...
+# \# service host off (upper case): 714 answers compared, 0 mismatches
+# Subtest: off (upper case): all 714 answers are the fixture's
+ok 84 - off (upper case): all 714 answers are the fixture's
+  ---
+  duration_ms: 478.201899
+  type: 'test'
+  ...
+# \# service host off (a space around it): 714 answers compared, 0 mismatches
+# Subtest: off (a space around it): all 714 answers are the fixture's
+ok 85 - off (a space around it): all 714 answers are the fixture's
+  ---
+  duration_ms: 465.006167
+  type: 'test'
+  ...
+# \# service host off (a line end after it): 714 answers compared, 0 mismatches
+# Subtest: off (a line end after it): all 714 answers are the fixture's
+ok 86 - off (a line end after it): all 714 answers are the fixture's
+  ---
+  duration_ms: 451.019831
+  type: 'test'
+  ...
+# \# service host off, wide grid (unset): 11664 answers compared, 0 mismatches
+# \# service host off, wide grid (upper case): 11664 answers compared, 0 mismatches
+# \# service host off, wide grid (a space around it): 11664 answers compared, 0 mismatches
+# \# service host off, wide grid (stand-ins alone): 11664 answers compared, 0 mismatches
+# \# service host off, wide grid (a typo, with stand-ins): 11664 answers compared, 0 mismatches
+# Subtest: CONTROL: the comparison can fail — with both settings on, answers differ from the fixture
+ok 87 - CONTROL: the comparison can fail — with both settings on, answers differ from the fixture
+  ---
+  duration_ms: 555.976172
+  type: 'test'
+  ...
+# Subtest: CONTROL: the fixture holds the whole wide grid, and it asks the stand-ins' own hostnames under every method
+ok 88 - CONTROL: the fixture holds the whole wide grid, and it asks the stand-ins' own hostnames under every method
+  ---
+  duration_ms: 0.775443
+  type: 'test'
+  ...
+# Subtest: off, wide grid (unset): all 11,664 answers are the fixture's
+ok 89 - off, wide grid (unset): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 6894.441685
+  type: 'test'
+  ...
+# Subtest: off, wide grid (upper case): all 11,664 answers are the fixture's
+ok 90 - off, wide grid (upper case): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 7511.687435
+  type: 'test'
+  ...
+# Subtest: off, wide grid (a space around it): all 11,664 answers are the fixture's
+ok 91 - off, wide grid (a space around it): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 6872.658568
+  type: 'test'
+  ...
+# Subtest: off, wide grid (stand-ins alone): all 11,664 answers are the fixture's
+ok 92 - off, wide grid (stand-ins alone): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 6926.69032
+  type: 'test'
+  ...
+# Subtest: off, wide grid (a typo, with stand-ins): all 11,664 answers are the fixture's
+ok 93 - off, wide grid (a typo, with stand-ins): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 7310.983444
+  type: 'test'
+  ...
+# Subtest: the wide comparison can fail — switched on, a stand-in answers as its role outside production; in production the list changes no answer
+ok 94 - the wide comparison can fail — switched on, a stand-in answers as its role outside production; in production the list changes no answer
+  ---
+  duration_ms: 1381.062081
+  type: 'test'
+  ...
+1..94
+# tests 94
+# suites 0
+# pass 94
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 43670.578347
