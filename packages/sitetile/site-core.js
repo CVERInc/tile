@@ -1599,6 +1599,10 @@ function inlineHtml(text, opts) {
 //     whitespace just inside either marker.
 //   - An escaped `~` (markEscapes has already hidden its backslash in a marker span, so the escape is
 //     read from that span) is never part of a run: `\~~b~~` and `~~b\~~` show their tildes as typed.
+//   - Proper nesting only: a closer that is not for the innermost open element (`~~**a [b** c~~](/p)`:
+//     the bold closes inside the link) ends every pending pair; see close() below.
+//   - If the walk ever meets a placeholder that is not one of this call's atoms, it returns the string
+//     untouched: every `~~` literal, as before strike existed. It never throws on authored text.
 //   - A URL written straight into prose (`scheme://…`, up to whitespace) is a literal run: tildes in
 //     it are part of the address, not delimiters. Nothing in this renderer autolinks a bare URL, so
 //     this is that narrowest rule and nothing more; it ends early if its container closes.
@@ -1616,23 +1620,34 @@ function markStrike(s, atoms, A) {
   const root = { tag: '', openers: [] };
   const stack = [root];
   const top = () => stack[stack.length - 1];
-  const close = (tag) => {                 // pop up to and including the nearest `tag`; none → no pop
-    for (let k = stack.length - 1; k > 0; k--) {
-      if (stack[k].tag !== tag) continue;
+  // Pop up to and including the nearest `tag`. Only a closer for the INNERMOST open element is
+  // proper nesting. Any other one (it closes an outer element while inner ones are still open, or
+  // nothing is open to close) is mis-nesting the browser repairs by moving or re-opening elements,
+  // so this walk cannot know which container the text after it really sits in: every pending
+  // opener, on every open element, dies, and no pair is drawn across that closer.
+  const close = (tag) => {
+    let k = stack.length - 1;
+    while (k > 0 && stack[k].tag !== tag) k--;
+    const proper = k > 0 && k === stack.length - 1;
+    if (k > 0) {
       const gone = stack.splice(k);
       if (url && gone.includes(url)) url = null;
-      return;
     }
-    top().openers.length = 0;              // a stray closer: nothing pairs across it
+    if (!proper) for (const f of stack) f.openers.length = 0;
   };
   let url = null;                          // the frame a bare-URL run started in, while inside one
   let prev = ' ';                          // the last visible character (line start counts as space)
   let i = 0;
   while (i < s.length) {
     const c = s[i];
-    if (s.startsWith(MK_ESCAPE, i)) {      // `\x`: the backslash's marker span, then x — never a delimiter
-      const end = i + MK_ESCAPE.length + 1;
-      out.push(s.slice(i, end)); prev = s[end - 1]; i = end; continue;
+    if (s.startsWith(MK_ESCAPE, i)) {      // `\x`: the backslash's marker span, then x
+      // Only an escaped `~` is taken with its marker, so it never joins a run. Any other escaped
+      // character is left for the branches below: an earlier pass may already have replaced it,
+      // `\[a](/p)` and `\![a](/x.png)` still form a link and an image, so what follows the marker
+      // can be an atom, and an atom is read whole, from its opening mark, or not at all.
+      i += MK_ESCAPE.length; out.push(MK_ESCAPE);
+      if (s[i] === '~') { out.push('~'); prev = '~'; i++; }
+      continue;
     }
     if (c === '<') {
       const end = s.indexOf('>', i) + 1;   // our own tags only; no `>` occurs inside one
@@ -1647,8 +1662,10 @@ function markStrike(s, atoms, A) {
     if (s.startsWith(A, i)) {              // atom: opaque; an `<a …>` start tag opens a link
       const end = s.indexOf(A, i + A.length) + A.length;
       if (end < i + 2 * A.length) { out.push(s.slice(i)); break; }
+      const html = atoms[+s.slice(i + A.length, end - A.length)];
+      if (typeof html !== 'string') return s;  // not an atom this call made: lost the structure, draw nothing
       out.push(s.slice(i, end));
-      if (atoms[+s.slice(i + A.length, end - A.length)].startsWith('<a ')) stack.push({ tag: 'a', openers: [] });
+      if (html.startsWith('<a ')) stack.push({ tag: 'a', openers: [] });
       prev = 'x'; i = end; continue;
     }
     RE_RAW_SMALL.lastIndex = i;

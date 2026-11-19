@@ -162,5 +162,87 @@ test('unchanged: plain items, `[]`, `[ ]x` and a link item render as they did', 
   assert.equal(post('- [x](/p)'), '<ul class="st-list"><li><a href="/p">x</a></li></ul>');
 });
 
+// ── second closing review: escapes next to atoms, and mis-nested emphasis ──────────────────────
+// Each expected string below is origin/main's output for that input, byte for byte (main draws no
+// strike, so every `~~` there is literal). They were computed from origin/main's site-core.js, and
+// the "(as on main)" cases pass when this file is run against it. The second table's inputs hold a
+// real pair: expected is main's output with only that pair drawn.
+const AS_ON_MAIN = [
+  ['\\[a](/one) plain [b](/two) ~~unclosed',
+    '<p><span class="st-mk">\\</span><a href="/one">a</a> plain <a href="/two">b</a> ~~unclosed</p>'],
+  ['\\![a](/x.png) plain `c` ~~unclosed',
+    '<p><span class="st-mk">\\</span><img class="st-img" src="/x.png" alt="a" loading="lazy" decoding="async"> plain <span class="st-code"><span class="st-mk">`</span>c<span class="st-mk">`</span></span> ~~unclosed</p>'],
+  ['\\[a](/one) plain [b](/two)',
+    '<p><span class="st-mk">\\</span><a href="/one">a</a> plain <a href="/two">b</a></p>'],
+  ['\\]a [b](/two) ~~unclosed',
+    '<p><span class="st-mk">\\</span>]a <a href="/two">b</a> ~~unclosed</p>'],
+  ['\\[\\[a](/one)](/two) ~~x',
+    '<p><span class="st-mk">\\</span><a href="/one"><span class="st-mk">\\</span>[a</a>](/two) ~~x</p>'],
+  ['[a [b](/c) d](/e) ~~x',
+    '<p><a href="/c">a [b</a> d](/e) ~~x</p>'],
+  ['\\[a\\] [b](/two) ~~unclosed',
+    '<p><span class="st-mk">\\</span>[a<span class="st-mk">\\</span>] <a href="/two">b</a> ~~unclosed</p>'],
+  ['**a \\[b](/p) c ~~d',
+    '<p>**a <span class="st-mk">\\</span><a href="/p">b</a> c ~~d</p>'],
+  ['\\!\\[a](/x.png) ~~y',
+    '<p><span class="st-mk">\\</span>!<span class="st-mk">\\</span><a href="/x.png">a</a> ~~y</p>'],
+  ['~~a \\[b~~ c](/p)',
+    '<p>~~a <span class="st-mk">\\</span><a href="/p">b~~ c</a></p>'],
+  ['~~**a [b** c~~](/p)',
+    '<p>~~<span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> c~~</a></p>'],
+  ['~~**old [price** new~~](/price)',
+    '<p>~~<span class="st-b"><span class="st-mk">**</span>old <a href="/price">price<span class="st-mk">**</span></span> new~~</a></p>'],
+  ['~~a <small>**b</small> c~~**',
+    '<p>~~a <small><span class="st-b"><span class="st-mk">**</span>b</small> c~~<span class="st-mk">**</span></span></p>'],
+  ['~~a [**b](/p) c** d~~',
+    '<p>~~a <a href="/p"><span class="st-b"><span class="st-mk">**</span>b</a> c<span class="st-mk">**</span></span> d~~</p>'],
+  ['~~**a [b** c](/p) d~~',
+    '<p>~~<span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> c</a> d~~</p>'],
+  ['**a [b** ~~c **d](/p) e** f~~',
+    '<p><span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> ~~c <span class="st-b"><span class="st-mk">**</span>d</a> e<span class="st-mk">**</span></span> f~~</p>'],
+  ['~~a **b [c** d](/p) e~~',
+    '<p>~~a <span class="st-b"><span class="st-mk">**</span>b <a href="/p">c<span class="st-mk">**</span></span> d</a> e~~</p>'],
+  ['~~a <small>[b</small> c~~](/p)',
+    '<p>~~a <small><a href="/p">b</small> c~~</a></p>'],
+];
+const STRIKE_NEXT_TO_ESCAPE = [
+  ['\\[a](/one) ~~strike~~ [b](/two)',
+    '<p><span class="st-mk">\\</span><a href="/one">a</a> ~~strike~~ <a href="/two">b</a></p>'],
+  ['\\![a](/x.png) ~~strike~~ [b](/two)',
+    '<p><span class="st-mk">\\</span><img class="st-img" src="/x.png" alt="a" loading="lazy" decoding="async"> ~~strike~~ <a href="/two">b</a></p>'],
+  ['\\[a](/one) ~~strike~~ `code`',
+    '<p><span class="st-mk">\\</span><a href="/one">a</a> ~~strike~~ <span class="st-code"><span class="st-mk">`</span>code<span class="st-mk">`</span></span></p>'],
+  ['\\[a](/one) ~~strike~~ ![b](/two.png)',
+    '<p><span class="st-mk">\\</span><a href="/one">a</a> ~~strike~~ <img class="st-img" src="/two.png" alt="b" loading="lazy" decoding="async"></p>'],
+];
+const onMain = (md) => AS_ON_MAIN.find(([i]) => i === md)[1];
+const rendered = (md) => {             // a throw is reported as a failure naming the input, not a crash of the file
+  try { return post(md); } catch (e) { throw new Error('threw on ' + JSON.stringify(md) + ': ' + e.constructor.name + ': ' + e.message); }
+};
+
+test('an escaped link before an unclosed `~~` still renders, as on main', () => {
+  const md = '\\[a](/one) plain [b](/two) ~~unclosed';
+  assert.equal(rendered(md), onMain(md));
+});
+test('an escaped link or image just before a strike pair renders, and the pair is drawn', () => {
+  for (const [md, main] of STRIKE_NEXT_TO_ESCAPE) assert.equal(rendered(md), main.replace('~~strike~~', STRUCK('strike')), md);
+});
+test('a bold span that closes inside a link does not let `~~` pair across the link edge (as on main)', () => {
+  const md = '~~**a [b** c~~](/p)';
+  assert.equal(rendered(md), onMain(md));
+});
+test('a bold span that closes inside a raw <small> does not let `~~` pair across it (as on main)', () => {
+  const md = '~~a <small>**b</small> c~~**';
+  assert.equal(rendered(md), onMain(md));
+});
+test('guard: escapes, nested brackets and mis-nested emphasis never throw and render as on main', () => {
+  const wrong = [];                    // every input is tried, so one run names all that differ
+  for (const [md, main] of AS_ON_MAIN) {
+    let got; try { got = rendered(md); } catch (e) { got = e.message; }
+    if (got !== main) wrong.push(md + '\n      got  ' + got + '\n      main ' + main);
+  }
+  assert.equal(wrong.length, 0, wrong.length + ' of ' + AS_ON_MAIN.length + ' differ from main:\n    ' + wrong.join('\n    '));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -1,0 +1,78 @@
+# post-body-marks.test.mjs (r2 test file) run against site-core.js of 02995af (before the fix)
+post-body-marks (tile#291)
+  ✓ `---` between blank lines is a rule, not the text "---"
+  ✓ a longer run of hyphens is a rule too, and a following line starts a new paragraph
+  ✓ `---` right after a list ends the list and draws a rule
+  ✓ unchanged: `---` directly under a paragraph line stays inside that paragraph
+  ✓ unchanged: `---` indented four spaces stays literal text
+  ✓ unchanged: `***`, `___` and `- - -` render as they did
+  ✓ unchanged: `---` inside a fenced block is code
+  ✓ the rule carries a source span like its neighbours when asked
+  ✓ `~~b~~` is struck through, markers kept in the hidden marker span like bold
+  ✓ strike nests with bold and works inside a link label
+  ✓ a `~~` pair that would cross a link or bold edge stays as typed (no mis-nested tags)
+  ✓ unchanged: `~~` inside a code span stays literal
+  ✓ unchanged: `~~` in a link destination is not touched
+  ✓ unchanged: a single `~`, an unclosed `~~` and an empty `~~~~` stay as typed
+  ✓ unchanged: `~~` in an image alt does not put markup inside the attribute
+  ✓ a `~~` pair whose ends sit in two different links stays as typed (as on main)
+  ✓ a `~~` pair whose ends sit in two different bold spans stays as typed (as on main)
+  ✓ a `~~` pair that would cross a raw <small> edge stays as typed (as on main)
+  ✓ a pair that wraps a whole link, or sits wholly inside a <small>, is still drawn
+  ✓ an escaped opening `\~~` is never a delimiter (as on main)
+  ✓ an escaped closing `\~~` is never a delimiter (as on main)
+  ✓ a bare URL in prose keeps its tildes: the full address shows (as on main)
+  ✓ a strike next to a bare URL is still drawn; one that would end inside the URL is not
+  ✓ `- [ ]` and `- [x]` are task items with a checkbox, not the text "[ ]"
+  ✓ an upper-case `[X]` is done too, and inline marks still render in the item
+  ✓ a nested task item keeps its parent
+  ✓ each task checkbox is named by its own text: checkbox and text share one <label>
+  ✓ a nested child task is not part of its parent checkbox's name
+  ✓ unchanged: plain items, `[]`, `[ ]x` and a link item render as they did
+  ✗ an escaped link before an unclosed `~~` still renders, as on main
+    threw on "\\[a](/one) plain [b](/two) ~~unclosed": TypeError: Cannot read properties of undefined (reading 'startsWith')
+  ✗ an escaped link or image just before a strike pair renders, and the pair is drawn
+    threw on "\\[a](/one) ~~strike~~ [b](/two)": TypeError: Cannot read properties of undefined (reading 'startsWith')
+  ✗ a bold span that closes inside a link does not let `~~` pair across the link edge (as on main)
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p><span class="st-s"><span class="st-mk">~~</span><span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> c<span class="st-mk">~~</span></span></a></p>'
+    - '<p>~~<span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> c~~</a></p>'
+    
+  ✗ a bold span that closes inside a raw <small> does not let `~~` pair across it (as on main)
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p><span class="st-s"><span class="st-mk">~~</span>a <small><span class="st-b"><span class="st-mk">**</span>b</small> c<span class="st-mk">~~</span></span><span class="st-mk">**</span></span></p>'
+    - '<p>~~a <small><span class="st-b"><span class="st-mk">**</span>b</small> c~~<span class="st-mk">**</span></span></p>'
+    
+  ✗ guard: escapes, nested brackets and mis-nested emphasis never throw and render as on main
+    7 of 18 differ from main:
+        \[a](/one) plain [b](/two) ~~unclosed
+          got  threw on "\\[a](/one) plain [b](/two) ~~unclosed": TypeError: Cannot read properties of undefined (reading 'startsWith')
+          main <p><span class="st-mk">\</span><a href="/one">a</a> plain <a href="/two">b</a> ~~unclosed</p>
+        \![a](/x.png) plain `c` ~~unclosed
+          got  threw on "\\![a](/x.png) plain `c` ~~unclosed": TypeError: Cannot read properties of undefined (reading 'startsWith')
+          main <p><span class="st-mk">\</span><img class="st-img" src="/x.png" alt="a" loading="lazy" decoding="async"> plain <span class="st-code"><span class="st-mk">`</span>c<span class="st-mk">`</span></span> ~~unclosed</p>
+        ~~**a [b** c~~](/p)
+          got  <p><span class="st-s"><span class="st-mk">~~</span><span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> c<span class="st-mk">~~</span></span></a></p>
+          main <p>~~<span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> c~~</a></p>
+        ~~**old [price** new~~](/price)
+          got  <p><span class="st-s"><span class="st-mk">~~</span><span class="st-b"><span class="st-mk">**</span>old <a href="/price">price<span class="st-mk">**</span></span> new<span class="st-mk">~~</span></span></a></p>
+          main <p>~~<span class="st-b"><span class="st-mk">**</span>old <a href="/price">price<span class="st-mk">**</span></span> new~~</a></p>
+        ~~a <small>**b</small> c~~**
+          got  <p><span class="st-s"><span class="st-mk">~~</span>a <small><span class="st-b"><span class="st-mk">**</span>b</small> c<span class="st-mk">~~</span></span><span class="st-mk">**</span></span></p>
+          main <p>~~a <small><span class="st-b"><span class="st-mk">**</span>b</small> c~~<span class="st-mk">**</span></span></p>
+        **a [b** ~~c **d](/p) e** f~~
+          got  <p><span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> <span class="st-s"><span class="st-mk">~~</span>c <span class="st-b"><span class="st-mk">**</span>d</a> e<span class="st-mk">**</span></span> f<span class="st-mk">~~</span></span></p>
+          main <p><span class="st-b"><span class="st-mk">**</span>a <a href="/p">b<span class="st-mk">**</span></span> ~~c <span class="st-b"><span class="st-mk">**</span>d</a> e<span class="st-mk">**</span></span> f~~</p>
+        ~~a <small>[b</small> c~~](/p)
+          got  <p><span class="st-s"><span class="st-mk">~~</span>a <small><a href="/p">b</small> c<span class="st-mk">~~</span></span></a></p>
+          main <p>~~a <small><a href="/p">b</small> c~~</a></p>
+    
+    7 !== 0
+    
+
+29 passed, 5 failed
+exit=1
