@@ -196,6 +196,23 @@ PREVIEW = "false"
 # does nothing — so the staging deployment that uses it must not set PREVIEW = "false". Never set in
 # production all the same.
 # CARDS_HOST_STANDINS = "service=cards-staging.feelreef.com people=staging.reef.cards legacy=card-staging.feelreef.com"
+#
+# The Content-Security-Policy of a person's page (cardtile-page-csp.mjs): which scripts a page may run, so
+# that a script the renderer did not write does not run. Three stages, by ONE setting compared exactly:
+#   off          unset, or anything but the two values below. No header; every answer as before.
+#   report-only  `Content-Security-Policy-Report-Only`: the browser reports (in its console — there is
+#                no report endpoint) and refuses nothing.
+#   enforce      `Content-Security-Policy`: the same policy text, enforced.
+# On, EVERY person's page and preview carries it, whatever it holds. An `embed` is then its own document
+# (cardtile-embed-document.mjs): its frame names `<page>/_embed/<hash>` instead of carrying the HTML as
+# srcdoc (a srcdoc frame would inherit the page's policy and its script would not run), and that address
+# answers with the same document, plus one `<base href>` naming the page (so its relative addresses
+# resolve as they did in srcdoc), under `sandbox allow-scripts`. Like the page, it may be framed by any
+# site. Off, the frame is srcdoc and the address is an unknown path, as before. Nothing else on the page
+# changes in any stage.
+# Forward: "report-only", read what browsers report, then "enforce". Back: remove the line; the page is
+# cached for 60 s, so the header is gone within a minute.
+# CARDS_PAGE_CSP = "report-only"
 
 [[env.production.kv_namespaces]]
 binding = "CARDS"

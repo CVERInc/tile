@@ -143,6 +143,8 @@ import { validHostOrigin } from '../w3/host-bridge.mjs';
 import { withDeck, DECK_CSS_PATH, DECK_JS_PATH, DECK_TRY_URL } from '../w3/deck-page.mjs';
 import { handleReport, REPORT_PATH } from './card-report.mjs';
 import { standIn, hostName } from './host-standins.mjs';
+import { pageCspHeaders, pageCspStage } from './cardtile-page-csp.mjs';
+import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, framesAsDocuments, hasSrcdocFrame, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -360,6 +362,7 @@ export function resolveHandle(host, pathname, vanity = {}, extra = new Set(), { 
  *   'avatar'                the card's own avatar only, never an icon badge
  *   'ico' | 'svg' | 'apple' one of the card's icon files (card-icon.mjs)
  *   'asset'                 one picture by its bytes' hash: `…/a/<sha256>.<ext>` (tile#339, asset-urls.mjs)
+ *   'embed'                 one embed's document by its hash: `…/_embed/<sha256>` (tile#372, cardtile-embed-document.mjs)
  *   'alias'               /<handle> on the card's own domain → 301 to its root
  *   null                    nothing lives here → 404
  *
@@ -394,6 +397,8 @@ export function cardPath(pathname, handle, isVanity) {
     // tile#339: a picture by its bytes' hash (asset-urls.mjs). `/<h>/a/…` too: the root card, whose
     // page is `/`, names its pictures there, because `/a/…` on a shared host is the handle `a`.
     if (ASSET_TAIL_RE.test(p) || (lower.startsWith(`/${h}/`) && ASSET_TAIL_RE.test(p.slice(h.length + 1)))) return 'asset';
+    // tile#372: an embed's own document (cardtile-embed-document.mjs), by the same two spellings as a picture
+    if (EMBED_TAIL_RE.test(p) || (lower.startsWith(`/${h}/`) && EMBED_TAIL_RE.test(p.slice(h.length + 1)))) return 'embed';
     return null;
   }
   const m = /^\/([^/]+)(\/.*)?$/.exec(p);
@@ -403,6 +408,7 @@ export function cardPath(pathname, handle, isVanity) {
   if (seg !== h) return null;
   if (rest === '/avatar') return 'avatar';
   if (ASSET_TAIL_RE.test(m[2] || '')) return 'asset';   // the unstripped tail: a file has no trailing `/`
+  if (EMBED_TAIL_RE.test(m[2] || '')) return 'embed';   // tile#372, the same rule
   return rest ? iconKind(rest) : 'page';
 }
 /**
@@ -851,6 +857,8 @@ const markdown = (body, { env, originalLength, alternate, handle, at, blank, ext
     status: 200,
     headers: {
       'Content-Type': 'text/markdown; charset=utf-8',
+      // tile#372 — a file is what a person wrote: a browser must never take it for anything but markdown
+      'X-Content-Type-Options': 'nosniff',
       'X-Markdown-Tokens': String(estTokens(body)),
       'X-Original-Tokens': String(estTokens(originalLength)),
       ...(alternate ? { Link: `<${alternate}>; rel="alternate"; type="text/markdown"` } : {}),
@@ -1374,16 +1382,30 @@ const router = {
     // compete with the creator's own page in exactly the way the PREVIEW deployment rule exists to
     // prevent. `noindex` is set unconditionally here rather than via isPreview(), because this route
     // is reachable on PRODUCTION and that is the whole point of it.
-    const pv = /^\/_preview\/([0-9a-f]{32})$/.exec(url.pathname);
-    if (pv) {
-      // A preview stamped with a generation that is no longer its handle's (the card was deleted while
-      // it was being parked, reef#2618) is expired. One stamped with no handle (parked before r1)
-      // keeps its hour; a handle without a generation is generation 0, as everywhere (r3).
-      const row = env && env.CARDS ? await env.CARDS.getWithMetadata(previewKey(pv[1])) : null;
+    // A preview stamped with a generation that is no longer its handle's (the card was deleted while
+    // it was being parked, reef#2618) is expired. One stamped with no handle (parked before r1)
+    // keeps its hour; a handle without a generation is generation 0, as everywhere (r3).
+    const previewDraft = async (id) => {
+      const row = env && env.CARDS ? await env.CARDS.getWithMetadata(previewKey(id)) : null;
       const meta = row && row.metadata;
       const stale = row && row.value != null && meta && meta.handle
         && !isCurrentGen(meta, await generationOf(env.CARDS, meta.handle));
-      const draft = row && !stale ? row.value : null;
+      return row && !stale ? row.value : null;
+    };
+    // tile#372 — one embed of a preview, as its own document (cardtile-embed-document.mjs). Only while the
+    // page's policy is on; off, this path is not looked at here and is answered below as it always was.
+    const pve = pageCspStage(env) !== 'off' ? /^\/_preview\/([0-9a-f]{32})\/_embed\/([0-9a-f]{64})$/.exec(url.pathname) : null;
+    if (pve) {
+      const draft = await previewDraft(pve[1]);
+      const doc = draft ? embedDocumentOf(await embedDocuments(parseCard(draft), (k) => frontmatter(draft, k)), pve[2]) : null;
+      if (doc == null) return new Response('', { status: 404, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
+      // its relative addresses resolve against the preview's own address, as in the srcdoc (r2); an author's
+      // own base is honoured as it was there (r3)
+      return new Response(embedDocumentBody(doc, `/_preview/${pve[1]}`, url.href), { headers: embedDocumentHeaders({ preview: true }) });
+    }
+    const pv = /^\/_preview\/([0-9a-f]{32})$/.exec(url.pathname);
+    if (pv) {
+      const draft = await previewDraft(pv[1]);
       if (!draft) {
         return new Response('<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>', {
           status: 404,
@@ -1391,11 +1413,18 @@ const router = {
         });
       }
       const videos = await resolveChannels(draft, ytFetch, channelShare);
-      return new Response(withServiceTry(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), env), {
+      const rendered = withServiceTry(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), env);
+      // tile#372: with the page's policy on, each embed is its own document (cardtile-embed-document.mjs)
+      const preview = pageCspStage(env) !== 'off' && hasSrcdocFrame(rendered)
+        ? framesAsDocuments(rendered, await embedDocuments(parseCard(draft), (k) => frontmatter(draft, k)), `/_preview/${pv[1]}/`)
+        : rendered;
+      return new Response(preview, {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
           'X-Robots-Tag': 'noindex, nofollow',
+          // what a person wrote, rendered on the people's origin: the page's policy (cardtile-page-csp.mjs; nothing unless CARDS_PAGE_CSP is set)
+          ...(await pageCspHeaders(env, preview)),
         },
       });
     }
@@ -1508,7 +1537,8 @@ const router = {
     // tile#339: the picture route exists only while the local switch is set (asset-urls.mjs
     // pictureStrategy). Unset — every deployment today — its paths are unknown paths, as they always were.
     const pictures = pictureStrategy(env);
-    if (!want || (want === 'asset' && pictures === 'inline')) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
+    // tile#372: and an embed's own document only while the page's policy is on (cardtile-embed-document.mjs)
+    if (!want || (want === 'asset' && pictures === 'inline') || (want === 'embed' && pageCspStage(env) === 'off')) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
@@ -1574,6 +1604,29 @@ const router = {
       const keeping = keepPicture(resolved.handle, gen, ref.hex, ref.ext, found.bytes);
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
       return pictureResponse(found, env, resolved.handle, at);
+    }
+
+    // tile#372 — one embed's document, by its hash (cardtile-embed-document.mjs). On both hosts, before the
+    // page's 301, like a picture. The document is made from the stored file's own `embed` tiles — the
+    // window `?w=<n>` names, for a file served in windows — and answered only when one has this hash. Every
+    // miss is the answer this host gives a card that is not there, as for a picture.
+    if (want === 'embed') {
+      const h = EMBED_TAIL_RE.exec(url.pathname.slice(url.pathname.lastIndexOf('/_embed/')))[1];
+      let model = null;
+      if (cardMd != null && onDemand) {
+        const wq = url.searchParams.get('w');
+        const n = wq == null ? 1 : /^[1-9]\d{0,8}$/.test(wq) ? Number(wq) : 0;
+        const front = deckFront(cardMd);
+        const plan = windowsOf(cardMd, index(), { front });
+        if (n >= 1 && n <= plan.count) model = windowOf(cardMd, index(), plan, n - 1, { front });
+      } else if (cardMd != null) model = parseCard(cardMd);
+      const doc = model ? embedDocumentOf(await embedDocuments(model, (k) => frontmatter(cardMd, k)), h) : null;
+      // r2: the visitor's language and the host they asked, as on every other missing page
+      if (doc == null) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
+      // its relative addresses resolve against the Cards' own address on this host, as in the srcdoc (r2):
+      // `/` on a one-card host (a person's domain, the root card), `/<handle>` on a shared one; an author's own
+      // base is honoured as it was there (r3)
+      return new Response(embedDocumentBody(doc, oneCardHost ? '/' : `/${resolved.handle}`, url.href), { headers: embedDocumentHeaders() });
     }
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.
@@ -1721,7 +1774,13 @@ const router = {
       : win ? await picturePlan(windowPicturesText(win.src.model, frontmatter(cardMd, 'backdrop')), win.src.model.assets, assetBase(resolved.handle, !!vanityHandle), pictures)
         : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
     const pageCtx = { ...resolved, canonicalUrl, ...(windowUrl ? { windowUrl } : {}), videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) };
-    const page = withServiceTry(win ? renderSource(win.src, { ...pageCtx, pager: win.pager, ...(win.last ? {} : { poolTile: false }) }) : renderCardHTML(cardMd, pageCtx), env);
+    const rendered = withServiceTry(win ? renderSource(win.src, { ...pageCtx, pager: win.pager, ...(win.last ? {} : { poolTile: false }) }) : renderCardHTML(cardMd, pageCtx), env);
+    // tile#372 — with the page's policy on, each embed is its own document (cardtile-embed-document.mjs): its frame
+    // names `<base>_embed/<hash>` (in a file served in windows, `?w=<n>` too) instead of holding it as srcdoc
+    const page = pageCspStage(env) !== 'off' && hasSrcdocFrame(rendered)
+      ? framesAsDocuments(rendered, await embedDocuments(win ? win.src.model : parseCard(cardMd), (k) => frontmatter(cardMd, k)),
+        assetBase(resolved.handle, !!vanityHandle), win ? `?w=${win.n}` : '')
+      : rendered;
     // tile#339 step 1: what this render decoded and hashed for the plan is kept for the picture requests
     // the page is about to cause (picture-cache.mjs keepPictures; one cache read when all are kept already):
     // only the pictures the rendered page names, in the order it draws them (a reference the page never
@@ -1733,7 +1792,10 @@ const router = {
       const keeping = keepPictures(resolved.handle, gen, drawn.map((u) => byUrl.get(u)), prefillCalls(ytCalls));
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
     }
-    return html(page, 200, env, resolved.handle, at, blank, chromeLang ? { ...probe, ...VARY_VISITOR_LANG } : probe);
+    // tile#372 — the page's Content-Security-Policy (cardtile-page-csp.mjs): on every person's page while
+    // CARDS_PAGE_CSP is exactly "report-only" or "enforce", whatever the page holds; nothing otherwise.
+    const csp = await pageCspHeaders(env, page, { afterPaint: plan.pictures ? plan.pictures.afterPaint : '' });
+    return html(page, 200, env, resolved.handle, at, blank, { ...probe, ...(chromeLang ? VARY_VISITOR_LANG : {}), ...csp });
   },
 };
 
