@@ -597,12 +597,22 @@ test('encoded separator deny and missing-binding controls fail closed before ASS
 	assert.deepEqual(missing.seenByAssets, []);
 });
 
-test('malformed encoded separator remains ordinary static behavior', async () => {
+// A path the asset server cannot decode cannot be compared with the gated set, so a site that
+// gates anything refuses it (without asking for a verdict) instead of handing it to ASSETS; a
+// site that gates nothing keeps serving it as ordinary static behavior.
+test('malformed encoded separator is refused where pages are gated, static where none are', async () => {
 	const { env, seenByRsp, seenByAssets } = makeEnv({ rsp: echoRsp });
 	const res = await withContract.mod.default.fetch(new Request('https://s.example/vault%2'), env);
-	assert.equal(await res.text(), 'STATIC:/vault%2');
+	assert.equal(res.status, 404);
+	assert.deepEqual(await res.json(), { error: 'blocked' });
 	assert.deepEqual(seenByRsp, []);
-	assert.equal(seenByAssets.length, 1);
+	assert.deepEqual(seenByAssets, []);
+
+	const ungated = makeEnv({ rsp: echoRsp });
+	const served = await withContractNoGates.mod.default.fetch(new Request('https://s.example/vault%2'), ungated.env);
+	assert.equal(await served.text(), 'STATIC:/vault%2');
+	assert.deepEqual(ungated.seenByRsp, []);
+	assert.equal(ungated.seenByAssets.length, 1);
 });
 
 test('HEAD follows the same generated gate as GET and preserves HEAD for ASSETS', async () => {
