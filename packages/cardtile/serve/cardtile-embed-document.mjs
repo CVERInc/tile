@@ -185,6 +185,11 @@ export function authorBaseHref(html) {
   let i = 0;
   let template = 0;
   let foreign = 0;
+  // 🔴 EVERY SEARCH BELOW STARTS AT THE CURSOR AND THE CURSOR MOVES PAST WHAT IT READ, or the input ends:
+  // the whole reading is one pass over the document (an embed is up to CARD_MAX_BYTES, read on every
+  // request). Never search for two endings separately — the one that is not there is looked for to the
+  // end of the document, once per comment (tile#372 r4).
+  const commentEnd = /--!?>/g;
   while (i < n) {
     const lt = s.indexOf('<', i);
     if (lt < 0) return null;
@@ -193,10 +198,10 @@ export function authorBaseHref(html) {
       // a comment ends at `-->` or `--!>`; `<!-->` and `<!--->` are empty ones
       if (s.startsWith('<!-->', lt)) { i = lt + 5; continue; }
       if (s.startsWith('<!--->', lt)) { i = lt + 6; continue; }
-      const ends = [s.indexOf('-->', lt + 4), s.indexOf('--!>', lt + 4)].filter((x) => x >= 0);
-      if (!ends.length) return null;
-      const e = Math.min(...ends);
-      i = e + (s.startsWith('-->', e) ? 3 : 4);
+      commentEnd.lastIndex = lt + 4;
+      const m = commentEnd.exec(s);   // the first of `-->` and `--!>`, in one forward scan
+      if (!m) return null;
+      i = m.index + m[0].length;
       continue;
     }
     if (foreign > 0 && s.startsWith('<![CDATA[', lt)) {

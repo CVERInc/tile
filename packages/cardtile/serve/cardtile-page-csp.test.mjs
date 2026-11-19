@@ -26,7 +26,7 @@ import vm from 'node:vm';
 import { deflateSync, crc32 } from 'node:zlib';
 import { pageCspStage, pageCspHeaderName, pagePolicy, pageCspHeaders, bootScriptOf, isBootData,
   videoScript, pictureScript, hashSource, PAGE_HANDLERS, DECK_FILE_ONERROR, ICON_ONERROR, PAGE_CSP_STAGES } from './cardtile-page-csp.mjs';
-import { embedDocuments, framesAsDocuments, EMBED_DOCUMENT_POLICY } from './cardtile-embed-document.mjs';
+import { embedDocuments, framesAsDocuments, embedDocumentBody, EMBED_DOC_HEAD, EMBED_DOCUMENT_POLICY } from './cardtile-embed-document.mjs';
 import { parseCard } from '../card-core.js';
 import { PICTURE_STRATEGIES } from './asset-urls.mjs';
 import { WINDOW_TILES } from './size-tier.mjs';
@@ -596,6 +596,65 @@ test('r3: an author\'s own `<base href>` is honoured as in its srcdoc — the re
     }
   }
   console.log(`# cardtile page csp r3: ${checked} author-base documents resolve as in the srcdoc`);
+});
+
+// r4: the characters the built-in searches examine while `f` runs — String indexOf/includes/lastIndexOf/
+// startsWith and RegExp exec (which test, replace, search and split go through once exec is replaced).
+// Deterministic, unlike a clock on a loaded host; the prototypes are restored before it returns.
+function searchedChars(f) {
+  const SP = String.prototype;
+  const RP = RegExp.prototype;
+  const orig = { indexOf: SP.indexOf, includes: SP.includes, lastIndexOf: SP.lastIndexOf, startsWith: SP.startsWith, exec: RP.exec };
+  let work = 0;
+  const found = (len, from, r, x) => { const at = Math.max(0, Math.min(Number(from) || 0, len)); work += r >= 0 ? r + String(x).length - at : len - at; };
+  SP.indexOf = function (x, from) { const r = orig.indexOf.call(this, x, from); found(this.length, from, r, x); return r; };
+  SP.includes = function (x, from) { const r = orig.indexOf.call(this, x, from); found(this.length, from, r, x); return r >= 0; };
+  SP.lastIndexOf = function (...a) { work += this.length; return orig.lastIndexOf.apply(this, a); };
+  SP.startsWith = function (x, pos) { work += String(x).length; return orig.startsWith.call(this, x, pos); };
+  RP.exec = function (str) {
+    const t = String(str);
+    const at = this.global || this.sticky ? this.lastIndex : 0;
+    const m = orig.exec.call(this, t);
+    work += m ? m.index + Math.max(1, m[0].length) - at : t.length - at;
+    return m;
+  };
+  try { f(); } finally { Object.assign(SP, { indexOf: orig.indexOf, includes: orig.includes, lastIndexOf: orig.lastIndexOf, startsWith: orig.startsWith }); RP.exec = orig.exec; }
+  return work;
+}
+
+test('r4: finding the author\'s base is one pass over the document — twice the markup is at most about twice the reading, for every shape it reads', () => {
+  // d4f9d88 searched for `-->` and for `--!>` separately from every comment: the one that is not there was
+  // looked for to the end of the document, once per comment (the review: 300 KB of ordinary SSR markup, 3 s).
+  const RAW = ['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript'];
+  const shapes = {
+    'empty comments (the review\'s)': '<!---->',
+    'SSR markup (the review\'s)': '<li><!--[--><span>item</span><!--]--></li>',
+    'comments that end `--!>`': '<!-- a --!>',
+    '`<!-->` and `<!--->`': '<!--><!--->',
+    'bogus comments': '<!x><?x></ x>',
+    'doctypes': '<!doctype html>',
+    '`<` as text': 'a < b <3 ',
+    'attributes, quoted and not': `<p a="1" b='2' c=3 d e="<base href=x>">`,
+    'end tags with attributes': '</p a="1">',
+    'bases with no href': '<base target=_self>',
+    'templates': '<template><base href=x></template>',
+    'svg': '<svg><path d="x"/><base href=x></svg>',
+    'math': '<math><mi>x</mi></math>',
+    'svg left by an HTML tag': '<svg><b>x</b>',
+    'CDATA in svg': '<svg><![CDATA[<base href=x>]]></svg>',
+    ...Object.fromEntries(RAW.map((t) => [`<${t}> with a near-miss end tag`, `<${t}><base href=x></${t}x></${t}>`])),
+    ...Object.fromEntries(RAW.map((t) => [`<${t}> holding a comment opener`, `<${t}><!--</${t}>`])),
+  };
+  const read = (markup) => searchedChars(() => embedDocumentBody(`${EMBED_DOC_HEAD}${markup}`, '/aster', 'https://cards.example/aster/_embed/abc'));
+  for (const [what, unit] of Object.entries(shapes)) {
+    const once = unit.repeat(Math.ceil(20000 / unit.length));
+    const twice = once + once;
+    const a = read(once);
+    const b = read(twice);
+    assert.ok(a >= once.length, `${what}: the count saw ${a} characters of ${once.length} — it is not counting`);
+    assert.ok(b <= 2.2 * a, `${what}: twice the markup was ${(b / a).toFixed(2)}× the reading (${a} → ${b} characters searched)`);
+    assert.ok(b <= 8 * twice.length, `${what}: ${(b / twice.length).toFixed(1)} characters searched per character of the document`);
+  }
 });
 
 test('setting off: the embed address is an unknown path, answer for answer (status, headers, body, store reads) on every stage and host', async () => {
