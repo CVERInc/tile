@@ -15,12 +15,15 @@
 //      for a translated book that is the locale's home (`/fr/`), passed in by the caller.
 //
 // Run: node test/pagetile-spine.test.mjs
-import { buildSiteSpine, bookFlag, spinePath } from '../packages/pagetile/spine-core.js';
+import { buildSiteSpine as buildSpine, bookFlag, spinePath } from '../packages/pagetile/spine-core.js';
 import { navMenuOf } from '../packages/sitetile/chrome-links.mjs';
 import { canonicalPath, contentUrls } from '../packages/sitetile/astro/src/lib/sitemap.mjs';
 import { localeHomePath } from '../packages/sitetile/locale.mjs';
 
 let pass = 0, fail = 0;
+// This file pins order and `book: false`, not what is withheld (test/pagetile-spine-public.test.mjs):
+// every book here is of a site with no members-only post, which a caller says with `gated: []`.
+const buildSiteSpine = (pages, nav, opts = {}) => buildSpine(pages, nav, { gated: [], ...opts });
 const eq = (a, b, msg) => { const ok = JSON.stringify(a) === JSON.stringify(b); if (ok) pass++; else { fail++; console.error('FAIL:', msg, '\n  got:', JSON.stringify(a), '\n  exp:', JSON.stringify(b)); } };
 
 const page = (path, meta = {}) => ({ path, meta });
