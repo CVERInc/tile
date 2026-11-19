@@ -200,3 +200,62 @@ test('worker: with nothing gated, a malformed escape is still the static site\'s
 	assert.deepEqual(seenByRsp, []);
 	assert.equal(seenByAssets[0].request, request);
 });
+
+// ── the build's members-only path list ───────────────────────────────────────
+// The build ships `_reef/verdict.json` in the upload (the preview uploader reads it there to
+// withhold the same pages). Nothing reads it over HTTP, so on a site that gates anything the
+// worker answers it as absent, in every spelling the asset server would resolve to that file.
+
+const MANIFEST_SPELLINGS = [
+	'/_reef/verdict.json',
+	'/%5Freef/verdict.json',
+	'/%5freef/verdict.json',
+	'/_reef/verdict%2Ejson',
+	'/_reef/verdict%2ejson',
+	'/%5F%72eef/%76erdict%2Ejson',
+	'//_reef/verdict.json',
+	'/_reef//verdict.json',
+	'/_reef%2Fverdict.json',
+	'/_reef/./verdict.json',
+	'/x/%2E%2E/_reef/verdict.json',
+	'/x%2F..%2F_reef/verdict.json',
+	'/_reef/verdict.json/',
+	'/_Reef/Verdict.JSON',
+];
+const MANIFEST_NEIGHBOURS = ['/_reef/build.json', '/_reef/posts.json', '/_reef/verdict.jsonx', '/_reef/verdict'];
+
+test('worker: the members-only path list is not served on a gated site, in any spelling or method', async () => {
+	for (const path of MANIFEST_SPELLINGS) {
+		for (const method of ['GET', 'HEAD', 'POST']) {
+			const { env, seenByRsp, seenByAssets } = makeEnv(ALLOW);
+			const res = await gatedSite.default.fetch(new Request('https://s.example' + path, { method, headers: { accept: 'text/html' } }), env);
+			assert.equal(res.status, 404, method + ' ' + path);
+			assert.equal(res.headers.get('cache-control'), 'private, no-store', method + ' ' + path);
+			assert.deepEqual(seenByRsp, [], method + ' ' + path);
+			assert.deepEqual(seenByAssets, [], method + ' ' + path + ' must not reach ASSETS');
+		}
+	}
+});
+
+test('worker: the rest of /_reef/ and the gated pages are unchanged (control)', async () => {
+	for (const path of MANIFEST_NEIGHBOURS) {
+		const { env, seenByRsp, seenByAssets } = makeEnv(DENY);
+		const request = new Request('https://s.example' + path);
+		const res = await gatedSite.default.fetch(request, env);
+		assert.equal(res.status, 200, path);
+		assert.equal(await res.text(), 'STATIC:' + path, path);
+		assert.deepEqual(seenByRsp, [], path);
+		assert.equal(seenByAssets[0].request, request, path);
+	}
+	const { env, seenByRsp } = makeEnv(DENY);
+	assert.equal((await gatedSite.default.fetch(new Request('https://s.example' + GATED), env)).status, 404);
+	assert.equal(seenByRsp.length, 1, 'a gated page still asks for its verdict');
+});
+
+test('worker: with nothing gated, /_reef/verdict.json is the static site\'s (control)', async () => {
+	const { env, seenByAssets } = makeEnv(DENY);
+	const request = new Request('https://s.example/_reef/verdict.json');
+	const res = await ungatedSite.default.fetch(request, env);
+	assert.equal(res.status, 200);
+	assert.equal(seenByAssets[0].request, request);
+});

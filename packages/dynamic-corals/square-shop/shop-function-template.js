@@ -2521,6 +2521,26 @@ function verdictPathUnreadable(rules, pathname) {
 	return (rules || []).length > 0 && verdictPathKey(pathname) === null;
 }
 
+// The build ships its members-only path list beside the pages, at GATED_MANIFEST_PATH: the
+// preview uploader reads it from the build output to withhold the same pages, and this worker
+// carries the same list baked in. Nothing reads it over HTTP, so on a site that gates anything it
+// is answered as absent, for every spelling the asset server would resolve to that file. Case is
+// folded here, unlike the gate itself: the path is fixed and no page of the site lives there.
+const GATED_MANIFEST_PATH = '/_reef/verdict.json';
+
+function isGatedManifestPath(rules, pathname) {
+	if ((rules || []).length === 0) return false;
+	const key = verdictPathKey(pathname);
+	return key !== null && key.toLowerCase() === GATED_MANIFEST_PATH;
+}
+
+function gatedManifestAbsentResponse() {
+	return new Response('Not Found', {
+		status: 404,
+		headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'private, no-store' }
+	});
+}
+
 // The comparison key for the verdict gate. The Pages asset server decodes the WHOLE pathname
 // once with decodeURIComponent before it looks a file up, and a trailing slash serves the
 // directory's index.html (workers-sdk pages-shared/asset-server/handler.ts, generateResponse).
@@ -2997,6 +3017,7 @@ const siteWorker = {
 		// result keeps this site's shell; old contracts, provider-only sites and
 		// malformed returns retain the existing RSP fallback.
 		const transport = CFG.apiTransport;
+		if (transport && isGatedManifestPath(transport.verdict, pathname)) return gatedManifestAbsentResponse();
 		const nativeCheckoutSuccess = matchNativeCheckoutSuccess(request, shopDescriptors, transport && transport.checkoutResult);
 		if (nativeCheckoutSuccess) return renderCompletion(request, env, CFG, nativeCheckoutSuccess, transport.checkoutResult);
 
@@ -3081,7 +3102,7 @@ export {
 	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchCheckoutResultFallback, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	matchSubscribeResult, renderSubscribeResult,
-	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath, verdictPathKey, verdictPathUnreadable,
+	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath, verdictPathKey, verdictPathUnreadable, isGatedManifestPath,
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse,
 	YT_POSTER_PATH, relayYoutubePoster,
 	platformReader,

@@ -677,7 +677,10 @@ function workerClaimedPaths() {
 		if (transport.subscribeResult) paths.add(transport.subscribeResult.path);
 		if (transport.checkoutResult) paths.add(transport.checkoutResult.path);
 	}
-	for (const rule of loadGatedManifest(arg('gated-manifest'))) paths.add(rule.value);
+	const gatedRules = loadGatedManifest(arg('gated-manifest'));
+	for (const rule of gatedRules) paths.add(rule.value);
+	// The worker answers the build's own copy of that list as absent (shop-function-template.js).
+	if (gatedRules.length > 0) paths.add('/_reef/verdict.json');
 	for (const shop of config.shops || []) {
 		paths.add(shop.shopPath);
 		paths.add(shop.shopPath + '/probe');

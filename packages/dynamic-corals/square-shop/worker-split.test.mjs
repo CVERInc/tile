@@ -216,7 +216,7 @@ test('emitted _routes.json and run_worker_first agree in both directions, and co
 });
 
 test('a static exclusion that hides a worker path is refused, before anything is written', () => {
-	for (const ex of ['["/vault/*"]', '["/api/*"]', '["/membership"]', '["/shop/*"]', '["/__reef/*"]', '["/about"]']) {
+	for (const ex of ['["/vault/*"]', '["/api/*"]', '["/membership"]', '["/shop/*"]', '["/__reef/*"]', '["/about"]', '["/_reef/*"]', '["/_reef/verdict.json"]']) {
 		const r = run(CURRENT, [...FULL, '--split-out', join(workDir, 'refused-' + n), '--static-exclusions', ex]);
 		assert.equal(r.status, 2, ex + ' must be refused');
 		assert.match(r.stderr, /static exclusion hides/);
