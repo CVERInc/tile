@@ -103,12 +103,30 @@ ok('the location: a URL is a link to it, shown without its scheme; a place is a 
   assert.deepEqual([by.talk.locationKind, by.talk.locationHref], ['none', '']);
 });
 
-ok('add to calendar: the Google link; the feed’s own .ics in Safari on an Apple device when the feed serves one', () => {
-  assert.equal(rows().find((r) => r.uid === 'con').addHref, addToCalendarUrl(CON, { descriptionIsText: true }));
+ok('add to calendar: the door is always the Google link, on any device; the file rides beside it when the feed serves one', () => {
   const src = 'https://feed.example/v0/?cal=x';
-  const apple = (feed) => listRows(feed, { now: NOW, locale: 'en', userAgent: SAFARI_IOS, feedSrc: src }).find((r) => r.uid === 'season').addHref;
-  assert.equal(new URL(apple({ ...FEED, ics: true })).searchParams.get('ics'), 'season');
-  assert.match(apple(FEED), /^https:\/\/calendar\.google\.com\//, 'a feed that does not say so keeps the Google link');
+  const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
+  const MAC_SAFARI = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+  for (const userAgent of ['', SAFARI_IOS, MAC_SAFARI, ANDROID]) {
+    const row = listRows({ ...FEED, ics: true }, { now: NOW, locale: 'en', userAgent, feedSrc: src }).find((r) => r.uid === 'season');
+    assert.match(row.addHref, /^https:\/\/calendar\.google\.com\//, 'never guessed from the device: ' + userAgent);
+    assert.equal(new URL(row.addFile).searchParams.get('ics'), 'season');
+    assert.notEqual(row.addHref, row.addFile);
+  }
+  assert.equal(rows().find((r) => r.uid === 'con').addHref, addToCalendarUrl(CON, { descriptionIsText: true }));
+  const plain = listRows(FEED, { now: NOW, locale: 'en', userAgent: SAFARI_IOS, feedSrc: src });
+  assert.ok(plain.every((r) => r.addFile === ''), 'a feed that does not say it serves files gives none');
+  assert.ok(listRows({ ...FEED, ics: true }, { now: NOW, locale: 'en', feedSrc: '/events.json' }).every((r) => r.addFile === ''), 'nor does a relative feed address');
+});
+
+ok('the three doors carry the file address, escaped, only when there is one', () => {
+  const src = 'https://feed.example/v0/?cal=x&a="b"';
+  const withFile = renderRows(listRows({ ...FEED, ics: true }, { now: NOW, locale: 'en', feedSrc: src, far: true }));
+  const doors = withFile.match(/<a class="dc-ev-(?:cal|cd|line dc-ev-when)"[^>]*>/g) || [];
+  assert.ok(doors.length >= 3 && doors.length % 3 === 0, String(doors.length));
+  for (const d of doors) { assert.match(d, / data-dc-add-file="https:\/\/feed\.example\/v0\/\?[^"]*ics=[^"]+"/); assert.match(d, / href="https:\/\/calendar\.google\.com\//); }
+  assert.ok(!/data-dc-add-file="[^"]*"b"/.test(withFile), 'a quote in the feed address cannot close the attribute');
+  assert.ok(!renderRows(listRows(FEED, { now: NOW, locale: 'en', feedSrc: src, far: true })).includes('data-dc-add-file'));
 });
 
 ok('a page language Intl refuses falls back to the browser’s own: the row still has its date', () => {

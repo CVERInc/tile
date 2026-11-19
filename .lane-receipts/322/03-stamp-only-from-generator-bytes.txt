@@ -1,0 +1,4 @@
+new committed stamp       4b05e452efd77cdb = recomputed 4b05e452efd77cdb
+stamp with old generator  28e77d8d9ce7ba76 (origin/main had "28e77d8d9ce7ba76")
+SOURCE_FILES unchanged    true
+exit=0

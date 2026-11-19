@@ -1,0 +1,27 @@
+=== M1a router: no normalisation of the request host (card-worker.mjs) → cards-service-host-normalise.test.mjs: exit 1, 1 failing
+  not ok 6 - 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+=== M1b hostBoundary: no normalisation (card-worker.mjs) → cards-service-host-normalise.test.mjs: exit 1, 1 failing
+  not ok 8 - 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+=== M1c movedTo split: no normalisation (card-worker.mjs) → cards-service-host-normalise.test.mjs: exit 1, 1 failing
+  not ok 8 - 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+=== M1d standIn: lookup by the raw hostname (host-standins.mjs) → cards-service-host-normalise.test.mjs: exit 1, 1 failing
+  not ok 10 - 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+=== M1e hostName: keeps the trailing dot (host-standins.mjs) → cards-service-host-normalise.test.mjs: exit 1, 8 failing
+  not ok 2 - 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+  not ok 3 - 378-1 split: the service host with a trailing dot answers every boundary row as without it
+  not ok 4 - 378-1 open: the service host with a trailing dot answers every boundary row as without it
+  not ok 5 - 378-1 split: the people's host with a trailing dot answers no service endpoint
+  not ok 6 - 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+  not ok 7 - 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+  not ok 8 - 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+  not ok 10 - 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+=== M2a standIn: a real-host Origin left as sent (host-standins.mjs) → cards-service-host-normalise.test.mjs: exit 1, 1 failing
+  not ok 11 - 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+=== M2b standIn: http: Location not mapped (host-standins.mjs) → cards-service-host-normalise.test.mjs: exit 1, 1 failing
+  not ok 13 - 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+=== M3a QR address missing (render) (card-render.mjs) → cards-service-host.test.mjs: exit 1, 1 failing
+  not ok 6 - split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+  -- failing assertion messages:
+=== M3b QR address wrong (render) (card-render.mjs) → cards-service-host.test.mjs: exit 1, 1 failing
+  not ok 6 - split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+  -- failing assertion messages:

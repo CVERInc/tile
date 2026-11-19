@@ -1,0 +1,1281 @@
+TAP version 13
+# Subtest: tile\#299 ①: cardsHostStage — three states, named in one place; canonical alone wins; a typo is dark
+ok 1 - tile\#299 ①: cardsHostStage — three states, named in one place; canonical alone wins; a typo is dark
+  ---
+  duration_ms: 1.635109
+  type: 'test'
+  ...
+# Subtest: tile\#299 ②: the decision table — setting × card host × route class
+ok 2 - tile\#299 ②: the decision table — setting × card host × route class
+  ---
+  duration_ms: 1023.970146
+  type: 'test'
+  ...
+# Subtest: tile\#299 ③: every other host answers the same in every stage but the cutover, and the cutover alone decides it
+ok 3 - tile\#299 ③: every other host answers the same in every stage but the cutover, and the cutover alone decides it
+  ---
+  duration_ms: 3900.679885
+  type: 'test'
+  ...
+# Subtest: tile\#299 ④: a typo in either setting is today, byte for byte, on both card hosts
+ok 4 - tile\#299 ④: a typo in either setting is today, byte for byte, on both card hosts
+  ---
+  duration_ms: 765.152845
+  type: 'test'
+  ...
+# Subtest: tile\#299 ⑤: dark and the open stage's dark routes read nothing from the store
+ok 5 - tile\#299 ⑤: dark and the open stage's dark routes read nothing from the store
+  ---
+  duration_ms: 1.993379
+  type: 'test'
+  ...
+# Subtest: tile\#299 ⑥: in the open stage no address the Worker emits names reef.cards
+ok 6 - tile\#299 ⑥: in the open stage no address the Worker emits names reef.cards
+  ---
+  duration_ms: 15.232605
+  type: 'test'
+  ...
+# Subtest: tile\#299 ⑦: an open-stage answer never poisons a cache entry the old host reads
+ok 7 - tile\#299 ⑦: an open-stage answer never poisons a cache entry the old host reads
+  ---
+  duration_ms: 12.551835
+  type: 'test'
+  ...
+# Subtest: tile\#299 ⑧: wrangler.example.toml documents the open stage beside the cutover switch
+ok 8 - tile\#299 ⑧: wrangler.example.toml documents the open stage beside the cutover switch
+  ---
+  duration_ms: 0.471504
+  type: 'test'
+  ...
+#     (partial: @cvernet/signet not installed — byte check skipped)
+# Subtest: resolveHandle: canonical path → handle + canonical cardUrl
+ok 9 - resolveHandle: canonical path → handle + canonical cardUrl
+  ---
+  duration_ms: 3.792163
+  type: 'test'
+  ...
+# Subtest: resolveHandle: vanity host → mapped handle + that host as cardUrl
+ok 10 - resolveHandle: vanity host → mapped handle + that host as cardUrl
+  ---
+  duration_ms: 0.429103
+  type: 'test'
+  ...
+# Subtest: resolveHandle: an unbound host is NOT a card — the control for the test above
+ok 11 - resolveHandle: an unbound host is NOT a card — the control for the test above
+  ---
+  duration_ms: 0.303639
+  type: 'test'
+  ...
+# Subtest: resolveHandle: a path segment still wins on a host with no binding
+ok 12 - resolveHandle: a path segment still wins on a host with no binding
+  ---
+  duration_ms: 0.260237
+  type: 'test'
+  ...
+# Subtest: 🔴 resolveHandle: a path names a card on our hosts only; a creator domain without a binding names none (reef\#2618 r2)
+ok 13 - 🔴 resolveHandle: a path names a card on our hosts only; a creator domain without a binding names none (reef\#2618 r2)
+  ---
+  duration_ms: 0.609178
+  type: 'test'
+  ...
+# Subtest: pathHosts: reads CARD_PATH_HOSTS; only well-formed names under a platform zone count
+ok 14 - pathHosts: reads CARD_PATH_HOSTS; only well-formed names under a platform zone count
+  ---
+  duration_ms: 0.943248
+  type: 'test'
+  ...
+# Subtest: routesByPath / resolveHandle: a host in the extra set routes by path; with no set, nothing changes
+ok 15 - routesByPath / resolveHandle: a host in the extra set routes by path; with no set, nothing changes
+  ---
+  duration_ms: 1.947468
+  type: 'test'
+  ...
+# Subtest: resolveHandle: bare canonical host (no handle) → the root card, at the bare origin
+ok 16 - resolveHandle: bare canonical host (no handle) → the root card, at the bare origin
+  ---
+  duration_ms: 0.276928
+  type: 'test'
+  ...
+# Subtest: resolveHandle: handle is lowercased; port stripped from host
+ok 17 - resolveHandle: handle is lowercased; port stripped from host
+  ---
+  duration_ms: 0.480265
+  type: 'test'
+  ...
+# Subtest: renderCardHTML: title from frontmatter, QR mount points at the external coral, icons resolve
+ok 18 - renderCardHTML: title from frontmatter, QR mount points at the external coral, icons resolve
+  ---
+  duration_ms: 11.337299
+  type: 'test'
+  ...
+# Subtest: renderCardHTML: name falls back to handle when frontmatter has no title
+ok 19 - renderCardHTML: name falls back to handle when frontmatter has no title
+  ---
+  duration_ms: 2.178475
+  type: 'test'
+  ...
+# Subtest: footer: the creator's own line always; the feelreef credit is DEFAULT OFF
+ok 20 - footer: the creator's own line always; the feelreef credit is DEFAULT OFF
+  ---
+  duration_ms: 4.641989
+  type: 'test'
+  ...
+# Subtest: generator: every card declares what built it, and it is NOT the powered-by switch
+ok 21 - generator: every card declares what built it, and it is NOT the powered-by switch
+  ---
+  duration_ms: 13.691049
+  type: 'test'
+  ...
+# Subtest: footer: `powered-by: on` opts into the referral credit (?ref=<handle>)
+ok 22 - footer: `powered-by: on` opts into the referral credit (?ref=<handle>)
+  ---
+  duration_ms: 0.956419
+  type: 'test'
+  ...
+# Subtest: footer: `since:` frontmatter adds the founding year → "© 2013–2026"
+ok 23 - footer: `since:` frontmatter adds the founding year → "© 2013–2026"
+  ---
+  duration_ms: 0.952538
+  type: 'test'
+  ...
+# Subtest: accent: one frontmatter hex derives the whole --cp-accent-* family; absent → no override
+ok 24 - accent: one frontmatter hex derives the whole --cp-accent-* family; absent → no override
+  ---
+  duration_ms: 1.641309
+  type: 'test'
+  ...
+# Subtest: bento: a titled LANE opens its own block; the face lane is the unlabelled one
+ok 25 - bento: a titled LANE opens its own block; the face lane is the unlabelled one
+  ---
+  duration_ms: 2.223817
+  type: 'test'
+  ...
+# Subtest: bleed: a `bleed` cell renders full-width OUTSIDE the bento blocks
+ok 26 - bleed: a `bleed` cell renders full-width OUTSIDE the bento blocks
+  ---
+  duration_ms: 1.819984
+  type: 'test'
+  ...
+# Subtest: bubbles: the ancestor 表演 is carried verbatim — pops from the tail origin, not a crossfade
+ok 27 - bubbles: the ancestor 表演 is carried verbatim — pops from the tail origin, not a crossfade
+  ---
+  duration_ms: 1.225846
+  type: 'test'
+  ...
+# Subtest: bubbles: the narrow-screen anchor is read from `narrow=`, and from the `origin-narrow=` it was first written as
+ok 28 - bubbles: the narrow-screen anchor is read from `narrow=`, and from the `origin-narrow=` it was first written as
+  ---
+  duration_ms: 12.931506
+  type: 'test'
+  ...
+# Subtest: 🔴 slider is the COMMON carousel — swipeable, with prev/next, and no JS
+ok 29 - 🔴 slider is the COMMON carousel — swipeable, with prev/next, and no JS
+  ---
+  duration_ms: 1.258518
+  type: 'test'
+  ...
+# Subtest: CONTROL: a ONE-image slider hides its controls
+ok 30 - CONTROL: a ONE-image slider hides its controls
+  ---
+  duration_ms: 0.781524
+  type: 'test'
+  ...
+# Subtest: drawers: a \#id target becomes an overlay trigger on BOTH link and feature cells
+ok 31 - drawers: a \#id target becomes an overlay trigger on BOTH link and feature cells
+  ---
+  duration_ms: 2.811444
+  type: 'test'
+  ...
+# Subtest: 🔴 drawers are LEAVES: a drawer cannot open another drawer (depth 1 is structural)
+ok 32 - 🔴 drawers are LEAVES: a drawer cannot open another drawer (depth 1 is structural)
+  ---
+  duration_ms: 1.241157
+  type: 'test'
+  ...
+# Subtest: drawer prose renders block markdown (paragraphs, bold, links) — not escaped source
+ok 33 - drawer prose renders block markdown (paragraphs, bold, links) — not escaped source
+  ---
+  duration_ms: 1.452713
+  type: 'test'
+  ...
+# Subtest: 🔴 back=: profile and text tiles get a door to their back; tiles without one do not
+ok 34 - 🔴 back=: profile and text tiles get a door to their back; tiles without one do not
+  ---
+  duration_ms: 1.982529
+  type: 'test'
+  ...
+# Subtest: 🔴 back=: a link with a back opens the back and carries its URL there; a missing back leaves it a link
+ok 35 - 🔴 back=: a link with a back opens the back and carries its URL there; a missing back leaves it a link
+  ---
+  duration_ms: 1.886007
+  type: 'test'
+  ...
+# Subtest: 🔴 back= inside a back is ignored: a back is a leaf
+ok 36 - 🔴 back= inside a back is ignored: a back is a leaf
+  ---
+  duration_ms: 1.589508
+  type: 'test'
+  ...
+# Subtest: a card with no drawers ships no overlay markup or client
+ok 37 - a card with no drawers ships no overlay markup or client
+  ---
+  duration_ms: 1.142485
+  type: 'test'
+  ...
+# Subtest: 🔴 a hyphenated param name is its own name — `yt-channel=` is not `channel=`
+ok 38 - 🔴 a hyphenated param name is its own name — `yt-channel=` is not `channel=`
+  ---
+  duration_ms: 1.862046
+  type: 'test'
+  ...
+# Subtest: video: click-to-load — the poster ships, the YouTube iframe does NOT until someone presses play
+ok 39 - video: click-to-load — the poster ships, the YouTube iframe does NOT until someone presses play
+  ---
+  duration_ms: 3.587568
+  type: 'test'
+  ...
+# Subtest: backdrop: a card with `backdrop:` gets a fixed dimmed layer; without it, nothing is emitted
+ok 40 - backdrop: a card with `backdrop:` gets a fixed dimmed layer; without it, nothing is emitted
+  ---
+  duration_ms: 4.34031
+  type: 'test'
+  ...
+# Subtest: a drawer's title is its heading AND its accessible name
+ok 41 - a drawer's title is its heading AND its accessible name
+  ---
+  duration_ms: 1.214726
+  type: 'test'
+  ...
+# Subtest: prose steps out of the packed grid — no guessed row count, no scrollbox in a scrolling drawer
+ok 42 - prose steps out of the packed grid — no guessed row count, no scrollbox in a scrolling drawer
+  ---
+  duration_ms: 1.573247
+  type: 'test'
+  ...
+# Subtest: 🔴 the page backdrop is emitted ONCE, and never inside a drawer
+ok 43 - 🔴 the page backdrop is emitted ONCE, and never inside a drawer
+  ---
+  duration_ms: 1.981959
+  type: 'test'
+  ...
+# Subtest: the bundled stylesheet is the one on disk — regenerate after editing either
+ok 44 - the bundled stylesheet is the one on disk — regenerate after editing either
+  ---
+  duration_ms: 1.522445
+  type: 'test'
+  ...
+# Subtest: the bundled qr/drawer coral clients are the ones on disk — regenerate after editing either
+ok 45 - the bundled qr/drawer coral clients are the ones on disk — regenerate after editing either
+  ---
+  duration_ms: 2.151944
+  type: 'test'
+  ...
+# Subtest: CONTROL: the qr/drawer drift comparison actually distinguishes a mismatched pair
+ok 46 - CONTROL: the qr/drawer drift comparison actually distinguishes a mismatched pair
+  ---
+  duration_ms: 0.283388
+  type: 'test'
+  ...
+# Subtest: the stylesheet is the card's own, not the Python era's 105KB
+ok 47 - the stylesheet is the card's own, not the Python era's 105KB
+  ---
+  duration_ms: 0.475615
+  type: 'test'
+  ...
+# Subtest: favicons resolve at the vocabulary layer: renamed domains and subdomains
+ok 48 - favicons resolve at the vocabulary layer: renamed domains and subdomains
+  ---
+  duration_ms: 1.34744
+  type: 'test'
+  ...
+# Subtest: an icon that 404s walks its fallbacks, then hides — never a broken image slot
+ok 49 - an icon that 404s walks its fallbacks, then hides — never a broken image slot
+  ---
+  duration_ms: 0.836554
+  type: 'test'
+  ...
+# Subtest: 🔴 a Card speaks sitetile's vocabulary — no cp-/sc-/lt- survives except the coral's
+ok 50 - 🔴 a Card speaks sitetile's vocabulary — no cp-/sc-/lt- survives except the coral's
+  ---
+  duration_ms: 59.905609
+  type: 'test'
+  ...
+# Subtest: the renderer's own strings follow the CARD's language, and default to English
+ok 51 - the renderer's own strings follow the CARD's language, and default to English
+  ---
+  duration_ms: 10.772662
+  type: 'test'
+  ...
+# Subtest: a quoted frontmatter value is the value, not the quotes
+ok 52 - a quoted frontmatter value is the value, not the quotes
+  ---
+  duration_ms: 3.087193
+  type: 'test'
+  ...
+# Subtest: a cell's span is a data attribute, because sitetile has no class for one
+ok 53 - a cell's span is a data attribute, because sitetile has no class for one
+  ---
+  duration_ms: 3.186105
+  type: 'test'
+  ...
+# Subtest: the card defines sitetile's --gd-* tokens, so a Site's stylesheet finds what it expects
+ok 54 - the card defines sitetile's --gd-* tokens, so a Site's stylesheet finds what it expects
+  ---
+  duration_ms: 0.229457
+  type: 'test'
+  ...
+# Subtest: 🔴 no `asset:` reference ever survives into the rendered HTML
+ok 55 - 🔴 no `asset:` reference ever survives into the rendered HTML
+  ---
+  duration_ms: 7.912266
+  type: 'test'
+  ...
+# Subtest: 🔴 no DECORATED span is ever rendered empty
+ok 56 - 🔴 no DECORATED span is ever rendered empty
+  ---
+  duration_ms: 1.744322
+  type: 'test'
+  ...
+# Subtest: sandbox: /try/edit is 200, HTML, never indexed, and never touches the CARDS store
+ok 57 - sandbox: /try/edit is 200, HTML, never indexed, and never touches the CARDS store
+  ---
+  duration_ms: 69.568508
+  type: 'test'
+  ...
+# Subtest: sandbox: a trailing slash answers the same as the bare path
+ok 58 - sandbox: a trailing slash answers the same as the bare path
+  ---
+  duration_ms: 3.485755
+  type: 'test'
+  ...
+# Subtest: sandbox: nothing is fixed on screen — no banner ships (owner ruling 2026-11-05, review P06/P28)
+ok 59 - sandbox: nothing is fixed on screen — no banner ships (owner ruling 2026-11-05, review P06/P28)
+  ---
+  duration_ms: 11.897985
+  type: 'test'
+  ...
+# Subtest: sandbox: locale comes from Accept-Language, one of the nine console locales the editor speaks
+ok 60 - sandbox: locale comes from Accept-Language, one of the nine console locales the editor speaks
+  ---
+  duration_ms: 186.307465
+  type: 'test'
+  ...
+# Subtest: sandbox + host mode: Accept-Language "ja;q=0,en;q=1" is read by quality → en
+ok 61 - sandbox + host mode: Accept-Language "ja;q=0,en;q=1" is read by quality → en
+  ---
+  duration_ms: 17.581715
+  type: 'test'
+  ...
+# Subtest: sandbox + host mode: Accept-Language "en;q=0.1,ja;q=1" is read by quality → ja
+ok 62 - sandbox + host mode: Accept-Language "en;q=0.1,ja;q=1" is read by quality → ja
+  ---
+  duration_ms: 18.838183
+  type: 'test'
+  ...
+# Subtest: sandbox + host mode: Accept-Language "ja;q=0.2,zh-TW;q=0.9" is read by quality → zh
+ok 63 - sandbox + host mode: Accept-Language "ja;q=0.2,zh-TW;q=0.9" is read by quality → zh
+  ---
+  duration_ms: 17.678828
+  type: 'test'
+  ...
+# Subtest: sandbox: `?locale=` overrides Accept-Language, for manual testing/linking
+ok 64 - sandbox: `?locale=` overrides Accept-Language, for manual testing/linking
+  ---
+  duration_ms: 7.189515
+  type: 'test'
+  ...
+# Subtest: sandbox: `?lang=` overrides both `?locale=` and Accept-Language — the brief's own resolution order
+ok 65 - sandbox: `?lang=` overrides both `?locale=` and Accept-Language — the brief's own resolution order
+  ---
+  duration_ms: 8.621248
+  type: 'test'
+  ...
+# Subtest: sandbox: `?lang=` accepts a full BCP-47 tag, not just the bare locale key (Traditional vs Simplified Chinese)
+ok 66 - sandbox: `?lang=` accepts a full BCP-47 tag, not just the bare locale key (Traditional vs Simplified Chinese)
+  ---
+  duration_ms: 20.08534
+  type: 'test'
+  ...
+# Subtest: 🔴 sandbox: a bare /try (no /edit) is NOT special-cased — same 404 as any unregistered handle
+ok 67 - 🔴 sandbox: a bare /try (no /edit) is NOT special-cased — same 404 as any unregistered handle
+  ---
+  duration_ms: 2.905897
+  type: 'test'
+  ...
+# Subtest: 🔴 park: the WHOLE card is stored, under try:<uuid>, with an hour to live
+ok 68 - 🔴 park: the WHOLE card is stored, under try:<uuid>, with an hour to live
+  ---
+  duration_ms: 2.013021
+  type: 'test'
+  ...
+# Subtest: 🔴 park: a parked key can never collide with a handle
+ok 69 - 🔴 park: a parked key can never collide with a handle
+  ---
+  duration_ms: 0.895057
+  type: 'test'
+  ...
+# Subtest: park: two posts get two different ids and two different rows
+ok 70 - park: two posts get two different ids and two different rows
+  ---
+  duration_ms: 1.617339
+  type: 'test'
+  ...
+# Subtest: 🔴 park: a body that is not a card is refused — this is not a free key/value store
+ok 71 - 🔴 park: a body that is not a card is refused — this is not a free key/value store
+  ---
+  duration_ms: 3.409732
+  type: 'test'
+  ...
+# Subtest: park: a card over the ingest budget is refused, and nothing is written
+ok 72 - park: a card over the ingest budget is refused, and nothing is written
+  ---
+  duration_ms: 16.041589
+  type: 'test'
+  ...
+# Subtest: park: only POST, and only from our own origin when a browser says which
+ok 73 - park: only POST, and only from our own origin when a browser says which
+  ---
+  duration_ms: 5.297458
+  type: 'test'
+  ...
+# Subtest: 🔴 the parked draft is read back over the GUARDED api, and only with the bearer
+ok 74 - 🔴 the parked draft is read back over the GUARDED api, and only with the bearer
+  ---
+  duration_ms: 93.464292
+  type: 'test'
+  ...
+# Subtest: the api refuses a made-up draft id, and refuses to write through this route
+ok 75 - the api refuses a made-up draft id, and refuses to write through this route
+  ---
+  duration_ms: 2.890276
+  type: 'test'
+  ...
+# Subtest: 🔴 the served sandbox never shows a visitor the internal codename
+ok 76 - 🔴 the served sandbox never shows a visitor the internal codename
+  ---
+  duration_ms: 7.654279
+  type: 'test'
+  ...
+# Subtest: the masthead is the feelreef lockup, and it is the way back
+ok 77 - the masthead is the feelreef lockup, and it is the way back
+  ---
+  duration_ms: 9.215156
+  type: 'test'
+  ...
+# Subtest: 🔴 the internal editor's OWN markup keeps its own name — the swap is a sandbox composition, not a file edit
+ok 78 - 🔴 the internal editor's OWN markup keeps its own name — the swap is a sandbox composition, not a file edit
+  ---
+  duration_ms: 1.111423
+  type: 'test'
+  ...
+# Subtest: sandbox: Save's door and the leave-edit question ship in the markup
+ok 79 - sandbox: Save's door and the leave-edit question ship in the markup
+  ---
+  duration_ms: 16.160042
+  type: 'test'
+  ...
+# Subtest: sandbox: the door is wired — the sheet, /try/park, and /dashboard/cards
+ok 80 - sandbox: the door is wired — the sheet, /try/park, and /dashboard/cards
+  ---
+  duration_ms: 7.601887
+  type: 'test'
+  ...
+# Subtest: sandbox: the page tells its module the locale, and where every borrowed file is
+ok 81 - sandbox: the page tells its module the locale, and where every borrowed file is
+  ---
+  duration_ms: 23.280846
+  type: 'test'
+  ...
+# Subtest: sandbox: every borrowed file and face answers, immutable, as the repo ships it — a stale hash is a 404
+ok 82 - sandbox: every borrowed file and face answers, immutable, as the repo ships it — a stale hash is a 404
+  ---
+  duration_ms: 47.340574
+  type: 'test'
+  ...
+# Subtest: the old table route is gone — /try/edit/t/… is no longer special
+ok 83 - the old table route is gone — /try/edit/t/… is no longer special
+  ---
+  duration_ms: 1.203156
+  type: 'test'
+  ...
+# Subtest: 🔴 /try/edit2 is a permanent redirect to /try/edit — nothing that already links to it breaks
+ok 84 - 🔴 /try/edit2 is a permanent redirect to /try/edit — nothing that already links to it breaks
+  ---
+  duration_ms: 0.64802
+  type: 'test'
+  ...
+# Subtest: 🔴 /try/edit2 redirects WITH the query string — a `?lang=` link still resolves the same locale
+ok 85 - 🔴 /try/edit2 redirects WITH the query string — a `?lang=` link still resolves the same locale
+  ---
+  duration_ms: 0.34592
+  type: 'test'
+  ...
+# Subtest: 🔴 CONTROL: /try/edit2 never touches the CARDS store, and never serves a body — it only redirects
+ok 86 - 🔴 CONTROL: /try/edit2 never touches the CARDS store, and never serves a body — it only redirects
+  ---
+  duration_ms: 0.230476
+  type: 'test'
+  ...
+# Subtest: 🔴 the retired table path is gone too — /try/edit2/t/… is not specially handled any more
+ok 87 - 🔴 the retired table path is gone too — /try/edit2/t/… is not specially handled any more
+  ---
+  duration_ms: 0.963579
+  type: 'test'
+  ...
+# Subtest: 🔴 the committed editor bundle is the one its sources produce
+ok 88 - 🔴 the committed editor bundle is the one its sources produce
+  ---
+  duration_ms: 6.675989
+  type: 'test'
+  ...
+# Subtest: 🔴 the stale-bundle stamp covers every file the generator READ, not a hand-kept list
+ok 89 - 🔴 the stale-bundle stamp covers every file the generator READ, not a hand-kept list
+  ---
+  duration_ms: 20.191793
+  type: 'test'
+  ...
+# Subtest: 🔴 the previous-output exclusion is an EXACT path, not a basename suffix
+ok 90 - 🔴 the previous-output exclusion is an EXACT path, not a basename suffix
+  ---
+  duration_ms: 0.387511
+  type: 'test'
+  ...
+# Subtest: 🔴 the committed deck is w3/deck.js and w3/deck.css, byte for byte
+ok 91 - 🔴 the committed deck is w3/deck.js and w3/deck.css, byte for byte
+  ---
+  duration_ms: 1.356
+  type: 'test'
+  ...
+# Subtest: every Card page carries the deck: its stylesheet in the head, the frontmatter and words, then deck.js
+ok 92 - every Card page carries the deck: its stylesheet in the head, the frontmatter and words, then deck.js
+  ---
+  duration_ms: 1.831125
+  type: 'test'
+  ...
+# Subtest: the deck stays off where the caller says so: the editor's tiles, and any editIndex render
+ok 93 - the deck stays off where the caller says so: the editor's tiles, and any editIndex render
+  ---
+  duration_ms: 2.977749
+  type: 'test'
+  ...
+# Subtest: /_deck/ serves the deck, immutable, on every host a Card answers on
+ok 94 - /_deck/ serves the deck, immutable, on every host a Card answers on
+  ---
+  duration_ms: 5.057341
+  type: 'test'
+  ...
+# Subtest: host mode: /edit?host=feelreef serves the editor with host opts, noindex, framable only by that host, never touching CARDS
+ok 95 - host mode: /edit?host=feelreef serves the editor with host opts, noindex, framable only by that host, never touching CARDS
+  ---
+  duration_ms: 49.2151
+  type: 'test'
+  ...
+# Subtest: host mode: a missing or disallowed ?host= is a 400, and still never touches CARDS
+ok 96 - host mode: a missing or disallowed ?host= is a 400, and still never touches CARDS
+  ---
+  duration_ms: 2.712931
+  type: 'test'
+  ...
+# Subtest: host mode: ?host= on the SANDBOX path does not leak — /try/edit stays the sandbox
+ok 97 - host mode: ?host= on the SANDBOX path does not leak — /try/edit stays the sandbox
+  ---
+  duration_ms: 7.022999
+  type: 'test'
+  ...
+# Subtest: CONTROL: the untouchable store really does throw when the Worker reads a card
+ok 98 - CONTROL: the untouchable store really does throw when the Worker reads a card
+  ---
+  duration_ms: 0.709921
+  type: 'test'
+  ...
+# Subtest: production Cards on canonical and fallback hosts carry noindex on every representation; an unbound host serves none
+ok 99 - production Cards on canonical and fallback hosts carry noindex on every representation; an unbound host serves none
+  ---
+  duration_ms: 93.849403
+  type: 'test'
+  ...
+# Subtest: a bound vanity Card stays indexable, while preview and demo Cards include noindex on icons too
+ok 100 - a bound vanity Card stays indexable, while preview and demo Cards include noindex on icons too
+  ---
+  duration_ms: 64.435634
+  type: 'test'
+  ...
+# Subtest: Card not-found pages and missing icons carry the same host-aware noindex rule
+ok 101 - Card not-found pages and missing icons carry the same host-aware noindex rule
+  ---
+  duration_ms: 16.140652
+  type: 'test'
+  ...
+# Subtest: CARD_PATH_HOSTS: a listed platform-zone host serves Cards by path like the fallback origin; nothing else changes
+ok 102 - CARD_PATH_HOSTS: a listed platform-zone host serves Cards by path like the fallback origin; nothing else changes
+  ---
+  duration_ms: 31.631704
+  type: 'test'
+  ...
+# Subtest: CARD_PATH_HOSTS unset, empty or naming another host: a platform-zone host outside the built-in list answers the small 404
+ok 103 - CARD_PATH_HOSTS unset, empty or naming another host: a platform-zone host outside the built-in list answers the small 404
+  ---
+  duration_ms: 2.251617
+  type: 'test'
+  ...
+# Subtest: stopping a Card blocks every representation on both hosts; resume restores bytes without Worker writes
+ok 104 - stopping a Card blocks every representation on both hosts; resume restores bytes without Worker writes
+  ---
+  duration_ms: 151.29762
+  type: 'test'
+  ...
+# Subtest: the card body and stop marker reads start in parallel for pages, markdown and icons
+ok 105 - the card body and stop marker reads start in parallel for pages, markdown and icons
+  ---
+  duration_ms: 40.114208
+  type: 'test'
+  ...
+# Subtest: an unknown path under a stopped handle returns the no-card page without any store read
+ok 106 - an unknown path under a stopped handle returns the no-card page without any store read
+  ---
+  duration_ms: 1.870796
+  type: 'test'
+  ...
+# Subtest: stop takes precedence over redirects and missing cards, and resume preserves their responses
+ok 107 - stop takes precedence over redirects and missing cards, and resume preserves their responses
+  ---
+  duration_ms: 12.267187
+  type: 'test'
+  ...
+# Subtest: 🔴 /_yt/ and /_icon/ cache on origin + path: a query string does not make a second entry or a second upstream fetch (tile\#150 L3)
+ok 108 - 🔴 /_yt/ and /_icon/ cache on origin + path: a query string does not make a second entry or a second upstream fetch (tile\#150 L3)
+  ---
+  duration_ms: 1.765203
+  type: 'test'
+  ...
+# Subtest: reef\#2725 ①: reef.cards routes by path exactly like the old host, and its root IS the feelreef card
+ok 109 - reef\#2725 ①: reef.cards routes by path exactly like the old host, and its root IS the feelreef card
+  ---
+  duration_ms: 9.676939
+  type: 'test'
+  ...
+# {"event":"apex_card_lookup_failed","host":"feelreef.com","op":"liveCard","error":"Error"}
+# {"event":"apex_card_lookup_failed","host":"feelreef.com","op":"liveCard","error":"Error"}
+# {"event":"apex_card_lookup_failed","host":"feelreef.com","op":"liveCard","error":"Error"}
+# {"event":"apex_card_lookup_failed","host":"feelreef.com","op":"liveCard","error":"Error"}
+# Subtest: reef\#2725 ②: with the switch on, the old card addresses 301 to reef.cards, path and query intact, cacheable
+ok 110 - reef\#2725 ②: with the switch on, the old card addresses 301 to reef.cards, path and query intact, cacheable
+  ---
+  duration_ms: 3101.925996
+  type: 'test'
+  ...
+# Subtest: reef\#2725: reserved apex paths stay on the site rather than redirect to Cards
+ok 111 - reef\#2725: reserved apex paths stay on the site rather than redirect to Cards
+  ---
+  duration_ms: 9.194205
+  type: 'test'
+  ...
+# Subtest: tile\#214: a live reserved Card stays on the apex site
+ok 112 - tile\#214: a live reserved Card stays on the apex site
+  ---
+  duration_ms: 1.545366
+  type: 'test'
+  ...
+# Subtest: tile\#214: apex lookup errors fall through to the site origin
+ok 113 - tile\#214: apex lookup errors fall through to the site origin
+  ---
+  duration_ms: 1.393892
+  type: 'test'
+  ...
+# Subtest: tile\#219: an apex store failure leaves exactly one warn line; a working store leaves none
+ok 114 - tile\#219: an apex store failure leaves exactly one warn line; a working store leaves none
+  ---
+  duration_ms: 10.579156
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3: apex redirects only a live Card; unknown site routes reach origin
+ok 115 - reef\#2725 r3: apex redirects only a live Card; unknown site routes reach origin
+  ---
+  duration_ms: 7.002559
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r4: every other apex path reaches the site origin on GET and HEAD
+ok 116 - reef\#2725 r4: every other apex path reaches the site origin on GET and HEAD
+  ---
+  duration_ms: 1.894187
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3: switch off keeps apex routing
+ok 117 - reef\#2725 r3: switch off keeps apex routing
+  ---
+  duration_ms: 0.433253
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3: switch off keeps the old bare /_api response
+ok 118 - reef\#2725 r3: switch off keeps the old bare /_api response
+  ---
+  duration_ms: 1.384992
+  type: 'test'
+  ...
+# Subtest: reef\#2725 ③: ONE noindex predicate — host × handle × switch
+ok 119 - reef\#2725 ③: ONE noindex predicate — host × handle × switch
+  ---
+  duration_ms: 2.858015
+  type: 'test'
+  ...
+# Subtest: reef\#2725 ③: the predicate is what the Worker sends, on every representation
+ok 120 - reef\#2725 ③: the predicate is what the Worker sends, on every representation
+  ---
+  duration_ms: 125.846039
+  type: 'test'
+  ...
+# Subtest: tile-lab\#51 ③: the root card is indexable on active hosts; customer Cards keep the old host's header
+ok 121 - tile-lab\#51 ③: the root card is indexable on active hosts; customer Cards keep the old host's header
+  ---
+  duration_ms: 5.234376
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r2 ①: cardUrlFor names the configured card host — unset is today, byte for byte
+ok 122 - reef\#2725 r2 ①: cardUrlFor names the configured card host — unset is today, byte for byte
+  ---
+  duration_ms: 0.368601
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r2 ③: host-mode /edit serves on the old host in both positions and reef.cards after cutover
+ok 123 - reef\#2725 r2 ③: host-mode /edit serves on the old host in both positions and reef.cards after cutover
+  ---
+  duration_ms: 24.754819
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3 ①: og:url and canonical name the configured card host, whatever host served the page
+ok 124 - reef\#2725 r3 ①: og:url and canonical name the configured card host, whatever host served the page
+  ---
+  duration_ms: 17.999068
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3 ②: switch unset, card.feelreef.com serves today's page byte for byte
+ok 125 - reef\#2725 r3 ②: switch unset, card.feelreef.com serves today's page byte for byte
+  ---
+  duration_ms: 11.460902
+  type: 'test'
+  ...
+# Subtest: tile-lab\#51 ②: a retired Card, a deleted Card and a never-existed handle answer byte for byte the same, on every exit
+ok 126 - tile-lab\#51 ②: a retired Card, a deleted Card and a never-existed handle answer byte for byte the same, on every exit
+  ---
+  duration_ms: 103.10814
+  type: 'test'
+  ...
+# Subtest: Refs \#218: custom-domain absent states share the small 404 on every card exit
+ok 127 - Refs \#218: custom-domain absent states share the small 404 on every card exit
+  ---
+  duration_ms: 11.37173
+  type: 'test'
+  ...
+# Subtest: Refs \#218: an inverse binding without a card body cannot redirect an absent handle
+ok 128 - Refs \#218: an inverse binding without a card body cannot redirect an absent handle
+  ---
+  duration_ms: 34.700987
+  type: 'test'
+  ...
+# Subtest: Refs \#218: both root aliases share the absent-state policy
+ok 129 - Refs \#218: both root aliases share the absent-state policy
+  ---
+  duration_ms: 18.571325
+  type: 'test'
+  ...
+# Subtest: tile-lab\#51 ②: existing / retired / deleted / never-existed / reserved — the page each gets, and no button
+ok 130 - tile-lab\#51 ②: existing / retired / deleted / never-existed / reserved — the page each gets, and no button
+  ---
+  duration_ms: 11.959087
+  type: 'test'
+  ...
+# Subtest: tile-lab\#51 ②: every other "no card" door is the same shaped page — no bare HTML left
+ok 131 - tile-lab\#51 ②: every other "no card" door is the same shaped page — no bare HTML left
+  ---
+  duration_ms: 7.407921
+  type: 'test'
+  ...
+# Subtest: tile\#217 P1: stopped own-domain card exits match an unbound host including headers
+ok 132 - tile\#217 P1: stopped own-domain card exits match an unbound host including headers
+  ---
+  duration_ms: 13.435091
+  type: 'test'
+  ...
+# Subtest: tile\#217 P2: stopped and missing identities perform the same ordered key reads
+ok 133 - tile\#217 P2: stopped and missing identities perform the same ordered key reads
+  ---
+  duration_ms: 45.972504
+  type: 'test'
+  ...
+# Subtest: 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+ok 134 - 378-1: the URL parser keeps a trailing dot in the hostname (the premise)
+  ---
+  duration_ms: 1.239107
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+ok 135 - 378-1 split: the service host with a trailing dot does not render a parked preview — it sends it to the people's host
+  ---
+  duration_ms: 28.602014
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the service host with a trailing dot answers every boundary row as without it
+ok 136 - 378-1 split: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 35.609834
+  type: 'test'
+  ...
+# Subtest: 378-1 open: the service host with a trailing dot answers every boundary row as without it
+ok 137 - 378-1 open: the service host with a trailing dot answers every boundary row as without it
+  ---
+  duration_ms: 15.71347
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the people's host with a trailing dot answers no service endpoint
+ok 138 - 378-1 split: the people's host with a trailing dot answers no service endpoint
+  ---
+  duration_ms: 5.664279
+  type: 'test'
+  ...
+# Subtest: 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+ok 139 - 378-1 open: the people's host with a trailing dot is as dark as without it — no API, no park
+  ---
+  duration_ms: 4.00862
+  type: 'test'
+  ...
+# Subtest: 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+ok 140 - 378-1 split: the legacy host with a trailing dot moves as without it, and refuses a POST to a page
+  ---
+  duration_ms: 3.147224
+  type: 'test'
+  ...
+# Subtest: 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+ok 141 - 378-1: hostBoundary and movedTo read a host as one name — case, port and trailing dot aside — once the service host is on
+  ---
+  duration_ms: 1.258467
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+ok 142 - CONTROL 378-1: with the service host off, nothing is normalised — a dotted host is still another name
+  ---
+  duration_ms: 0.601338
+  type: 'test'
+  ...
+# Subtest: 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+ok 143 - 378-1 staging: a stand-in with a trailing dot answers as the stand-in
+  ---
+  duration_ms: 9.305818
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+ok 144 - 378-2 staging: an Origin that names the role's real host is another site to the stand-in — the park and the report refuse it
+  ---
+  duration_ms: 11.897186
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+ok 145 - CONTROL 378-2 staging: the stand-in's own Origin still passes, and the real host still parks for its own Origin
+  ---
+  duration_ms: 7.534996
+  type: 'test'
+  ...
+# Subtest: 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+ok 146 - 378-2 staging: an http: Location that names a role's real host is mapped back to its stand-in
+  ---
+  duration_ms: 1.313989
+  type: 'test'
+  ...
+# Subtest: CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+ok 147 - CONTROL 378-2: a Location in another scheme, or to a host that is no role, is left alone
+  ---
+  duration_ms: 0.491864
+  type: 'test'
+  ...
+# Subtest: split: reef.cards/ is a temporary redirect to the editor on the service host, and reads nothing
+ok 148 - split: reef.cards/ is a temporary redirect to the editor on the service host, and reads nothing
+  ---
+  duration_ms: 7.36247
+  type: 'test'
+  ...
+# Subtest: split: reef.cards/ carries its query to the editor (a language, a referrer)
+ok 149 - split: reef.cards/ carries its query to the editor (a language, a referrer)
+  ---
+  duration_ms: 1.437003
+  type: 'test'
+  ...
+# Subtest: CONTROL split: reef.cards/<handle> is served, canonical on reef.cards
+ok 150 - CONTROL split: reef.cards/<handle> is served, canonical on reef.cards
+  ---
+  duration_ms: 19.074819
+  type: 'test'
+  ...
+# Subtest: split: a page's "make your own" goes to the service host; outside split it is the address it was
+ok 151 - split: a page's "make your own" goes to the service host; outside split it is the address it was
+  ---
+  duration_ms: 17.923335
+  type: 'test'
+  ...
+# Subtest: split: only the page's own boot line is rewritten, never the same text inside what a person wrote
+ok 152 - split: only the page's own boot line is rewritten, never the same text inside what a person wrote
+  ---
+  duration_ms: 3.303249
+  type: 'test'
+  ...
+# Subtest: split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+ok 153 - split: the platform's own handle is an ordinary handle on reef.cards — its address is /feelreef, not the bare origin
+  ---
+  duration_ms: 71.401463
+  type: 'test'
+  ...
+# Subtest: split: reef.cards answers no service page — the editor paths redirect to the service host, a write is refused
+ok 154 - split: reef.cards answers no service page — the editor paths redirect to the service host, a write is refused
+  ---
+  duration_ms: 4.367551
+  type: 'test'
+  ...
+# Subtest: split: the write API does not answer on reef.cards
+ok 155 - split: the write API does not answer on reef.cards
+  ---
+  duration_ms: 1.910207
+  type: 'test'
+  ...
+# Subtest: CONTROL split: reef.cards keeps its report door and its security.txt
+ok 156 - CONTROL split: reef.cards keeps its report door and its security.txt
+  ---
+  duration_ms: 3.305949
+  type: 'test'
+  ...
+# Subtest: split: a service page on the legacy host redirects to the same path on the service host
+ok 157 - split: a service page on the legacy host redirects to the same path on the service host
+  ---
+  duration_ms: 1.599318
+  type: 'test'
+  ...
+# Subtest: CONTROL split: what a person wrote on the legacy host redirects to reef.cards/<handle>
+ok 158 - CONTROL split: what a person wrote on the legacy host redirects to reef.cards/<handle>
+  ---
+  duration_ms: 1.277568
+  type: 'test'
+  ...
+# Subtest: split: an editor left open on the legacy host keeps working — its draft can still be opened there, and Save still parks
+ok 159 - split: an editor left open on the legacy host keeps working — its draft can still be opened there, and Save still parks
+  ---
+  duration_ms: 10.0609
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the legacy host still answers what cannot follow a redirect — the API, the park, host mode, the editor's files
+ok 160 - CONTROL split: the legacy host still answers what cannot follow a redirect — the API, the park, host mode, the editor's files
+  ---
+  duration_ms: 19.596786
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the service host serves the service pages
+ok 161 - CONTROL split: the service host serves the service pages
+  ---
+  duration_ms: 17.363688
+  type: 'test'
+  ...
+# Subtest: split: the service host's root is a temporary redirect to its editor
+ok 162 - split: the service host's root is a temporary redirect to its editor
+  ---
+  duration_ms: 0.558727
+  type: 'test'
+  ...
+# Subtest: split: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+ok 163 - split: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+  ---
+  duration_ms: 1.361601
+  type: 'test'
+  ...
+# Subtest: split: anything else on the service host is the nothing-here page, unread
+ok 164 - split: anything else on the service host is the nothing-here page, unread
+  ---
+  duration_ms: 12.04797
+  type: 'test'
+  ...
+# Subtest: CONTROL open: the service host serves the service pages
+ok 165 - CONTROL open: the service host serves the service pages
+  ---
+  duration_ms: 31.230163
+  type: 'test'
+  ...
+# Subtest: open: the service host's root is a temporary redirect to its editor
+ok 166 - open: the service host's root is a temporary redirect to its editor
+  ---
+  duration_ms: 0.723002
+  type: 'test'
+  ...
+# Subtest: open: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+ok 167 - open: the service host never serves what a person wrote — a handle's address redirects to the people's host, unread
+  ---
+  duration_ms: 0.918427
+  type: 'test'
+  ...
+# Subtest: open: anything else on the service host is the nothing-here page, unread
+ok 168 - open: anything else on the service host is the nothing-here page, unread
+  ---
+  duration_ms: 38.526391
+  type: 'test'
+  ...
+# Subtest: split: a parked preview is what a person wrote — the service host sends it to reef.cards, which renders it
+ok 169 - split: a parked preview is what a person wrote — the service host sends it to reef.cards, which renders it
+  ---
+  duration_ms: 4.136314
+  type: 'test'
+  ...
+# Subtest: serviceHostStage: only exactly "cards.feelreef.com" turns the service host on
+ok 170 - serviceHostStage: only exactly "cards.feelreef.com" turns the service host on
+  ---
+  duration_ms: 0.433523
+  type: 'test'
+  ...
+# Subtest: a typo in CARDS_SERVICE_HOST — another case and a space around it included — redirects nothing to a host nobody serves
+ok 171 - a typo in CARDS_SERVICE_HOST — another case and a space around it included — redirects nothing to a host nobody serves
+  ---
+  duration_ms: 20.649617
+  type: 'test'
+  ...
+# Subtest: the local editor's server calls the API on the service host and reads public exits from the people's host
+ok 172 - the local editor's server calls the API on the service host and reads public exits from the people's host
+  ---
+  duration_ms: 0.484394
+  type: 'test'
+  ...
+# Subtest: staging: each stand-in answers as its role's host, and every redirect of the ruling stays inside staging
+ok 173 - staging: each stand-in answers as its role's host, and every redirect of the ruling stays inside staging
+  ---
+  duration_ms: 11.37935
+  type: 'test'
+  ...
+# Subtest: staging: a redirect to a host that is no role (a creator's domain) and a relative one are left alone
+ok 174 - staging: a redirect to a host that is no role (a creator's domain) and a relative one are left alone
+  ---
+  duration_ms: 4.134683
+  type: 'test'
+  ...
+# Subtest: CONTROL staging: a browser on the stand-in passes the same-origin check, another site still does not, and a body travels
+ok 175 - CONTROL staging: a browser on the stand-in passes the same-origin check, another site still does not, and a body travels
+  ---
+  duration_ms: 16.471852
+  type: 'test'
+  ...
+# Subtest: staging: a stand-in keeps the scheme and the port of an Origin — the same-origin check answers as on the real host, for every port pair
+ok 176 - staging: a stand-in keeps the scheme and the port of an Origin — the same-origin check answers as on the real host, for every port pair
+  ---
+  duration_ms: 14.104431
+  type: 'test'
+  ...
+# Subtest: staging: only a name of ours can stand in — anything else in the setting is ignored
+ok 177 - staging: only a name of ours can stand in — anything else in the setting is ignored
+  ---
+  duration_ms: 0.930128
+  type: 'test'
+  ...
+# Subtest: CONTROL staging: a host that is no stand-in is answered as itself, stand-ins or not
+ok 178 - CONTROL staging: a host that is no stand-in is answered as itself, stand-ins or not
+  ---
+  duration_ms: 18.716219
+  type: 'test'
+  ...
+# Subtest: split: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 179 - split: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 344.117609
+  type: 'test'
+  ...
+# Subtest: open: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 180 - open: the service host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 337.08984
+  type: 'test'
+  ...
+# Subtest: CONTROL split: the people's host answers no service endpoint — every service path × every method, with or without a credential
+ok 181 - CONTROL split: the people's host answers no service endpoint — every service path × every method, with or without a credential
+  ---
+  duration_ms: 31.284844
+  type: 'test'
+  ...
+# Subtest: split: the legacy host renders, reflects and reads nothing a person wrote — every path class × every method
+ok 182 - split: the legacy host renders, reflects and reads nothing a person wrote — every path class × every method
+  ---
+  duration_ms: 47.932222
+  type: 'test'
+  ...
+# Subtest: CONTROL split: what the legacy host answers in place is answered as before the split, for every method — the API, the park, host mode, the editor's files
+ok 183 - CONTROL split: what the legacy host answers in place is answered as before the split, for every method — the API, the park, host mode, the editor's files
+  ---
+  duration_ms: 1637.627897
+  type: 'test'
+  ...
+# Subtest: the legacy host's rule is the split's alone — off, open and at the cutover the boundary decides nothing there
+ok 184 - the legacy host's rule is the split's alone — off, open and at the cutover the boundary decides nothing there
+  ---
+  duration_ms: 6.37944
+  type: 'test'
+  ...
+# Subtest: hostBoundary: off, it decides nothing — on any host, any path, any method
+ok 185 - hostBoundary: off, it decides nothing — on any host, any path, any method
+  ---
+  duration_ms: 5.002509
+  type: 'test'
+  ...
+# Subtest: staging: with the service host off — unset or not exactly its value — a stand-in list changes no answer, on the stand-ins' own hostnames
+ok 186 - staging: with the service host off — unset or not exactly its value — a stand-in list changes no answer, on the stand-ins' own hostnames
+  ---
+  duration_ms: 7889.856766
+  type: 'test'
+  ...
+# Subtest: staging: in a production deployment (PREVIEW "false") a stand-in list changes no answer, the service host on or not
+ok 187 - staging: in a production deployment (PREVIEW "false") a stand-in list changes no answer, the service host on or not
+  ---
+  duration_ms: 418.47298
+  type: 'test'
+  ...
+# Subtest: CONTROL: the fixture holds the whole grid, and the grid reaches every kind of answer
+ok 188 - CONTROL: the fixture holds the whole grid, and the grid reaches every kind of answer
+  ---
+  duration_ms: 5.784563
+  type: 'test'
+  ...
+# \# service host off (unset): 714 answers compared, 0 mismatches
+# Subtest: unset: all 714 answers are the fixture's, byte for byte, headers and store reads included
+ok 189 - unset: all 714 answers are the fixture's, byte for byte, headers and store reads included
+  ---
+  duration_ms: 1301.215377
+  type: 'test'
+  ...
+# \# service host off (empty): 714 answers compared, 0 mismatches
+# Subtest: off (empty): all 714 answers are the fixture's
+ok 190 - off (empty): all 714 answers are the fixture's
+  ---
+  duration_ms: 1088.575086
+  type: 'test'
+  ...
+# \# service host off ("true"): 714 answers compared, 0 mismatches
+# Subtest: off ("true"): all 714 answers are the fixture's
+ok 191 - off ("true"): all 714 answers are the fixture's
+  ---
+  duration_ms: 1172.089251
+  type: 'test'
+  ...
+# \# service host off ("1"): 714 answers compared, 0 mismatches
+# Subtest: off ("1"): all 714 answers are the fixture's
+ok 192 - off ("1"): all 714 answers are the fixture's
+  ---
+  duration_ms: 975.092676
+  type: 'test'
+  ...
+# \# service host off (the legacy host): 714 answers compared, 0 mismatches
+# Subtest: off (the legacy host): all 714 answers are the fixture's
+ok 193 - off (the legacy host): all 714 answers are the fixture's
+  ---
+  duration_ms: 960.732188
+  type: 'test'
+  ...
+# \# service host off (a typo): 714 answers compared, 0 mismatches
+# Subtest: off (a typo): all 714 answers are the fixture's
+ok 194 - off (a typo): all 714 answers are the fixture's
+  ---
+  duration_ms: 861.05841
+  type: 'test'
+  ...
+# \# service host off (reef.cards): 714 answers compared, 0 mismatches
+# Subtest: off (reef.cards): all 714 answers are the fixture's
+ok 195 - off (reef.cards): all 714 answers are the fixture's
+  ---
+  duration_ms: 839.038413
+  type: 'test'
+  ...
+# \# service host off (stand-ins alone): 714 answers compared, 0 mismatches
+# Subtest: off (stand-ins alone): all 714 answers are the fixture's
+ok 196 - off (stand-ins alone): all 714 answers are the fixture's
+  ---
+  duration_ms: 778.186945
+  type: 'test'
+  ...
+# \# service host off (a malformed stand-in list): 714 answers compared, 0 mismatches
+# Subtest: off (a malformed stand-in list): all 714 answers are the fixture's
+ok 197 - off (a malformed stand-in list): all 714 answers are the fixture's
+  ---
+  duration_ms: 773.567377
+  type: 'test'
+  ...
+# \# service host off (upper case): 714 answers compared, 0 mismatches
+# Subtest: off (upper case): all 714 answers are the fixture's
+ok 198 - off (upper case): all 714 answers are the fixture's
+  ---
+  duration_ms: 805.851142
+  type: 'test'
+  ...
+# \# service host off (a space around it): 714 answers compared, 0 mismatches
+# Subtest: off (a space around it): all 714 answers are the fixture's
+ok 199 - off (a space around it): all 714 answers are the fixture's
+  ---
+  duration_ms: 813.742918
+  type: 'test'
+  ...
+# \# service host off (a line end after it): 714 answers compared, 0 mismatches
+# Subtest: off (a line end after it): all 714 answers are the fixture's
+ok 200 - off (a line end after it): all 714 answers are the fixture's
+  ---
+  duration_ms: 827.307353
+  type: 'test'
+  ...
+# \# service host off, wide grid (unset): 11664 answers compared, 0 mismatches
+# \# service host off, wide grid (upper case): 11664 answers compared, 0 mismatches
+# \# service host off, wide grid (a space around it): 11664 answers compared, 0 mismatches
+# \# service host off, wide grid (stand-ins alone): 11664 answers compared, 0 mismatches
+# \# service host off, wide grid (a typo, with stand-ins): 11664 answers compared, 0 mismatches
+# Subtest: CONTROL: the comparison can fail — with both settings on, answers differ from the fixture
+ok 201 - CONTROL: the comparison can fail — with both settings on, answers differ from the fixture
+  ---
+  duration_ms: 939.277047
+  type: 'test'
+  ...
+# Subtest: CONTROL: the fixture holds the whole wide grid, and it asks the stand-ins' own hostnames under every method
+ok 202 - CONTROL: the fixture holds the whole wide grid, and it asks the stand-ins' own hostnames under every method
+  ---
+  duration_ms: 1.124814
+  type: 'test'
+  ...
+# Subtest: off, wide grid (unset): all 11,664 answers are the fixture's
+ok 203 - off, wide grid (unset): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 10638.373245
+  type: 'test'
+  ...
+# Subtest: off, wide grid (upper case): all 11,664 answers are the fixture's
+ok 204 - off, wide grid (upper case): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 10827.421262
+  type: 'test'
+  ...
+# Subtest: off, wide grid (a space around it): all 11,664 answers are the fixture's
+ok 205 - off, wide grid (a space around it): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 11825.533359
+  type: 'test'
+  ...
+# Subtest: off, wide grid (stand-ins alone): all 11,664 answers are the fixture's
+ok 206 - off, wide grid (stand-ins alone): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 11479.670088
+  type: 'test'
+  ...
+# Subtest: off, wide grid (a typo, with stand-ins): all 11,664 answers are the fixture's
+ok 207 - off, wide grid (a typo, with stand-ins): all 11,664 answers are the fixture's
+  ---
+  duration_ms: 10150.628192
+  type: 'test'
+  ...
+# Subtest: the wide comparison can fail — switched on, a stand-in answers as its role outside production; in production the list changes no answer
+ok 208 - the wide comparison can fail — switched on, a stand-in answers as its role outside production; in production the list changes no answer
+  ---
+  duration_ms: 2277.612475
+  type: 'test'
+  ...
+1..208
+# tests 208
+# suites 0
+# pass 208
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 69607.38006
+exit=0

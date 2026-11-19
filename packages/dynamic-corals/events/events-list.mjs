@@ -8,8 +8,9 @@
 //   • a timed event is read on the visitor's clock, an all-day one keeps the calendar's dates;
 //   • a location that is a URL is a link to it, any other is a place on the platform's map;
 //   • add-to-calendar has three doors on each row: the date tile, the date line and the badge.
-import { upcoming, phaseOf, nextMoment, locationKind, locationText, eventHref, whenText } from '../countdown/countdown-feed.mjs';
+import { upcoming, phaseOf, nextMoment, locationKind, locationText, eventHref, eventFile, whenText } from '../countdown/countdown-feed.mjs';
 import { esc, icon } from './events-core.mjs';
+import { ADD_FILE_ATTR } from '../shared/add-menu.mjs';
 
 const H = 36e5, D = 24 * H;
 
@@ -124,7 +125,8 @@ export function listRows(feed, opts = {}) {
       locationKind: kind,
       locationHref: eventHref(event, 'location', userAgent),
       description: String(event.description == null ? '' : event.description).trim(),
-      addHref: eventHref(event, 'add', userAgent, fileSrc),
+      addHref: eventHref(event, 'add'),
+      addFile: eventFile(event, fileSrc),   // '' when the feed serves no files: the doors are then plain Google links
     };
   });
 }
@@ -133,25 +135,27 @@ export function listRows(feed, opts = {}) {
 export const rowsShape = (rows) => rows.map((r) => `${r.uid}\u0000${r.state}\u0000${r.title}\u0000${r.when}\u0000${r.tile.mo}${r.tile.wd}${r.tile.day}\u0000${r.badge ? 1 : 0}`).join('\u0001');
 
 const ADD = 'Add to calendar';   // accessible name only; English like every aria string the corals ship
-const link = (href, cls, inner, label) => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener"${label ? ` aria-label="${esc(label)}"` : ''}>${inner}</a>`;
+const link = (href, cls, inner, label, more = '') => `<a class="${cls}" href="${esc(href)}"${more} target="_blank" rel="noopener"${label ? ` aria-label="${esc(label)}"` : ''}>${inner}</a>`;
 
 /** The list's markup. Every value is escaped: the feed is a third party's text. */
 export function renderRows(rows, opts = {}) {
   if (!rows.length) return `<div class="dc-ev--empty">${esc(opts.empty || 'No upcoming events.')}</div>`;
   const items = rows.map((r) => {
+    // a door that also knows the event as a file opens the two-row menu (shared/add-menu.mjs) instead of leaving the page
+    const file = r.addFile ? ` ${ADD_FILE_ATTR}="${esc(r.addFile)}"` : '';
     // The tile: the month as a bar across the top, weekday and day centred in what is left.
     const tileInner = `<span class="dc-ev-cal-mo">${esc(r.tile.mo)}</span><span class="dc-ev-cal-face"><span class="dc-ev-cal-wd">${esc(r.tile.wd)}</span><span class="dc-ev-cal-day">${esc(r.tile.day)}</span></span>`;
     // The tile and the badge are extra doors to what the date line already does and says, so a
     // screen reader is given the date line only: one "Add to calendar: <when>", not three.
     const tile = r.addHref
-      ? `<a class="dc-ev-cal" href="${esc(r.addHref)}" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1">${tileInner}</a>`
+      ? `<a class="dc-ev-cal" href="${esc(r.addHref)}"${file} target="_blank" rel="noopener" aria-hidden="true" tabindex="-1">${tileInner}</a>`
       : `<div class="dc-ev-cal" aria-hidden="true">${tileInner}</div>`;
     const title = r.locationHref ? link(r.locationHref, 'dc-ev-title', esc(r.title)) : `<span class="dc-ev-title">${esc(r.title)}</span>`;
     const badge = !r.badge ? ''
-      : r.addHref ? `<a class="dc-ev-cd" href="${esc(r.addHref)}" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1">${esc(r.badge)}</a>`
+      : r.addHref ? `<a class="dc-ev-cd" href="${esc(r.addHref)}"${file} target="_blank" rel="noopener" aria-hidden="true" tabindex="-1">${esc(r.badge)}</a>`
       : `<span class="dc-ev-cd">${esc(r.badge)}</span>`;
     const when = r.addHref
-      ? link(r.addHref, 'dc-ev-line dc-ev-when', `${icon('calendar-plus')}<span>${esc(r.when)}</span>`, `${ADD}: ${r.when}`)
+      ? link(r.addHref, 'dc-ev-line dc-ev-when', `${icon('calendar-plus')}<span>${esc(r.when)}</span>`, `${ADD}: ${r.when}`, file)
       : `<span class="dc-ev-line dc-ev-when">${icon('calendar')}<span>${esc(r.when)}</span></span>`;
     const place = r.locationKind === 'none' ? ''
       : r.locationHref ? link(r.locationHref, 'dc-ev-line dc-ev-loc', `${icon(r.locationKind === 'url' ? 'link' : 'map-pin')}<span>${esc(r.location)}</span>`)

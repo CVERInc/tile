@@ -1,0 +1,765 @@
+    (partial: @cvernet/signet not installed — byte check skipped)
+TAP version 13
+# Subtest: resolveHandle: canonical path → handle + canonical cardUrl
+ok 1 - resolveHandle: canonical path → handle + canonical cardUrl
+  ---
+  duration_ms: 2.815931
+  type: 'test'
+  ...
+# Subtest: resolveHandle: vanity host → mapped handle + that host as cardUrl
+ok 2 - resolveHandle: vanity host → mapped handle + that host as cardUrl
+  ---
+  duration_ms: 0.259527
+  type: 'test'
+  ...
+# Subtest: resolveHandle: an unbound host is NOT a card — the control for the test above
+ok 3 - resolveHandle: an unbound host is NOT a card — the control for the test above
+  ---
+  duration_ms: 0.246677
+  type: 'test'
+  ...
+# Subtest: resolveHandle: a path segment still wins on a host with no binding
+ok 4 - resolveHandle: a path segment still wins on a host with no binding
+  ---
+  duration_ms: 0.179355
+  type: 'test'
+  ...
+# Subtest: 🔴 resolveHandle: a path names a card on our hosts only; a creator domain without a binding names none (reef\#2618 r2)
+ok 5 - 🔴 resolveHandle: a path names a card on our hosts only; a creator domain without a binding names none (reef\#2618 r2)
+  ---
+  duration_ms: 0.405402
+  type: 'test'
+  ...
+# Subtest: pathHosts: reads CARD_PATH_HOSTS; only well-formed names under a platform zone count
+ok 6 - pathHosts: reads CARD_PATH_HOSTS; only well-formed names under a platform zone count
+  ---
+  duration_ms: 0.756902
+  type: 'test'
+  ...
+# Subtest: routesByPath / resolveHandle: a host in the extra set routes by path; with no set, nothing changes
+ok 7 - routesByPath / resolveHandle: a host in the extra set routes by path; with no set, nothing changes
+  ---
+  duration_ms: 1.777691
+  type: 'test'
+  ...
+# Subtest: resolveHandle: bare canonical host (no handle) → the root card, at the bare origin
+ok 8 - resolveHandle: bare canonical host (no handle) → the root card, at the bare origin
+  ---
+  duration_ms: 0.219576
+  type: 'test'
+  ...
+# Subtest: resolveHandle: handle is lowercased; port stripped from host
+ok 9 - resolveHandle: handle is lowercased; port stripped from host
+  ---
+  duration_ms: 0.429643
+  type: 'test'
+  ...
+# Subtest: renderCardHTML: title from frontmatter, QR mount points at the external coral, icons resolve
+ok 10 - renderCardHTML: title from frontmatter, QR mount points at the external coral, icons resolve
+  ---
+  duration_ms: 10.407731
+  type: 'test'
+  ...
+# Subtest: renderCardHTML: name falls back to handle when frontmatter has no title
+ok 11 - renderCardHTML: name falls back to handle when frontmatter has no title
+  ---
+  duration_ms: 1.885764
+  type: 'test'
+  ...
+# Subtest: footer: the creator's own line always; the feelreef credit is DEFAULT OFF
+ok 12 - footer: the creator's own line always; the feelreef credit is DEFAULT OFF
+  ---
+  duration_ms: 2.830612
+  type: 'test'
+  ...
+# Subtest: generator: every card declares what built it, and it is NOT the powered-by switch
+ok 13 - generator: every card declares what built it, and it is NOT the powered-by switch
+  ---
+  duration_ms: 11.603226
+  type: 'test'
+  ...
+# Subtest: footer: `powered-by: on` opts into the referral credit (?ref=<handle>)
+ok 14 - footer: `powered-by: on` opts into the referral credit (?ref=<handle>)
+  ---
+  duration_ms: 0.807294
+  type: 'test'
+  ...
+# Subtest: footer: `since:` frontmatter adds the founding year → "© 2013–2026"
+ok 15 - footer: `since:` frontmatter adds the founding year → "© 2013–2026"
+  ---
+  duration_ms: 0.777692
+  type: 'test'
+  ...
+# Subtest: accent: one frontmatter hex derives the whole --cp-accent-* family; absent → no override
+ok 16 - accent: one frontmatter hex derives the whole --cp-accent-* family; absent → no override
+  ---
+  duration_ms: 1.335259
+  type: 'test'
+  ...
+# Subtest: bento: a titled LANE opens its own block; the face lane is the unlabelled one
+ok 17 - bento: a titled LANE opens its own block; the face lane is the unlabelled one
+  ---
+  duration_ms: 1.932416
+  type: 'test'
+  ...
+# Subtest: bleed: a `bleed` cell renders full-width OUTSIDE the bento blocks
+ok 18 - bleed: a `bleed` cell renders full-width OUTSIDE the bento blocks
+  ---
+  duration_ms: 1.549334
+  type: 'test'
+  ...
+# Subtest: bubbles: the ancestor 表演 is carried verbatim — pops from the tail origin, not a crossfade
+ok 19 - bubbles: the ancestor 表演 is carried verbatim — pops from the tail origin, not a crossfade
+  ---
+  duration_ms: 1.029639
+  type: 'test'
+  ...
+# Subtest: bubbles: the narrow-screen anchor is read from `narrow=`, and from the `origin-narrow=` it was first written as
+ok 20 - bubbles: the narrow-screen anchor is read from `narrow=`, and from the `origin-narrow=` it was first written as
+  ---
+  duration_ms: 8.434125
+  type: 'test'
+  ...
+# Subtest: 🔴 slider is the COMMON carousel — swipeable, with prev/next, and no JS
+ok 21 - 🔴 slider is the COMMON carousel — swipeable, with prev/next, and no JS
+  ---
+  duration_ms: 1.046691
+  type: 'test'
+  ...
+# Subtest: CONTROL: a ONE-image slider hides its controls
+ok 22 - CONTROL: a ONE-image slider hides its controls
+  ---
+  duration_ms: 0.626958
+  type: 'test'
+  ...
+# Subtest: drawers: a \#id target becomes an overlay trigger on BOTH link and feature cells
+ok 23 - drawers: a \#id target becomes an overlay trigger on BOTH link and feature cells
+  ---
+  duration_ms: 2.177853
+  type: 'test'
+  ...
+# Subtest: 🔴 drawers are LEAVES: a drawer cannot open another drawer (depth 1 is structural)
+ok 24 - 🔴 drawers are LEAVES: a drawer cannot open another drawer (depth 1 is structural)
+  ---
+  duration_ms: 1.135013
+  type: 'test'
+  ...
+# Subtest: drawer prose renders block markdown (paragraphs, bold, links) — not escaped source
+ok 25 - drawer prose renders block markdown (paragraphs, bold, links) — not escaped source
+  ---
+  duration_ms: 1.111812
+  type: 'test'
+  ...
+# Subtest: 🔴 back=: profile and text tiles get a door to their back; tiles without one do not
+ok 26 - 🔴 back=: profile and text tiles get a door to their back; tiles without one do not
+  ---
+  duration_ms: 1.530685
+  type: 'test'
+  ...
+# Subtest: 🔴 back=: a link with a back opens the back and carries its URL there; a missing back leaves it a link
+ok 27 - 🔴 back=: a link with a back opens the back and carries its URL there; a missing back leaves it a link
+  ---
+  duration_ms: 1.474403
+  type: 'test'
+  ...
+# Subtest: 🔴 back= inside a back is ignored: a back is a leaf
+ok 28 - 🔴 back= inside a back is ignored: a back is a leaf
+  ---
+  duration_ms: 1.291288
+  type: 'test'
+  ...
+# Subtest: a card with no drawers ships no overlay markup or client
+ok 29 - a card with no drawers ships no overlay markup or client
+  ---
+  duration_ms: 0.930207
+  type: 'test'
+  ...
+# Subtest: 🔴 a hyphenated param name is its own name — `yt-channel=` is not `channel=`
+ok 30 - 🔴 a hyphenated param name is its own name — `yt-channel=` is not `channel=`
+  ---
+  duration_ms: 1.73671
+  type: 'test'
+  ...
+# Subtest: video: click-to-load — the poster ships, the YouTube iframe does NOT until someone presses play
+ok 31 - video: click-to-load — the poster ships, the YouTube iframe does NOT until someone presses play
+  ---
+  duration_ms: 0.978089
+  type: 'test'
+  ...
+# Subtest: backdrop: a card with `backdrop:` gets a fixed dimmed layer; without it, nothing is emitted
+ok 32 - backdrop: a card with `backdrop:` gets a fixed dimmed layer; without it, nothing is emitted
+  ---
+  duration_ms: 2.034359
+  type: 'test'
+  ...
+# Subtest: a drawer's title is its heading AND its accessible name
+ok 33 - a drawer's title is its heading AND its accessible name
+  ---
+  duration_ms: 1.000829
+  type: 'test'
+  ...
+# Subtest: prose steps out of the packed grid — no guessed row count, no scrollbox in a scrolling drawer
+ok 34 - prose steps out of the packed grid — no guessed row count, no scrollbox in a scrolling drawer
+  ---
+  duration_ms: 0.871985
+  type: 'test'
+  ...
+# Subtest: 🔴 the page backdrop is emitted ONCE, and never inside a drawer
+ok 35 - 🔴 the page backdrop is emitted ONCE, and never inside a drawer
+  ---
+  duration_ms: 1.651377
+  type: 'test'
+  ...
+# Subtest: the bundled stylesheet is the one on disk — regenerate after editing either
+ok 36 - the bundled stylesheet is the one on disk — regenerate after editing either
+  ---
+  duration_ms: 1.05347
+  type: 'test'
+  ...
+# Subtest: the bundled qr/drawer coral clients are the ones on disk — regenerate after editing either
+ok 37 - the bundled qr/drawer coral clients are the ones on disk — regenerate after editing either
+  ---
+  duration_ms: 0.959458
+  type: 'test'
+  ...
+# Subtest: CONTROL: the qr/drawer drift comparison actually distinguishes a mismatched pair
+ok 38 - CONTROL: the qr/drawer drift comparison actually distinguishes a mismatched pair
+  ---
+  duration_ms: 0.149064
+  type: 'test'
+  ...
+# Subtest: the stylesheet is the card's own, not the Python era's 105KB
+ok 39 - the stylesheet is the card's own, not the Python era's 105KB
+  ---
+  duration_ms: 0.494035
+  type: 'test'
+  ...
+# Subtest: favicons resolve at the vocabulary layer: renamed domains and subdomains
+ok 40 - favicons resolve at the vocabulary layer: renamed domains and subdomains
+  ---
+  duration_ms: 1.069921
+  type: 'test'
+  ...
+# Subtest: an icon that 404s walks its fallbacks, then hides — never a broken image slot
+ok 41 - an icon that 404s walks its fallbacks, then hides — never a broken image slot
+  ---
+  duration_ms: 0.655089
+  type: 'test'
+  ...
+# Subtest: 🔴 a Card speaks sitetile's vocabulary — no cp-/sc-/lt- survives except the coral's
+ok 42 - 🔴 a Card speaks sitetile's vocabulary — no cp-/sc-/lt- survives except the coral's
+  ---
+  duration_ms: 68.786583
+  type: 'test'
+  ...
+# Subtest: the renderer's own strings follow the CARD's language, and default to English
+ok 43 - the renderer's own strings follow the CARD's language, and default to English
+  ---
+  duration_ms: 6.347184
+  type: 'test'
+  ...
+# Subtest: a quoted frontmatter value is the value, not the quotes
+ok 44 - a quoted frontmatter value is the value, not the quotes
+  ---
+  duration_ms: 2.556094
+  type: 'test'
+  ...
+# Subtest: a cell's span is a data attribute, because sitetile has no class for one
+ok 45 - a cell's span is a data attribute, because sitetile has no class for one
+  ---
+  duration_ms: 0.792653
+  type: 'test'
+  ...
+# Subtest: the card defines sitetile's --gd-* tokens, so a Site's stylesheet finds what it expects
+ok 46 - the card defines sitetile's --gd-* tokens, so a Site's stylesheet finds what it expects
+  ---
+  duration_ms: 0.147055
+  type: 'test'
+  ...
+# Subtest: 🔴 no `asset:` reference ever survives into the rendered HTML
+ok 47 - 🔴 no `asset:` reference ever survives into the rendered HTML
+  ---
+  duration_ms: 4.48419
+  type: 'test'
+  ...
+# Subtest: 🔴 no DECORATED span is ever rendered empty
+ok 48 - 🔴 no DECORATED span is ever rendered empty
+  ---
+  duration_ms: 2.320287
+  type: 'test'
+  ...
+# Subtest: sandbox: /try/edit is 200, HTML, never indexed, and never touches the CARDS store
+ok 49 - sandbox: /try/edit is 200, HTML, never indexed, and never touches the CARDS store
+  ---
+  duration_ms: 28.966799
+  type: 'test'
+  ...
+# Subtest: sandbox: a trailing slash answers the same as the bare path
+ok 50 - sandbox: a trailing slash answers the same as the bare path
+  ---
+  duration_ms: 3.221883
+  type: 'test'
+  ...
+# Subtest: sandbox: nothing is fixed on screen — no banner ships (owner ruling 2026-11-05, review P06/P28)
+ok 51 - sandbox: nothing is fixed on screen — no banner ships (owner ruling 2026-11-05, review P06/P28)
+  ---
+  duration_ms: 31.595055
+  type: 'test'
+  ...
+# Subtest: sandbox: locale comes from Accept-Language, one of the nine console locales the editor speaks
+ok 52 - sandbox: locale comes from Accept-Language, one of the nine console locales the editor speaks
+  ---
+  duration_ms: 158.766451
+  type: 'test'
+  ...
+# Subtest: sandbox + host mode: Accept-Language "ja;q=0,en;q=1" is read by quality → en
+ok 53 - sandbox + host mode: Accept-Language "ja;q=0,en;q=1" is read by quality → en
+  ---
+  duration_ms: 37.765044
+  type: 'test'
+  ...
+# Subtest: sandbox + host mode: Accept-Language "en;q=0.1,ja;q=1" is read by quality → ja
+ok 54 - sandbox + host mode: Accept-Language "en;q=0.1,ja;q=1" is read by quality → ja
+  ---
+  duration_ms: 12.844263
+  type: 'test'
+  ...
+# Subtest: sandbox + host mode: Accept-Language "ja;q=0.2,zh-TW;q=0.9" is read by quality → zh
+ok 55 - sandbox + host mode: Accept-Language "ja;q=0.2,zh-TW;q=0.9" is read by quality → zh
+  ---
+  duration_ms: 37.206888
+  type: 'test'
+  ...
+# Subtest: sandbox: `?locale=` overrides Accept-Language, for manual testing/linking
+ok 56 - sandbox: `?locale=` overrides Accept-Language, for manual testing/linking
+  ---
+  duration_ms: 7.858198
+  type: 'test'
+  ...
+# Subtest: sandbox: `?lang=` overrides both `?locale=` and Accept-Language — the brief's own resolution order
+ok 57 - sandbox: `?lang=` overrides both `?locale=` and Accept-Language — the brief's own resolution order
+  ---
+  duration_ms: 6.318243
+  type: 'test'
+  ...
+# Subtest: sandbox: `?lang=` accepts a full BCP-47 tag, not just the bare locale key (Traditional vs Simplified Chinese)
+ok 58 - sandbox: `?lang=` accepts a full BCP-47 tag, not just the bare locale key (Traditional vs Simplified Chinese)
+  ---
+  duration_ms: 29.225777
+  type: 'test'
+  ...
+# Subtest: 🔴 sandbox: a bare /try (no /edit) is NOT special-cased — same 404 as any unregistered handle
+ok 59 - 🔴 sandbox: a bare /try (no /edit) is NOT special-cased — same 404 as any unregistered handle
+  ---
+  duration_ms: 2.936295
+  type: 'test'
+  ...
+# Subtest: 🔴 park: the WHOLE card is stored, under try:<uuid>, with an hour to live
+ok 60 - 🔴 park: the WHOLE card is stored, under try:<uuid>, with an hour to live
+  ---
+  duration_ms: 1.694629
+  type: 'test'
+  ...
+# Subtest: 🔴 park: a parked key can never collide with a handle
+ok 61 - 🔴 park: a parked key can never collide with a handle
+  ---
+  duration_ms: 0.68432
+  type: 'test'
+  ...
+# Subtest: park: two posts get two different ids and two different rows
+ok 62 - park: two posts get two different ids and two different rows
+  ---
+  duration_ms: 1.310198
+  type: 'test'
+  ...
+# Subtest: 🔴 park: a body that is not a card is refused — this is not a free key/value store
+ok 63 - 🔴 park: a body that is not a card is refused — this is not a free key/value store
+  ---
+  duration_ms: 1.552245
+  type: 'test'
+  ...
+# Subtest: park: a card over the ingest budget is refused, and nothing is written
+ok 64 - park: a card over the ingest budget is refused, and nothing is written
+  ---
+  duration_ms: 19.205417
+  type: 'test'
+  ...
+# Subtest: park: only POST, and only from our own origin when a browser says which
+ok 65 - park: only POST, and only from our own origin when a browser says which
+  ---
+  duration_ms: 2.820702
+  type: 'test'
+  ...
+# Subtest: 🔴 the parked draft is read back over the GUARDED api, and only with the bearer
+ok 66 - 🔴 the parked draft is read back over the GUARDED api, and only with the bearer
+  ---
+  duration_ms: 28.700092
+  type: 'test'
+  ...
+# Subtest: the api refuses a made-up draft id, and refuses to write through this route
+ok 67 - the api refuses a made-up draft id, and refuses to write through this route
+  ---
+  duration_ms: 6.742826
+  type: 'test'
+  ...
+# Subtest: 🔴 the served sandbox never shows a visitor the internal codename
+ok 68 - 🔴 the served sandbox never shows a visitor the internal codename
+  ---
+  duration_ms: 7.284551
+  type: 'test'
+  ...
+# Subtest: the masthead is the feelreef lockup, and it is the way back
+ok 69 - the masthead is the feelreef lockup, and it is the way back
+  ---
+  duration_ms: 24.460839
+  type: 'test'
+  ...
+# Subtest: 🔴 the internal editor's OWN markup keeps its own name — the swap is a sandbox composition, not a file edit
+ok 70 - 🔴 the internal editor's OWN markup keeps its own name — the swap is a sandbox composition, not a file edit
+  ---
+  duration_ms: 0.329029
+  type: 'test'
+  ...
+# Subtest: sandbox: Save's door and the leave-edit question ship in the markup
+ok 71 - sandbox: Save's door and the leave-edit question ship in the markup
+  ---
+  duration_ms: 6.466728
+  type: 'test'
+  ...
+# Subtest: sandbox: the door is wired — the sheet, /try/park, and /dashboard/cards
+ok 72 - sandbox: the door is wired — the sheet, /try/park, and /dashboard/cards
+  ---
+  duration_ms: 6.770296
+  type: 'test'
+  ...
+# Subtest: sandbox: the page tells its module the locale, and where every borrowed file is
+ok 73 - sandbox: the page tells its module the locale, and where every borrowed file is
+  ---
+  duration_ms: 22.728899
+  type: 'test'
+  ...
+# Subtest: sandbox: every borrowed file and face answers, immutable, as the repo ships it — a stale hash is a 404
+ok 74 - sandbox: every borrowed file and face answers, immutable, as the repo ships it — a stale hash is a 404
+  ---
+  duration_ms: 35.165439
+  type: 'test'
+  ...
+# Subtest: the old table route is gone — /try/edit/t/… is no longer special
+ok 75 - the old table route is gone — /try/edit/t/… is no longer special
+  ---
+  duration_ms: 1.567286
+  type: 'test'
+  ...
+# Subtest: 🔴 /try/edit2 is a permanent redirect to /try/edit — nothing that already links to it breaks
+ok 76 - 🔴 /try/edit2 is a permanent redirect to /try/edit — nothing that already links to it breaks
+  ---
+  duration_ms: 0.481364
+  type: 'test'
+  ...
+# Subtest: 🔴 /try/edit2 redirects WITH the query string — a `?lang=` link still resolves the same locale
+ok 77 - 🔴 /try/edit2 redirects WITH the query string — a `?lang=` link still resolves the same locale
+  ---
+  duration_ms: 0.223077
+  type: 'test'
+  ...
+# Subtest: 🔴 CONTROL: /try/edit2 never touches the CARDS store, and never serves a body — it only redirects
+ok 78 - 🔴 CONTROL: /try/edit2 never touches the CARDS store, and never serves a body — it only redirects
+  ---
+  duration_ms: 0.194906
+  type: 'test'
+  ...
+# Subtest: 🔴 the retired table path is gone too — /try/edit2/t/… is not specially handled any more
+ok 79 - 🔴 the retired table path is gone too — /try/edit2/t/… is not specially handled any more
+  ---
+  duration_ms: 1.307978
+  type: 'test'
+  ...
+# Subtest: 🔴 the committed editor bundle is the one its sources produce
+ok 80 - 🔴 the committed editor bundle is the one its sources produce
+  ---
+  duration_ms: 11.819752
+  type: 'test'
+  ...
+# Subtest: 🔴 the stale-bundle stamp covers every file the generator READ, not a hand-kept list
+ok 81 - 🔴 the stale-bundle stamp covers every file the generator READ, not a hand-kept list
+  ---
+  duration_ms: 36.482117
+  type: 'test'
+  ...
+# Subtest: 🔴 the previous-output exclusion is an EXACT path, not a basename suffix
+ok 82 - 🔴 the previous-output exclusion is an EXACT path, not a basename suffix
+  ---
+  duration_ms: 0.279538
+  type: 'test'
+  ...
+# Subtest: 🔴 the committed deck is w3/deck.js and w3/deck.css, byte for byte
+ok 83 - 🔴 the committed deck is w3/deck.js and w3/deck.css, byte for byte
+  ---
+  duration_ms: 0.931187
+  type: 'test'
+  ...
+# Subtest: every Card page carries the deck: its stylesheet in the head, the frontmatter and words, then deck.js
+ok 84 - every Card page carries the deck: its stylesheet in the head, the frontmatter and words, then deck.js
+  ---
+  duration_ms: 2.445031
+  type: 'test'
+  ...
+# Subtest: the deck stays off where the caller says so: the editor's tiles, and any editIndex render
+ok 85 - the deck stays off where the caller says so: the editor's tiles, and any editIndex render
+  ---
+  duration_ms: 11.138932
+  type: 'test'
+  ...
+# Subtest: /_deck/ serves the deck, immutable, on every host a Card answers on
+ok 86 - /_deck/ serves the deck, immutable, on every host a Card answers on
+  ---
+  duration_ms: 5.203121
+  type: 'test'
+  ...
+# Subtest: host mode: /edit?host=feelreef serves the editor with host opts, noindex, framable only by that host, never touching CARDS
+ok 87 - host mode: /edit?host=feelreef serves the editor with host opts, noindex, framable only by that host, never touching CARDS
+  ---
+  duration_ms: 69.754282
+  type: 'test'
+  ...
+# Subtest: host mode: a missing or disallowed ?host= is a 400, and still never touches CARDS
+ok 88 - host mode: a missing or disallowed ?host= is a 400, and still never touches CARDS
+  ---
+  duration_ms: 2.276466
+  type: 'test'
+  ...
+# Subtest: host mode: ?host= on the SANDBOX path does not leak — /try/edit stays the sandbox
+ok 89 - host mode: ?host= on the SANDBOX path does not leak — /try/edit stays the sandbox
+  ---
+  duration_ms: 10.777562
+  type: 'test'
+  ...
+# Subtest: CONTROL: the untouchable store really does throw when the Worker reads a card
+ok 90 - CONTROL: the untouchable store really does throw when the Worker reads a card
+  ---
+  duration_ms: 0.525796
+  type: 'test'
+  ...
+# Subtest: production Cards on canonical and fallback hosts carry noindex on every representation; an unbound host serves none
+ok 91 - production Cards on canonical and fallback hosts carry noindex on every representation; an unbound host serves none
+  ---
+  duration_ms: 80.38278
+  type: 'test'
+  ...
+# Subtest: a bound vanity Card stays indexable, while preview and demo Cards include noindex on icons too
+ok 92 - a bound vanity Card stays indexable, while preview and demo Cards include noindex on icons too
+  ---
+  duration_ms: 74.677794
+  type: 'test'
+  ...
+# Subtest: Card not-found pages and missing icons carry the same host-aware noindex rule
+ok 93 - Card not-found pages and missing icons carry the same host-aware noindex rule
+  ---
+  duration_ms: 31.105381
+  type: 'test'
+  ...
+# Subtest: CARD_PATH_HOSTS: a listed platform-zone host serves Cards by path like the fallback origin; nothing else changes
+ok 94 - CARD_PATH_HOSTS: a listed platform-zone host serves Cards by path like the fallback origin; nothing else changes
+  ---
+  duration_ms: 25.686085
+  type: 'test'
+  ...
+# Subtest: CARD_PATH_HOSTS unset, empty or naming another host: a platform-zone host outside the built-in list answers the small 404
+ok 95 - CARD_PATH_HOSTS unset, empty or naming another host: a platform-zone host outside the built-in list answers the small 404
+  ---
+  duration_ms: 1.587696
+  type: 'test'
+  ...
+# Subtest: stopping a Card blocks every representation on both hosts; resume restores bytes without Worker writes
+ok 96 - stopping a Card blocks every representation on both hosts; resume restores bytes without Worker writes
+  ---
+  duration_ms: 115.161608
+  type: 'test'
+  ...
+# Subtest: the card body and stop marker reads start in parallel for pages, markdown and icons
+ok 97 - the card body and stop marker reads start in parallel for pages, markdown and icons
+  ---
+  duration_ms: 54.16951
+  type: 'test'
+  ...
+# Subtest: an unknown path under a stopped handle returns the no-card page without any store read
+ok 98 - an unknown path under a stopped handle returns the no-card page without any store read
+  ---
+  duration_ms: 1.292688
+  type: 'test'
+  ...
+# Subtest: stop takes precedence over redirects and missing cards, and resume preserves their responses
+ok 99 - stop takes precedence over redirects and missing cards, and resume preserves their responses
+  ---
+  duration_ms: 19.707971
+  type: 'test'
+  ...
+# Subtest: 🔴 /_yt/ and /_icon/ cache on origin + path: a query string does not make a second entry or a second upstream fetch (tile\#150 L3)
+ok 100 - 🔴 /_yt/ and /_icon/ cache on origin + path: a query string does not make a second entry or a second upstream fetch (tile\#150 L3)
+  ---
+  duration_ms: 1.36727
+  type: 'test'
+  ...
+# Subtest: reef\#2725 ①: reef.cards routes by path exactly like the old host, and its root IS the feelreef card
+ok 101 - reef\#2725 ①: reef.cards routes by path exactly like the old host, and its root IS the feelreef card
+  ---
+  duration_ms: 18.595809
+  type: 'test'
+  ...
+{"event":"apex_card_lookup_failed","host":"feelreef.com","op":"liveCard","error":"Error"}
+{"event":"apex_card_lookup_failed","host":"feelreef.com","op":"liveCard","error":"Error"}
+{"event":"apex_card_lookup_failed","host":"feelreef.com","op":"liveCard","error":"Error"}
+{"event":"apex_card_lookup_failed","host":"feelreef.com","op":"liveCard","error":"Error"}
+# Subtest: reef\#2725 ②: with the switch on, the old card addresses 301 to reef.cards, path and query intact, cacheable
+ok 102 - reef\#2725 ②: with the switch on, the old card addresses 301 to reef.cards, path and query intact, cacheable
+  ---
+  duration_ms: 2385.229262
+  type: 'test'
+  ...
+# Subtest: reef\#2725: reserved apex paths stay on the site rather than redirect to Cards
+ok 103 - reef\#2725: reserved apex paths stay on the site rather than redirect to Cards
+  ---
+  duration_ms: 1.758341
+  type: 'test'
+  ...
+# Subtest: tile\#214: a live reserved Card stays on the apex site
+ok 104 - tile\#214: a live reserved Card stays on the apex site
+  ---
+  duration_ms: 0.456803
+  type: 'test'
+  ...
+# Subtest: tile\#214: apex lookup errors fall through to the site origin
+ok 105 - tile\#214: apex lookup errors fall through to the site origin
+  ---
+  duration_ms: 1.311948
+  type: 'test'
+  ...
+# Subtest: tile\#219: an apex store failure leaves exactly one warn line; a working store leaves none
+ok 106 - tile\#219: an apex store failure leaves exactly one warn line; a working store leaves none
+  ---
+  duration_ms: 1.328529
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3: apex redirects only a live Card; unknown site routes reach origin
+ok 107 - reef\#2725 r3: apex redirects only a live Card; unknown site routes reach origin
+  ---
+  duration_ms: 1.314358
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r4: every other apex path reaches the site origin on GET and HEAD
+ok 108 - reef\#2725 r4: every other apex path reaches the site origin on GET and HEAD
+  ---
+  duration_ms: 1.320648
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3: switch off keeps apex routing
+ok 109 - reef\#2725 r3: switch off keeps apex routing
+  ---
+  duration_ms: 0.315109
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3: switch off keeps the old bare /_api response
+ok 110 - reef\#2725 r3: switch off keeps the old bare /_api response
+  ---
+  duration_ms: 1.011029
+  type: 'test'
+  ...
+# Subtest: reef\#2725 ③: ONE noindex predicate — host × handle × switch
+ok 111 - reef\#2725 ③: ONE noindex predicate — host × handle × switch
+  ---
+  duration_ms: 0.262257
+  type: 'test'
+  ...
+# Subtest: reef\#2725 ③: the predicate is what the Worker sends, on every representation
+ok 112 - reef\#2725 ③: the predicate is what the Worker sends, on every representation
+  ---
+  duration_ms: 68.106484
+  type: 'test'
+  ...
+# Subtest: tile-lab\#51 ③: the root card is indexable on active hosts; customer Cards keep the old host's header
+ok 113 - tile-lab\#51 ③: the root card is indexable on active hosts; customer Cards keep the old host's header
+  ---
+  duration_ms: 4.754888
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r2 ①: cardUrlFor names the configured card host — unset is today, byte for byte
+ok 114 - reef\#2725 r2 ①: cardUrlFor names the configured card host — unset is today, byte for byte
+  ---
+  duration_ms: 0.303139
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r2 ③: host-mode /edit serves on the old host in both positions and reef.cards after cutover
+ok 115 - reef\#2725 r2 ③: host-mode /edit serves on the old host in both positions and reef.cards after cutover
+  ---
+  duration_ms: 19.433863
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3 ①: og:url and canonical name the configured card host, whatever host served the page
+ok 116 - reef\#2725 r3 ①: og:url and canonical name the configured card host, whatever host served the page
+  ---
+  duration_ms: 10.03376
+  type: 'test'
+  ...
+# Subtest: reef\#2725 r3 ②: switch unset, card.feelreef.com serves today's page byte for byte
+ok 117 - reef\#2725 r3 ②: switch unset, card.feelreef.com serves today's page byte for byte
+  ---
+  duration_ms: 5.066547
+  type: 'test'
+  ...
+# Subtest: tile-lab\#51 ②: a retired Card, a deleted Card and a never-existed handle answer byte for byte the same, on every exit
+ok 118 - tile-lab\#51 ②: a retired Card, a deleted Card and a never-existed handle answer byte for byte the same, on every exit
+  ---
+  duration_ms: 91.314067
+  type: 'test'
+  ...
+# Subtest: Refs \#218: custom-domain absent states share the small 404 on every card exit
+ok 119 - Refs \#218: custom-domain absent states share the small 404 on every card exit
+  ---
+  duration_ms: 9.245788
+  type: 'test'
+  ...
+# Subtest: Refs \#218: an inverse binding without a card body cannot redirect an absent handle
+ok 120 - Refs \#218: an inverse binding without a card body cannot redirect an absent handle
+  ---
+  duration_ms: 45.643773
+  type: 'test'
+  ...
+# Subtest: Refs \#218: both root aliases share the absent-state policy
+ok 121 - Refs \#218: both root aliases share the absent-state policy
+  ---
+  duration_ms: 11.879594
+  type: 'test'
+  ...
+# Subtest: tile-lab\#51 ②: existing / retired / deleted / never-existed / reserved — the page each gets, and no button
+ok 122 - tile-lab\#51 ②: existing / retired / deleted / never-existed / reserved — the page each gets, and no button
+  ---
+  duration_ms: 7.636081
+  type: 'test'
+  ...
+# Subtest: tile-lab\#51 ②: every other "no card" door is the same shaped page — no bare HTML left
+ok 123 - tile-lab\#51 ②: every other "no card" door is the same shaped page — no bare HTML left
+  ---
+  duration_ms: 3.020798
+  type: 'test'
+  ...
+# Subtest: tile\#217 P1: stopped own-domain card exits match an unbound host including headers
+ok 124 - tile\#217 P1: stopped own-domain card exits match an unbound host including headers
+  ---
+  duration_ms: 12.445621
+  type: 'test'
+  ...
+# Subtest: tile\#217 P2: stopped and missing identities perform the same ordered key reads
+ok 125 - tile\#217 P2: stopped and missing identities perform the same ordered key reads
+  ---
+  duration_ms: 34.243573
+  type: 'test'
+  ...
+1..125
+# tests 125
+# suites 0
+# pass 125
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4001.197726

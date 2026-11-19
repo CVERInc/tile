@@ -34,6 +34,7 @@ export const INTERNAL = {
     'data-loc': 'Location on generated event links.',
     'data-start': 'Timestamp on generated event entries.',
     'data-end': 'Timestamp on generated event entries.',
+    'data-dc-add-file': 'The event as a file, on generated add-to-calendar links (read by the shared menu).',
   },
   'square-shop': {
     'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
@@ -64,6 +65,7 @@ export const INTERNAL = {
   countdown: {
     'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
     'data-dynamic-coral-css': 'Document-level CSS layering policy, not a mount option.',
+    'data-dc-add-file': 'The event as a file, written by the coral on the host\'s add-to-calendar link (read by the shared menu).',
   },
   dock: {
     'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',

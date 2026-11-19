@@ -2,7 +2,7 @@
 //   run: node --test packages/dynamic-corals/countdown/countdown-feed.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { upcoming, nextMoment, phaseOf, httpUrl, locationKind, locationText, eventHref, eventText, whenText, unitText, feedSource } from './countdown-feed.mjs';
+import { upcoming, nextMoment, phaseOf, httpUrl, locationKind, locationText, eventHref, eventFile, eventText, whenText, unitText, feedSource } from './countdown-feed.mjs';
 import { mountFromFeed, mountAll, FEED_TIMEOUT_MS } from './countdown-core.mjs';
 import { feedEvents, eventInstants, plainText, renderEvents, addToCalendarUrl, FEED_MAX, DETAILS_MAX } from '../events/events-core.mjs';
 import { parseICal, parseICalCalendar } from '../events/ical.mjs';
@@ -784,50 +784,46 @@ const IPHONE_IN_APP = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Ap
 const MAC_CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel)';
 
-test('eventHref add: an .ics link in Safari on Apple devices only, and only with a feed address and a uid', () => {
+test('eventHref add is the Google link on every device; eventFile is the event as a file, only with a feed address and a uid', () => {
   const event = { uid: 'u1@example.com', title: 'Open', start: '2026-10-12', end: '2026-12-02', allDay: true };
   const src = 'https://feed.example/v0/?cal=x';
-  for (const ua of [IPHONE, MAC]) {
-    const u = new URL(eventHref(event, 'add', ua, src));
-    assert.equal(u.origin + u.pathname, 'https://feed.example/v0/');
-    assert.equal(u.searchParams.get('ics'), 'u1@example.com');
-    assert.equal(u.searchParams.get('cal'), 'x');
-  }
   const google = addToCalendarUrl(event);
-  assert.equal(eventHref(event, 'add', ANDROID, src), google, 'Android keeps the Google link');
-  assert.equal(eventHref(event, 'add', IPHONE_IN_APP, src), google, 'an app’s built-in browser keeps the Google link');
-  assert.equal(eventHref(event, 'add', MAC_CHROME, src), google, 'Chrome on a Mac keeps the Google link');
-  assert.equal(eventHref(event, 'add', '', src), google, 'an unknown device keeps the Google link');
-  assert.equal(eventHref(event, 'add', IPHONE), google, 'no feed address: the Google link');
-  assert.equal(eventHref(event, 'add', IPHONE, '/events.json'), google, 'a relative feed address: the Google link');
-  assert.equal(eventHref({ ...event, uid: null }, 'add', IPHONE, src), google, 'no uid: the Google link');
+  for (const ua of [IPHONE, MAC, ANDROID, IPHONE_IN_APP, MAC_CHROME, '']) assert.equal(eventHref(event, 'add', ua), google, 'not guessed from the device: ' + ua);
+  const u = new URL(eventFile(event, src));
+  assert.equal(u.origin + u.pathname, 'https://feed.example/v0/');
+  assert.equal(u.searchParams.get('ics'), 'u1@example.com');
+  assert.equal(u.searchParams.get('cal'), 'x');
+  assert.equal(eventFile(event, ''), '', 'no feed address');
+  assert.equal(eventFile(event, '/events.json'), '', 'a relative feed address');
+  assert.equal(eventFile({ ...event, uid: null }, src), '', 'no uid');
+  assert.equal(eventFile(null, src), '');
 });
 
-test('a mounted root links to the file only when the feed says it serves one', async () => {
-  const apple = (doc, clock, fetch) => ({ ...env(doc, clock, fetch), userAgent: IPHONE });
-  // the feed says so
-  let p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
-  let c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
-  let u = new URL(p.els.when.getAttribute('href'));
-  assert.equal(u.searchParams.get('ics'), 'Workshop');
-  assert.equal(u.searchParams.get('cal'), 'x');
-  p.els.next.click();
-  assert.equal(new URL(p.els.when.getAttribute('href')).searchParams.get('ics'), 'Applications open', 'paging re-points the link at the event shown');
-  c.stop();
-  // the feed does not say so (a static feed, an older worker): the Google link, even on an iPhone
-  p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
-  c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf(FEED).fetch));
-  assert.equal(p.els.when.getAttribute('href'), addToCalendarUrl(WORKSHOP));
-  c.stop();
-  // the feed says so, on a device that is not Apple's: the Google link
-  p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
-  c = await mountFromFeed(p.root, env(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
-  assert.equal(p.els.when.getAttribute('href'), addToCalendarUrl(WORKSHOP));
-  c.stop();
+test('a mounted root: the add link is Google; it carries the file address only when the feed says it serves one', async () => {
+  const FILE = 'data-dc-add-file';
+  for (const userAgent of [IPHONE, ANDROID, '']) {
+    const on = (doc, clock, fetch) => ({ ...env(doc, clock, fetch), userAgent });
+    // the feed says so
+    let p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
+    let c = await mountFromFeed(p.root, on(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
+    assert.equal(p.els.when.getAttribute('href'), addToCalendarUrl(WORKSHOP), 'the link itself is Google: ' + userAgent);
+    let u = new URL(p.els.when.getAttribute(FILE));
+    assert.equal(u.searchParams.get('ics'), 'Workshop');
+    assert.equal(u.searchParams.get('cal'), 'x');
+    p.els.next.click();
+    assert.equal(new URL(p.els.when.getAttribute(FILE)).searchParams.get('ics'), 'Applications open', 'paging re-points the file at the event shown');
+    c.stop();
+    // the feed does not say so (a static feed, an older worker): a plain Google link
+    p = page({ 'data-src': 'https://feed.example/v0/?cal=x' });
+    c = await mountFromFeed(p.root, on(p.doc, createClock(NOW), feedOf(FEED).fetch));
+    assert.equal(p.els.when.getAttribute('href'), addToCalendarUrl(WORKSHOP));
+    assert.ok(!p.els.when.getAttribute(FILE), 'no file address');
+    c.stop();
+  }
   // the language's own feed address is the one the file comes from
-  p = page({ 'data-src': 'https://feed.example/v0/?cal=x', 'data-src-ja': 'https://feed.example/v0/?cal=ja' });
+  const p = page({ 'data-src': 'https://feed.example/v0/?cal=x', 'data-src-ja': 'https://feed.example/v0/?cal=ja' });
   p.doc.documentElement.setAttribute('lang', 'ja');
-  c = await mountFromFeed(p.root, apple(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
-  assert.equal(new URL(p.els.when.getAttribute('href')).searchParams.get('cal'), 'ja');
+  const c = await mountFromFeed(p.root, env(p.doc, createClock(NOW), feedOf({ ...FEED, ics: true }).fetch));
+  assert.equal(new URL(p.els.when.getAttribute(FILE)).searchParams.get('cal'), 'ja');
   c.stop();
 });

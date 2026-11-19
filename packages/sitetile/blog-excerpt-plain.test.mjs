@@ -78,7 +78,7 @@ test('no run in the excerpt is longer than a word: nothing a narrow card cannot 
 test('links with brackets inside the URL, emphasis, code, autolinks and bare URLs', () => {
   const post = `---\ntitle: t\n---\nThanks to [A Channel](https://social.example.com/achannel?__cft__[0]=AZX&__tn__=-]K-R) for **the** _feature_ and \`code\` ~~old~~ <https://example.com/x> see https://example.com/long/path?q=1 or [https://short.example/AB](https://short.example/AB?ref=1) a < b & c\n`;
   const s = parsePost('t', post).excerptText;
-  assert.equal(s, 'Thanks to A Channel for the feature and code ~~old~~ see or a < b & c');
+  assert.equal(s, 'Thanks to A Channel for the feature and code old see or a < b & c');
 });
 
 // Review fixtures. THE ORACLE IS THE POST PAGE: each expected value is the text a reader sees where
@@ -92,7 +92,8 @@ const REVIEW_CASES = [
   ['line<br/>two<br />three', 'line two three'],
   // code: what the page renders inside the code span, unchanged
   ['Use `~~` as the operator.', 'Use ~~ as the operator.'],
-  ['Use `<b>text</b>` and `&amp;` here, ~~not this~~.', 'Use <b>text</b> and &amp; here, ~~not this~~.'],
+  // the page now draws ~~strike~~ as a struck span, so the reader sees the words without the marks
+  ['Use `<b>text</b>` and `&amp;` here, ~~not this~~.', 'Use <b>text</b> and &amp; here, not this.'],
   ['see `https://code.example/x` here', 'see https://code.example/x here'],
   // the page's inline code span collapses whitespace (span.st-code is white-space: normal)
   ['Use `a  b` here.', 'Use a b here.'],
