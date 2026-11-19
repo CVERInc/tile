@@ -32,7 +32,10 @@
 //     given `frame-ancestors 'self'` again (an ancestor restriction is checked against every ancestor).
 // And (r2) an embed's relative addresses: a picture `aster/favicon.ico` loads, and `document.baseURI`, the
 // picture's and a `#x` link's addresses, a `#x` click, a `target=_blank` and a `target=_top` click all
-// come out as they do in the srcdoc with the setting off.
+// come out as they do in the srcdoc with the setting off. And (r3) an author's own `<base href>`: the review's
+// widget, found by its absolute base, loads; a path-relative one resolves against the page; `<base` in a comment,
+// a script, an attribute, a style, a textarea, a template, an svg or a noscript, and `<baseline>`, are not a base —
+// each embed's `document.baseURI`, its widget and the widget's requests come out as in the srcdoc with the setting off.
 //
 // Every step has a deadline (STEP_MS): an engine that stops answering fails the step, it does not stall
 // the run. Nothing here reaches the network: every other host is answered in this process.
@@ -100,11 +103,20 @@ const INJECTED = '<script>window.__ran = (window.__ran || []).concat("inline scr
   + '<iframe src="https://frames.example/" title="x"></iframe>';
 // the r1 review's model of an escaping failure in the parent: a script in the page origin
 const PARENT_SCRIPT = '<script>window.__parentPwn = location.origin</script>';
+// r3: what the widget's server was asked (counted here, by the server: a browser's request events can miss a frame's first load)
+const widgetAsked = [];
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     // the framing control's other site: asked as 127.0.0.1, a different origin from localhost (both loopback,
     // so no browser refuses it for reaching a private address)
+    // r3: the widget an author's base points at (`<base href="<this server>/app/">` + `widget.js`)
+    if (url.pathname === '/app/widget.js') {
+      widgetAsked.push(url.pathname);
+      res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' });
+      res.end('document.getElementById("t").textContent = "widget ready"');
+      return;
+    }
     if (url.pathname === '/__framer') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(`<!doctype html><iframe id="f" style="width:420px;height:900px" src="${String(url.searchParams.get('src')).replace(/[<>"&]/g, '')}"></iframe>`);
@@ -145,6 +157,18 @@ const server = http.createServer(async (req, res) => {
 });
 await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
 const base = `http://localhost:${server.address().port}`;
+// r3 — an author's OWN base (the closing review's input: a widget whose script is found by its base), and the
+// `<base` a browser does not count: each embed says, once loaded, what its base is and what its widget did
+const SAY_BASE = '<script>addEventListener("load", function () { parent.postMessage({ authorBase: { base: document.baseURI, text: (document.getElementById("t") || {}).textContent || null } }, "*") })</script>';
+const AUTHOR_BASES = [
+  ['the review\'s widget, its own absolute base', `<base href="${base}/app/"><b id="t">loading</b><script src="widget.js"></script>`],
+  ['a path-relative author base', '<base href="app/"><b id="t">loading</b><script src="widget.js"></script>'],
+  ['`<base href` in a comment', `<!-- <base href="${base}/app/"> --><b id="t">x</b>`],
+  ['`<base href` in a script string', `<script>var s = '<base href="${base}/app/">';</script><b id="t">x</b>`],
+  ['tag names that begin with base', `<baseline href="${base}/app/">x</baseline><basefont href="${base}/app/"><base-x href="${base}/app/"></base-x><b id="t">x</b>`],
+  ['`<base` in an attribute, a style, a textarea, a template, an svg and a noscript', `<a title='<base href="${base}/app/">'>t</a><style>/* <base href="${base}/app/"> */</style><textarea><base href="${base}/app/"></textarea><template><base href="/tpl/"></template><svg><base href="/svg/"></base></svg><noscript><base href="/ns/"></noscript><b id="t">x</b>`],
+];
+for (const [i, [, html]] of AUTHOR_BASES.entries()) cards[`authorbase${i}`] = `---\ntitle: An author's own base\nview: wall\n---\n\n## grid\n\n- [ ] %% card: embed w=6 %% ${html}${SAY_BASE}\n`;
 
 const failures = [];
 const check = (ok, what) => { console.log(`${ok ? '  ✓' : '  ✗'} ${what}`); if (!ok) failures.push(what); };
@@ -535,6 +559,27 @@ try {
         for (const stage of ['enforce', 'report-only']) {
           check(JSON.stringify(seen[stage].said) === JSON.stringify(seen.off.said), `relative addresses in an embed, ${stage}: baseURI, picture and #x link as in the srcdoc (${JSON.stringify({ on: seen[stage].said, off: seen.off.said })})`);
           check(JSON.stringify(seen[stage].fragment) === JSON.stringify(seen.off.fragment), `relative addresses in an embed, ${stage}: a #x click does what it does in the srcdoc (${JSON.stringify({ on: seen[stage].fragment, off: seen.off.fragment, before: [seen[stage].before, seen.off.before] })})`);
+        }
+      }
+      // r3 — an author's own base: the base and the widget as in the srcdoc with the setting off, in every stage
+      for (const [i, [what]] of AUTHOR_BASES.entries()) {
+        const strip = (u) => String(u).replace(/\?stage=[a-z-]+/, '');
+        const seen = {};
+        for (const stage of ['off', 'enforce', 'report-only']) {
+          widgetAsked.length = 0;
+          const p = await open(bare, `/authorbase${i}?stage=${stage}`);
+          await eagerFrames(p);
+          await p.page.waitForFunction(() => window.__msgs.some((m) => m.data && m.data.authorBase), null, { timeout: 8000 }).catch(() => {});
+          const said = ((await msgs(p)).find((m) => m.data && m.data.authorBase) || { data: {} }).data.authorBase || null;
+          seen[stage] = { said: said && { ...said, base: strip(said.base) }, widget: [...widgetAsked] };
+          // a base that points nowhere this server answers is a 404 the srcdoc gets too: only the widget's arms load one
+          await quiet(`an author's own base, ${what}, ${stage}`, p, bare);
+          await close(p);
+        }
+        check(!!seen.off.said, `an author's own base, ${what}: with the setting off the srcdoc says what its base is (${JSON.stringify(seen.off)})`);
+        if (i < 2) check(seen.off.said && seen.off.said.text === 'widget ready' && JSON.stringify(seen.off.widget) === '["/app/widget.js"]', `an author's own base, ${what}, off: the widget loads, from /app/widget.js (${JSON.stringify(seen.off)})`);
+        for (const stage of ['enforce', 'report-only']) {
+          check(JSON.stringify(seen[stage]) === JSON.stringify(seen.off), `an author's own base, ${what}, ${stage}: the base, the widget and its requests as in the srcdoc (${JSON.stringify({ on: seen[stage], off: seen.off })})`);
         }
       }
       // 🔴 CONTROL: the same embed left as srcdoc under the page's policy — its script is refused

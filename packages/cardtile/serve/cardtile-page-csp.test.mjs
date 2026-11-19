@@ -525,6 +525,79 @@ test('r2 finding 3: a missed embed address answers in the visitor\'s language an
   }
 });
 
+// ── r3: the closing review's finding — an author's own `<base href>` ─────────────────────────────
+// In the srcdoc, an author's base is honoured: the first base element WITH an href, in tree order (a base in a
+// template, an <svg> or a <noscript> is none), parsed against the srcdoc's fallback base — the page's address.
+// Measured in Chromium and WebKit on the srcdoc page (lane receipt): `app/` on /x/aster → /x/app/, `` → the
+// page, a base in a template, an svg or a noscript → the page, `<base target>` then `<base href>` → the second.
+// `pick` is the href the browser picks in the srcdoc (null: none, the page's address is the base);
+// `inject` is what the served document adds after its head: 'none', or the href of the one base element.
+const relativeTo = (href) => (page, pageUrl, docUrl) => {
+  const u = new URL(href, pageUrl);
+  return u.href === new URL(href, docUrl).href ? 'none' : `${u.pathname}${u.search}${u.hash}`;
+};
+const AUTHOR_BASES = [
+  ['the review\'s input: an absolute base of the author\'s own', '<base href="http://localhost:37231/app/"><b id="t">loading</b><script src="widget.js"></script>', 'http://localhost:37231/app/', () => 'none'],
+  ['`<base href` inside a comment', '<!-- <base href="http://elsewhere.example/"> --><img src="aster/favicon.ico">', null, (page) => page],
+  ['`<base href` inside a script string', '<script>var s = \'<base href="http://elsewhere.example/">\';</script><img src="aster/favicon.ico">', null, (page) => page],
+  ['tag names that begin with base', '<baseline href="http://elsewhere.example/">x</baseline><basefont href="http://elsewhere.example/"><base-x href="http://elsewhere.example/"></base-x>', null, (page) => page],
+  ['`<base href` inside an attribute value, a style and a textarea', '<a title=\'<base href="http://elsewhere.example/">\'>t</a><style>/* <base href="http://elsewhere.example/"> */</style><textarea><base href="http://elsewhere.example/"></textarea>', null, (page) => page],
+  ['a base in a template, an svg and a noscript', '<template><base href="/tpl/"></template><svg><base href="/svg/"></base></svg><noscript><base href="/ns/"></noscript><img src="aster/favicon.ico">', null, (page) => page],
+  ['a base with a target and no href', '<base target="_self"><a href="aster">a</a>', null, (page) => page],
+  ['a target-only base, then one with an href', '<base target="_self"><base href="https://cdn.example/app/">', 'https://cdn.example/app/', () => 'none'],
+  ['a root-relative author base', '<base href="/app/"><script src="widget.js"></script>', '/app/', () => 'none'],
+  ['a scheme-relative author base', '<base href="//cdn.example/app/">', '//cdn.example/app/', () => 'none'],
+  ['an author base after the first content', '<b>x</b><base href="/late/">', '/late/', () => 'none'],
+  ['upper case, unquoted', '<BASE HREF=https://cdn.example/up/>', 'https://cdn.example/up/', () => 'none'],
+  // relative to the page: the one base added is the author's, resolved against the page as in the srcdoc —
+  // unless it comes out the same at the embed's address (`../app/` from `/` and from `/_embed/<hash>`)
+  ['a path-relative author base', '<base href="app/"><script src="widget.js"></script>', 'app/', relativeTo('app/')],
+  ['a dot-dot author base', '<base href="../app/">', '../app/', relativeTo('../app/')],
+  ['an empty author base', '<base href="">', '', (page, pageUrl, docUrl) => page],
+  ['a query-only author base', '<base href="?v=2">', '?v=2', relativeTo('?v=2')],
+  ['a path-relative author base with a character reference', '<base href="a&amp;b/">', 'a&b/', (...a) => relativeTo('a&b/')(...a).replace(/&/g, '&amp;')],
+];
+
+test('r3: an author\'s own `<base href>` is honoured as in its srcdoc — the review\'s widget at /aster loads widget.js from the author\'s base', async () => {
+  const shapes = [
+    // [what, the page's address, the page as its base element names it, the store, the extra settings]
+    ['a shared host', 'http://localhost/aster', '/aster', (md) => ({ aster: md }), {}],
+    ['a person\'s own domain', 'https://own.example/', '/', (md) => ({ aster: md, 'vanity:own.example': 'aster', 'vanityof:aster:0': 'own.example', 'vanitybind:aster:0:own.example': '1' }), { PREVIEW: 'false' }],
+    ['a preview', `http://localhost/_preview/${'e'.repeat(32)}`, `/_preview/${'e'.repeat(32)}`, (md) => ({ [`_preview:${'e'.repeat(32)}`]: md }), {}],
+  ];
+  let checked = 0;
+  for (const [what, html, pick, inject] of AUTHOR_BASES) {
+    const md = `---\ntitle: An author's own base\nview: wall\n---\n\n## grid\n\n- [ ] %% card: embed %% ${html}\n`;
+    for (const [where, pageUrl, pageBase, seedOf, extra] of shapes) {
+      const seed = seedOf(md);
+      const get = (u, s) => worker.fetch(new Request(u), { CARDS: { get: async (k) => seed[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...extra, ...s });
+      const [off] = framesOf(await (await get(pageUrl, {})).text());
+      const srcdocDoc = fromSrcdoc(off.srcdoc);
+      assert.ok(srcdocDoc.endsWith(html), `${what}, ${where}: the author's HTML is the end of the srcdoc document`);
+      // where the srcdoc's relative addresses go (the browser's answer, above)
+      const srcdocBase = pick == null ? new URL(pageUrl).href : new URL(pick, pageUrl).href;
+      for (const stage of ['report-only', 'enforce']) {
+        const [f] = framesOf(await (await get(pageUrl, { CARDS_PAGE_CSP: stage })).text());
+        const docUrl = new URL(f.src, pageUrl).href;
+        const want = inject(pageBase, pageUrl, docUrl);
+        const r = await get(docUrl, { CARDS_PAGE_CSP: stage });
+        assert.equal(r.status, 200, `${what}, ${where} ${stage}`);
+        const body = await r.text();
+        // exactly the author's document, or it plus one base element right after the renderer's head
+        const added = body === srcdocDoc ? 'none' : (body.startsWith(`${DOC_HEAD}<base href="`) && /^<base href="([^"]*)">/.exec(body.slice(DOC_HEAD.length)) || [])[1];
+        assert.ok(added === 'none' || body === srcdocDoc.replace(DOC_HEAD, `${DOC_HEAD}<base href="${added}">`), `${what}, ${where} ${stage}: not the srcdoc's document (plus one base element)`);
+        assert.equal(added, want, `${what}, ${where} ${stage}: the base element added`);
+        // the base the served document resolves against: the one added (it is first), else the author's own
+        const servedBase = added === 'none' ? new URL(pick, docUrl).href : new URL(unescape(added), docUrl).href;
+        assert.equal(servedBase, srcdocBase, `${what}, ${where} ${stage}: resolves elsewhere than in the srcdoc`);
+        if (html.includes('widget.js')) assert.equal(new URL('widget.js', servedBase).href, new URL('widget.js', srcdocBase).href);
+        checked += 1;
+      }
+    }
+  }
+  console.log(`# cardtile page csp r3: ${checked} author-base documents resolve as in the srcdoc`);
+});
+
 test('setting off: the embed address is an unknown path, answer for answer (status, headers, body, store reads) on every stage and host', async () => {
   const hex = 'a'.repeat(64);
   const pairs = [[`/aster/_embed/${hex}`, `/aster/_embee/${hex}`], [`/_embed/${hex}`, `/_embee/${hex}`], [`/aster/_embed/${hex}?w=1`, `/aster/_embee/${hex}?w=1`],

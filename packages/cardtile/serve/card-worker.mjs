@@ -1394,8 +1394,9 @@ const router = {
       const draft = await previewDraft(pve[1]);
       const doc = draft ? embedDocumentOf(await embedDocuments(parseCard(draft), (k) => frontmatter(draft, k)), pve[2]) : null;
       if (doc == null) return new Response('', { status: 404, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
-      // its relative addresses resolve against the preview's own address, as in the srcdoc (r2)
-      return new Response(embedDocumentBody(doc, `/_preview/${pve[1]}`), { headers: embedDocumentHeaders({ preview: true }) });
+      // its relative addresses resolve against the preview's own address, as in the srcdoc (r2); an author's
+      // own base is honoured as it was there (r3)
+      return new Response(embedDocumentBody(doc, `/_preview/${pve[1]}`, url.href), { headers: embedDocumentHeaders({ preview: true }) });
     }
     const pv = /^\/_preview\/([0-9a-f]{32})$/.exec(url.pathname);
     if (pv) {
@@ -1618,8 +1619,9 @@ const router = {
       // r2: the visitor's language and the host they asked, as on every other missing page
       if (doc == null) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
       // its relative addresses resolve against the Cards' own address on this host, as in the srcdoc (r2):
-      // `/` on a one-card host (a person's domain, the root card), `/<handle>` on a shared one
-      return new Response(embedDocumentBody(doc, oneCardHost ? '/' : `/${resolved.handle}`), { headers: embedDocumentHeaders() });
+      // `/` on a one-card host (a person's domain, the root card), `/<handle>` on a shared one; an author's own
+      // base is honoured as it was there (r3)
+      return new Response(embedDocumentBody(doc, oneCardHost ? '/' : `/${resolved.handle}`, url.href), { headers: embedDocumentHeaders() });
     }
 
     // The avatar is an image exit on both hosts, before the page's canonical→vanity redirect.

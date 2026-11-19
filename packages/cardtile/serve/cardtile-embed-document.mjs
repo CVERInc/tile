@@ -5,7 +5,7 @@
 // the parent's Content-Security-Policy, and the parent's script-src (cardtile-page-csp.mjs) refuses the
 // author's script. So while the page's policy is on (CARDS_PAGE_CSP "report-only" or "enforce"), every
 // embed frame of a page is written with `src` instead: a same-origin address that answers with the
-// document the srcdoc held plus one `<base href>` (embedDocumentBody, below), under a policy of its own.
+// document the srcdoc held plus, at most, one `<base href>` (embedDocumentBody, below), under a policy of its own.
 // The page's policy is then the same on every page, whatever the page holds, and nothing a person
 // writes decides whether it is sent.
 //
@@ -19,7 +19,7 @@
 //             parsed file — tiles whose type is `embed`, front and backs — by the renderer's own function,
 //             never read out of the rendered page: an address cannot be made to answer with another
 //             person's embed (their file is not read) or with any HTML that is not an embed of this file.
-//   BODY      that document with one `<base href>` naming the page's address: embedDocumentBody, below.
+//   BODY      that document with, at most, one `<base href>`, so it resolves as in the srcdoc: embedDocumentBody, below.
 //   HEADERS   embedDocumentHeaders, below.
 import { renderEmbedHtml } from '../card-render.mjs';
 
@@ -83,10 +83,10 @@ export function framesAsDocuments(page, documents, base, query = '') {
 export const embedDocumentOf = (documents, h) => (documents.find((d) => d.hex === h) || {}).doc ?? null;
 
 /**
- * 🔴 WHERE ITS RELATIVE ADDRESSES POINT (tile#372 r2). A srcdoc document's base is its parent's: an
+ * 🔴 WHERE ITS RELATIVE ADDRESSES POINT (tile#372 r2, r3). A srcdoc document's base is its parent's: an
  * author's `<img src="aster/favicon.ico">` on `/aster` meant `/aster/favicon.ico`. Served at
  * `/aster/_embed/<hash>` with nothing added, the same markup would mean `/aster/_embed/aster/favicon.ico`.
- * So the served document is the srcdoc's document with exactly ONE element added: `<base href="<page>">`,
+ * So the served document is the srcdoc's document with at most ONE element added: `<base href="…">`,
  * right after the head every embed document starts with (EMBED_DOC_HEAD, card-render.mjs renderEmbedHtml),
  * before the theme and before a byte the author wrote. The author's bytes are unchanged; the hash in the
  * address is still the srcdoc document's (it names WHICH embed; the base follows from the address).
@@ -98,18 +98,186 @@ export const embedDocumentOf = (documents, h) => (documents.find((d) => d.hex ==
  *           Not carried: the query of the visitor's own address (`?lang=`, a window's `?w=&r=`), which
  *           only an empty, `?…` or `#…` address could see — those resolve against the bare page address.
  *   href only, never `target`: an author's own `<base target>` and every link's target act as before.
- *   🔴 The one known difference: an author's OWN `<base href>` is now the second one in the document,
- *           and the first one wins, so it is ignored (in the srcdoc it was the first, and was honoured).
- *           Telling a real one from the text `<base href` in a comment or a script means parsing the
- *           author's HTML, which this module does not do.
+ *
+ *   🔴 AN AUTHOR'S OWN `<base href>` (r3). In the srcdoc it was honoured: the document's base is its FIRST
+ *   base element that has an href, in tree order, parsed against the parent page's address. A base added
+ *   in front of it would be that first one, and the author's would be ignored (a widget that finds its
+ *   script by its base stopped loading). So the author's base is found by reading the document the way the
+ *   browser's parser does (authorBaseHref, below), and:
+ *     · none                                  → `<base href="<page>">`, as above;
+ *     · one that means the same on the page and at the embed's address (absolute, `//host/…`, `/…`)
+ *                                             → nothing is added: the author's base is the first, as it was;
+ *     · one relative to the page (`app/`, `../x/`, ``, `?q`, `#x`) → `<base href="<it, resolved against the
+ *       page>">`: what the srcdoc resolved it to (the author's own, now second, is the same address);
+ *     · one that is not an address at all     → `<base href="<page>">` (a browser ignores it, as in the srcdoc);
+ *     · one this module cannot read exactly (a character reference other than the five below and numeric ones)
+ *                                             → nothing is added: the author's base, as written, is the first.
+ *   NOT counted, as the browser does not count them: `<base` in a comment, in a script, style, textarea,
+ *   title or noscript (raw text; scripting is on in the sandbox), in a template, in svg or math, a tag
+ *   named `baseline`, `basefont` or `base-x`, and a base with no href (target only).
  */
 export const EMBED_DOC_HEAD = '<!doctype html><meta charset="utf-8">';
 const attr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-/** embedDocumentBody: (doc, page) → what the embed address answers: `doc` with `<base href="<page>">` after its head */
-export function embedDocumentBody(doc, page) {
+
+// the HTML tokenizer's own classes (HTML Living Standard §13.2.5), only as far as finding a base needs
+const RAW_TEXT = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']);
+// an HTML start tag that ends svg/math content (the tree builder's "in foreign content" breakout list)
+const BREAKOUT = new Set(['b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd', 'div', 'dl', 'dt', 'em', 'embed', 'h1', 'h2',
+  'h3', 'h4', 'h5', 'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta', 'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small',
+  'span', 'strong', 'strike', 'sub', 'sup', 'table', 'tt', 'u', 'ul', 'var']);
+const SPACE = /[\t\n\f\r ]/;
+
+/**
+ * readTag: (html, at) → { name, end, attrs: Map, selfClosing, next } for the tag whose `<` is at `at`, or
+ * null when the input ends inside it (the tokenizer then emits nothing). Attribute names are lower-cased;
+ * a repeated attribute keeps its first value; values are raw (character references not decoded).
+ */
+function readTag(html, at) {
+  const end = html[at + 1] === '/';
+  let i = at + (end ? 2 : 1);
+  const n = html.length;
+  const from = i;
+  while (i < n && !SPACE.test(html[i]) && html[i] !== '/' && html[i] !== '>') i += 1;
+  const name = html.slice(from, i).toLowerCase();
+  const attrs = new Map();
+  let selfClosing = false;
+  while (i < n) {
+    const c = html[i];
+    if (SPACE.test(c)) { i += 1; continue; }
+    if (c === '>') return { name, end, attrs, selfClosing, next: i + 1 };
+    if (c === '/') { i += 1; selfClosing = html[i] === '>'; continue; }
+    const a = i;
+    i += 1;   // a name may begin with `=`
+    while (i < n && !SPACE.test(html[i]) && html[i] !== '/' && html[i] !== '>' && html[i] !== '=') i += 1;
+    const key = html.slice(a, i).toLowerCase();
+    while (i < n && SPACE.test(html[i])) i += 1;
+    let value = '';
+    if (html[i] === '=') {
+      i += 1;
+      while (i < n && SPACE.test(html[i])) i += 1;
+      const q = html[i];
+      if (q === '"' || q === "'") {
+        const close = html.indexOf(q, i + 1);
+        if (close < 0) return null;
+        value = html.slice(i + 1, close);
+        i = close + 1;
+      } else {
+        const v = i;
+        while (i < n && !SPACE.test(html[i]) && html[i] !== '>') i += 1;
+        value = html.slice(v, i);
+      }
+    }
+    if (!attrs.has(key)) attrs.set(key, value);
+    selfClosing = false;
+  }
+  return null;
+}
+
+/**
+ * authorBaseHref: (html) → the raw href of the first base element that has one — the one a browser takes as
+ * the document's base — or null. A reading of the markup in the tokenizer's terms (comments, bogus comments,
+ * raw text, CDATA in svg/math), plus the tree builder's three places where a base is not the document's:
+ * a template's content, svg/math content, and — scripting being on — a noscript (raw text, above).
+ */
+export function authorBaseHref(html) {
+  const s = String(html);
+  const n = s.length;
+  let i = 0;
+  let template = 0;
+  let foreign = 0;
+  while (i < n) {
+    const lt = s.indexOf('<', i);
+    if (lt < 0) return null;
+    const c = s[lt + 1];
+    if (s.startsWith('<!--', lt)) {
+      // a comment ends at `-->` or `--!>`; `<!-->` and `<!--->` are empty ones
+      if (s.startsWith('<!-->', lt)) { i = lt + 5; continue; }
+      if (s.startsWith('<!--->', lt)) { i = lt + 6; continue; }
+      const ends = [s.indexOf('-->', lt + 4), s.indexOf('--!>', lt + 4)].filter((x) => x >= 0);
+      if (!ends.length) return null;
+      const e = Math.min(...ends);
+      i = e + (s.startsWith('-->', e) ? 3 : 4);
+      continue;
+    }
+    if (foreign > 0 && s.startsWith('<![CDATA[', lt)) {
+      const e = s.indexOf(']]>', lt + 9);
+      if (e < 0) return null;
+      i = e + 3;
+      continue;
+    }
+    if (c === '!' || c === '?' || (c === '/' && !/[A-Za-z>]/.test(s[lt + 2] || ''))) {
+      // a doctype, a bogus comment (`<!x>`, `<?x>`, `</ x>`): up to the next `>`
+      const e = s.indexOf('>', lt + 2);
+      if (e < 0) return null;
+      i = e + 1;
+      continue;
+    }
+    if (c === '/' && s[lt + 2] === '>') { i = lt + 3; continue; }
+    if (!/[A-Za-z]/.test(c === '/' ? s[lt + 2] || '' : c || '')) { i = lt + 1; continue; }   // `<` as text
+    const tag = readTag(s, lt);
+    if (!tag) return null;
+    i = tag.next;
+    const { name } = tag;
+    if (tag.end) {
+      if (name === 'template' && template > 0) template -= 1;
+      else if (foreign > 0 && (name === 'svg' || name === 'math')) foreign -= 1;
+      continue;
+    }
+    if (foreign > 0 && (BREAKOUT.has(name) || (name === 'font' && ['color', 'face', 'size'].some((k) => tag.attrs.has(k))))) foreign = 0;
+    if (foreign > 0) {
+      if ((name === 'svg' || name === 'math') && !tag.selfClosing) foreign += 1;
+      continue;
+    }
+    if (name === 'svg' || name === 'math') { if (!tag.selfClosing) foreign = 1; continue; }
+    if (name === 'template') { template += 1; continue; }
+    if (name === 'base' && template === 0 && tag.attrs.has('href')) return tag.attrs.get('href');
+    if (name === 'plaintext') return null;
+    if (RAW_TEXT.has(name)) {
+      // raw text up to `</name` followed by a space, `/` or `>` (any case)
+      const re = new RegExp(`</${name}[\\t\\n\\f\\r />]`, 'gi');
+      re.lastIndex = i;
+      const m = re.exec(s);
+      if (!m) return null;
+      i = m.index;
+    }
+  }
+  return null;
+}
+
+// an attribute value's character references: the five a person writes in an address, and numeric ones that
+// name a printable character; anything else is null (not read here, so nothing is decided from it)
+const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+function decodeAttr(v) {
+  let unread = false;
+  const out = v.replace(/&(?:#[xX]([0-9a-fA-F]{1,6});|#([0-9]{1,7});|(amp|lt|gt|quot|apos);|(?=[A-Za-z0-9#]))/g, (m, hx, dec, name) => {
+    if (name) return NAMED[name];
+    const cp = hx != null ? parseInt(hx, 16) : dec != null ? Number(dec) : -1;
+    if (cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff) { unread = true; return m; }
+    return String.fromCodePoint(cp);
+  });
+  return unread ? null : out;
+}
+
+/**
+ * embedDocumentBody: (doc, page, at) → what the embed address answers: `doc` with, at most, one
+ * `<base href>` after its head (above). `page`: the Cards' address (root-relative); `at`: the address the
+ * document is served at (the request's URL), against which an author's base is otherwise resolved.
+ */
+export function embedDocumentBody(doc, page, at = `https://cards.invalid${page === '/' ? '' : page}/_embed/`) {
   const d = String(doc);
   if (!d.startsWith(EMBED_DOC_HEAD)) throw new Error('an embed document that does not start with the renderer\'s head');
-  return `${EMBED_DOC_HEAD}<base href="${attr(page)}">${d.slice(EMBED_DOC_HEAD.length)}`;
+  const with1 = (href) => `${EMBED_DOC_HEAD}<base href="${attr(href)}">${d.slice(EMBED_DOC_HEAD.length)}`;
+  const raw = authorBaseHref(d.slice(EMBED_DOC_HEAD.length));
+  if (raw == null) return with1(page);
+  const href = decodeAttr(raw);
+  if (href == null) return d;
+  const pageUrl = new URL(page, at);
+  let onPage;
+  let here;
+  try { onPage = new URL(href, pageUrl); here = new URL(href, at); } catch { return with1(page); }
+  if (onPage.href === here.href) return d;
+  // relative to the page: its path, query and fragment on the page's own origin (a relative address keeps it)
+  return with1(onPage.origin === pageUrl.origin ? `${onPage.pathname}${onPage.search}${onPage.hash}` : onPage.href);
 }
 
 /**
