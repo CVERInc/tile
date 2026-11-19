@@ -18,7 +18,7 @@ import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, sourceRevision } from '@sitetile';
 import { contentPageRel } from '../lib/locale-editions.mjs';
-import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
+import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, homePagingForwards, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
 import { tagLocalesSource, pageLocalesOrWarn, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
 import { noindexFlag, routeOutputFile } from '../lib/noindex.mjs';
@@ -39,6 +39,7 @@ export function getStaticPaths() {
   const sourceOf = (r) => r.props.kind === 'page' ? `content/${r.params.path ?? 'home'}.md`
     : r.props.kind === 'post' ? `blog post "${r.props.post.slug}"`
     : r.props.kind === 'blog-index' ? `the blog index${r.props.pageNum > 1 ? ` page ${r.props.pageNum}` : ''}`
+    : r.props.kind === 'home-paging' ? `the /${r.params.path} forward (blog-home-paging-redirects)`
     : 'a date archive';
   const warnCollisions = (out) => {
     const first = new Map();
@@ -312,10 +313,28 @@ export function getStaticPaths() {
     });
   }
 
+  // ── WordPress home paging (/page/<n> → the blog's page <n>) ──
+  // LAST, so it sees every path above: a /page/<n> any of them already routes keeps its page (a
+  // root-mounted blog's own pager, a content page at page/<n>), and the forward is simply not made.
+  // Counted exactly like the pager above (over `listed`, by blog-page-size), so it forwards to pages
+  // that exist. Each forward is Astro's own static redirect (below): a 0-second refresh with
+  // noindex and a canonical to the target — no `_redirects` line, so it costs none of the site's
+  // redirect rules and a preview build serves it like any other page. See lib/blog.mjs.
+  {
+    const size = Number(meta['blog-page-size']) || 0;
+    const total = size ? Math.ceil(listed.length / size) || 1 : 1;
+    const claimed = new Set(paths.map((r) => routeOutputFile(r.params.path)));
+    for (const { path, to } of homePagingForwards(meta, total, (p) => claimed.has(routeOutputFile(p)))) {
+      paths.push({ params: { path }, props: { kind: 'home-paging', to } });
+    }
+  }
+
   return warnCollisions(paths);
 }
 
 const props = Astro.props;
+// A forward is a response, not a view: in a static build Astro writes it as its redirect page.
+if (props.kind === 'home-paging') return Astro.redirect(props.to, 301);
 // Dispatch to the kind's view. A single dynamic <View/> at the template root adds ZERO bytes
 // around the view's own output (verified against the Astro compiler), so each page is byte-for-byte
 // what the old dedicated route emitted.

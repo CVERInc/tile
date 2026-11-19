@@ -1636,6 +1636,28 @@ export function indexUrl(meta, n = 1) {
   return Number(n) <= 1 ? (base || '/') : `${base}/page/${n}`;
 }
 
+// homePagingForwards: WordPress pages a posts-on-front home at /page/<n>/. A site that arrived from
+// WordPress and now keeps its blog under a `blog-path` still has those addresses out in the world —
+// search results, bookmarks, other sites' "older posts" links — and every one of them answered 404.
+// OPT-IN via `blog-home-paging-redirects` (present and not "false", the `blog-date-routes` rule):
+// /page/<n> for n = 2..totalPages forwards to the blog's own page <n> (indexUrl, the pager's own
+// href, plus the trailing slash its page's own canonical carries — the directory form the build
+// writes, so the forward lands on that URL with no second hop). The range is the pager's: WordPress never links /page/1/ (it 301s that to the home), and a
+// number past the blog's last page has no page to forward to. Nothing at all when the blog is
+// root-mounted — its pager already IS /page/<n> — and nothing for a path `claimed(path)` says
+// another route already owns: a real page there wins, a forward never displaces it.
+// Returns [{ path, to }] with `path` in catch-all param form ('page/2').
+export function homePagingForwards(meta, totalPages, claimed = () => false) {
+  const on = meta && meta['blog-home-paging-redirects'] != null && String(meta['blog-home-paging-redirects']) !== 'false';
+  if (!on || blogBase(meta) === '') return [];
+  const out = [];
+  for (let n = 2; n <= Number(totalPages); n++) {
+    const path = `page/${n}`;
+    if (!claimed(path)) out.push({ path, to: `${indexUrl(meta, n)}/` });
+  }
+  return out;
+}
+
 // localeBlogCorpora: for each NON-DEFAULT configured locale that actually has translated posts
 // (`ir/posts/<url-locale>/<slug>.md`, staged by the runner into `blog/<url-locale>/<slug>.md`),
 // the locale-scoped { locale, url, meta, posts, listed } a caller needs to build that locale's own
