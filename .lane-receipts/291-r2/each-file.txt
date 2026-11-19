@@ -1,0 +1,10 @@
+# rendering test files touching inlineHtml/bodyHtml/flowingHtml, one at a time, after the r2 fix
+MISSING-MODULE blog-excerpt-plain (exit=1) :: blog-excerpt-plain: 5 passed
+PASS bracket-run-cost (exit=0) :: sitetile bracket run cost: 24 passed, all green
+MISSING-MODULE section-contract (exit=1) ::   23 passed
+MISSING-MODULE dialogue-sides (exit=1) :: dialogue-sides: 9 passed, SOME FAILED
+PASS grid-cell-list (exit=0) :: # duration_ms 41.441724
+MISSING-MODULE inline-code-literal (exit=1) :: Node.js v22.23.4
+PASS prose-renderer-parity (exit=0) ::   12 passed
+PASS render-run-cost (exit=0) :: sitetile render-path run cost: 9 passed, all green
+PASS youtube-line (exit=0) ::   20 passed

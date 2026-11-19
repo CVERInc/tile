@@ -1,0 +1,200 @@
+=== mutation: rule fix reverted
+    replaced: if (RE_RULE_LINE.test(lines[i])) {
+    with:     if (false) {
+post-body-marks (tile#291)
+  ✗ `---` between blank lines is a rule, not the text "---"
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>above</p>\n<p>---</p>\n<p>below</p>'
+    - '<p>above</p>\n<hr>\n<p>below</p>'
+                      ^
+    
+  ✗ a longer run of hyphens is a rule too, and a following line starts a new paragraph
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>above</p>\n<p>----- below</p>'
+    - '<p>above</p>\n<hr>\n<p>below</p>'
+                      ^
+    
+  ✗ `---` right after a list ends the list and draws a rule
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<ul class="st-list"><li>a</li></ul>\n<p>---</p>'
+    - '<ul class="st-list"><li>a</li></ul>\n<hr>'
+    
+  ✓ unchanged: `---` directly under a paragraph line stays inside that paragraph
+  ✓ unchanged: `---` indented four spaces stays literal text
+  ✓ unchanged: `***`, `___` and `- - -` render as they did
+  ✓ unchanged: `---` inside a fenced block is code
+  ✗ the rule carries a source span like its neighbours when asked
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p data-src="1-1">a</p>\n<p data-src="3-3">---</p>'
+    - '<p data-src="1-1">a</p>\n<hr data-src="3-3">'
+    
+  ✓ `~~b~~` is struck through, markers kept in the hidden marker span like bold
+  ✓ strike nests with bold and works inside a link label
+  ✓ a `~~` pair that would cross a link or bold edge stays as typed (no mis-nested tags)
+  ✓ unchanged: `~~` inside a code span stays literal
+  ✓ unchanged: `~~` in a link destination is not touched
+  ✓ unchanged: a single `~`, an unclosed `~~` and an empty `~~~~` stay as typed
+  ✓ unchanged: `~~` in an image alt does not put markup inside the attribute
+  ✓ `- [ ]` and `- [x]` are task items with a checkbox, not the text "[ ]"
+  ✓ an upper-case `[X]` is done too, and inline marks still render in the item
+  ✓ a nested task item keeps its parent
+  ✓ unchanged: plain items, `[]`, `[ ]x` and a link item render as they did
+
+15 passed, 4 failed
+exit=1
+=== mutation: task fix reverted
+    replaced: const task = RE_TASK_ITEM.exec(it.text);
+    with:     const task = null;
+post-body-marks (tile#291)
+  ✓ `---` between blank lines is a rule, not the text "---"
+  ✓ a longer run of hyphens is a rule too, and a following line starts a new paragraph
+  ✓ `---` right after a list ends the list and draws a rule
+  ✓ unchanged: `---` directly under a paragraph line stays inside that paragraph
+  ✓ unchanged: `---` indented four spaces stays literal text
+  ✓ unchanged: `***`, `___` and `- - -` render as they did
+  ✓ unchanged: `---` inside a fenced block is code
+  ✓ the rule carries a source span like its neighbours when asked
+  ✓ `~~b~~` is struck through, markers kept in the hidden marker span like bold
+  ✓ strike nests with bold and works inside a link label
+  ✓ a `~~` pair that would cross a link or bold edge stays as typed (no mis-nested tags)
+  ✓ unchanged: `~~` inside a code span stays literal
+  ✓ unchanged: `~~` in a link destination is not touched
+  ✓ unchanged: a single `~`, an unclosed `~~` and an empty `~~~~` stay as typed
+  ✓ unchanged: `~~` in an image alt does not put markup inside the attribute
+  ✗ `- [ ]` and `- [x]` are task items with a checkbox, not the text "[ ]"
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<ul class="st-list"><li>[ ] todo</li><li>[x] done</li></ul>'
+    - '<ul class="st-list"><li class="st-task"><input type="checkbox" disabled> todo</li><li class="st-task"><input type="checkbox" disabled checked> done</li></ul>'
+    
+  ✗ an upper-case `[X]` is done too, and inline marks still render in the item
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<ul class="st-list"><li>[X] <span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span></li></ul>'
+    - '<ul class="st-list"><li class="st-task"><input type="checkbox" disabled checked> <span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span></li></ul>'
+    
+  ✗ a nested task item keeps its parent
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<ul class="st-list"><li>a<ul class="st-list"><li>[ ] b</li></ul></li></ul>'
+    - '<ul class="st-list"><li>a<ul class="st-list"><li class="st-task"><input type="checkbox" disabled> b</li></ul></li></ul>'
+    
+  ✓ unchanged: plain items, `[]`, `[ ]x` and a link item render as they did
+
+16 passed, 3 failed
+exit=1
+=== mutation: strike fix reverted
+    replaced: s = s.replace(RE_STRIKE,
+    with:     s = s.replace(/(?!)/g,
+post-body-marks (tile#291)
+  ✓ `---` between blank lines is a rule, not the text "---"
+  ✓ a longer run of hyphens is a rule too, and a following line starts a new paragraph
+  ✓ `---` right after a list ends the list and draws a rule
+  ✓ unchanged: `---` directly under a paragraph line stays inside that paragraph
+  ✓ unchanged: `---` indented four spaces stays literal text
+  ✓ unchanged: `***`, `___` and `- - -` render as they did
+  ✓ unchanged: `---` inside a fenced block is code
+  ✓ the rule carries a source span like its neighbours when asked
+  ✗ `~~b~~` is struck through, markers kept in the hidden marker span like bold
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>a ~~b~~ c</p>'
+    - '<p>a <span class="st-s"><span class="st-mk">~~</span>b<span class="st-mk">~~</span></span> c</p>'
+    
+  ✗ strike nests with bold and works inside a link label
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>~~<span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span>~~</p>'
+    - '<p><span class="st-s"><span class="st-mk">~~</span><span class="st-b"><span class="st-mk">**</span>b<span class="st-mk">**</span></span><span class="st-mk">~~</span></span></p>'
+    
+  ✓ a `~~` pair that would cross a link or bold edge stays as typed (no mis-nested tags)
+  ✓ unchanged: `~~` inside a code span stays literal
+  ✓ unchanged: `~~` in a link destination is not touched
+  ✓ unchanged: a single `~`, an unclosed `~~` and an empty `~~~~` stay as typed
+  ✓ unchanged: `~~` in an image alt does not put markup inside the attribute
+  ✓ `- [ ]` and `- [x]` are task items with a checkbox, not the text "[ ]"
+  ✓ an upper-case `[X]` is done too, and inline marks still render in the item
+  ✓ a nested task item keeps its parent
+  ✓ unchanged: plain items, `[]`, `[ ]x` and a link item render as they did
+
+17 passed, 2 failed
+exit=1
+=== mutation: strike balance guard removed
+    replaced: if (n(/<span\b/g) !== n(/<\/span>/g) || opens !== n(/<\/a>/g)) return m;
+    with:     ;
+post-body-marks (tile#291)
+  ✓ `---` between blank lines is a rule, not the text "---"
+  ✓ a longer run of hyphens is a rule too, and a following line starts a new paragraph
+  ✓ `---` right after a list ends the list and draws a rule
+  ✓ unchanged: `---` directly under a paragraph line stays inside that paragraph
+  ✓ unchanged: `---` indented four spaces stays literal text
+  ✓ unchanged: `***`, `___` and `- - -` render as they did
+  ✓ unchanged: `---` inside a fenced block is code
+  ✓ the rule carries a source span like its neighbours when asked
+  ✓ `~~b~~` is struck through, markers kept in the hidden marker span like bold
+  ✓ strike nests with bold and works inside a link label
+  ✗ a `~~` pair that would cross a link or bold edge stays as typed (no mis-nested tags)
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p><span class="st-s"><span class="st-mk">~~</span>a <a href="/p">b<span class="st-mk">~~</span></span> c</a></p>'
+    - '<p>~~a <a href="/p">b~~ c</a></p>'
+    
+  ✓ unchanged: `~~` inside a code span stays literal
+  ✓ unchanged: `~~` in a link destination is not touched
+  ✓ unchanged: a single `~`, an unclosed `~~` and an empty `~~~~` stay as typed
+  ✓ unchanged: `~~` in an image alt does not put markup inside the attribute
+  ✓ `- [ ]` and `- [x]` are task items with a checkbox, not the text "[ ]"
+  ✓ an upper-case `[X]` is done too, and inline marks still render in the item
+  ✓ a nested task item keeps its parent
+  ✓ unchanged: plain items, `[]`, `[ ]x` and a link item render as they did
+
+18 passed, 1 failed
+exit=1
+=== mutation: rule also interrupts a paragraph
+    replaced: || isTableStart(lines, i) || isHeadlessTableStart(lines, i);
+    with:     || isTableStart(lines, i) || isHeadlessTableStart(lines, i) || RE_RULE_LINE.test(lines[i]);
+post-body-marks (tile#291)
+  ✓ `---` between blank lines is a rule, not the text "---"
+  ✓ a longer run of hyphens is a rule too, and a following line starts a new paragraph
+  ✓ `---` right after a list ends the list and draws a rule
+  ✗ unchanged: `---` directly under a paragraph line stays inside that paragraph
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + '<p>above</p>\n<hr>\n<p>below</p>'
+    - '<p>above --- below</p>'
+               ^
+    
+  ✓ unchanged: `---` indented four spaces stays literal text
+  ✓ unchanged: `***`, `___` and `- - -` render as they did
+  ✓ unchanged: `---` inside a fenced block is code
+  ✓ the rule carries a source span like its neighbours when asked
+  ✓ `~~b~~` is struck through, markers kept in the hidden marker span like bold
+  ✓ strike nests with bold and works inside a link label
+  ✓ a `~~` pair that would cross a link or bold edge stays as typed (no mis-nested tags)
+  ✓ unchanged: `~~` inside a code span stays literal
+  ✓ unchanged: `~~` in a link destination is not touched
+  ✓ unchanged: a single `~`, an unclosed `~~` and an empty `~~~~` stay as typed
+  ✓ unchanged: `~~` in an image alt does not put markup inside the attribute
+  ✓ `- [ ]` and `- [x]` are task items with a checkbox, not the text "[ ]"
+  ✓ an upper-case `[X]` is done too, and inline marks still render in the item
+  ✓ a nested task item keeps its parent
+  ✓ unchanged: plain items, `[]`, `[ ]x` and a link item render as they did
+
+18 passed, 1 failed
+exit=1
+restored site-core.js byte-identical
