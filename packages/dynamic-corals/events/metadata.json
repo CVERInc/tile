@@ -1,7 +1,7 @@
 {
   "id": "events",
   "author": "official",
-  "summary": "Shows an event feed from a JSON endpoint and updates countdown labels in the browser.",
+  "summary": "Shows the upcoming events of a calendar feed. A feed that carries the calendar as data (`events`) is drawn in the browser: what's-next order, dates and relative times in the page's language from Intl, a timed event on the visitor's clock, a title that links to the location, and add-to-calendar on the date tile, the date line and the badge. A feed that carries only `html` is shown as it came.",
   "embed": "<div data-dynamic-coral=\"events\" data-src=\"/events.json\"></div>\n<script type=\"module\" src=\"https://feelreef.com/corals/events/v0/events.js\"></script>",
   "attributes": [
     {
@@ -19,7 +19,14 @@
       "type": "url",
       "required": false,
       "default": "/events.json",
-      "description": "JSON event feed URL."
+      "description": "JSON event feed URL. With `events` in the response the list is drawn in the browser; a `show=` in this address is the row count when `data-show` is not set."
+    },
+    {
+      "name": "data-show",
+      "type": "string",
+      "required": false,
+      "default": null,
+      "description": "How many events to list, 1 to 20 (default 5), for a feed drawn in the browser. Without it, the feed address's own `show=` is used."
     },
     {
       "name": "data-empty",
@@ -33,21 +40,21 @@
       "type": "string",
       "required": false,
       "default": "in ",
-      "description": "Prefix for upcoming countdowns."
+      "description": "Static `html` feeds only: prefix for upcoming countdowns. A feed drawn in the browser takes these words from Intl."
     },
     {
       "name": "data-live-label",
       "type": "string",
       "required": false,
       "default": "Now",
-      "description": "Text for an event happening now."
+      "description": "Static `html` feeds only: text for an event happening now. A feed drawn in the browser takes this word from Intl."
     },
     {
       "name": "data-countdown",
       "type": "enum",
       "required": false,
       "default": null,
-      "description": "Set to always to show far-off countdowns."
+      "description": "Set to always to keep the badge on events more than a week away."
     }
   ]
 }
