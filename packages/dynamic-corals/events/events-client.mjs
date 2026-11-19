@@ -86,8 +86,9 @@ import { withDynamicCoralCssLayer } from '../shared/dynamic-coral-css.mjs';
       // The tile's outline is a ring painted OVER its contents, not a border around them. With a real border the bar is
       // clipped to the curve just inside it, and two anti-aliased curves a hair apart let a sliver of the face show
       // between bar and border on high-density screens. Under a ring the bar simply runs to the tile's edge.
-      '.dc-ev-list--live .dc-ev-cal::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1.5px var(--gd-accent-deep,var(--gd-accent,#875fb6));pointer-events:none}',
-      // Type is sized from the tile's width, which no longer loses 3px to a border: the factors are the old ones x 89/92.
+      '.dc-ev-list--live .dc-ev-cal::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1.5px var(--gd-accent-deep,var(--gd-accent,#875fb6));outline:1.5px solid transparent;outline-offset:-1.5px;pointer-events:none}',
+      // (The transparent outline is the tile's frame in forced-colours mode, where shadows are dropped and outlines take a system colour.)
+      // Type is sized from the tile's width, which no longer loses 3px to a border: the factors are the old ones x 89/92 (exact at 92px, a third of a pixel larger at 60px).
       '.dc-ev-list--live .dc-ev-cal-mo{align-self:stretch;flex:none;padding:calc(.3em + 1.5px) 0 .3em;font-size:max(8.5px,10.06cqw);font-weight:800;letter-spacing:.06em;line-height:1.1;text-align:center;background:var(--gd-accent-deep,var(--gd-accent,#875fb6));color:var(--gd-accent-ink,#fff)}',
       // 0.95, not 1: the bar above is heavy, so the pair sits a hair above the true middle of the face.
       '.dc-ev-cal-face{align-self:stretch;flex:.95 1 0%;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}',
