@@ -123,17 +123,27 @@ function normalizeSitePath(value, where) {
 	return pathname;
 }
 
-// A members-only path in the spelling the worker's verdict rules are baked in. The renderer
-// writes each value as the literal path of the page's file: the same string names the route and
-// the directory the static build writes, and a value whose escapes would decode to a different
-// string fails that build. So every `%` in a value is a literal character, spelled `%25` here
-// before the URL parser escapes the rest; the baked rule then decodes to the file's own name
-// (verdictRuleKey). Left as written, `/100%` had no key at all, and `/100%-%41` keyed as
-// `/100%-A`, and a `%25` spelling of either members-only page was served without its verdict.
-// A value with no `%` is baked exactly as before. Only the gated set is respelled: a page's own
-// URL and every other path keep their spelling.
+// A members-only path in the spelling the worker's verdict rules are baked in: the name of the
+// file the static build writes for that page, escaped so the URL parser keeps it intact.
+//
+// The renderer writes each value as the page's route param, and the build names the page's file
+// after that param once Astro has sanitised it (astro 7.3.5 dist/core/routing/generator.js:6,
+// `sanitizeParams`: Unicode NFC, `#` -> `%23`, `?` -> `%3F`; the file path is then the generated
+// path itself, dist/core/build/generate.js:350 `encodeURI` + common.js:28). The same three steps
+// are applied here first. Every `%` left is then a literal character of the name — a value whose
+// escapes would decode to a different string fails that build — so it is spelled `%25`, and a
+// control character or space is escaped too, because the URL parser would drop one at the end
+// of the path. The baked rule then decodes to the file's own name (verdictRuleKey). Before this,
+// `/100%` had no key, `/100%-%41` keyed as `/100%-A`, `/c#-tips` as `/c`, and an NFD `café`
+// in its decomposed form, and a spelling of each that reaches the file was served without its
+// verdict. A path with none of these characters is baked exactly as before. Only the gated set
+// is respelled: a page's own URL and every other path keep their spelling.
 function normalizeGatedPath(value, where) {
-	return normalizeSitePath(typeof value === 'string' ? value.replace(/%/g, '%25') : value, where);
+	if (typeof value !== 'string') return normalizeSitePath(value, where);
+	const named = value.normalize().replace(/#/g, '%23').replace(/\?/g, '%3F');
+	const literal = named.replace(/%/g, '%25')
+		.replace(/[\x00-\x20\x7F]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'));
+	return normalizeSitePath(literal, where);
 }
 
 function loadGatedManifest(path) {
