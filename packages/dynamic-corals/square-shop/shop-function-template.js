@@ -2493,18 +2493,24 @@ function matchForwardRule(rules, pathname, method) {
 //
 // Both sides are compared as the asset server will read the request: the request path and
 // each rule's value go through verdictPathKey, so any spelling ASSETS would resolve to a
-// gated file meets that file's rule. A request path with a malformed escape has no such key;
-// it is matched only by its exact renderer spelling (normalizeVerdictPath), and the fetch
-// handler refuses it otherwise (verdictPathUnreadable) rather than handing it to ASSETS.
+// gated file meets that file's rule. A request path that cannot be decoded is also keyed as the
+// literal string it is (verdictRequestKey), because that is the name the asset server looks up
+// when its own decode fails; a rule meets it under that key or, as before, under its exact
+// renderer spelling (normalizeVerdictPath). Either reading only widens what is gated: the fetch
+// handler still refuses an undecodable path that meets no rule (verdictPathUnreadable) rather
+// than handing it to ASSETS.
+//
+// The key is also tried in Unicode NFC, the form the build names every file in (the emitter
+// bakes rules the same way), so an NFD spelling of a members-only page meets its rule even if
+// the asset server folds the two forms. An NFC key is unchanged, so this too only widens.
 function matchVerdictRule(rules, pathname) {
-	const key = verdictPathKey(pathname);
+	const strict = verdictPathKey(pathname);
+	const key = strict !== null ? strict : verdictRequestKey(pathname);
+	const keys = key.normalize() === key ? [key] : [key, key.normalize()];
 	for (const rule of rules || []) {
-		if (key === null) {
-			if (pathMatchesRule(rule, normalizeVerdictPath(pathname))) return rule;
-			continue;
-		}
 		const ruleKey = verdictRuleKey(rule);
-		if (ruleKey !== null && pathMatchesRule({ match: rule.match, value: ruleKey }, key)) return rule;
+		if (ruleKey !== null && keys.some((k) => pathMatchesRule({ match: rule.match, value: ruleKey }, k))) return rule;
+		if (strict === null && pathMatchesRule(rule, normalizeVerdictPath(pathname))) return rule;
 	}
 	return null;
 }
@@ -2562,10 +2568,22 @@ function verdictPathKey(pathname) {
 	return key;
 }
 
+// A path read the way the asset server reads it: decoded once when it decodes, and otherwise as
+// the literal string it is (its lookup keeps the undecoded path when decodeURIComponent throws).
+// Every `%` of an undecodable path is then a literal character, so it is spelled `%25` and keyed:
+// the renderer's own link to a page whose slug holds a `%` (`/100%`, `/100%-%41/`) keys as that
+// page's file name. A path that decodes keys exactly as verdictPathKey does.
+function verdictRequestKey(pathname) {
+	const key = verdictPathKey(pathname);
+	return key !== null ? key : verdictPathKey(pathname.replace(/%/g, '%25'));
+}
+
 // A rule's value in the same key space. A prefix keeps the trailing slash it was written with,
-// so /members/ still never claims /membersx.
+// so /members/ still never claims /membersx. The emitter bakes a members-only path with every
+// `%` of its file name spelled `%25`, so the value decodes to that name; a value that does not
+// decode is read literally, the same way as a request (verdictRequestKey).
 function verdictRuleKey(rule) {
-	const key = verdictPathKey(rule.value);
+	const key = verdictRequestKey(rule.value);
 	if (key === null) return null;
 	return rule.match !== 'exact' && key !== '/' && rule.value.endsWith('/') ? key + '/' : key;
 }
@@ -3102,7 +3120,7 @@ export {
 	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchCheckoutResultFallback, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	matchSubscribeResult, renderSubscribeResult,
-	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath, verdictPathKey, verdictPathUnreadable, isGatedManifestPath,
+	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath, verdictPathKey, verdictRequestKey, verdictPathUnreadable, isGatedManifestPath,
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse,
 	YT_POSTER_PATH, relayYoutubePoster,
 	platformReader,
