@@ -69,7 +69,7 @@ import { compile as compileQueryRedirects, countRules as countQueryRedirects, Qu
 // reserved_path refusal asks them rather than a re-derived list (workerClaims below).
 import {
 	matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchSiteOwnedBuyerPage,
-	matchSubscribeResult, matchForwardRule, matchVerdictRule, escapeBarePercent, YT_POSTER_PATH
+	matchSubscribeResult, matchForwardRule, matchVerdictRule, YT_POSTER_PATH
 } from './shop-function-template.js';
 import { assembleWorker, SITE_CONFIG_KIND, SITE_CONFIG_SCHEMA_VERSION } from './worker-assembly.mjs';
 import {
@@ -123,14 +123,17 @@ function normalizeSitePath(value, where) {
 	return pathname;
 }
 
-// A members-only path in the spelling the worker's verdict rules are baked in. A bare `%` (one
-// not followed by two hex digits) is the literal character: the renderer writes a page whose slug
-// holds one to a file of that name, and the asset server reaches that file from `%25`. Spelled
-// `%25` here, the rule has a comparison key equal to that file's (verdictRuleKey); left bare, the
-// rule had no key and the `%25` spelling of a members-only page was served without its verdict.
-// Only the gated set is respelled — a page's own URL and every other path keep their spelling.
+// A members-only path in the spelling the worker's verdict rules are baked in. The renderer
+// writes each value as the literal path of the page's file: the same string names the route and
+// the directory the static build writes, and a value whose escapes would decode to a different
+// string fails that build. So every `%` in a value is a literal character, spelled `%25` here
+// before the URL parser escapes the rest; the baked rule then decodes to the file's own name
+// (verdictRuleKey). Left as written, `/100%` had no key at all, and `/100%-%41` keyed as
+// `/100%-A`, and a `%25` spelling of either members-only page was served without its verdict.
+// A value with no `%` is baked exactly as before. Only the gated set is respelled: a page's own
+// URL and every other path keep their spelling.
 function normalizeGatedPath(value, where) {
-	return normalizeSitePath(typeof value === 'string' ? escapeBarePercent(value) : value, where);
+	return normalizeSitePath(typeof value === 'string' ? value.replace(/%/g, '%25') : value, where);
 }
 
 function loadGatedManifest(path) {
@@ -197,7 +200,7 @@ function loadMarkdownManifest(path, edgeRendered) {
 		if (!entry || typeof entry !== 'object') die(where + ': entry is not an object');
 		const value = normalizeSitePath(entry.path, where + '.path');
 		const asset = normalizeSitePath(entry.asset, where + '.asset');
-		// Compared in the gated set's spelling, so a bare `%` cannot hide a collision either.
+		// Compared in the gated set's spelling, so a `%` cannot hide a collision either.
 		if (gated.has(normalizeGatedPath(entry.path, where + '.path'))) {
 			die('--markdown-manifest maps the gated path ' + value + ' (also in --gated-manifest); a private route must have no markdown twin');
 		}

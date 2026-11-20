@@ -1,11 +1,14 @@
-// A post slug may hold a bare `%` — one not followed by two hex digits (`100%`, `50%off`), from
-// its file name, its frontmatter, or a category in its permalink. The renderer keeps that `%`
-// unencoded in the page's URL and writes the page to a file of that literal name, and the Pages
-// asset server reaches the file from the `%25` spelling, which decodes to the name. So a
-// members-only page with such a slug must be gated under every spelling that reaches its file:
-// `%25` with and without the trailing slash and the explicit index.html, and the raw `%` the
-// renderer's own links send. A public page with a `%` must stay public, and the page's URL is
-// not respelled anywhere but in the gated set.
+// A members-only page is gated under the name of the file the static build writes for it.
+//
+// The renderer writes each members-only path as the literal path of the page's file: the same
+// string names the route and the directory (a `100%` slug is written to `100%/index.html`, a
+// `100%-%41` slug to `100%-%41/index.html`), and a path whose escapes would decode to a different
+// string fails that build. The Pages asset server decodes a request path once and, when that
+// decode fails, looks the path up as the literal string it is. So every spelling that reaches a
+// members-only file must be judged: the escaped spelling of its name (any `%` as `%25`, any
+// non-ASCII byte or space escaped) with and without the trailing slash and the explicit
+// index.html, and the renderer's own unencoded link. A public page with a `%` must stay public,
+// and a page's own URL is never respelled.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -18,38 +21,81 @@ import { matchVerdictRule, verdictPathKey, verdictPathUnreadable } from './shop-
 const here = dirname(fileURLToPath(import.meta.url));
 const workDir = mkdtempSync(join(tmpdir(), 'verdict-bare-percent-'));
 
-// The members-only manifest as the renderer writes it: the post URLs, `%` left bare.
-const MANIFEST_PATHS = ['/devlog/100%', '/devlog/50%off/', '/devlog/sale%/members-post/', '/devlog/members-only/'];
-// The verdict rule each one must be baked as, and the file the asset server serves for it.
-const BAKED = ['/devlog/100%25', '/devlog/50%25off', '/devlog/sale%25/members-post', '/devlog/members-only'];
-const FILES = ['/devlog/100%', '/devlog/50%off', '/devlog/sale%/members-post', '/devlog/members-only'];
+// [manifest value as the renderer writes it, the rule it must be baked as, the file's directory].
+// `100%41` cannot be built by the renderer today (its route decodes to `100A`); it is here so a
+// value with a literal `%XX` and no bare `%` is keyed as its file too.
+const GATED = [
+	['/devlog/100%', '/devlog/100%25', '/devlog/100%'],
+	['/devlog/50%off/', '/devlog/50%25off', '/devlog/50%off'],
+	['/devlog/100%-%41', '/devlog/100%25-%2541', '/devlog/100%-%41'],
+	['/devlog/100%41/', '/devlog/100%2541', '/devlog/100%41'],
+	['/devlog/sale%/members-post/', '/devlog/sale%25/members-post', '/devlog/sale%/members-post'],
+	['/devlog/路障', '/devlog/%E8%B7%AF%E9%9A%9C', '/devlog/路障'],
+	['/devlog/🎉party', '/devlog/%F0%9F%8E%89party', '/devlog/🎉party'],
+	['/devlog/a b/', '/devlog/a%20b', '/devlog/a b'],
+	['/devlog/members-only/', '/devlog/members-only', '/devlog/members-only'],
+];
+const PUBLIC = ['/devlog/7%public', '/devlog/100%-%42', '/devlog/公開', '/devlog/100A', '/devlog/100%25'];
 
-// Every spelling of each members-only page that reaches its file, with the rule it must meet.
-function spellings(file, baked) {
-	const escaped = file.replace(/%/g, '%25');
-	return [escaped, escaped + '/', escaped + '/index.html', file, file + '/', file + '/index.html']
-		.map((path) => [path, baked]);
+const escapeName = (file) => file.split('/').map(encodeURIComponent).join('/');
+const lowerHex = (path) => path.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase());
+// What the asset server looks a request path up as (decoded once; the literal path when the
+// decode fails), with the trailing slash and the explicit index.html folded onto the directory.
+function assetLookup(pathname) {
+	let p = pathname;
+	try { p = decodeURIComponent(pathname); } catch { /* the literal path */ }
+	if (p.endsWith('/index.html')) p = p.slice(0, -'/index.html'.length);
+	return p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p;
 }
-const GATED_REQUESTS = FILES.flatMap((file, i) => spellings(file, BAKED[i]));
-const PUBLIC_ESCAPED = ['/devlog/7%25public', '/devlog/7%25public/', '/devlog/100%25x', '/devlog/100%2525', '/devlog/50%25of/'];
+// The request spellings tried for one file: escaped (both hex cases), the renderer's raw link,
+// and escaped twice; each bare, with a trailing slash and with /index.html.
+function spellingsOf(file) {
+	const escaped = escapeName(file);
+	const bases = [escaped, lowerHex(escaped), file, escaped.replace(/%/g, '%25')];
+	return [...new Set(bases.flatMap((b) => [b, b + '/', b + '/index.html']))];
+}
+const pathnameOf = (spelling) => new URL('https://s.example' + spelling).pathname;
 
-test('matchVerdictRule: a rule baked with %25 meets every spelling of the page, raw % included', () => {
-	const rules = BAKED.map((value) => ({ match: 'exact', value }));
-	for (const [path, baked] of GATED_REQUESTS) assert.equal(matchVerdictRule(rules, path)?.value, baked, path);
+test('matchVerdictRule: a baked rule meets every request the asset server resolves to its file', () => {
+	const rules = GATED.map(([, value]) => ({ match: 'exact', value }));
+	for (const [, baked, file] of GATED) {
+		let reaching = 0;
+		for (const spelling of spellingsOf(file)) {
+			const pathname = pathnameOf(spelling);
+			if (assetLookup(pathname) !== file) continue;
+			reaching += 1;
+			assert.equal(matchVerdictRule(rules, pathname)?.value, baked, spelling);
+		}
+		assert.ok(reaching >= 3, file + ': the escaped spelling, its slash form and its index.html form reach the file');
+	}
 });
 
-test('matchVerdictRule: a rule still written with a bare % (not respelled by the emitter) is keyed as the file', () => {
-	const rules = FILES.map((value) => ({ match: 'exact', value }));
-	for (const [path, file] of FILES.flatMap((f) => spellings(f, f))) assert.equal(matchVerdictRule(rules, path)?.value, file, path);
+test('matchVerdictRule: the two spellings that reached a members-only file with a literal %XX are judged', () => {
+	const rules = [{ match: 'exact', value: '/devlog/100%25-%2541' }, { match: 'exact', value: '/devlog/100%2541' }];
+	assert.equal(matchVerdictRule(rules, '/devlog/100%25-%2541/')?.value, '/devlog/100%25-%2541');
+	assert.equal(matchVerdictRule(rules, '/devlog/100%-%41/')?.value, '/devlog/100%25-%2541');
+	assert.equal(matchVerdictRule(rules, '/devlog/100%2541/')?.value, '/devlog/100%2541');
+	// `/devlog/100%41/` and `/devlog/100%25-%41` decode to other names (`100A`, `100%-A`).
+	assert.equal(matchVerdictRule(rules, '/devlog/100%41/'), null);
+	assert.equal(matchVerdictRule(rules, '/devlog/100%25-%41'), null);
+});
+
+test('matchVerdictRule: a rule still written unescaped is keyed as the literal name', () => {
+	const rules = [{ match: 'exact', value: '/devlog/100%' }, { match: 'exact', value: '/devlog/100%-%41' }];
+	for (const path of ['/devlog/100%25', '/devlog/100%', '/devlog/100%/index.html']) assert.equal(matchVerdictRule(rules, path)?.value, '/devlog/100%', path);
+	for (const path of ['/devlog/100%25-%2541/', '/devlog/100%-%41']) assert.equal(matchVerdictRule(rules, path)?.value, '/devlog/100%-%41', path);
 });
 
 test('matchVerdictRule: public pages with a % stay public; the strict key and the unreadable refusal are unchanged', () => {
-	const rules = BAKED.map((value) => ({ match: 'exact', value }));
-	for (const path of PUBLIC_ESCAPED) {
-		assert.equal(matchVerdictRule(rules, path), null, path);
-		assert.equal(verdictPathUnreadable(rules, path), false, path);
+	const rules = GATED.map(([, value]) => ({ match: 'exact', value }));
+	for (const file of PUBLIC) {
+		const escaped = escapeName(file);
+		for (const path of [escaped, escaped + '/']) {
+			assert.equal(matchVerdictRule(rules, path), null, path);
+			assert.equal(verdictPathUnreadable(rules, path), false, path);
+		}
 	}
-	// A raw bare % that meets no rule still cannot be compared strictly, so a gated site refuses it.
+	// A raw `%` that meets no rule cannot be compared strictly, so a gated site still refuses it.
 	assert.equal(verdictPathKey('/devlog/7%public'), null);
 	assert.equal(matchVerdictRule(rules, '/devlog/7%public'), null);
 	assert.equal(verdictPathUnreadable(rules, '/devlog/7%public'), true);
@@ -67,14 +113,12 @@ writeFileSync(contract, JSON.stringify({
 	onBindingMissing: { status: 503, cacheControl: 'private, no-store' },
 }));
 const gatedManifest = join(workDir, 'gated.json');
-writeFileSync(gatedManifest, JSON.stringify({ paths: MANIFEST_PATHS }));
+writeFileSync(gatedManifest, JSON.stringify({ paths: GATED.map(([value]) => value) }));
 
-function emitArgs(args, out) {
-	return [join(here, 'emit-shop-function.mjs'), '--api-contract', contract, ...args, '--api', 'https://api.example', '--out', out];
-}
 function emitFile(args, name) {
 	const out = join(workDir, name + '.mjs');
-	execFileSync('node', emitArgs(args, out), { stdio: ['ignore', 'ignore', 'pipe'] });
+	execFileSync('node', [join(here, 'emit-shop-function.mjs'), '--api-contract', contract, ...args,
+		'--api', 'https://api.example', '--out', out], { stdio: ['ignore', 'ignore', 'pipe'] });
 	return out;
 }
 const gatedOut = emitFile(['--gated-manifest', gatedManifest], 'gated');
@@ -87,6 +131,8 @@ function bakedVerdictValues(file) {
 	return cfg.apiTransport.verdict.map((rule) => { assert.equal(rule.match, 'exact'); return rule.value; });
 }
 
+// ASSETS serves a file by the asset server's lookup; members-only bodies are marked.
+const BODIES = new Map([...GATED.map(([, , file]) => [file, 'MEMBERS ' + file]), ...PUBLIC.map((file) => [file, 'PUBLIC ' + file])]);
 function makeEnv(verdict) {
 	const seenByRsp = [];
 	const seenByAssets = [];
@@ -94,7 +140,8 @@ function makeEnv(verdict) {
 		ASSETS: {
 			fetch: async (req) => {
 				seenByAssets.push(req);
-				return new Response('STATIC', { status: 200 });
+				const body = BODIES.get(assetLookup(new URL(req.url).pathname));
+				return body ? new Response(body, { status: 200 }) : new Response('Not Found', { status: 404 });
 			}
 		},
 		RSP: {
@@ -109,53 +156,64 @@ function makeEnv(verdict) {
 const DENY = { allow: false, reason: 'members_only' };
 const ALLOW = { allow: true, reason: 'members_ok' };
 
-test('emitter: a members-only path with a bare % is baked with %25, every other path as before', () => {
-	assert.deepEqual(bakedVerdictValues(gatedOut), BAKED);
+test('emitter: each members-only path is baked as its file name, and a path with no % exactly as before', () => {
+	assert.deepEqual(bakedVerdictValues(gatedOut), GATED.map(([, baked]) => baked));
 });
 
-test('worker: every spelling of a members-only page with a bare % is judged and refused on deny', async () => {
-	for (const [path, baked] of GATED_REQUESTS) {
-		const request = new Request('https://s.example' + path);
-		const { env, seenByRsp, seenByAssets } = makeEnv(DENY);
-		const res = await gatedSite.default.fetch(request, env);
-		assert.equal(res.status, 404, path);
-		assert.equal(seenByRsp.length, 1, path + ' must ask for a verdict');
-		assert.equal(seenByRsp[0].searchParams.get('path'), baked, path);
-		assert.deepEqual(seenByAssets, [], path + ' must not reach ASSETS');
+test('worker: no spelling of a members-only page serves it without a verdict; the ones that reach it are judged', async () => {
+	for (const [, baked, file] of GATED) {
+		for (const spelling of spellingsOf(file)) {
+			const request = new Request('https://s.example' + spelling);
+			const { env, seenByRsp } = makeEnv(DENY);
+			const res = await gatedSite.default.fetch(request, env);
+			assert.equal((await res.text()).startsWith('MEMBERS '), false, spelling + ' served a members-only page');
+			if (assetLookup(new URL(request.url).pathname) === file) {
+				assert.equal(res.status, 404, spelling);
+				assert.equal(seenByRsp.length, 1, spelling + ' must ask for a verdict');
+				assert.equal(seenByRsp[0].searchParams.get('path'), baked, spelling);
+			}
+		}
 	}
 });
 
-test('worker: a member is served the page from its raw and its escaped spelling', async () => {
-	for (const path of ['/devlog/100%', '/devlog/100%25/']) {
-		const request = new Request('https://s.example' + path);
-		const { env, seenByRsp, seenByAssets } = makeEnv(ALLOW);
-		const res = await gatedSite.default.fetch(request, env);
-		assert.equal(res.status, 200, path);
-		assert.equal(seenByRsp.length, 1, path);
-		assert.equal(seenByAssets.length, 1, path);
-		assert.equal(seenByAssets[0], request, path + ' serves the original request');
+test('worker: a member is served the page from its raw link and its escaped spelling', async () => {
+	for (const [, , file] of GATED) {
+		for (const spelling of [escapeName(file) + '/', file]) {
+			const request = new Request('https://s.example' + spelling);
+			if (assetLookup(new URL(request.url).pathname) !== file) continue;
+			const { env, seenByRsp, seenByAssets } = makeEnv(ALLOW);
+			const res = await gatedSite.default.fetch(request, env);
+			assert.equal(res.status, 200, spelling);
+			assert.equal(await res.text(), 'MEMBERS ' + file, spelling);
+			assert.equal(seenByRsp.length, 1, spelling);
+			assert.equal(seenByAssets[0], request, spelling + ' serves the original request');
+		}
 	}
 });
 
 test('worker: a public page with a % is served without a verdict (control)', async () => {
-	for (const path of PUBLIC_ESCAPED) {
-		const request = new Request('https://s.example' + path);
-		const { env, seenByRsp, seenByAssets } = makeEnv(DENY);
-		const res = await gatedSite.default.fetch(request, env);
-		assert.equal(res.status, 200, path);
-		assert.deepEqual(seenByRsp, [], path);
-		assert.equal(seenByAssets[0], request, path);
+	for (const file of PUBLIC) {
+		const escaped = escapeName(file);
+		for (const spelling of [escaped, escaped + '/', escaped + '/index.html']) {
+			const request = new Request('https://s.example' + spelling);
+			const { env, seenByRsp, seenByAssets } = makeEnv(DENY);
+			const res = await gatedSite.default.fetch(request, env);
+			assert.equal(res.status, 200, spelling);
+			assert.equal(await res.text(), 'PUBLIC ' + file, spelling);
+			assert.deepEqual(seenByRsp, [], spelling);
+			assert.equal(seenByAssets[0], request, spelling);
+		}
 	}
 });
 
-test('emitter: a markdown twin of a members-only page with a bare % is refused', () => {
-	for (const [i, path] of ['/devlog/100%', '/devlog/100%25/', '/devlog/50%off'].entries()) {
+test('emitter: a markdown twin of a members-only page with a % is refused', () => {
+	for (const [i, path] of ['/devlog/100%', '/devlog/100%-%41/', '/devlog/50%off', '/devlog/100%41'].entries()) {
 		const mapping = join(workDir, 'collide-' + i + '.json');
 		writeFileSync(mapping, JSON.stringify({ schemaVersion: 1, routes: [{ path, asset: '/devlog/x.md' }] }));
 		assert.throws(() => emitFile(['--gated-manifest', gatedManifest, '--markdown-manifest', mapping], 'collide-' + i),
 			(e) => String(e.stderr).includes('maps the gated path'), path);
 	}
-	// A public page with a bare % keeps its markdown twin, in its own spelling.
+	// A public page with a % keeps its markdown twin, in its own spelling.
 	const publicMapping = join(workDir, 'public.json');
 	writeFileSync(publicMapping, JSON.stringify({ schemaVersion: 1, routes: [{ path: '/devlog/7%public', asset: '/devlog/7%public.md' }] }));
 	const out = readFileSync(emitFile(['--gated-manifest', gatedManifest, '--markdown-manifest', publicMapping], 'public'), 'utf8');
