@@ -2499,12 +2499,17 @@ function matchForwardRule(rules, pathname, method) {
 // renderer spelling (normalizeVerdictPath). Either reading only widens what is gated: the fetch
 // handler still refuses an undecodable path that meets no rule (verdictPathUnreadable) rather
 // than handing it to ASSETS.
+//
+// The key is also tried in Unicode NFC, the form the build names every file in (the emitter
+// bakes rules the same way), so an NFD spelling of a members-only page meets its rule even if
+// the asset server folds the two forms. An NFC key is unchanged, so this too only widens.
 function matchVerdictRule(rules, pathname) {
 	const strict = verdictPathKey(pathname);
 	const key = strict !== null ? strict : verdictRequestKey(pathname);
+	const keys = key.normalize() === key ? [key] : [key, key.normalize()];
 	for (const rule of rules || []) {
 		const ruleKey = verdictRuleKey(rule);
-		if (ruleKey !== null && pathMatchesRule({ match: rule.match, value: ruleKey }, key)) return rule;
+		if (ruleKey !== null && keys.some((k) => pathMatchesRule({ match: rule.match, value: ruleKey }, k))) return rule;
 		if (strict === null && pathMatchesRule(rule, normalizeVerdictPath(pathname))) return rule;
 	}
 	return null;

@@ -46,9 +46,11 @@ const GATED = [
 	['/devlog/lead\u0001ctl', '/devlog/lead%01ctl', '/devlog/lead\u0001ctl'],
 	['/devlog/a+b:c@d,e;f=g&h$i!', '/devlog/a+b:c@d,e;f=g&h$i!', '/devlog/a+b:c@d,e;f=g&h$i!'],
 ];
-// Public neighbours, including the names the members-only paths above used to be keyed as.
+// Public neighbours, including the names the members-only paths above used to be keyed as. (No
+// NFD name: the build writes every file name in NFC, and an NFD request for an NFC members-only
+// name is judged, below.)
 const PUBLIC = ['/devlog/7%public', '/devlog/100%-%42', '/devlog/公開', '/devlog/100A', '/devlog/100%25',
-	'/devlog/c', '/devlog/why', '/devlog/q', '/devlog/trail', '/devlog/cafe\u0301', '/devlog/caf\u00e9-public'];
+	'/devlog/c', '/devlog/why', '/devlog/q', '/devlog/trail', '/devlog/caf\u00e9-public'];
 
 const escapeName = (file) => file.split('/').map(encodeURIComponent).join('/');
 const lowerHex = (path) => path.replace(/%[0-9A-F]{2}/g, (m) => m.toLowerCase());
@@ -100,7 +102,15 @@ test('matchVerdictRule: the spellings that reached a sanitised name (`#`, `?`, N
 	assert.equal(matchVerdictRule(rules, '/devlog/why%253F/')?.value, '/devlog/why%253F');
 	assert.equal(matchVerdictRule(rules, '/devlog/caf%C3%A9/')?.value, '/devlog/caf%C3%A9');
 	// The names these used to be keyed as are other pages.
-	for (const path of ['/devlog/c', '/devlog/why', '/devlog/cafe%CC%81/']) assert.equal(matchVerdictRule(rules, path), null, path);
+	for (const path of ['/devlog/c', '/devlog/why']) assert.equal(matchVerdictRule(rules, path), null, path);
+});
+
+test('matchVerdictRule: an NFD spelling of a members-only page is judged; one of a public page stays public', () => {
+	const rules = [{ match: 'exact', value: '/devlog/caf%C3%A9' }];
+	for (const path of ['/devlog/cafe%CC%81/', '/devlog/cafe%cc%81', '/devlog/cafe%CC%81/index.html']) {
+		assert.equal(matchVerdictRule(rules, path)?.value, '/devlog/caf%C3%A9', path);
+	}
+	for (const path of ['/devlog/cafe%CC%81-public/', '/devlog/cafe', '/devlog/cafe%CC%81%CC%81/']) assert.equal(matchVerdictRule(rules, path), null, path);
 });
 
 test('matchVerdictRule: a rule still written unescaped is keyed as the literal name', () => {
@@ -212,6 +222,15 @@ test('worker: a member is served the page from its raw link and its escaped spel
 			assert.equal(seenByAssets[0], request, spelling + ' serves the original request');
 		}
 	}
+});
+
+test('worker: an NFD request for an NFC members-only page asks for a verdict', async () => {
+	const { env, seenByRsp, seenByAssets } = makeEnv(DENY);
+	const res = await gatedSite.default.fetch(new Request('https://s.example/devlog/cafe%CC%81/'), env);
+	assert.equal(res.status, 404);
+	assert.equal(seenByRsp.length, 1);
+	assert.equal(seenByRsp[0].searchParams.get('path'), '/devlog/caf%C3%A9');
+	assert.deepEqual(seenByAssets, []);
 });
 
 test('worker: a public page with a % is served without a verdict (control)', async () => {
