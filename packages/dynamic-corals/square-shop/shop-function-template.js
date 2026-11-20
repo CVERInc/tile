@@ -2493,11 +2493,14 @@ function matchForwardRule(rules, pathname, method) {
 //
 // Both sides are compared as the asset server will read the request: the request path and
 // each rule's value go through verdictPathKey, so any spelling ASSETS would resolve to a
-// gated file meets that file's rule. A request path with a malformed escape has no such key;
-// it is matched only by its exact renderer spelling (normalizeVerdictPath), and the fetch
-// handler refuses it otherwise (verdictPathUnreadable) rather than handing it to ASSETS.
+// gated file meets that file's rule. A bare `%` (one not followed by two hex digits) is read as
+// the literal character it names, on both sides (verdictRequestKey, verdictRuleKey), so a page
+// whose file name holds one meets every spelling that reaches that file. A request path that
+// still cannot be decoded has no key; it is matched only by its exact renderer spelling
+// (normalizeVerdictPath), and the fetch handler refuses it otherwise (verdictPathUnreadable)
+// rather than handing it to ASSETS.
 function matchVerdictRule(rules, pathname) {
-	const key = verdictPathKey(pathname);
+	const key = verdictRequestKey(pathname);
 	for (const rule of rules || []) {
 		if (key === null) {
 			if (pathMatchesRule(rule, normalizeVerdictPath(pathname))) return rule;
@@ -2562,10 +2565,32 @@ function verdictPathKey(pathname) {
 	return key;
 }
 
+// A bare `%` — one not followed by two hex digits — spelled as the escape it stands for. The
+// renderer writes a page whose slug holds a bare `%` to a file of that literal name (a post slug
+// like `100%`), and its URL carries the `%` unencoded. The asset server reaches that file from
+// `/100%25`, which decodes to the name, so a rule written `/100%` must be keyed as `/100%25`:
+// left as it is, the rule has no key and never meets the escaped request. A valid escape is
+// never touched, so a path without a bare `%` keeps its key exactly.
+function escapeBarePercent(pathname) {
+	return pathname.replace(/%(?![0-9A-Fa-f]{2})/g, '%25');
+}
+
+// The key a REQUEST path is matched with. A path the asset server can decode keys as before
+// (and holds no bare `%`, since decodeURIComponent refuses one). A path that holds a bare `%`
+// is also keyed with that `%` read as a literal, so the renderer's own unencoded link to such a
+// page (`/100%`, `/100%/`, `/100%/index.html`) is judged under that page's rule. This key only
+// widens what is gated: verdictPathUnreadable still reads the strict key, so an undecodable
+// request that meets no rule is refused exactly as before and never handed to ASSETS.
+function verdictRequestKey(pathname) {
+	const key = verdictPathKey(pathname);
+	return key !== null ? key : verdictPathKey(escapeBarePercent(pathname));
+}
+
 // A rule's value in the same key space. A prefix keeps the trailing slash it was written with,
-// so /members/ still never claims /membersx.
+// so /members/ still never claims /membersx. A bare `%` in the value is the literal character
+// (escapeBarePercent); the emitter already spells it `%25`, and this covers a rule that was not.
 function verdictRuleKey(rule) {
-	const key = verdictPathKey(rule.value);
+	const key = verdictPathKey(escapeBarePercent(rule.value));
 	if (key === null) return null;
 	return rule.match !== 'exact' && key !== '/' && rule.value.endsWith('/') ? key + '/' : key;
 }
@@ -3102,7 +3127,7 @@ export {
 	stripDonorHead, injectHead, replaceMain, matchShop, matchShopIndex, matchShopComplete, matchNativeCheckoutSuccess, matchCheckoutResultFallback, COMPLETE_COPY, completionLocale, shouldClearCartForOutcome, cartAfterOrder, settleCartAfterOrder, completionBody, renderCompletion, parseCoralDiv, injectCoralGrid,
 	matchSiteOwnedBuyerPage, renderSiteOwnedBuyerPage,
 	matchSubscribeResult, renderSubscribeResult,
-	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath, verdictPathKey, verdictPathUnreadable, isGatedManifestPath,
+	pathMatchesRule, matchForwardRule, matchVerdictRule, normalizeVerdictPath, verdictPathKey, verdictRequestKey, verdictPathUnreadable, escapeBarePercent, isGatedManifestPath,
 	handleInboxForward, isSiteRelativePath, resolveInboxReturnPath, inboxRedirectResponse,
 	YT_POSTER_PATH, relayYoutubePoster,
 	platformReader,
