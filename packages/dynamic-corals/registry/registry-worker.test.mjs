@@ -87,7 +87,7 @@ const PATHS = [
   '/corals/sample/latest/missing.js',    // no such artifact
   '/corals/sample/nochannel/sample.js',  // unknown channel
   '/corals/nobody/latest/sample.js',     // unknown coral
-  '/corals/sample',                      // wrong shape
+  '/corals/sample/latest',               // wrong shape (one segment, /corals/sample, is a page: reef#2165)
 ];
 const STORED = new Set(['/sample/1.0.0/sample.js', '/sample/0.9.0/sample.js', '/sample/1.0.0/manifest.json']);
 

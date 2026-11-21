@@ -32,10 +32,22 @@ import manifest from 'coral-manifest';
 
 const EXACT = /^\d+\.\d+\.\d+$/;
 const CORS = { 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'nosniff' };
+// reef#2165 — a coral's PAGE is not a coral's file. `/corals`, `/corals/`, `/corals/<id>` and
+// `/corals/<id>/` are the catalogue pages the feelreef app serves, and `/corals/<id>/__data.json` and
+// `/corals/__data.json` are those pages' SvelteKit data routes (a client-side navigation that lands
+// on a coral page fetches one — the browser's Back button included — and a 404 there is the app's
+// error page, with no fallback to a document load), so all of them go on to the origin.
+// Every artifact path has three segments after `/corals` (`/corals/<id>/<ref>/<file>`) and cannot
+// match, whatever `<file>` is called; `/corals/manifest.json` has a `.` in the id position and
+// cannot match; neither can `%2F`, `..`, `//` or uppercase, so nothing that is not plainly one
+// id-shaped segment (plus, at most, the literal `__data.json`) leaves this worker.
+const PAGE = /^\/corals(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)?(?:\/|\/__data\.json)?$/;
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // A Worker's subrequest to its own route is not routed back into it: this reaches the origin.
+    if (PAGE.test(url.pathname)) return fetch(request);
     const parts = url.pathname.replace(/^\/corals\/?/, '').split('/').filter(Boolean);
 
     if (parts.length === 1 && parts[0] === 'manifest.json') {
