@@ -2297,6 +2297,79 @@ function inboxRedirectResponse(returnPath, outcome, returnFragment) {
 	return new Response(null, { status: 303, headers: { location: url.pathname + url.search + url.hash } });
 }
 
+// The page a submission came from, as an absolute URL on THIS site — what the platform stores as
+// `page_url` and shows the site's owner as a link. Built by RESOLVING the validated return path
+// against the site origin, never by appending text to it: `https://site.example` followed by a
+// posted `.evil.example/login` or `@evil.example/x` is a different host that still reads like
+// this one. Same result-side rule as `inboxRedirectResponse`: whatever the path gate admitted,
+// the resolved URL must still be on this origin and its path must not begin with `//`; either
+// failing gives the site root.
+function inboxPageUrl(returnPath, origin) {
+	const root = origin + '/';
+	try {
+		const url = new URL(returnPath, root);
+		if (url.origin !== origin || url.pathname.startsWith('//')) return root;
+		return url.href;
+	} catch (e) {
+		return root;
+	}
+}
+
+// What one submission may carry. Sized from what the `form` coral actually posts — `return_to`,
+// `thanks_to`, `return_fragment` (at most 128 bytes), the honeypot, and one text field per
+// authored `### label` — with room to spare, so no real form meets a limit:
+//   · body: 1 MiB. A script-less submit is urlencoded, where one CJK character costs nine bytes,
+//     so the longest single value below is under 300 KiB on the wire;
+//   · 100 fields, files included (the coral renders no file input; a File entry is counted and
+//     then ignored);
+//   · a field name of 256 characters (it is the author's own label), a value of 32768.
+// Past any of them the submission is refused with the existing `too_long` outcome.
+const INBOX_MAX_BODY_BYTES = 1048576;
+const INBOX_MAX_FIELDS = 100;
+const INBOX_MAX_FIELD_NAME_CHARS = 256;
+const INBOX_MAX_FIELD_VALUE_CHARS = 32768;
+
+// Reads the posted form with a ceiling on how much of it is ever held. `Request.formData()` alone
+// has none: it buffers the whole body, uploaded files included, before returning. Two checks,
+// because the first is only a claim:
+//   · a declared Content-Length over the cap is refused without reading a byte;
+//   · the body is then read chunk by chunk and abandoned the moment it passes the cap, which is
+//     what holds when the header is absent (a chunked upload) or understates the body.
+// Only the bytes that fit are parsed, through the same FormData parser as before, so both content
+// types the coral can send behave exactly as they did. Anything that fails to read or parse is
+// `{ form: null }` — an empty submission, not a refusal.
+async function readInboxForm(request) {
+	const declared = (request.headers.get('content-length') || '').trim();
+	if (/^[0-9]+$/.test(declared) && Number(declared) > INBOX_MAX_BODY_BYTES) return { tooLarge: true };
+	if (!request.body) return { form: null };
+	const reader = request.body.getReader();
+	const chunks = [];
+	let total = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			total += value.byteLength;
+			if (total > INBOX_MAX_BODY_BYTES) {
+				try { await reader.cancel(); } catch (e) { /* already errored or closed */ }
+				return { tooLarge: true };
+			}
+			chunks.push(value);
+		}
+	} catch (e) {
+		return { form: null };
+	}
+	const bytes = new Uint8Array(total);
+	let offset = 0;
+	for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+	const type = request.headers.get('content-type');
+	try {
+		return { form: await new Response(bytes, type ? { headers: { 'content-type': type } } : undefined).formData() };
+	} catch (e) {
+		return { form: null };
+	}
+}
+
 // ── /_yt/<id>.jpg — a YouTube line's poster, relayed (tile#148) ─────────────────────────
 // sitetile renders a paragraph that is only a YouTube link as a click-to-play block whose poster is
 // THIS path (cardtile/yt.mjs posterPath), never i.ytimg.com: a Google-hosted poster in the markup
@@ -2356,16 +2429,30 @@ async function handleInboxForward(request, CFG) {
 	// the same Workers Request.formData(). Anything else fails to parse; treated
 	// as an empty submission rather than a crash, same as a bot that sends
 	// nothing usable.
-	let form = null;
-	try { form = await request.formData(); } catch (e) { form = null; }
+	//
+	// Bounded before it is parsed (see `readInboxForm`). A body refused there was never read, so
+	// its `return_to` is unknown: the visitor goes back by the Referer's own path, or the site root.
+	const read = await readInboxForm(request);
+	if (read.tooLarge) return inboxRedirectResponse(resolveInboxReturnPath(undefined, referer, origin), 'too_long');
+	const form = read.form;
 	const raw = {};
+	let oversize = false;
 	if (form) {
+		let count = 0;
 		for (const [key, value] of form.entries()) {
-			if (typeof value === 'string') raw[key] = value; // a File entry is never a field's text value
+			count += 1;
+			if (count > INBOX_MAX_FIELDS || key.length > INBOX_MAX_FIELD_NAME_CHARS) { oversize = true; break; }
+			if (typeof value !== 'string') continue; // a File entry is never a field's text value
+			if (value.length > INBOX_MAX_FIELD_VALUE_CHARS) { oversize = true; break; }
+			raw[key] = value;
 		}
 	}
 
 	const returnPath = resolveInboxReturnPath(raw.return_to, referer, origin);
+	// Too many fields, or one too long: refused whole — never trimmed and forwarded, which would
+	// deliver a message its sender did not write. `return_to` is only trusted here if the loop
+	// reached it before stopping; otherwise this is the Referer-or-root fallback again.
+	if (oversize) return inboxRedirectResponse(returnPath, 'too_long');
 	// `thanks_to` (opt-in): posted by the coral, already validated once at
 	// build time (site-core.js's `safeInternalPath`, when the author wrote `thanks=`) — but a
 	// hidden field is still something a visitor's own browser tooling can edit before the
@@ -2395,7 +2482,9 @@ async function handleInboxForward(request, CFG) {
 	const visitorEmail = raw.visitor_email || raw.email_field || undefined;
 
 	const refUrl = sameOriginUrl(referer, origin);
-	const pageUrl = refUrl ? referer : origin + (typeof raw.return_to === 'string' ? raw.return_to : '');
+	// With no same-origin Referer, the page is the VALIDATED return path resolved on this origin
+	// (`inboxPageUrl`) — never the posted `return_to` glued onto the origin as text.
+	const pageUrl = refUrl ? referer : inboxPageUrl(returnPath, origin);
 
 	const payload = {
 		kind: 'site',

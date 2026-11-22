@@ -1585,3 +1585,83 @@ test('tile#345 stack, a pile of 22: a tap, a key, a wheel, a resize, a scroll, t
   settled(p, 'the wall and back');
   assert.equal(pageAt(p), 0, `the wall and back: the page is at card ${pageAt(p)}`);
 });
+
+// ── tile#351: a video, slides, pasted HTML or a social row that writes back=#id turns over to it ──────────────
+// On the wall these four keep what a tap already means on them (play, swipe, the HTML's own, an icon), so
+// the engine adds no door: it names the back on the cell (data-back) and the deck seats it in stack and list.
+const NAMED = {
+  embed: '- [ ] %% card: embed back=#about %% <p>hi</p>',
+  video: '- [ ] %% card: video yt=dQw4w9WgXcQ back=#about %%',
+  slides: '- [ ] %% card: slides back=#about %% ![a](https://example.com/a.jpg) ![b](https://example.com/b.jpg)',
+  social: '- [ ] %% card: social back=#about %% [IG](https://instagram.com/x)',
+};
+const namedCard = (view, lines) => ['---', 'card-page: specimen', 'title: Specimen', `view: ${view}`, '---', '', '## cards', '',
+  ...lines, '- [ ] %% card: text noback %% Last.', '', '## back: about | About', '', '- [ ] %% card: text %% The back.', ''].join('\n');
+/** run `act` and return every node that was inserted or moved anywhere in the document while it ran */
+const putsDuring = (p, act) => {
+  let proto = Object.getPrototypeOf(p.doc.documentElement);
+  while (proto && !Object.prototype.hasOwnProperty.call(proto, '_put')) proto = Object.getPrototypeOf(proto);
+  assert.ok(proto, 'CONTROL: the stand-in has one place every insertion goes through');
+  const real = proto._put, seen = [];
+  proto._put = function (n, ref) { seen.push(n); return real.call(this, n, ref); };
+  try { act(); } finally { proto._put = real; }
+  return seen;
+};
+// (with and without moveBefore: without it the deck takes loading="lazy" off a frame before it re-inserts it — see `eager` in
+// deck.js — so there the wall of a pasted-HTML tile is the engine's markup but for that one attribute, back= or not)
+for (const [type, line] of Object.entries(NAMED)) for (const moveBefore of [true, false]) {
+  test(`${type} with back=#about${moveBefore ? '' : ' (no moveBefore)'}: it turns over to that back in stack and in list, and on the wall the back is in its drawer`, () => {
+    const p = open(namedCard('stack', [line]), { moveBefore });
+    const lazyOff = type === 'embed' && !moveBefore;
+    const cell = p.cells[0], body = p.doc.querySelector('.dc-drawer-body'), drawer = p.doc.getElementById('about');
+    assert.equal(cell.dataset.coralType, type, 'CONTROL: the first tile is the subject');
+    assert.ok(body && drawer, 'CONTROL: the back is on the page');
+    assert.equal(cell.querySelectorAll('.st-back-door').length, 0, 'the tile has a door');
+    assert.equal(cell.querySelectorAll('[data-drawer]').length, 0, 'something in the tile opens the back on the wall');
+    const k = cell.closest('.deck-card');
+    for (const mode of ['stack', 'list', 'stack']) {
+      if (p.root.dataset.view !== mode) { p.press(mode); holds(p, mode, `→ ${mode}`); }
+      p.win.__deckJump(0); p.win.tick(1000);
+      assert.equal(k.dataset.back, 'about', `${mode}: the card does not name the back`);
+      assert.ok(k.classList.contains('can-flip'), `${mode}: the card cannot be turned over`);
+      turnOver(p, cell);
+      assert.ok(k.classList.contains('flipped') && p.root.classList.contains('open'), `${mode}: the card did not turn over`);
+      same(body.closest('.deck-card'), k, `${mode}: the card is turned over and the back it names is not on it`);
+      assert.ok(body.parentNode.classList.contains('deck-back-scroll'), `${mode}: the back is not the card's other side`);
+      assert.deepEqual(dupIds(p.doc), [], `${mode}: an id is in the document more than once`);
+      putBack(p);
+    }
+    p.press('wall');
+    if (lazyOff) assert.equal(wallMarkup(p.doc), p.before.wall.replace(' loading="lazy"', ''), 'stack → wall: the wall is not the engine\'s own markup (less the frame\'s loading="lazy")');
+    else holds(p, 'wall', 'stack → wall');
+    same(body.parentNode, drawer, 'on the wall the back is in its drawer');
+    same(cell.parentNode, p.before.parents[0], 'on the wall the tile is where the engine put it');
+    assert.equal(p.doc.querySelectorAll('main .st-back-door').length, 0, 'the wall has a door');
+  });
+}
+test('pasted HTML with back=#about: the frame is the engine\'s — same node, same sandbox — and turning the card over does not move it', () => {
+  for (const view of ['stack', 'list']) {
+    const p = open(namedCard(view, [NAMED.embed]));
+    const cell = p.cells[0], frame = cell.querySelector('iframe'), k = cell.closest('.deck-card');
+    assert.ok(frame, 'CONTROL: the tile has its frame');
+    assert.equal(frame.getAttribute('sandbox'), 'allow-scripts');
+    assert.equal(k.dataset.back, 'about', `${view}: the card does not name the back`);
+    const attrs = frame.outerHTML.slice(0, frame.outerHTML.indexOf('>') + 1);
+    p.win.__deckJump(0); p.win.tick(1000);
+    const body = p.doc.querySelector('.dc-drawer-body');
+    const moved = putsDuring(p, () => { turnOver(p, cell); putBack(p); turnOver(p, cell); });
+    assert.ok(k.classList.contains('flipped'), `${view}: CONTROL: the card is turned over`);
+    same(body.closest('.deck-card'), k, `${view}: the back it names is not on the card`);
+    // a frame that is taken out and put in again loads again: nothing that holds it may be inserted anywhere
+    assert.equal(moved.filter((n) => n === frame || (n.contains && n.contains(frame))).length, 0, `${view}: the frame, or something that holds it, was put into the document again`);
+    same(cell.querySelector('iframe'), frame, `${view}: the frame is another node`);
+    assert.ok(frame.isConnected && cell.contains(frame));
+    assert.equal(frame.outerHTML.slice(0, frame.outerHTML.indexOf('>') + 1), attrs, `${view}: the frame's attributes changed`);
+    assert.equal(p.doc.left.filter((n) => n === frame || (n.contains && n.contains(frame))).length, 0, `${view}: the frame left the document at some point`);
+  }
+});
+test('these tiles without back= are seated as they were: none of their cards names a back, and the back nobody names stays in its drawer', () => {
+  const p = open(namedCard('stack', Object.values(NAMED).map((l) => l.replace(' back=#about', ''))));
+  for (const c of p.cells) assert.ok(!c.closest('.deck-card').dataset.back, `a ${c.dataset.coralType} tile that names no back holds one`);
+  same(p.doc.querySelector('.dc-drawer-body').parentNode, p.doc.getElementById('about'), 'the back nobody names left its drawer');
+});

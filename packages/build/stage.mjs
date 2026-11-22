@@ -11,11 +11,17 @@
 // renderer's own demo posts and demo book build into your site, under your domain, with nothing
 // saying so.
 
-import { cp, mkdir, mkdtemp, readdir, rename, rm, stat } from 'node:fs/promises';
+import { constants as FS } from 'node:fs';
+import {
+  chmod, copyFile, cp, lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm, stat,
+} from 'node:fs/promises';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const exists = async (p) => { try { await stat(p); return true; } catch { return false; } };
+// …and the same question WITHOUT following a link, for anything a site supplies: a link is there
+// whether or not it leads anywhere, and "is it there" must not be answered by going where it points.
+const present = async (p) => { try { await lstat(p); return true; } catch { return false; } };
 
 // One spelling for the directory this module hides the renderer's own material in — it is named by
 // `.gitignore`, by the leftover check below, and by the tests, and those three must not drift.
@@ -38,6 +44,10 @@ export const ASTRO_SCRATCH = [['.astro', '.astro'], ['node_modules/.astro', 'nod
 // The `code` on the error restore() throws when it could not finish, so a program can tell "stopped,
 // renderer back" from "stopped, renderer wrecked" without parsing a sentence (#16, R3-3).
 export const RESTORE_FAILED = 'TILE_RESTORE_FAILED';
+
+// The `code` on the error thrown when something a site supplied is a symbolic link — in its posts,
+// its books, its media, or its theme file. See `copySiteTree`.
+export const LINK_REFUSED = 'TILE_LINK_REFUSED';
 
 /**
  * Reduce ONE page path to something safe to be a filename, keeping the slashes.
@@ -76,6 +86,259 @@ export function themeNameFromPages(pages) {
   return hit ? hit[1] : '';
 }
 
+// ── a site's own directories and files are let in WITHOUT following a link, at any step ─────────
+//
+// 🩸 THIS USED TO BE `cp(dir, …, { recursive: true })`, AND `cp` KEEPS A SYMBOLIC LINK AS A LINK.
+// Measured 2026-11-22: a site's `posts/leak.md -> ../secret.txt` arrived in the renderer's blog/ as
+// a link to that file's absolute path, readable through it, and a directory link arrived the same
+// way. The renderer reads blog/ and pagetile/ by glob and copies public/ into the output — so
+// whatever a link named ON THE BUILD MACHINE was on its way into a site that somebody else wrote.
+// A site's posts, books, media and theme file are an export, a clone or an unpacked archive: all
+// three carry links.
+//
+// The rule: nothing a site supplies may be a link. It is refused by name and the build fails.
+//   · Refused, not skipped: a skipped file is a site that built "successfully" one post or one
+//     image short, with nothing anywhere saying which.
+//   · Refused even when it points back inside the site: telling inside from outside means
+//     RESOLVING the link, and a link resolved in one step and read in the next is exactly the gap
+//     a swap goes through. Never asking where a link points is the only version without that step
+//     — and it is why a chain, a dangling link and a link to its own directory need no handling of
+//     their own.
+//   · The directory you NAME is held to it too — its last step must not be a link. The way TO it
+//     is yours (a mount point, a temp directory that is itself a link) and is resolved once.
+//
+// 🔴 AND THE COPY ITSELF NEVER FOLLOWS ONE, which is a different claim from "the tree was checked".
+// Each entry is looked at without following it, opened with O_NOFOLLOW, and then asked what it IS
+// through the handle that was opened; only that handle is ever read. A link put there between the look and the
+// open is refused by the open. O_NOFOLLOW guards only the LAST step of a path, though, so the
+// directories on the way are held as well:
+//   · Linux: a directory is opened once and its entries are addressed through that open directory
+//     (/proc/self/fd/<n>/<name>). Renaming it away and leaving a link in its place changes nothing
+//     about what is read.
+//   · elsewhere: by path, with the directory's identity (device, inode) re-checked after every
+//     open and before anything is written. That catches a swap that is still in place. One that
+//     is put back between the open and the re-check is not caught — Node has no openat() to close
+//     that with — and where O_NOFOLLOW does not exist at all (Windows) the last step rests on the
+//     lstat alone.
+const BIG = { bigint: true };
+const NOFOLLOW = FS.O_NOFOLLOW ?? 0;
+// O_NONBLOCK, so a FIFO put there after the look is opened and refused rather than waited on.
+const READ_FLAGS = FS.O_RDONLY | NOFOLLOW | (FS.O_NONBLOCK ?? 0);
+const DIR_FLAGS = READ_FLAGS | (FS.O_DIRECTORY ?? 0);
+// What an O_NOFOLLOW open answers when the last step is a link: Linux and macOS, FreeBSD, NetBSD.
+const LINK_ERRNO = new Set(['ELOOP', 'EMLINK', 'EFTYPE']);
+const sameEntry = (a, b) => a.ino === b.ino && a.dev === b.dev;
+
+const refusals = (what) => ({
+  link: (p, itself = false) => Object.assign(
+    new Error(`stageSite: the ${what} ${itself ? 'is' : 'holds'} a symbolic link — ${p}. A link in `
+      + 'what a site supplies is refused, never followed and never copied: it is how a file from '
+      + 'outside the site would end up in the built output. Put the file or directory itself there.'),
+    { code: LINK_REFUSED },
+  ),
+  kind: (p) => new Error(`stageSite: the ${what} holds something that is neither a file nor a `
+    + `directory — ${p}. Only those two are staged; remove it.`),
+  changed: (p, was) => new Error(`stageSite: the ${what} changed while it was being staged — ${p} is `
+    + `no longer the ${was} that was found there, and it was not copied. Run the build again once `
+    + "the site's files are at rest."),
+});
+
+// The path that was named, with everything ABOVE its last step resolved and the last step left alone.
+const anchorNamed = async (p) => {
+  const abs = path.resolve(p);
+  return path.join(await realpath(path.dirname(abs)), path.basename(abs));
+};
+
+// Write an already-open, already-vetted file to `dest`. The bytes come from the HANDLE, so nothing
+// that happens to the source path after the open can change what is written.
+//
+// 🔴 Created EXCLUSIVELY, and whatever is in the way is removed first rather than written THROUGH:
+// what sits at `dest` may be a link the renderer itself ships in public/, and following it would
+// put a site's file somewhere restore() does not look.
+//
+// `reopen` is the handle's own address under /proc (Linux, once proved to work — see copySiteTree):
+// the same open file, so the kernel can copy it the way `cp` did (in one call, sharing blocks where
+// the filesystem can) instead of the bytes being carried through this process a megabyte at a time.
+async function writeOut(handle, st, dest, reopen) {
+  const exclusively = async (write) => {
+    try { return await write(); } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      await rm(dest, { force: true });
+      return write();
+    }
+  };
+  if (reopen) {
+    await exclusively(() => copyFile(reopen, dest, FS.COPYFILE_EXCL));
+    return;
+  }
+  const out = await exclusively(() => open(dest, FS.O_WRONLY | FS.O_CREAT | FS.O_EXCL | NOFOLLOW, 0o600));
+  try {
+    // One byte more than the file, so an ordinary file is one read that comes back short.
+    const buf = Buffer.allocUnsafe(Math.min(Number(st.size) + 1, 1 << 20));
+    for (;;) {
+      const { bytesRead } = await handle.read(buf, 0, buf.length, null);
+      for (let done = 0; done < bytesRead;) {
+        done += (await out.write(buf, done, bytesRead - done, null)).bytesWritten;
+      }
+      if (bytesRead < buf.length) break;
+    }
+    await out.chmod(Number(st.mode & 0o7777n));   // the source's mode, as `cp` gave it
+  } finally {
+    await out.close();
+  }
+}
+
+// One file a site supplies (its theme), under the same rule as a file inside one of its directories.
+async function copySiteFile(srcFile, destFile, { what }) {
+  const refuse = refusals(what);
+  const named = await anchorNamed(srcFile);
+  if ((await lstat(named)).isSymbolicLink()) throw refuse.link(srcFile, true);
+  let handle;
+  try { handle = await open(named, READ_FLAGS); } catch (err) {
+    throw LINK_ERRNO.has(err.code) ? refuse.link(srcFile, true) : err;
+  }
+  try {
+    const st = await handle.stat(BIG);
+    if (!st.isFile()) throw new Error(`stageSite: ${what} is not a file: ${srcFile}`);
+    await writeOut(handle, st, destFile);
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Copy a directory a site supplies into `destDir`, merging into what is there and replacing files
+ * of the same path — what `cp(src, dest, { recursive: true, force: true })` does for a tree with
+ * no links in it — and refusing, by name, anything in it that is a symbolic link.
+ *
+ * Exported for the tests, which is also why the last two options exist.
+ *
+ * @param {string} srcDir
+ * @param {string} destDir
+ * @param {object} [o]
+ * @param {string} [o.what]        how the refusal names this directory ("blog dir", "assets dir")
+ * @param {(path: string) => any} [o.beforeOpen]  a seam for tests: awaited once an entry has been
+ *                                 looked at and found to be a plain file or directory, and before
+ *                                 it is opened — the instant a swap would have to land in.
+ * @param {boolean} [o.anchor=true]  `false` holds directories by path even where they can be held
+ *                                 open, so the path every other platform takes is tested on Linux.
+ */
+export async function copySiteTree(srcDir, destDir, { what = 'directory', beforeOpen, anchor = true } = {}) {
+  const refuse = refusals(what);
+  const rootPath = await anchorNamed(srcDir);
+  const rootSt = await lstat(rootPath, BIG);
+  if (rootSt.isSymbolicLink()) throw refuse.link(srcDir, true);
+  if (!rootSt.isDirectory()) throw new Error(`stageSite: ${what} is not a directory: ${srcDir}`);
+
+  // A directory, held one of two ways. `at` is how one of its entries is addressed, `held` throws
+  // if it is no longer the directory that was entered, `enter` is the no-follow way into a child,
+  // and `reopen` is the address of an already-open file for the kernel to copy from (see writeOut).
+  const byPath = (p, st, shown) => ({
+    st,
+    at: (name) => path.join(p, name),
+    reopen: () => undefined,
+    list: () => readdir(p, { withFileTypes: true }),
+    async held() {
+      const now = await lstat(p, BIG).catch(() => null);
+      if (now?.isSymbolicLink()) throw refuse.link(shown, shown === srcDir);
+      if (!now?.isDirectory() || !sameEntry(now, st)) throw refuse.changed(shown, 'directory');
+    },
+    async enter(name, shownChild) {
+      const now = await lstat(path.join(p, name), BIG);
+      if (now.isSymbolicLink()) throw refuse.link(shownChild);
+      if (!now.isDirectory()) throw refuse.changed(shownChild, 'directory');
+      await this.held();
+      return byPath(path.join(p, name), now, shownChild);
+    },
+    close: async () => {},
+  });
+  const byHandle = (handle, st) => {
+    const base = `/proc/self/fd/${handle.fd}`;
+    return {
+      st,
+      at: (name) => `${base}/${name}`,
+      reopen: (fh) => `/proc/self/fd/${fh.fd}`,
+      list: () => readdir(base, { withFileTypes: true }),
+      held: async () => {},   // nothing to re-check: `base` IS the open directory, whatever its path says now
+      async enter(name, shownChild) {
+        let child;
+        try { child = await open(`${base}/${name}`, DIR_FLAGS); } catch (err) {
+          // With O_DIRECTORY as well, Linux answers ENOTDIR for a link — ask which it was, without following.
+          if (err.code !== 'ENOTDIR' && !LINK_ERRNO.has(err.code)) throw err;
+          const now = await lstat(`${base}/${name}`).catch(() => null);
+          throw now?.isSymbolicLink() ? refuse.link(shownChild) : refuse.changed(shownChild, 'directory');
+        }
+        try { return byHandle(child, await child.stat(BIG)); } catch (err) { await child.close(); throw err; }
+      },
+      close: () => handle.close(),
+    };
+  };
+
+  let root = byPath(rootPath, rootSt, srcDir);
+  if (anchor && process.platform === 'linux') {
+    const handle = await open(rootPath, DIR_FLAGS);
+    const own = await handle.stat(BIG).catch(() => null);
+    // 🔴 Proved, not assumed: /proc may be absent or masked (a chroot, a hardened container), and
+    // an address that does not lead back to this very directory is not an anchor.
+    const via = await stat(`/proc/self/fd/${handle.fd}`, BIG).catch(() => null);
+    if (own && via && sameEntry(own, via)) root = byHandle(handle, own);
+    else await handle.close();
+  }
+
+  async function copyEntry(dir, name, shown, dest) {
+    let handle;
+    try { handle = await open(dir.at(name), READ_FLAGS); } catch (err) {
+      throw LINK_ERRNO.has(err.code) ? refuse.link(shown) : err;
+    }
+    try {
+      const st = await handle.stat(BIG);
+      if (!st.isFile()) throw refuse.changed(shown, 'file');
+      await dir.held();
+      await writeOut(handle, st, dest, dir.reopen(handle));
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async function copyDir(dir, shownDir, dest) {
+    // Sorted, so the entry a refusal names does not depend on the order a filesystem lists them in.
+    // 🔴 The listing's own answer to "what is this" is the look (it never follows a link, and costs
+    // nothing more per entry); the open below is what is trusted.
+    const entries = (await dir.list()).sort((a, b) => (a.name < b.name ? -1 : 1));
+    await dir.held();
+    for (const st of entries) {
+      const { name } = st;
+      const shown = path.join(shownDir, name);
+      const to = path.join(dest, name);
+      if (st.isSymbolicLink()) throw refuse.link(shown);
+      if (st.isDirectory()) {
+        await beforeOpen?.(shown);
+        const child = await dir.enter(name, shown);
+        try {
+          const had = (await lstat(to).catch(() => null))?.isDirectory();
+          if (!had) await mkdir(to);   // EEXIST if a file or a link is in the way: never descended through
+          await copyDir(child, shown, to);
+          if (!had) await chmod(to, Number(child.st.mode & 0o7777n));
+        } finally {
+          await child.close();
+        }
+      } else if (st.isFile()) {
+        await beforeOpen?.(shown);
+        await copyEntry(dir, name, shown, to);
+      } else {
+        throw refuse.kind(shown);
+      }
+    }
+  }
+
+  try {
+    await mkdir(destDir, { recursive: true });
+    await copyDir(root, srcDir, destDir);
+  } finally {
+    await root.close();
+  }
+}
+
 /**
  * Stage a site into the renderer, and hand back the way out.
  *
@@ -86,6 +349,8 @@ export function themeNameFromPages(pages) {
  * @param {string} [o.blogDir]     the site's posts, staged into blog/
  * @param {string} [o.pagetileDir] the site's books (*.book.md), staged into pagetile/
  * @param {string} [o.themeFile]   the site's compiled theme.css
+ *                                 🔴 None of these four may be, or hold, a symbolic link: staging
+ *                                 rejects with `code: LINK_REFUSED`, naming it. See `copySiteTree`.
  * @param {AbortSignal} [o.signal] abort STAGING: the renderer is put back and this rejects with an
  *                                 AbortError whose `cause` is `signal.reason`. 🔴 Only while this call
  *                                 is running: once it has returned, `restore` is the caller's and an
@@ -272,15 +537,15 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
 
     await takeOver(blogBuildDir, 'blog');
     if (blogDir) {
-      if (!(await exists(blogDir))) throw new Error(`stageSite: blog dir not found: ${blogDir}`);
-      await cp(blogDir, blogBuildDir, { recursive: true, force: true });
+      if (!(await present(blogDir))) throw new Error(`stageSite: blog dir not found: ${blogDir}`);
+      await copySiteTree(blogDir, blogBuildDir, { what: 'blog dir' });
     }
     checkAborted();
 
     await takeOver(pagetileBuildDir, 'pagetile');
     if (pagetileDir) {
-      if (!(await exists(pagetileDir))) throw new Error(`stageSite: pagetile dir not found: ${pagetileDir}`);
-      await cp(pagetileDir, pagetileBuildDir, { recursive: true, force: true });
+      if (!(await present(pagetileDir))) throw new Error(`stageSite: pagetile dir not found: ${pagetileDir}`);
+      await copySiteTree(pagetileDir, pagetileBuildDir, { what: 'pagetile dir' });
     }
     checkAborted();
 
@@ -300,7 +565,7 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
         + 'the baseline skin.');
     }
     if (themeFile) {
-      if (!(await exists(themeFile))) throw new Error(`stageSite: theme file not found: ${themeFile}`);
+      if (!(await present(themeFile))) throw new Error(`stageSite: theme file not found: ${themeFile}`);
       if (!themeName) throw new Error('stageSite: a themeFile was given but the IR declares no \'theme:\' — '
         + 'a site must say which skin it wears');
       await mkdir(themesDir, { recursive: true });
@@ -311,26 +576,31 @@ export async function stageSite({ astroDir, pages, assetsDir, blogDir, pagetileD
         throw new Error(`stageSite: the renderer already has a theme named '${themeName}' (${target}). `
           + 'Refusing to shadow it — a site theme and a shipped theme must never collide.');
       }
-      await cp(themeFile, target, { force: true });
+      // 🔴 The theme file travels with the export, beside ir/, so it is the site's own material as
+      // much as a post is. A plain copy staged a link here AS a link, and the renderer then bundled
+      // whatever it pointed at into the site's stylesheet.
+      await copySiteFile(themeFile, target, { what: 'theme file' });
       stagedTheme = target;   // only now is it OURS to remove
     }
     checkAborted();
 
     // ── the site's media, overlaid onto the renderer's public/ ──────────────────────────────────
     if (assetsDir) {
-      if (!(await exists(assetsDir))) throw new Error(`stageSite: assets dir not found: ${assetsDir}`);
+      if (!(await present(assetsDir))) throw new Error(`stageSite: assets dir not found: ${assetsDir}`);
       // The renderer's public/ may not exist at all — every site brings its own media, so an absent
       // public/ is a normal state to be created rather than died on.
       await mkdir(publicDir, { recursive: true });
       // public/ is COPIED aside rather than moved: the site's media is an overlay onto whatever the
       // renderer ships there, not a replacement for it.
+      // (A plain `cp`, links kept as links, is RIGHT for this one: it is the renderer's own
+      // material being set aside to come back exactly as it was, not a site's being let in.)
       await cp(publicDir, path.join(stash, 'public'), { recursive: true });
       stashed.add('public');
       touched.add('public');
       // 🩸 This overlay is a file-level REPLACE per path. A site shipping its own `_redirects`
       // therefore REPLACES the renderer's rather than merging with it. Merging is a deployment
       // concern and is deliberately not in this repo — see README §"What is deliberately NOT here".
-      await cp(assetsDir, publicDir, { recursive: true, force: true });
+      await copySiteTree(assetsDir, publicDir, { what: 'assets dir' });
     }
     checkAborted();
 
