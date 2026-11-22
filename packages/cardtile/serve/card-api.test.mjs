@@ -3159,9 +3159,21 @@ test('🔴 list_cards of 200 handles stays within the platform\'s 1000 subreques
     measured[state] = await countSubrequests(env, async () => { listed = await (await call(env, 'POST', '/_api/cards', { handles })).json(); });
     assert.equal(listed.cards.length, 200, `CONTROL ${state}: every card listed`);
   }
+  // the objects bound but not answering: list_cards stops at the first handle and answers 503
+  {
+    const env = envWith(seed);
+    const restore = failHeld(env, HELD_FAILURES['500']);
+    let res;
+    measured['object failing'] = await countSubrequests(env, async () => { res = await call(env, 'POST', '/_api/cards', { handles }); });
+    restore();
+    measured['object failing: status'] = res.status;
+  }
+  const failingStatus = measured['object failing: status'];
+  delete measured['object failing: status'];
   // generation 0 (a card from before generations) is the worst case: its body and its stop are each
-  // read under two keys. Measured: settled 600, first contact 1000, no object 1000.
+  // read under two keys. Measured: settled 600, first contact 1000, no object 1000, object failing 1.
   for (const [state, n] of Object.entries(measured)) assert.ok(n <= 1000, `${state}: ${n} subrequests for one list_cards`);
+  assert.equal(failingStatus, 503, 'object failing: list_cards did not answer 503');
 });
 
 test('🔴 a handle taken again after a delete: the new holder\'s list and previews never carry the previous card', async () => {
@@ -3202,14 +3214,73 @@ test('🔴 the read asks the object and changes nothing in it: no key written, n
   }
 });
 
-test('a Worker with no object bound, or whose object does not answer, reads KV as before', async () => {
+test('a Worker with no object bound reads KV as before', async () => {
   const unbound = { CARDS: fakeKv({ t: CARD }), MCP_TOKEN_HASH: TOKEN_HASH };
   assert.equal((await (await call(unbound, 'GET', '/_api/card/t')).json()).version, await cardVersion(CARD));
   assert.equal(await (await call(unbound, 'GET', '/_api/card/t/full')).text(), CARD);
   assert.equal((await call(unbound, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) })).status, 200);
-  const broken = envWith({ t: CARD });
-  broken.CARD_LIFETIMES = { idFromName: (name) => ({ name }), get: () => ({ fetch: async () => { throw new Error('object unreachable'); } }) };
-  assert.equal((await (await call(broken, 'GET', '/_api/card/t')).json()).version, await cardVersion(CARD));
+  assert.deepEqual((await (await call(unbound, 'POST', '/_api/cards', { handles: ['t'] })).json()).cards.map((c) => c.handle), ['t']);
+  assert.equal((await call(unbound, 'GET', '/_api/card/t/asset/x')).status, 405);
+});
+
+/**
+ * the handle's object is bound but its `/held` does not answer: it throws, answers non-ok, or answers
+ * something that is not an answer. Every other call reaches the real object (the delete went through it).
+ */
+const HELD_FAILURES = {
+  throws: async () => { throw new Error('object unreachable'); },
+  '500': async () => new Response('overloaded', { status: 500 }),
+  garbage: async () => new Response('{"gen":"not a generation"}', { status: 200 }),
+  'not json': async () => new Response('<html>', { status: 200 }),
+};
+const failHeld = (env, fail) => {
+  const ns = env.CARD_LIFETIMES, get = ns.get;
+  ns.get = (id) => {
+    const stub = get(id);
+    return { ...stub, fetch: (url, init) => (new URL(url).pathname === '/held' ? fail() : stub.fetch(url, init)) };
+  };
+  return () => { ns.get = get; };
+};
+
+test('🔴 a bound object that does not answer a read: 503 "read again" on every authenticated read, never KV\'s own gen:', async () => {
+  const seen503 = {};
+  for (const [mode, fail] of Object.entries(HELD_FAILURES)) {
+    const { env, seen } = await deletedFixture();
+    const restoreKv = lagKv(env, seen); // this location has not seen the delete, gen: included
+    const restoreHeld = failHeld(env, fail);
+    const answers = {};
+    for (const [route, req] of Object.entries({
+      list: ['POST', '/_api/cards', { handles: ['t'] }],
+      thin: ['GET', '/_api/card/t'],
+      full: ['GET', '/_api/card/t/full'],
+      preview: ['POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) }],
+      asset: ['GET', '/_api/card/t/asset/extra'],
+    })) {
+      const res = await call(env, ...req);
+      const body = await res.text();
+      answers[route] = [res.status, res.status === 503 ? JSON.parse(body).error : body.slice(0, 80)];
+    }
+    // CONTROL: the lag is real — KV alone, through the same view, still answers the deleted card
+    const kvSays = await call(kvOnly(env), 'GET', '/_api/card/t');
+    restoreHeld();
+    restoreKv();
+    assert.equal(kvSays.status, 200, `CONTROL ${mode}: the lagged view did not answer the deleted card`);
+    seen503[mode] = { ...answers, parked: parkedDrafts(env).length };
+  }
+  // every mode at once, so a red run names each one that was answered from KV
+  const refused = [503, 'read_failed'];
+  const want = { list: refused, thin: refused, full: refused, preview: refused, asset: refused, parked: 0 };
+  assert.deepEqual(seen503, Object.fromEntries(Object.keys(HELD_FAILURES).map((m) => [m, want])),
+    'a read whose object did not answer was answered from KV');
+});
+
+test('the 503 of an unanswered read says which handle and to read again', async () => {
+  const env = envWith({ t: CARD });
+  const restore = failHeld(env, HELD_FAILURES['500']);
+  const res = await call(env, 'GET', '/_api/card/t');
+  restore();
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: 'read_failed', why: '"t" was not read: its write queue did not answer. Read the card again.' });
 });
 
 test('🔴 a card adopted from KV and not yet settled is not answered from the object: the read stays on KV', async () => {
