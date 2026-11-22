@@ -9,7 +9,7 @@
 // 🔴 A HEADER, ON EVERY PERSON'S PAGE. Unless the setting is "off", every person's page, every preview
 // and both "no card" pages carry the policy, whatever the page holds: nothing a person writes, and
 // nothing in the rendered page, decides whether it is sent. The page's bytes are the same as with the
-// setting off, but for one attribute of an embed's frame (below). Nothing here changes the renderer or
+// setting off — under "enforce", but for one attribute of an embed's frame (below). Nothing here changes the renderer or
 // the deck (the editor's own module carries the renderer, so a change there would change the editor's
 // page whatever this setting says).
 //
@@ -51,13 +51,16 @@
 //   frame-ancestors is NOT sent. Today any site may frame a person's page (no X-Frame-Options, no
 //   policy), and this module keeps what a page does today.
 //
-// 🔴 AN `embed` IS ITS OWN DOCUMENT WHILE THE SETTING IS ON. An `about:srcdoc` document INHERITS its
+// 🔴 AN `embed` IS ITS OWN DOCUMENT WHILE THE POLICY IS ENFORCED. An `about:srcdoc` document INHERITS its
 // parent's whole policy: under the script-src above the author's own script — the one place a
 // person's script is meant to run — would be refused, and a hash of it in the parent's policy would
-// allow the same text in the parent. So with the setting on, the Worker writes each embed's frame
+// allow the same text in the parent. So under "enforce", the Worker writes each embed's frame
 // with `src` (a same-origin address, the same sandbox) instead of `srcdoc`, and answers that address
 // with the document under a policy of its own (cardtile-embed-document.mjs). The parent's policy
 // does not bend for it: it allows frames of its own origin, and nothing more.
+// Under report-only (the default) the frame stays srcdoc: the policy refuses nothing, so the author's script
+// runs as it always did, and the browser reports it — a report that "enforce" does not repeat, since there the
+// embed is its own document. The address answers in every stage (cardtile-embed-document.mjs says why).
 import { parseCard } from '../card-core.js';
 import { renderPage } from '../card-render.mjs';
 import { iconOnerror } from '../marks.mjs';

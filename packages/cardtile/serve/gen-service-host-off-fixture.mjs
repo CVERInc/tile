@@ -30,16 +30,19 @@ const DIR = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_PATH = join(DIR, 'service-host-off.fixture.json');
 
 // ── the grid: 3 stages × 7 hosts × 34 requests = 714 answers (and the wide grid, further down) ──────────────────────────────────────
-const cardsFile = (title) => `---\ncard-page: t\ntitle: ${title}\n---\n\n## grid\n\n- [ ] %% card: profile w=6 %% Public bio\n`;
+const cardsFile = (title, more = '') => `---\ncard-page: t\ntitle: ${title}\n---\n\n## grid\n\n- [ ] %% card: profile w=6 %% Public bio\n${more}`;
+// tile#372: a person's page and the preview hold an `embed` (the one tile whose frame a stage of the page's
+// policy can write differently), so the grid compares those pages' bodies with an embed on them
+export const GRID_EMBED = '- [ ] %% card: embed w=6 %% <b id="t">x</b><script>t.textContent = "ran"</script>\n';
 export const GRID_PREVIEW = 'b'.repeat(32);
 export const GRID_SEED = Object.freeze({
   feelreef: cardsFile('Stored platform page'),
-  aster: cardsFile('Aster'),
+  aster: cardsFile('Aster', GRID_EMBED),
   'pool:aster:0': 'in',
   'vanity:own.example': 'aster',
   'vanityof:aster:0': 'own.example',
   'vanitybind:aster:0:own.example': '1',
-  [`_preview:${GRID_PREVIEW}`]: cardsFile('A parked draft'),
+  [`_preview:${GRID_PREVIEW}`]: cardsFile('A parked draft', GRID_EMBED),
 });
 export const GRID_TOKEN = 'service-host-off-grid-token';
 const TOKEN_HASH = createHash('sha256').update(GRID_TOKEN).digest('hex');
@@ -77,9 +80,9 @@ export function gridCases() {
 /**
  * One answer, as the fixture keeps it. `extra` is merged over the stage's settings (the new settings,
  * in the values under test; {} for the capture). The body is kept as its size and hash; the headers
- * and the store reads whole, in order.
+ * and the store reads whole, in order. `{ text: true }` keeps the body's text as well (a test's, never the fixture's).
  */
-export async function answerOf(worker, { stage, host, path, init }, extra = {}) {
+export async function answerOf(worker, { stage, host, path, init }, extra = {}, { text = false } = {}) {
   const reads = [];
   const CARDS = {
     async get(k) { reads.push(k); return Object.hasOwn(GRID_SEED, k) ? GRID_SEED[k] : null; },
@@ -88,7 +91,7 @@ export async function answerOf(worker, { stage, host, path, init }, extra = {}) 
   const env = { PREVIEW: 'false', MCP_TOKEN_HASH: TOKEN_HASH, ...GRID_STAGES[stage], ...extra, CARDS };
   const res = await worker.fetch(new Request(`https://${host}${path}`, init), env);
   const body = Buffer.from(await res.arrayBuffer());
-  return { status: res.status, bytes: body.length, sha: createHash('sha256').update(body).digest('hex'), headers: [...res.headers], reads };
+  return { status: res.status, bytes: body.length, sha: createHash('sha256').update(body).digest('hex'), headers: [...res.headers], reads, ...(text ? { text: body.toString('utf8') } : {}) };
 }
 
 /** the one clock every answer of the grid is asked under */

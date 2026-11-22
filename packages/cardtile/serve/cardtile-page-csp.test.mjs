@@ -1,19 +1,22 @@
 // The Content-Security-Policy of a person's page (cardtile-page-csp.mjs), asked of the cardtile worker.
 //
 // What is proved here, without a browser:
-//   · the setting: exactly "report-only" or "enforce" is on; unset and everything else is off, and
-//     off is the committed before-fixture's 714 answers, byte for byte (service-host-off fixture);
-//   · on, only a header is added: every body, status and store read of the same 714 is unchanged;
+//   · the setting: report-only by default (unset, and every value but two); exactly "enforce" enforces and
+//     exactly "off" is off — and off is main's 714 answers, byte for byte (the service-host-off fixture,
+//     captured from main with an embed in its files);
+//   · report-only and enforce add a header: every body (report-only), status and store read of the same 714
+//     is main's; under enforce an embed's frame names its own document;
 //   · the STATIC CHECK: on a page holding every tile type, every inline script and every inline
 //     event handler the page carries is in the policy by hash, and every address class the page
 //     loads from is allowed — and the same check FAILS on a page with one script added;
 //   · the policy is on EVERY person's page and preview, whatever it holds: nothing a person writes, and
 //     nothing in the rendered page, decides whether it is sent (an embed, the word "embed" in a file
 //     served in windows, ` srcdoc="` in the page — the r1 review's cases);
-//   · with the setting on, an embed is its own document (cardtile-embed-document.mjs): its frame names a
+//   · enforced, an embed is its own document (cardtile-embed-document.mjs): its frame names a
 //     same-origin address with the same sandbox, that address answers with exactly the document the
-//     srcdoc held under a policy of its own, and only for an embed tile of the file it names; with the
-//     setting off that address is an unknown path, answer for answer;
+//     srcdoc held under a policy of its own, and only for an embed tile of the file it names; report-only
+//     and off keep the srcdoc. The address answers alike in every stage (a rollback), and an address the
+//     file no longer holds (an edit) is an empty document, never the "no card" page;
 //   · the setting leaves every other answer alone, the `.md` exits included (their nosniff is
 //     cardtile-md-nosniff.test.mjs, and does not depend on this setting).
 // What a browser does with the policy is verify/page-csp.mjs.
@@ -30,7 +33,7 @@ import { embedDocuments, framesAsDocuments, embedDocumentBody, EMBED_DOC_HEAD, E
 import { parseCard } from '../card-core.js';
 import { PICTURE_STRATEGIES } from './asset-urls.mjs';
 import { WINDOW_TILES } from './size-tier.mjs';
-import { GRID_STAGES, GRID_HOSTS, GRID_PREVIEW } from './gen-service-host-off-fixture.mjs';
+import { GRID_STAGES, GRID_HOSTS, GRID_PREVIEW, GRID_SEED, GRID_EMBED, wideCases, wideAnswerOf } from './gen-service-host-off-fixture.mjs';
 import { DECK_HEAD_JS, DECK_JS_PATH } from '../w3/deck-page.mjs';
 import { ON_DEMAND_TILES } from './size-tier.mjs';
 import { PNG, EVERY_TILE, PLAIN, WITH_EMBED, HOSTILE_FRONT, long, proseNamingEmbed, wordsNamingEmbed, EMBED_ON_BACK, OTHER_EMBED, RELATIVE_EMBED } from './cardtile-page-csp-fixtures.mjs';
@@ -163,14 +166,19 @@ test('unset: every page the Worker serves for a person carries the report-only p
     }
     assert.equal(d['frame-ancestors'], undefined, `${what}: frame-ancestors (today any site may frame a page)`);
     assert.equal(d['report-uri'] ?? d['report-to'], undefined, `${what}: a report endpoint (this Worker has none)`);
-    if (r.status === 200 && init?.method !== 'HEAD') assert.deepEqual(refusals(await r.text(), policy), [], `${what}: the page does not fit its own policy`);
+    // report-only keeps an embed srcdoc (the default's review): the one thing the policy would report on such a page is
+    // that frame — its script runs, and the browser reports it; under "enforce" the embed is its own document instead
+    const expected = ['a page with an embed', 'a person\'s own domain'].includes(what) ? ['a srcdoc frame (it inherits this policy)'] : [];   // both hold WITH_EMBED
+    if (r.status === 200 && init?.method !== 'HEAD') assert.deepEqual(refusals(await r.text(), policy), expected, `${what}: the page does not fit its own policy`);
     sentOn.push(what);
   }
-  // the embed's own document
+  // the embed: by default a srcdoc frame, as with the setting off (report-only refuses nothing, so its script runs);
+  // the document a page loaded under "enforce" names answers by default too, under its own policy
   const page = await (await get('http://localhost/embedded')).text();
   const [f] = framesOf(page);
-  assert.ok(f && f.src && !f.srcdoc, 'by default an embed is its own document');
-  const doc = await get(`http://localhost${f.src}`);
+  assert.ok(f && f.srcdoc && !f.src && !page.includes('/_embed/'), 'by default an embed is a srcdoc frame');
+  const [e] = framesOf(await (await worker.fetch(new Request('http://localhost/embedded'), { ...env, ...ON })).text());
+  const doc = await get(`http://localhost${e.src}`);
   assert.equal(doc.status, 200);
   assert.equal(doc.headers.get(ENFORCED), EMBED_DOCUMENT_POLICY);
   assert.equal(doc.headers.get('x-content-type-options'), 'nosniff');
@@ -416,7 +424,7 @@ const fromSrcdoc = (s) => s.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replac
 const EMBED_HEADERS = [['cache-control', 'public, max-age=60'], ['content-security-policy', EMBED_DOCUMENT_POLICY], ['content-type', 'text/html; charset=utf-8'],
   ['cross-origin-resource-policy', 'same-origin'], ['x-content-type-options', 'nosniff'], ['x-robots-tag', 'noindex']];
 
-test('setting on: an embed is its own document — same sandbox, a same-origin address, the srcdoc\'s document plus one base element, its own policy', async () => {
+test('enforced: an embed is its own document — same sandbox, a same-origin address, the srcdoc\'s document plus one base element, its own policy', async () => {
   assert.equal(EMBED_DOCUMENT_POLICY, 'sandbox allow-scripts');
   for (const [path, base, query, pageAt] of [['/embedded', '/embedded/', '', '/embedded'], ['/onback', '/onback/', '', '/onback'],
     [`/_preview/${'d'.repeat(32)}`, `/_preview/${'d'.repeat(32)}/`, '', `/_preview/${'d'.repeat(32)}`],
@@ -426,7 +434,7 @@ test('setting on: an embed is its own document — same sandbox, a same-origin a
     assert.equal(offFrames.length, 1, `${path}: the fixture holds one embed`);
     assert.ok(offFrames[0].srcdoc && !offFrames[0].src, `${path}: off, the embed is a srcdoc frame`);
     assert.ok(!off.includes('/_embed/'), `${path}: off, no embed address`);
-    for (const stage of ['report-only', 'enforce']) {
+    for (const stage of ['enforce']) {
       const r = await ask(path, { CARDS_PAGE_CSP: stage });
       const on = await r.text();
       const [f] = framesOf(on);
@@ -451,7 +459,7 @@ test('setting on: an embed is its own document — same sandbox, a same-origin a
   }
 });
 
-test('setting on, a person\'s own domain and the root card: the address is under the page\'s own base, and answers there', async () => {
+test('enforced, a person\'s own domain and the root card: the address is under the page\'s own base, and answers there', async () => {
   const seed = { aster: WITH_EMBED, 'vanity:own.example': 'aster', 'vanityof:aster:0': 'own.example', 'vanitybind:aster:0:own.example': '1' };
   const env = { CARDS: { get: async (k) => seed[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...ON, PREVIEW: 'false' };
   const page = await (await worker.fetch(new Request('https://own.example/'), env)).text();
@@ -469,7 +477,12 @@ test('the embed address cannot be made to answer with anything but an embed tile
   const theirs = framesOf(await (await ask('/other', ON)).text())[0].src;
   const unknown = await ask('/embedded/nope', ON);
   const unknownBody = await unknown.text();
+  // an embed address the file does not hold: the empty document, in every stage (the default's review)
   const missOn = async (path, why) => {
+    for (const [stage, s] of EVERY_STAGE) await isEmptyEmbed(await ask(path, s), `${why}, ${stage}: ${path}`);
+  };
+  // a path that is not an embed address at all: the unknown path it always was
+  const unknownOn = async (path, why) => {
     const r = await ask(path, ON);
     assert.equal(r.status, unknown.status, `${why}: ${path}`);
     assert.deepEqual([...r.headers], [...unknown.headers], `${why}: ${path}`);
@@ -481,25 +494,18 @@ test('the embed address cannot be made to answer with anything but an embed tile
   await missOn(`/embedded/_embed/${hexOf(await (await ask('/embedded')).text())}`, 'the page itself');
   await missOn(`/plain/_embed/${src.split('/').pop()}`, 'this embed under a handle that has none');
   await missOn(`/nobody/_embed/${src.split('/').pop()}`, 'a handle with no file');
-  await missOn(src.toUpperCase().replace('/EMBEDDED/_EMBED/', '/embedded/_embed/'), 'an upper-case hash');
-  await missOn(`${src}/`, 'a trailing slash');
+  await unknownOn(src.toUpperCase().replace('/EMBEDDED/_EMBED/', '/embedded/_embed/'), 'an upper-case hash');
+  await unknownOn(`${src}/`, 'a trailing slash');
   // the word "embed", a link address and an `embed kind=slider` are no embed tile: no frame, no document
   assert.deepEqual(await embedDocuments(parseCard(wordsNamingEmbed(ON_DEMAND_TILES + 5)), () => ''), []);
   // a window that does not hold the embed does not answer for it, nor does a window that does not exist
   const longSrc = framesOf(await (await ask(`/longembedded?w=${EMBED_WINDOW}`, ON)).text())[0].src;
   assert.equal((await ask(longSrc, ON)).status, 200);
-  for (const q of ['', '?w=1', `?w=${EMBED_WINDOW + 1}`, '?w=0', '?w=x']) {
-    const r = await ask(longSrc.replace(/\?.*$/, '') + q, ON);
-    assert.notEqual(r.status, 200, `the long file's embed answered at ${q || 'no window'}`);
-  }
-  // a preview's embed: under its own preview only
+  for (const q of ['', '?w=1', `?w=${EMBED_WINDOW + 1}`, '?w=0', '?w=x']) await missOn(longSrc.replace(/\?.*$/, '') + q, `the long file's embed at ${q || 'no window'}`);
+  // a preview's embed: under its own preview only (another preview, one that is gone, a hash it does not hold)
   const pv = framesOf(await (await ask(`/_preview/${'d'.repeat(32)}`, ON)).text())[0].src;
   assert.equal((await ask(pv, ON)).status, 200);
-  for (const p of [pv.replace('d'.repeat(32), 'c'.repeat(32)), pv.replace('d'.repeat(32), 'e'.repeat(32)), pv.replace(/[0-9a-f]{64}$/, '0'.repeat(64))]) {
-    const r = await ask(p, ON);
-    assert.equal(r.status, 404, p);
-    assert.equal(await r.text(), '', p);
-  }
+  for (const p of [pv.replace('d'.repeat(32), 'c'.repeat(32)), pv.replace('d'.repeat(32), 'e'.repeat(32)), pv.replace(/[0-9a-f]{64}$/, '0'.repeat(64))]) await missOn(p, 'not this preview\'s embed');
 });
 
 // ── r2: the second review's three findings, each with the review's own input ─────────────────────
@@ -524,7 +530,7 @@ test('r2 finding 1: an embed\'s relative addresses resolve as they did in its sr
   for (const [what, pageUrl, pageBase, get] of shapes) {
     const offFrames = framesOf(await (await get(pageUrl, OFF)).text());
     assert.equal(offFrames.length, 2, `${what}: two embeds`);
-    for (const stage of ['report-only', 'enforce']) {
+    for (const stage of ['enforce']) {
       const onFrames = framesOf(await (await get(pageUrl, { CARDS_PAGE_CSP: stage })).text());
       for (const [i, f] of onFrames.entries()) {
         const docUrl = new URL(f.src, pageUrl).href;
@@ -559,7 +565,7 @@ test('r2 finding 2: a Cards page framed by another site still shows its embeds �
   const ancestors = (r) => [r.headers.get(ENFORCED), r.headers.get(REPORTED)].filter(Boolean)
     .flatMap((p) => p.split(';').map((d) => d.trim()).filter((d) => /^frame-ancestors\b/i.test(d)));
   for (const path of ['/embedded', `/_preview/${'d'.repeat(32)}`]) {
-    for (const stage of ['report-only', 'enforce']) {
+    for (const stage of ['enforce']) {
       const page = await ask(path, { CARDS_PAGE_CSP: stage });
       const src = framesOf(await page.text())[0].src;
       const doc = await ask(src, { CARDS_PAGE_CSP: stage });
@@ -576,20 +582,15 @@ test('r2 finding 2: a Cards page framed by another site still shows its embeds �
   }
 });
 
-test('r2 finding 3: a missed embed address answers in the visitor\'s language and names the host they asked, as any missing page does', async () => {
+// r2 finding 3 asked a missed embed address to be the "no card" page in the visitor's language. The default's
+// review saw that page drawn inside an embed's box, and it is now the empty document: it has no words, so no
+// language — whatever the visitor's language or the host they asked, it is the same bytes.
+test('r2 finding 3, superseded: a missed embed address is the same empty document in every language and on every host', async () => {
   const env = { CARDS: store(), ...ON, CARD_CANONICAL_HOST: 'reef.cards' };
   const miss = `/aster/_embed/${'0'.repeat(64)}`;
-  for (const [how, q, init] of [['?lang=ja', '?lang=ja', {}], ['Accept-Language: ja', '', { headers: { 'accept-language': 'ja' } }]]) {
-    const ordinary = await worker.fetch(new Request(`https://reef.cards/aster/nope${q}`, init), env);
-    const got = await worker.fetch(new Request(`https://reef.cards${miss}${q}`, init), env);
-    const [want, body] = [await ordinary.text(), await got.text()];
-    // the control: an ordinary missing page speaks Japanese and links the host asked
-    assert.ok(want.includes('lang="ja-JP"') && want.includes('https://reef.cards/'), `${how}: the ordinary missing page`);
-    assert.equal(got.status, 404, how);
-    assert.ok(body.includes('lang="ja-JP"'), `${how}: the missed embed address is not in the visitor's language`);
-    assert.ok(body.includes('https://reef.cards/') && !body.includes('https://feelreef.com/'), `${how}: the missed embed address names another host`);
-    assert.equal(body, want, `${how}: not the ordinary missing page`);
-    assert.deepEqual([...got.headers], [...ordinary.headers], how);
+  for (const [how, u, init] of [['?lang=ja', `https://reef.cards${miss}?lang=ja`, {}], ['Accept-Language: ja', `https://reef.cards${miss}`, { headers: { 'accept-language': 'ja' } }],
+    ['a window', `https://reef.cards${miss}?w=2`, {}], ['plain', `https://reef.cards${miss}`, {}]]) {
+    await isEmptyEmbed(await worker.fetch(new Request(u, init), env), how);
   }
 });
 
@@ -644,7 +645,7 @@ test('r3: an author\'s own `<base href>` is honoured as in its srcdoc — the re
       assert.ok(srcdocDoc.endsWith(html), `${what}, ${where}: the author's HTML is the end of the srcdoc document`);
       // where the srcdoc's relative addresses go (the browser's answer, above)
       const srcdocBase = pick == null ? new URL(pageUrl).href : new URL(pick, pageUrl).href;
-      for (const stage of ['report-only', 'enforce']) {
+      for (const stage of ['enforce']) {
         const [f] = framesOf(await (await get(pageUrl, { CARDS_PAGE_CSP: stage })).text());
         const docUrl = new URL(f.src, pageUrl).href;
         const want = inject(pageBase, pageUrl, docUrl);
@@ -725,30 +726,53 @@ test('r4: finding the author\'s base is one pass over the document — twice the
   }
 });
 
-test('setting off: the embed address is an unknown path, answer for answer (status, headers, body, store reads) on every stage and host', async () => {
+// The default's review, finding 2, on the whole grid: an embed address answers the SAME in every stage of the
+// setting (so moving it — back to "off", or to the default — never changes what a loaded page's frame gets), and
+// it is never the rendered "no card" page. Each answer is the empty document, or — where the address does not
+// reach the embed route at all (a host with no Cards on it, a person's own domain whose file is gone, a method the
+// route does not take) — exactly what the same path with `_embee` answers there.
+test('the embed address answers alike in every stage of the setting, on every stage and host of the grid, and is never the rendered "no card" page', async () => {
   const hex = 'a'.repeat(64);
   const pairs = [[`/aster/_embed/${hex}`, `/aster/_embee/${hex}`], [`/_embed/${hex}`, `/_embee/${hex}`], [`/aster/_embed/${hex}?w=1`, `/aster/_embee/${hex}?w=1`],
     [`/_preview/${GRID_PREVIEW}/_embed/${hex}`, `/_preview/${GRID_PREVIEW}/_embee/${hex}`], [`/feelreef/_embed/${hex}`, `/feelreef/_embee/${hex}`]];
-  let compared = 0;
+  const kinds = new Map();
   const bad = [];
+  const isEmpty = (a) => a.status === 404 && JSON.stringify(a.headers) === JSON.stringify(EMPTY_EMBED_HEADERS);
+  // the page's own policy header follows the stage on a page (an unknown path's "no card" page carries it); the
+  // embed document's policy is its own and is compared
+  const noPagePolicy = (a) => ({ ...a, headers: a.headers.filter(([k, v]) => k !== REPORTED && !(k === ENFORCED && v !== EMBED_DOCUMENT_POLICY)) });
+  // `/_embed/<hash>` at a host's root is an embed address only on a person's own domain (a one-card host): a shared
+  // host's pages name `/<handle>/_embed/<hash>`, so there it is an unknown path, as any other
+  const written = (host, path) => !path.startsWith('/_embed/') || host === 'own.example';
   await atFixedClock(async () => {
     for (const stage of Object.keys(GRID_STAGES)) for (const host of GRID_HOSTS) for (const [path, sibling] of pairs) for (const init of [{}, { method: 'HEAD' }, { method: 'POST', body: 'x' }]) {
-      for (const extra of [OFF]) {
-        const got = await answerOf(worker, { stage, host, path, init }, extra);
-        const asked = await answerOf(worker, { stage, host, path: sibling, init }, extra);
+      const key = `${stage} ${host} ${init.method || 'GET'} ${path}`;
+      const answers = [];
+      for (const [, s] of EVERY_STAGE) answers.push(await answerOf(worker, { stage, host, path, init }, s));
+      for (const [i, a] of answers.entries()) { const d = answerDiff(noPagePolicy(a), noPagePolicy(answers[0])); if (d) bad.push(`${key}, ${EVERY_STAGE[i][0]}: ${d}`); }
+      const got = answers[0];
+      let kind;
+      if (isEmpty(got)) kind = 'the empty document';
+      else {
+        const asked = await answerOf(worker, { stage, host, path: sibling, init }, ON);
         // a redirect names the path it was asked: that one header is the sibling's path, and is read as ours
         const want = { ...asked, headers: asked.headers.map(([k, v]) => [k, k === 'location' ? v.replace('/_embee/', '/_embed/') : v]) };
         const d = answerDiff(got, want);
-        if (d) bad.push(`${stage} ${host} ${init.method || 'GET'} ${path}: ${d}`);
-        compared += 1;
+        if (d) bad.push(`${key}: neither the empty document nor the unknown path: ${d}`);
+        kind = `the unknown path: ${got.status}, ${got.bytes} bytes${written(host, path) ? '' : ' (not an embed address on this host)'}`;
+        if (got.status === 404 && got.bytes > 1000 && written(host, path)) bad.push(`${key}: the rendered "no card" page`);
       }
+      kinds.set(kind, (kinds.get(kind) || 0) + 1);
     }
   });
-  console.log(`# cardtile page csp off: ${compared} embed addresses compared with an unknown path, ${bad.length} mismatches`);
-  assert.deepEqual(bad, []);
-  // and a page with an embed is the srcdoc page
-  const off = await (await ask('/embedded')).text();
-  assert.ok(/<iframe sandbox="allow-scripts" srcdoc="/.test(off) && !off.includes('/_embed/'));
+  console.log(`# embed addresses on the grid, every stage of the setting: ${[...kinds].map(([k, n]) => `${n} × ${k}`).join(' | ')}`);
+  assert.deepEqual(bad.slice(0, 10), [], `${bad.length} mismatches`);
+  assert.ok((kinds.get('the empty document') || 0) > 0, 'CONTROL: no address reached the embed route');
+  // and a page with an embed is the srcdoc page, off and by default
+  for (const s of [OFF, {}]) {
+    const page = await (await ask('/embedded', s)).text();
+    assert.ok(/<iframe sandbox="allow-scripts" srcdoc="/.test(page) && !page.includes('/_embed/'));
+  }
 });
 
 test('r1: the boot line under the review\'s adversarial values — hashed, and running it runs nothing but data', async () => {
@@ -769,6 +793,127 @@ test('r1: the boot line under the review\'s adversarial values — hashed, and r
   }
   for (const [code, data] of [['window.__x="";alert(1);', false], ['window.__x={"x":(alert(1))};', false], ['window.__x="\\u0022;alert(1);//";', true], ['window.__proto__={};', false]]) {
     assert.equal(isBootData(code), data, code);
+  }
+});
+
+// ── the default's review: embeds stay srcdoc until "enforce"; an embed address never draws a "no card" page ──
+// What an embed address answers when the file no longer holds its document: an empty document, under the
+// embed document's own policy, never cached (a revert answers at once). Never the "no card" page — that
+// page, drawn inside an embed's box, is what the review saw (cardtile-embed-document.mjs embedMissResponse).
+const EMPTY_EMBED_HEADERS = [['cache-control', 'no-store'], ['content-security-policy', EMBED_DOCUMENT_POLICY], ['content-type', 'text/html; charset=utf-8'],
+  ['cross-origin-resource-policy', 'same-origin'], ['x-content-type-options', 'nosniff'], ['x-robots-tag', 'noindex, nofollow']];
+async function isEmptyEmbed(r, what) {
+  assert.equal(r.status, 404, `${what}: status`);
+  assert.deepEqual([...r.headers], EMPTY_EMBED_HEADERS, `${what}: headers`);
+  const body = await r.text();
+  assert.ok(!/Nothing here|<main|feelreef/i.test(body), `${what}: the "no card" page in the embed's box`);
+  assert.equal(body, EMBED_DOC_HEAD, `${what}: not the empty document`);
+}
+/** a store the test can edit between two requests, as an owner does while a page is open */
+const editable = (seed) => {
+  const s = { ...seed };
+  return { seed: s, CARDS: { get: async (k) => s[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } };
+};
+const PV_EDIT = '7'.repeat(32);
+const OWN_SEED = (handle, md) => ({ [handle]: md, 'vanity:own.example': handle, [`vanityof:${handle}:0`]: 'own.example', [`vanitybind:${handle}:0:own.example`]: '1' });
+// [what, the page's address, the store, the key the owner edits, the deployment's settings]
+const EDIT_SHAPES = [
+  ['a shared host', 'http://localhost/edited', { edited: WITH_EMBED }, 'edited', {}],
+  ['a person\'s own domain', 'https://own.example/', OWN_SEED('edited', WITH_EMBED), 'edited', { PREVIEW: 'false' }],
+  ['the root card', 'https://reef.cards/', { feelreef: WITH_EMBED }, 'feelreef', { CARD_CANONICAL_HOST: 'reef.cards', PREVIEW: 'false' }],
+  ['a preview', `http://localhost/_preview/${PV_EDIT}`, { [`_preview:${PV_EDIT}`]: WITH_EMBED }, `_preview:${PV_EDIT}`, {}],
+  ['a long file\'s window', `http://localhost/longedit?w=${EMBED_WINDOW}`, { longedit: CARDS.longembedded }, 'longedit', {}],
+];
+// every stage a Worker can be in when the frame's address is asked
+const EVERY_STAGE = [['enforce', ON], ['off', OFF], ['unset (report-only)', {}], ['"report-only"', { CARDS_PAGE_CSP: 'report-only' }]];
+
+test('the default\'s review, finding 1: an embed edited after its page was loaded — its address answers an empty document in every stage, never the "no card" page', async () => {
+  const edits = [
+    ['the embed\'s own HTML', (md) => md.replace('</script>\n', ';0</script>\n')],
+    ['the theme (every embed\'s hash)', (md) => md.replace('---\n', '---\ntheme: dark\n')],
+    ['the accent (every embed\'s hash)', (md) => md.replace('---\n', '---\naccent: "#0a7d5a"\n')],
+    ['the embed taken out', (md) => md.replace(/- \[ \] %% card: embed[^\n]*\n/, '')],
+    ['the file stopped', null],
+  ];
+  let asked = 0;
+  for (const [where, pageUrl, seed, key, extra] of EDIT_SHAPES) {
+    for (const [what, edit] of edits) {
+      const st = editable(seed);
+      const get = (u, s, init = {}) => worker.fetch(new Request(u, init), { CARDS: st.CARDS, ...extra, ...s });
+      // the page, loaded under "enforce" before the edit: its embed is its own document
+      const frames = framesOf(await (await get(pageUrl, ON)).text());
+      assert.equal(frames.length, 1, `${where}: one embed`);
+      const docUrl = new URL(frames[0].src, pageUrl).href;
+      assert.equal((await get(docUrl, ON)).status, 200, `CONTROL ${where}: before the edit its address answers`);
+      // the owner edits (or the file is stopped); the open tab's lazy frame then asks its address
+      if (edit) { st.seed[key] = edit(st.seed[key]); assert.notEqual(st.seed[key], seed[key], `${where} ${what}: the edit edited nothing`); }
+      else if (key.startsWith('_preview:')) delete st.seed[key];
+      else st.seed[`stop:${key}`] = '1';
+      for (const [stage, s] of EVERY_STAGE) {
+        if (!edit && where === 'a person\'s own domain') {
+          // a stopped file on a person's own domain: every address there answers as an unbound domain does (the
+          // binding is not public once the file is gone — card-worker.mjs), the embed's too: the small 404, no page of ours
+          const unbound = await get('https://own.example/wp-login.php', s);
+          const r = await get(docUrl, s);
+          assert.equal(r.status, 404);
+          assert.deepEqual([...r.headers], [...unbound.headers], `${where}, ${what}, ${stage}`);
+          assert.equal(await r.text(), await unbound.text(), `${where}, ${what}, ${stage}`);
+          continue;
+        }
+        await isEmptyEmbed(await get(docUrl, s), `${where}, ${what}, ${stage}`);
+        await isEmptyEmbed(await get(docUrl, s, { method: 'HEAD' }), `${where}, ${what}, ${stage}, HEAD`);
+        asked += 2;
+      }
+    }
+    // the same page loaded with the setting unset (the default) holds no address to ask: its embed is srcdoc
+    const before = await (await worker.fetch(new Request(pageUrl), { CARDS: editable(seed).CARDS, ...extra })).text();
+    assert.ok(!before.includes('/_embed/') && framesOf(before)[0].srcdoc, `${where}: by default the embed is not its own document`);
+  }
+  console.log(`# the default's review, finding 1: ${asked} edited embed addresses answered the empty document`);
+});
+
+test('the default\'s review, finding 2: a rollback with a page loaded before it — the embed addresses that page names answer as they did, in every stage', async () => {
+  let asked = 0;
+  for (const [where, pageUrl, seed, , extra] of [...EDIT_SHAPES, ['two embeds, relative addresses', 'http://localhost/aster', { aster: RELATIVE_EMBED(DECK_JS_PATH) }, 'aster', {}]]) {
+    const get = (u, s, init = {}) => worker.fetch(new Request(u, init), { CARDS: editable(seed).CARDS, ...extra, ...s });
+    // loaded while the Worker enforced
+    const frames = framesOf(await (await get(pageUrl, ON)).text());
+    assert.ok(frames.length >= 1 && frames.every((f) => f.src), `${where}: under "enforce" every embed is its own document`);
+    for (const f of frames) {
+      const docUrl = new URL(f.src, pageUrl).href;
+      const then = await get(docUrl, ON);
+      const body = await then.text();
+      assert.equal(then.status, 200, where);
+      // …asked after the setting went back ("off", or unset), or forward again
+      for (const [stage, s] of EVERY_STAGE) {
+        const r = await get(docUrl, s);
+        assert.equal(r.status, 200, `${where}, ${stage}: ${docUrl}`);
+        assert.deepEqual([...r.headers], [...then.headers], `${where}, ${stage}: headers`);
+        assert.equal(await r.text(), body, `${where}, ${stage}: not the document the page was loaded with`);
+        assert.equal((await get(docUrl, s, { method: 'HEAD' })).status, 200, `${where}, ${stage}: HEAD`);
+        asked += 1;
+      }
+    }
+  }
+  console.log(`# the default's review, finding 2: ${asked} embed addresses of an enforced page answered after the setting moved`);
+});
+
+test('the default\'s review, finding 3: report-only (the default) keeps every embed srcdoc — the page "off" serves, plus the header; only "enforce" names an address', async () => {
+  const own = editable(OWN_SEED('aster', WITH_EMBED));
+  const shapes = [['/embedded', store()], ['/onback', store()], [`/_preview/${'d'.repeat(32)}`, store()], [`/longembedded?w=${EMBED_WINDOW}`, store()],
+    ['/aster', store()], ['https://own.example/', own.CARDS]];
+  for (const [path, CARDS_] of shapes) {
+    const u = path.startsWith('https:') ? path : `http://localhost${path}`;
+    const get = (s) => worker.fetch(new Request(u), { CARDS: CARDS_, PREVIEW: 'false', ...s });
+    const off = await (await get(OFF)).text();
+    assert.ok(framesOf(off).length >= 1 && framesOf(off).every((f) => f.srcdoc), `${path}: off, srcdoc`);
+    for (const [name, s] of [['unset', {}], ['"report-only"', { CARDS_PAGE_CSP: 'report-only' }], ['a typo', { CARDS_PAGE_CSP: 'Enforce' }]]) {
+      const r = await get(s);
+      assert.ok(r.headers.get(REPORTED), `${path} ${name}: the report-only header`);
+      assert.equal(await r.text(), off, `${path} ${name}: the body is not the page "off" serves`);
+    }
+    const enforced = await (await get(ON)).text();
+    assert.ok(framesOf(enforced).every((f) => f.src && !f.srcdoc) && enforced.includes('/_embed/'), `${path}: enforce, every embed its own document`);
   }
 });
 
@@ -796,57 +941,115 @@ test('only a person\'s page, a preview and the "no card" pages: not the editor, 
   assert.deepEqual(own, ['localhost/edit?host=https://feelreef.com', 'reef.cards/report']);
 });
 
-// ── the fixture holds the default (report-only); "off" takes the one header away; "enforce" renames it ──
-// service-host-off.fixture.json is captured with every setting unset — since tile#372 that is report-only,
-// so a person's page, a preview and a "no card" page carry the report-only header there.
+// ── main, with an embed on its pages: "off" is main; the default adds one header; "enforce" renames it ──
+// service-host-off.fixture.json is main's Worker (its `base`, a commit on main) asked with every setting unset,
+// and its files hold an embed (GRID_EMBED) on a person's page and on the preview. So this compares the default
+// with main itself, embeds present — not this tree with a capture of its own.
 const FIXTURE = readFixture();
 const CASES = gridCases();
 const sorted = (headers) => [...headers].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-test('the default: all 714 answers of the fixture, byte for byte, headers and store reads included, under every spelling that is not "off" or "enforce"', async () => {
+// main sends no page policy: an answer of main that carries one has a policy of its own (the report page, host mode)
+const ownPolicy = (a) => a.headers.some(([k]) => k === ENFORCED || k === REPORTED);
+// a person's page or a preview (200, at these requests), or a "no card" page (404, at whatever path was missed)
+const PAGE_REQUEST = /^(GET|HEAD) \/(\?lang=ja|\?ref=aster|aster|aster\?utm=qr|feelreef|_preview\/b{32})?$/;
+const requestOf = (key) => key.split(' ').slice(2).join(' ');
+
+test('CONTROL: the fixture is main\'s Worker, and the grid\'s pages hold an embed — main\'s bytes, srcdoc', async () => {
+  assert.match(FIXTURE.base, /^[0-9a-f]{40}$/);
+  assert.ok(GRID_SEED.aster.includes(GRID_EMBED) && GRID_SEED[`_preview:${GRID_PREVIEW}`].includes(GRID_EMBED));
+  let pages = 0;
+  await atFixedClock(async () => {
+    for (const key of ['canonical own.example GET /', 'dark own.example GET /', `open card.feelreef.com GET /_preview/${GRID_PREVIEW}`, `canonical reef.cards GET /_preview/${GRID_PREVIEW}`]) {
+      const c = CASES.find((x) => x.key === key);
+      const got = await answerOf(worker, c, OFF, { text: true });
+      assert.equal(got.status, 200, key);
+      assert.equal(got.sha, FIXTURE.answers[key].sha, `${key}: not main's page`);
+      assert.match(got.text, /<iframe sandbox="allow-scripts" srcdoc="[^"]*t\.textContent = &quot;ran&quot;/, `${key}: the embed is not on the page`);
+      pages += 1;
+    }
+  });
+  assert.equal(pages, 4);
+});
+
+test('"off": all 714 answers and the 11,664 of the wide grid are main\'s, byte for byte — headers and store reads included', async () => {
+  const bad = [];
+  await atFixedClock(async () => {
+    for (const c of CASES) { const d = answerDiff(await answerOf(worker, c, OFF), FIXTURE.answers[c.key]); if (d) bad.push(`${c.key}: ${d}`); }
+    const wide = wideCases();
+    for (let i = 0; i < wide.length; i++) { const d = answerDiff(await wideAnswerOf(worker, wide[i], OFF), FIXTURE.wide[i]); if (d) bad.push(`${wide[i].key}: ${d}`); }
+  });
+  console.log(`# cardtile page csp "off": ${CASES.length} + 11664 answers compared with main, ${bad.length} mismatches`);
+  assert.deepEqual(bad.slice(0, 10), [], `${bad.length} mismatches`);
+});
+
+test('the default: of main\'s 714, people\'s pages, the preview and the "no card" pages carry one more header — the report-only policy — and nothing else differs, bodies with an embed included; under every spelling that is not "off" or "enforce"', async () => {
   for (const [name, extra] of [['unset', {}], ['"report-only"', { CARDS_PAGE_CSP: 'report-only' }], ['empty', { CARDS_PAGE_CSP: '' }], ['"1"', { CARDS_PAGE_CSP: '1' }],
     ['"Off"', { CARDS_PAGE_CSP: 'Off' }], ['another case', { CARDS_PAGE_CSP: 'Enforce' }], ['a trailing space', { CARDS_PAGE_CSP: 'off ' }], ['a typo', { CARDS_PAGE_CSP: 'enforced' }]]) {
     const bad = [];
-    await atFixedClock(async () => {
-      for (const c of CASES) { const d = answerDiff(await answerOf(worker, c, extra), FIXTURE.answers[c.key]); if (d) bad.push(`${c.key}: ${d}`); }
-    });
-    console.log(`# cardtile page csp ${name}: ${CASES.length} answers compared, ${bad.length} mismatches`);
-    assert.deepEqual(bad, [], name);
-  }
-});
-
-test('"off" and "enforce": of the same 714, only people\'s pages, the preview and the "no card" pages differ, and only by the one header', async () => {
-  for (const stage of ['off', 'enforce']) {
     const changed = [];
     await atFixedClock(async () => {
       for (const c of CASES) {
-        const got = await answerOf(worker, c, { CARDS_PAGE_CSP: stage });
+        const got = await answerOf(worker, c, extra);
         const want = FIXTURE.answers[c.key];
-        const ours = want.headers.find(([k]) => k === REPORTED);
-        // the report page and host mode have an enforcing policy of their own in the fixture: that one is not ours
-        const expected = !ours ? want : {
-          ...want,
-          headers: stage === 'off' ? want.headers.filter(([k]) => k !== REPORTED) : sorted(want.headers.map(([k, v]) => [k === REPORTED ? ENFORCED : k, v])),
-        };
-        assert.equal(answerDiff({ ...got, headers: ours && stage === 'enforce' ? sorted(got.headers) : got.headers }, expected), '', `${stage} ${c.key}`);
-        if (ours) {
-          assert.ok([200, 404].includes(got.status), c.key);
-          assert.ok(got.headers.some(([k, v]) => k === 'content-type' && v === 'text/html; charset=utf-8'), c.key);
+        const added = got.headers.filter(([k]) => k === REPORTED);
+        const d = answerDiff({ ...got, headers: got.headers.filter(([k]) => k !== REPORTED) }, want);
+        if (d) bad.push(`${c.key}: ${d}`);
+        if (added.length) {
+          if (ownPolicy(want) || added.length !== 1) bad.push(`${c.key}: the header on an answer with a policy of its own, or twice`);
+          if (!(want.status === 404 || PAGE_REQUEST.test(requestOf(c.key)))) bad.push(`${c.key}: an answer that is not a person's page carries the header`);
+          if (!got.headers.some(([k, v]) => k === 'content-type' && v === 'text/html; charset=utf-8')) bad.push(`${c.key}: not a page`);
           changed.push(c.key);
         }
       }
     });
-    const paths = [...new Set(changed.map((k) => k.split(' ').slice(2).join(' ')))].sort();
-    console.log(`# cardtile page csp ${stage}: ${changed.length} of ${CASES.length} answers differ from the default by the one header; requests: ${paths.join(' | ')}`);
-    assert.ok(changed.length > 0);
-    // a person's page or a preview (200), or a "no card" page (404, at whatever path was missed) — never a file,
-    // an API answer, the editor or the report page that was found
-    const notFoundShas = new Set();
-    for (const k of changed) {
-      const a = FIXTURE.answers[k];
-      if (a.status === 404) { notFoundShas.add(a.sha); continue; }
-      assert.match(k.split(' ').slice(2).join(' '), /^(GET|HEAD) \/(\?lang=ja|\?ref=aster|aster|aster\?utm=qr|feelreef|_preview\/b{32})?$/, `an answer that is not a person's page carries the header: ${k}`);
-    }
+    console.log(`# cardtile page csp ${name}: ${CASES.length} answers compared with main, ${bad.length} mismatches; ${changed.length} carry the one added header`);
+    assert.deepEqual(bad.slice(0, 10), [], name);
+    // the pages with the embed are among them: same body as main, plus the header
+    for (const k of ['canonical own.example GET /', 'dark own.example GET /', `open card.feelreef.com GET /_preview/${GRID_PREVIEW}`]) assert.ok(changed.includes(k), `${name}: ${k} carries no policy`);
+    const notFound = new Set(changed.filter((k) => FIXTURE.answers[k].status === 404).map((k) => FIXTURE.answers[k].sha));
     // the 404s are the "no card" pages: a handful of bodies (language × host asked, and the small one), not one per path
-    assert.ok(notFoundShas.size > 0 && notFoundShas.size <= 8, `${notFoundShas.size} distinct 404 bodies carry the header`);
+    assert.ok(notFound.size > 0 && notFound.size <= 8, `${name}: ${notFound.size} distinct 404 bodies carry the header`);
   }
+  // and the wide grid, unset: main's answers but for the one header
+  const bad = [];
+  await atFixedClock(async () => {
+    const wide = wideCases();
+    for (let i = 0; i < wide.length; i++) {
+      const got = await wideAnswerOf(worker, wide[i]);
+      const d = answerDiff({ ...got, headers: got.headers.filter(([k]) => k !== REPORTED) }, FIXTURE.wide[i]);
+      if (d) bad.push(`${wide[i].key}: ${d}`);
+    }
+  });
+  console.log(`# cardtile page csp unset, wide grid: 11664 answers compared with main, ${bad.length} mismatches`);
+  assert.deepEqual(bad.slice(0, 10), [], `${bad.length} mismatches`);
+});
+
+test('"enforce": of main\'s 714, the same answers carry the policy as the enforcing header, and a page with an embed differs from main by its frame\'s one attribute', async () => {
+  const changed = [];
+  let framed = 0;
+  await atFixedClock(async () => {
+    for (const c of CASES) {
+      const got = await answerOf(worker, c, ON, { text: true });
+      const want = FIXTURE.answers[c.key];
+      const ours = !ownPolicy(want) && got.headers.some(([k]) => k === ENFORCED);
+      const headers = ours ? got.headers.filter(([k]) => k !== ENFORCED) : got.headers;
+      if (got.sha !== want.sha) {
+        // the one body that may move: an embed's frame, `srcdoc="…"` → `src="<base>_embed/<hash>"` (main's own body is this tree's "off")
+        const off = await answerOf(worker, c, OFF, { text: true });
+        assert.equal(off.sha, want.sha, `${c.key}: "off" is not main`);
+        const [a] = framesOf(off.text);
+        const [b] = framesOf(got.text);
+        assert.ok(a && a.srcdoc && b && b.src && /_embed\/[0-9a-f]{64}$/.test(b.src), `${c.key}: a body moved that has no embed`);
+        assert.equal(got.text, off.text.replace(` srcdoc="${a.srcdoc}"`, ` src="${b.src}"`), `${c.key}: the page moved elsewhere than its embed's frame`);
+        framed += 1;
+        assert.equal(answerDiff({ ...got, sha: want.sha, bytes: want.bytes, headers }, want), '', c.key);
+      } else assert.equal(answerDiff({ ...got, headers }, want), '', `enforce ${c.key}`);
+      if (ours) {
+        assert.ok(want.status === 404 || PAGE_REQUEST.test(requestOf(c.key)), `an answer that is not a person's page carries the header: ${c.key}`);
+        changed.push(c.key);
+      }
+    }
+  });
+  console.log(`# cardtile page csp enforce: ${changed.length} of ${CASES.length} answers carry the enforcing policy; ${framed} pages with an embed name its document`);
+  assert.ok(changed.length > 0 && framed > 0);
 });

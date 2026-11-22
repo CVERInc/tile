@@ -205,15 +205,18 @@ PREVIEW = "false"
 #   enforce      `Content-Security-Policy`: the same policy text, enforced. A later step, after the
 #                reports have been read.
 #   off          No header; every answer as before.
-# On, EVERY person's page and preview, and both "no card" pages, carry it, whatever they hold. An `embed` is then its own document
-# (cardtile-embed-document.mjs): its frame names `<page>/_embed/<hash>` instead of carrying the HTML as
-# srcdoc (a srcdoc frame would inherit the page's policy and its script would not run), and that address
-# answers with the same document, plus one `<base href>` naming the page (so its relative addresses
-# resolve as they did in srcdoc), under `sandbox allow-scripts`. Like the page, it may be framed by any
-# site. Off, the frame is srcdoc and the address is an unknown path, as before. Nothing else on the page
-# changes in any stage.
-# Forward: read what browsers report, then "enforce". Back: "off"; the page is cached for 60 s, so the
-# header is gone within a minute.
+# On, EVERY person's page and preview, and both "no card" pages, carry it, whatever they hold. Report-only
+# adds the header and nothing else: every body is the body "off" serves. An embed's frame stays srcdoc, so
+# it inherits the report-only policy and the browser reports the author's own script (it runs).
+# Enforced, an `embed` is its own document (cardtile-embed-document.mjs): its frame names
+# `<page>/_embed/<hash>` instead of carrying the HTML as srcdoc (an enforced srcdoc frame would refuse its
+# script), and that address answers with the same document, plus one `<base href>` naming the page (so its
+# relative addresses resolve as they did in srcdoc), under `sandbox allow-scripts`. Like the page, it may
+# be framed by any site. That address answers in EVERY stage (a page loaded under "enforce" asks it after
+# the setting went back), and an address the file no longer holds answers an empty document.
+# Forward: "enforce" (there is no report endpoint: what browsers report is in each visitor's own console).
+# Back: "off"; the page is cached for 60 s, so the header is gone within a minute, and the embed addresses
+# pages loaded before it name keep answering.
 # CARDS_PAGE_CSP = "off"
 
 [[env.production.kv_namespaces]]

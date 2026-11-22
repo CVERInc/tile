@@ -18,12 +18,18 @@ import { gridCases, answerOf, answerDiff, atFixedClock, readFixture, GRID_STAGES
 const FIXTURE = readFixture();
 const CASES = gridCases();
 
+// tile#372: the page's policy is sent report-only by default, so this tree's people's pages carry one header
+// the fixture's Worker did not send. That header is cardtile-page-csp.test.mjs's to check (where on the grid,
+// and that it is the only difference); here it is the one header not compared.
+const POLICY_HEADER = 'content-security-policy-report-only';
+const withoutPolicy = (a) => ({ ...a, headers: a.headers.filter(([k]) => k !== POLICY_HEADER) });
+
 /** every case under `extra` settings → the list of mismatches against the fixture */
 async function mismatches(extra) {
   const out = [];
   await atFixedClock(async () => {
     for (const c of CASES) {
-      const d = answerDiff(await answerOf(worker, c, extra), FIXTURE.answers[c.key]);
+      const d = answerDiff(withoutPolicy(await answerOf(worker, c, extra)), FIXTURE.answers[c.key]);
       if (d) out.push(`${c.key}: ${d}`);
     }
   });
@@ -88,12 +94,9 @@ test('CONTROL: the comparison can fail — with both settings on, answers differ
   let pages = 0;
   await atFixedClock(async () => {
     for (const c of CASES.filter((x) => x.stage === 'canonical' && !ROLES.includes(x.host))) {
-      const got = await answerOf(worker, c, ON), want = FIXTURE.answers[c.key];
+      const got = withoutPolicy(await answerOf(worker, c, ON)), want = FIXTURE.answers[c.key];
       assert.equal(got.status, want.status, c.key);
-      // the page's report-only policy (tile#372) hashes the page's boot line, so it follows the moved text:
-      // its hashes may differ where the body did, and nothing else in it may
-      const hashless = (h) => h.map(([k, v]) => [k, k === 'content-security-policy-report-only' ? v.replace(/'sha256-[^']*'/g, 'H') : v]);
-      assert.deepEqual(got.sha === want.sha ? got.headers : hashless(got.headers), got.sha === want.sha ? want.headers : hashless(want.headers), c.key);
+      assert.deepEqual(got.headers, want.headers, c.key);
       assert.deepEqual(got.reads, want.reads, c.key);
       if (got.sha !== want.sha) {
         pages += 1;
@@ -114,7 +117,7 @@ async function wideMismatches(extra) {
   const out = [];
   await atFixedClock(async () => {
     for (let i = 0; i < WIDE.length; i++) {
-      const d = answerDiff(await wideAnswerOf(worker, WIDE[i], extra), FIXTURE.wide[i]);
+      const d = answerDiff(withoutPolicy(await wideAnswerOf(worker, WIDE[i], extra)), FIXTURE.wide[i]);
       if (d) out.push(`${WIDE[i].key}: ${d}`);
     }
   });
@@ -163,7 +166,7 @@ test('the wide comparison can fail — switched on, a stand-in answers as its ro
       asked += 1;
       const withList = await wideAnswerOf(worker, c, WITH);
       // against the Worker that had no such setting
-      if (answerDiff(withList, FIXTURE.wide[i])) moved[c.deployment].add(c.host);
+      if (answerDiff(withoutPolicy(withList), FIXTURE.wide[i])) moved[c.deployment].add(c.host);
       // against this Worker without the list: in production the list is not read at all
       if (c.deployment === 'production' && answerDiff(withList, await wideAnswerOf(worker, c, ON))) differ += 1;
     }

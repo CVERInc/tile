@@ -189,10 +189,7 @@ test('every tile of every window is the tile the whole-file render draws, byte f
   assert.ok(tilesIn(md) > LINE, 'CONTROL: past the line');
   const full = partsOf(renderCardHTML(md, resolvedOwn()));
   assert.ok(full.tiles.length > 6000, 'CONTROL: the whole render draws the tiles');
-  // compared with the whole-file render, which writes an embed's frame as srcdoc: the page's policy "off"
-  // keeps it so (with the policy on — the default — an embed is its own document in every window alike;
-  // cardtile-page-csp.test.mjs asks that of a long file's windows)
-  const env = envOf(md, { extra: { CARDS_PAGE_CSP: 'off' } });
+  const env = envOf(md);
   const windows = await walk(env, `https://${OWN}/`);
   assert.ok(windows.length >= 7, `CONTROL: ${windows.length} windows`);
   const seen = [];
