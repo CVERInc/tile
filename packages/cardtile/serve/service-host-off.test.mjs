@@ -90,7 +90,10 @@ test('CONTROL: the comparison can fail — with both settings on, answers differ
     for (const c of CASES.filter((x) => x.stage === 'canonical' && !ROLES.includes(x.host))) {
       const got = await answerOf(worker, c, ON), want = FIXTURE.answers[c.key];
       assert.equal(got.status, want.status, c.key);
-      assert.deepEqual(got.headers, want.headers, c.key);
+      // the page's report-only policy (tile#372) hashes the page's boot line, so it follows the moved text:
+      // its hashes may differ where the body did, and nothing else in it may
+      const hashless = (h) => h.map(([k, v]) => [k, k === 'content-security-policy-report-only' ? v.replace(/'sha256-[^']*'/g, 'H') : v]);
+      assert.deepEqual(got.sha === want.sha ? got.headers : hashless(got.headers), got.sha === want.sha ? want.headers : hashless(want.headers), c.key);
       assert.deepEqual(got.reads, want.reads, c.key);
       if (got.sha !== want.sha) {
         pages += 1;

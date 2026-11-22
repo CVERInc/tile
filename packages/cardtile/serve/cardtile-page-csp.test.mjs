@@ -838,10 +838,15 @@ test('"off" and "enforce": of the same 714, only people\'s pages, the preview an
     const paths = [...new Set(changed.map((k) => k.split(' ').slice(2).join(' ')))].sort();
     console.log(`# cardtile page csp ${stage}: ${changed.length} of ${CASES.length} answers differ from the default by the one header; requests: ${paths.join(' | ')}`);
     assert.ok(changed.length > 0);
-    // a person's page, a preview, a "no card" page — nothing the fixture asks that is a file, an API, the editor or the report
+    // a person's page or a preview (200), or a "no card" page (404, at whatever path was missed) — never a file,
+    // an API answer, the editor or the report page that was found
+    const notFoundShas = new Set();
     for (const k of changed) {
-      const p = k.split(' ').slice(2).join(' ');
-      assert.doesNotMatch(p, /\.md$|\/avatar|favicon|_api|\/edit|\/try\/|\/report|\.well-known|\/_cards\//, `an answer that is not a page carries the header: ${k}`);
+      const a = FIXTURE.answers[k];
+      if (a.status === 404) { notFoundShas.add(a.sha); continue; }
+      assert.match(k.split(' ').slice(2).join(' '), /^(GET|HEAD) \/(\?lang=ja|\?ref=aster|aster|aster\?utm=qr|feelreef|_preview\/b{32})?$/, `an answer that is not a person's page carries the header: ${k}`);
     }
+    // the 404s are the "no card" pages: a handful of bodies (language × host asked, and the small one), not one per path
+    assert.ok(notFoundShas.size > 0 && notFoundShas.size <= 8, `${notFoundShas.size} distinct 404 bodies carry the header`);
   }
 });
