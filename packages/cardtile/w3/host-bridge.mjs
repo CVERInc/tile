@@ -188,6 +188,9 @@ export function createHostBridge({
       st.timer = setTimer(flushChange, debounceMs);
     },
 
+    /** send a waiting card:change now: the page is going away, and the debounce would never fire */
+    flush() { if (st.timer) { clearTimer(st.timer); flushChange(); } },
+
     /** Save pressed (or Cmd/Ctrl+S). Returns false when there is nothing to do. */
     save() {
       if (!st.loaded || st.status === 'saving') return false;
