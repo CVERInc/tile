@@ -174,3 +174,28 @@ test('a save naming a disallowed scheme is refused (422 card_url_scheme) and not
   const ok = await save(mk('- [ ] %% card: link w=3 %% [x](mailto:hello@example.com)'));
   assert.equal(ok.res.status, 200, JSON.stringify(ok.body));
 });
+
+test('a destination refused for a control character says so and names it, never a scheme it does not have', async () => {
+  const cases = [
+    // [cell, the refused value as written, the character named]
+    ['- [ ] %% card: feature w=3 img=https://ok.example/a\u0001b.png title=x %%', 'https://ok.example/a\u0001b.png', 'U+0001'],
+    ['- [ ] %% card: embed kind=bubbles images=https://i.example/1.png bg="https://e.example/a\u000cb" %%', 'https://e.example/a\u000cb', 'U+000C'],
+    ['- [ ] %% card: link w=3 %% [x](https://ok.example/a\u007fb)', 'https://ok.example/a\u007fb', 'U+007F'],
+    // entity-encoded: the character a browser would read, as the renderer's gate reads it
+    ['- [ ] %% card: link w=3 %% [x](https://ok.example/a&#x7f;b)', 'https://ok.example/a&#x7f;b', 'U+007F'],
+  ];
+  for (const [cell, url, ch] of cases) {
+    const r = await save(mk(cell));
+    assert.equal(r.res.status, 422, cell);
+    assert.equal(r.body.error, 'card_url_control_character', JSON.stringify(r.body));
+    assert.equal(r.body.url, url);
+    assert.equal(r.body.character, ch);
+    assert.deepEqual(r.body.refused, [url]);
+    assert.equal(r.body.message, `Links and pictures in Cards cannot contain a control character. ${JSON.stringify(url)} contains ${ch}. Remove it and save again.`);
+    assert.doesNotMatch(r.body.message, /scheme/);
+    assert.equal(r.store.puts, 0, 'nothing written');
+  }
+  // a refused scheme is still reported as one
+  const js = await save(mk('- [ ] %% card: link w=3 %% [x](javascript:void(0))'));
+  assert.equal(js.body.error, 'card_url_scheme');
+});

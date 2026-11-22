@@ -6,7 +6,7 @@ import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
   ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
   safeHref, safeSrc, safeInternalPath, quoteRunReport, softJoin, INBOX_FORM_SCRIPT,
-  hrefAllowed, imageSrcAllowed, cssUrlString, parseParams as paramsOf, heroVariant } from './site-core.js';
+  hrefAllowed, imageSrcAllowed, cssUrlString, parseParams as paramsOf, heroVariant, destControlCharacter } from './site-core.js';
 import { emitHero } from '../emit/hero.mjs';
 import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
 import { contentRelsOf } from './locale.mjs';
@@ -1182,6 +1182,22 @@ test('destination gates: every C0 control character and DEL is refused, wherever
   assert.ok(drops.length > 0 && drops.every((d) => d.scheme === '(control character)'),
     'each refusal is reported as a control character, not as the scheme the cleaned value resolves to: '
     + JSON.stringify([...new Set(drops.map((d) => d.scheme))]));
+});
+
+test('destControlCharacter: names the character the gate refuses, read the way the gate reads it, and nothing else', () => {
+  for (let n = 0; n <= 0x20; n++) {
+    const c = String.fromCharCode(n === 0x20 ? 0x7f : n);
+    const want = `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+    assert.equal(destControlCharacter('https://ok.example/a' + c + 'b.png'), want);
+    // agreement with the gate: whatever it names, the gate refuses
+    assert.equal(hrefAllowed('https://ok.example/a' + c + 'b'), false);
+  }
+  assert.equal(destControlCharacter('https://ok.example/a\u0001b\u0002'), 'U+0001', 'the first one');
+  assert.equal(destControlCharacter('https://ok.example/a&#x7f;b'), 'U+007F', 'entity-decoded, as the gate reads it');
+  assert.equal(destControlCharacter('https://ok.example/a&#9;b'), 'U+0009');
+  for (const fine of ['https://ok.example/a.png', 'javascript:void(0)', '/a b', '/a%0Cb', '', null, undefined, 'https://ok.example/a&#1;b']) {
+    assert.equal(destControlCharacter(fine), null, JSON.stringify(fine));
+  }
 });
 
 test('destination gates: what an ordinary address may carry is still admitted, unchanged', () => {

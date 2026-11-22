@@ -1142,6 +1142,14 @@ function recordDrop(rawDest, schemeOverride) {
 // keeps an entity from decoding to a C0 control other than tab/LF/CR, and those three are
 // refused here with the rest.
 const RE_DEST_CONTROL = /[\u0000-\u001f\u007f]/;
+// The first control character RE_DEST_CONTROL refuses in `dest`, as `U+XXXX`, read the way the gate
+// reads it (entity-decoded once); null when there is none. For a host that tells an author WHY a
+// destination was refused (cardtile's save): a control character is not a scheme, and saying it
+// was would point the author at the wrong part of the address.
+function destControlCharacter(dest) {
+  const m = RE_DEST_CONTROL.exec(decodeEntitiesOnce(dest));
+  return m ? `U+${m[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}` : null;
+}
 // hrefAllowed: the policy itself, with no side effect — isSafeHref is this plus the drop record. A
 // host that renders outside a site build (cardtile's Card Worker) asks THIS, so the one allowlist is
 // shared without the build-time queue growing for the life of a Worker isolate.
@@ -3815,6 +3823,8 @@ export {
   safeHref, safeSrc,
   // the same policy without the build-time drop record (cardtile's Card links and images)
   hrefAllowed, imageSrcAllowed,
+  // …and the one reason that policy gives that is not a scheme: the control character, named
+  destControlCharacter,
   // reef#2857: the text-free hero predicate and the page-h1 owner both renderers share.
   heroHeadingless, pageH1Index,
   // reef#2857 r2: the hero variant selection (Hero.astro) and the h1-capable type test (Section.astro).

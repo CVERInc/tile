@@ -23,6 +23,7 @@
 // held only by the hosted Worker.
 import { parseCard, serializeCard, mergeAssets, CARD_MAX_BYTES, embedsOverCeiling } from '../card-core.js';
 import { cardDestinations, cardLinkReport } from './card-destinations.mjs';
+import { destControlCharacter } from '../../sitetile/site-core.js';
 import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
 import { handleVanity } from './card-vanity.mjs';
@@ -2009,6 +2010,15 @@ async function routeApi(request, env, url) {
       // Card link destinations accept only safe URL schemes: a link or picture the renderer would not
       // write (it would show as plain text, or not at all) is refused by name, not stored silently.
       if (refused.length) {
+        // A destination carrying a control character is refused for that, whatever its scheme
+        // (`https://…/a<U+0001>b.png` is https): say so, and name the character.
+        const character = destControlCharacter(refused[0]);
+        if (character) {
+          return json({
+            error: 'card_url_control_character', url: refused[0], refused, character,
+            message: `Links and pictures in Cards cannot contain a control character. ${JSON.stringify(refused[0])} contains ${character}. Remove it and save again.`,
+          }, 422);
+        }
         return json({
           error: 'card_url_scheme', url: refused[0], refused,
           message: `Card link destinations accept only safe URL schemes (http, https, mailto, tel; pictures also a raster data:image). ${JSON.stringify(refused[0])} is not one of them. Change or remove it and save again.`,
