@@ -1979,6 +1979,25 @@ function speechIsListItem(body, i) {
   return next != null && (RE_TURN_BULLET.test(next) || RE_LIST_ORDERED.test(next));
 }
 
+// An Obsidian callout (GitHub alerts are the same shape): a quote block whose FIRST line opens with
+// `[!type]`, optionally a fold marker (`-`/`+`), optionally a title after a space.
+//
+//     > [!note] Optional title
+//     > The body.
+//
+// There is no callout design here and this adds none. What it prevents is the tag being printed:
+// it used to land in the paragraph as literal text. The block renders as the same `st-quote` it
+// always was, minus the tag; the type is kept as `st-callout-<type>` (lower-cased) so a stylesheet
+// can pick it up later. A title is the author's own words and stays, as its own paragraph. The
+// fold marker is an interaction this renderer does not have and goes with the tag. Only the first
+// line is a tag — `[!x]` anywhere else is text — so no block without one renders differently.
+const RE_CALLOUT_HEAD = /^\[!([A-Za-z][A-Za-z0-9-]*)\][+-]?(?:\s+(.*?))?\s*$/;
+function calloutHead(buf) {
+  const m = RE_CALLOUT_HEAD.exec((buf[0] || '').trim());
+  if (!m) return null;
+  return { type: m[1].toLowerCase(), buf: (m[2] ? [m[2], ''] : []).concat(buf.slice(1)) };
+}
+
 // Quote lines → paragraphs (a blank `>` line separates them; soft newlines fold to spaces).
 const quoteParas = (buf) =>
   buf.join('\n').split(/\n\s*\n/).map((p) => p.trim().replace(/\n/g, ' ')).filter(Boolean);
@@ -2417,14 +2436,15 @@ function bodyHtml(body, opts) {
         const turn = verdict.turns[b];
         if (turn) { run.push(turn); continue; }
         flushRun();
+        const callout = calloutHead(buf);                                     // `> [!type]` — see RE_CALLOUT_HEAD
         // a blank quote line (`>` with no text) separates paragraphs inside the quote.
-        const paras = quoteParas(buf);
+        const paras = quoteParas(callout ? callout.buf : buf);
         // R2-P2-03: a quote block whose only line was `> <!-- comment -->` never reaches `buf` at all
         // (the block-comment check above swallows the whole line before it is collected) — `buf` comes
         // out empty, quoteParas' own filter(Boolean) already drops the resulting empty paragraph, and
         // this guard keeps an empty `<blockquote>` shell from being emitted for it either.
         if (!paras.length) continue;
-        out.push('<blockquote class="st-quote">' + paras.map((p) => '<p>' + inlineHtml(p) + '</p>').join('') + '</blockquote>');
+        out.push('<blockquote class="st-quote' + (callout ? ' st-callout-' + callout.type : '') + '">' + paras.map((p) => '<p>' + inlineHtml(p) + '</p>').join('') + '</blockquote>');
       }
       flushRun();
       continue;
