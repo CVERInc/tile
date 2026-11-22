@@ -1,4 +1,4 @@
-// The same-origin inbox forwarder's two input bounds (Refs CVERInc/tile-lab#64):
+// The same-origin inbox forwarder's two input bounds (tile-lab#64):
 //   · `page_url` is always a URL on the site's OWN origin, whatever `return_to` was posted;
 //   · an oversize submission is refused before it is parsed or forwarded — by its declared
 //     Content-Length, by a hard cap while reading when that header is absent or wrong, and by a
