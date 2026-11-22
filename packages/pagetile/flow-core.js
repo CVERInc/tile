@@ -57,6 +57,15 @@ function defaultMeasure(str, fontSize) {
 // between any two glyphs. A combining mark always stays in the unit of the glyph before it. Offsets
 // are absolute in the text.
 const RE_UNIT_SRC = '[' + WIDE + ']\\p{M}*[ \\t\\r]*|(?:[^ \\t\\r\\n' + WIDE + ']\\p{M}*)+[ \\t\\r]*|[ \\t\\r]+';
+//
+// Kinsoku: a closing mark never starts a line and an opening bracket never ends one. Both are kept
+// by taking the break opportunity away — a unit that begins with a closing mark joins the unit
+// before it, and the unit after an opening bracket joins the bracket's — spaces between included.
+// The full-width marks, their ASCII and half-width-form twins, the curly quotes and the ellipsis.
+// A mark with nothing before it on its line (the start of the text, after a hard break) stays
+// where it is; a joined run wider than a whole line is broken by glyph like any oversized word.
+const RE_NO_START = /^[，。、；：！？」』）》〉】〕］｝’”…‥,.;:!?)\]}｡､｣]/u;
+const RE_NO_END = /[「『（《〈【〔［｛‘“(\[{｢]$/u;
 function unitsOf(text, from, to) {
   const units = [];
   const re = new RegExp(RE_UNIT_SRC, 'gu');
@@ -65,7 +74,11 @@ function unitsOf(text, from, to) {
   while ((m = re.exec(text)) && m.index < to) {
     const end = Math.min(m.index + m[0].length, to);
     const word = text.slice(m.index, end).replace(/[ \t\r]+$/, '');
-    units.push({ start: m.index, end, word });
+    const prev = units[units.length - 1];
+    if (prev && word && (RE_NO_START.test(word) || RE_NO_END.test(prev.word))) {
+      prev.word = text.slice(prev.start, m.index) + word;
+      prev.end = end;
+    } else units.push({ start: m.index, end, word });
   }
   return units;
 }

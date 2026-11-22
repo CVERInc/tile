@@ -143,7 +143,9 @@ const big = mounted.reader.view();
 eq(big.fontSize, 20, 'A+ steps the font size to 20');
 ok(big.total > before.total, 'a larger font gives more computed pages (' + before.total + ' → ' + big.total + ')');
 ok(big.page.start <= anchor.offset && anchor.offset < big.page.end, 'after A+ the page on screen holds the text that was at the top before');
-ok(surface.querySelectorAll('.ptr-flow-line').map((l) => l.textContent).join('\n').replace(/\s+/g, ' ').includes(anchorText.replace(/\s+/g, ' ').slice(0, 12)),
+// (compared with the white space taken out: a CJK line break has no space in the text, so joining
+// the drawn lines with one would split a quote that happens to run across two lines — tile#388)
+ok(surface.querySelectorAll('.ptr-flow-line').map((l) => l.textContent).join('').replace(/\s+/g, '').includes(anchorText.replace(/\s+/g, '').slice(0, 12)),
   'that text is in the drawn lines');
 eq(prog.textContent, (big.index + 1) + ' / ' + big.total, 'page N/M is recounted at the new size');
 // every further step keeps it too — one step can keep the same page NUMBER by luck, three cannot

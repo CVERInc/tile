@@ -199,5 +199,63 @@ eq(lineTexts(astral, layoutFlow(astral, { ...DIM, width: 3, measure: codepoints 
   'P5: an Extension B ideograph fits beside latin and the next one wraps alone');
 ok(defaultMeasure('\u{20000}', 16) === defaultMeasure('中', 16), 'P5: the default measure sets Extension B as wide as BMP CJK');
 
-console.log(`\npagetile flow: ${pass} passed, ${fail} failed`);
+// ── 6. kinsoku (tile#388): a line never starts with a closing mark or ends with an opening bracket ──
+// The default measure sets a wide glyph at 1em, so at 10px a width of 60 is six glyphs.
+const KIN = { width: 60, height: 1000, fontSize: 10, lineHeight: 1, paragraphGap: 0 };
+const RE_STARTS_CLOSED = /^[，。、；：！？」』）》〉】…,.;:!?)\]}]/u;
+const RE_ENDS_OPEN = /[「『（《〈【(\[{]\s*$/u;
+const tiles = (src, lay) => lay.lines.every((l, i) => l.start < l.end && l.start === (i ? lay.lines[i - 1].end : 0)) && lay.lines[lay.lines.length - 1].end === src.length;
+
+const comma = '今天天氣很好，我們去公園散步。';
+eq(lineTexts(comma, layoutFlow(comma, KIN)), ['今天天氣很', '好，我們去公', '園散步。'],
+  'kinsoku: the comma that would open a line takes the glyph before it along');
+const closers = '一二三四五好。」）六七';
+eq(lineTexts(closers, layoutFlow(closers, KIN)), ['一二三四五', '好。」）六七'], 'kinsoku: a run of closing marks stays with the glyph it closes');
+const opener = '一二三四五「六七」八';
+eq(lineTexts(opener, layoutFlow(opener, KIN)), ['一二三四五', '「六七」八'], 'kinsoku: an opening bracket never ends a line');
+const halfWidth = '一二三四五,六';
+eq(lineTexts(halfWidth, layoutFlow(halfWidth, { ...KIN, width: 50 })), ['一二三四', '五,六'], 'kinsoku: a half-width comma after a wide glyph stays with it');
+const spaced = '一二三四五 ，六';
+eq(lineTexts(spaced, layoutFlow(spaced, { ...KIN, width: 50 })), ['一二三四', '五 ，六'], 'kinsoku: a space before a closing mark is not a place to break');
+
+// a closing mark with nothing before it (the start of the text, or of a hard-broken line) has no
+// glyph to join: it stays where it is, and the text still tiles
+const leading = '，一二三四五六七';
+const leadLay = layoutFlow(leading, KIN);
+eq(lineTexts(leading, leadLay), ['，一二三四五', '六七'], 'kinsoku: a closing mark at the very start of the text opens the first line');
+ok(tiles(leading, leadLay), 'kinsoku: …and the lines still tile the text');
+eq(lineTexts('一二\n。三', layoutFlow('一二\n。三', KIN)), ['一二\n', '。三'], 'kinsoku: a closing mark after a hard break stays on its own line');
+
+// a line one glyph wide cannot keep the rule: the break is allowed, and the layout ends
+const one = '好，。」「好';
+const oneLay = layoutFlow(one, { ...KIN, width: 10 });
+eq(lineTexts(one, oneLay), ['好', '，', '。', '」', '「', '好'], 'kinsoku: at one glyph per line every glyph gets a line (the rule gives way, nothing loops)');
+ok(oneLay.lines.every((l) => l.width <= 10), 'kinsoku: …and no line overflows');
+
+// wherever the widest glued run fits (five glyphs here), the rule holds at every width, on every line and page
+const quoted = '他說：「早晨的渡輪在天亮前出發，港口的燈一盞一盞熄滅。」（海鷗在爭吵……）然後呢？'.repeat(3);
+let kept = true, tiled = true, fits = true;
+for (let width = 50; width <= 200; width += 5) {
+  const lay = layoutFlow(quoted, { ...KIN, width, height: 30 });
+  const texts = lineTexts(quoted, lay);
+  kept = kept && texts.every((t, i) => (i === 0 || !RE_STARTS_CLOSED.test(t)) && (i === texts.length - 1 || !RE_ENDS_OPEN.test(t)))
+    && lay.pages.every((p) => p.start === 0 || !RE_STARTS_CLOSED.test(quoted.slice(p.start)));
+  tiled = tiled && tiles(quoted, lay) && lay.pages.every((p, i) => p.start === (i ? lay.pages[i - 1].end : 0)) && lay.pages[lay.pages.length - 1].end === quoted.length;
+  fits = fits && lay.lines.every((l) => l.width <= width);
+}
+ok(kept, 'kinsoku: no line or page starts with a closing mark or ends with an opening bracket, at widths 50–200');
+ok(tiled, 'kinsoku: lines and pages tile the text at every one of those widths');
+ok(fits, 'kinsoku: no line overflows at any of those widths');
+
+// positions round-trip: the top of every computed page locates back to that page, and across layouts
+const KIN_BOOK = parseBook(['---', 'pagetile-book: true', '---', '', '# C', '', '## P', 'kind: flow', quoted, ''].join('\n'));
+const kinNarrow = paginateBook(KIN_BOOK, { ...KIN, width: 60, height: 30 }), kinWide = paginateBook(KIN_BOOK, { ...KIN, width: 110, height: 40 });
+ok(kinNarrow.total > kinWide.total && kinWide.total > 1, 'kinsoku: the quoted text spans several pages in both layouts (' + kinNarrow.total + ', ' + kinWide.total + ')');
+ok(kinNarrow.pages.every((p, i) => locate(kinNarrow, positionAt(KIN_BOOK, kinNarrow, i)) === i)
+  && kinWide.pages.every((p, i) => locate(kinWide, positionAt(KIN_BOOK, kinWide, i)) === i), 'kinsoku: positionAt → locate returns every page to itself');
+ok(kinNarrow.pages.every((p, i) => { const pos = positionAt(KIN_BOOK, kinNarrow, i), hit = kinWide.pages[locate(kinWide, pos)]; return hit.start <= pos.offset && pos.offset < hit.end; }),
+  'kinsoku: a position taken in one layout lands on the page holding that text in the other');
+ok(kinNarrow.pages.every((p) => p.start === 0 || !RE_STARTS_CLOSED.test(quoted.slice(p.start))), 'kinsoku: no computed page opens on a closing mark');
+
+console.log(`\npagetile flow:${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
