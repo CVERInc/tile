@@ -1424,8 +1424,12 @@ test('🔴 a preview in a later lifetime renders, and one held mid-put across th
   const pending = call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) });
   const parked = await held.started;
   await call(env, 'DELETE', '/_api/card/t');
+  // tile#399 r2: a 409 now removes its draft; that removal fails here, so the stamp alone must hold
+  const del = env.CARDS.delete.bind(env.CARDS);
+  env.CARDS.delete = async (k) => { if (k === parked) throw new Error('KV delete failed'); return del(k); };
   held.release();
   assert.equal((await pending).status, 409);
+  env.CARDS.delete = del;
   assert.ok(env.CARDS._m.has(parked), 'CONTROL: the late preview did land (its TTL removes it)');
   assert.equal((await page(env, '/' + parked.replace(':', '/'))).status, 404);
 });
@@ -3566,6 +3570,122 @@ test('tile#399 CONTROL: with no object bound, the stop and the exchange state go
   assert.deepEqual(await answered(await call(unbound, 'DELETE', '/_api/card/t/stop')), [200, { handle: 't', stopped: false }]);
   assert.deepEqual(await answered(await call(unbound, 'DELETE', '/_api/card/t/pool')), [200, { handle: 't', gen: G, in: null }]);
   assert.deepEqual([keysOf(unbound, 'stop:t'), keysOf(unbound, 'pool:t')], [[], []]);
+});
+
+// ── tile#399 r2: a DELETE that failed halfway (the lifetime ended in its object, KV's `gen:` not moved) ──
+//
+// The object has rotated to a fresh generation, but `/settle` never ran, so every location's `gen:` still
+// names the deleted lifetime and the public pages keep serving the deleted card until the DELETE is
+// retried. A write keyed by the object's generation lands where no public page reads: a stop answered
+// `stopped: true` with the page still up, and a save was accepted while the page still showed the deleted
+// card. Now the object says whether its lifetime is settled; while it is not, the stop is written where
+// the public pages read (and the caller is told to retry the DELETE), and every other generation-keyed
+// write is refused with the same advice.
+
+const UNFINISHED = { conflict: true, delete_unfinished: true, why: '"t" has a delete that did not finish. Nothing was written; retry the DELETE.' };
+const STOPPED_UNFINISHED = { conflict: true, delete_unfinished: true, stopped: true, why: '"t" is stopped: its public page no longer shows it. Its delete did not finish: retry the DELETE.' };
+/** what t's object itself says (`/current`, `/held`): the generation, and whether its lifetime is settled */
+const lifeSays = async (env, op) => {
+  const res = await env.CARD_LIFETIMES.get(env.CARD_LIFETIMES.idFromName('t')).fetch(`https://card-lifetime/${op}`, { method: 'POST', body: JSON.stringify({ handle: 't' }) });
+  const { gen, settled } = await res.json();
+  return { gen, settled };
+};
+/**
+ * t, created, deleted, created again, then a DELETE that fails halfway — and `heal()` lets the next
+ * DELETE through. `domain`: its own domain is bound and that host does not acknowledge the end (the r8
+ * row); otherwise no domain is bound and the object does not answer `/settle` (a Worker that died
+ * between /end and /settle: nothing is owed to any host, and still `gen:` never moved).
+ */
+const halfDeleted = async ({ domain }) => {
+  const env = await reborn();
+  if (domain) await bindVanity(env, 't', OWNER);
+  const hosts = env.HOST_BINDINGS, lifetimes = env.CARD_LIFETIMES, getLife = lifetimes.get;
+  if (domain) {
+    env.HOST_BINDINGS = { ...hosts, get: (id) => ({ fetch: (url, init) =>
+      new URL(url).pathname === '/end' ? Promise.resolve(new Response('unavailable', { status: 503 })) : hosts.get(id).fetch(url, init) }) };
+  } else {
+    lifetimes.get = (id) => { const stub = getLife(id); return { ...stub, fetch: (url, init) =>
+      new URL(url).pathname === '/settle' ? Promise.resolve(new Response('overloaded', { status: 500 })) : stub.fetch(url, init) }; };
+  }
+  const del = await answered(await call(env, 'DELETE', '/_api/card/t'));
+  assert.equal(del[0], 503, `CONTROL: the DELETE did not fail halfway: ${JSON.stringify(del)}`);
+  const heal = () => { env.HOST_BINDINGS = hosts; lifetimes.get = getLife; };
+  return { env, heal };
+};
+/** what a visitor gets: the card's own domain (when it has one) and canonical /t */
+const publicOf = async (env, domain) => [...(domain ? [(await host(env, OWNER, '/')).status] : []), (await page(env, '/t')).status];
+
+test('🔴 tile#399 r2 a half-failed DELETE: a stop takes the public page down (never 200 with the page still up), every other write is refused "retry the DELETE", and after the retry both work (2 rows)', async () => {
+  for (const domain of [true, false]) {
+    const row = domain ? 'domain end unacknowledged' : 'settle unanswered, no domain';
+    const { env, heal } = await halfDeleted({ domain });
+    const kvGen = env.CARDS._m.get(genKey('t'));
+    const got = {}, want = {};
+    // the state: the object has moved on and says it is not settled; KV and so the pages have not
+    got.object = [await lifeSays(env, 'current'), await lifeSays(env, 'held')].map((s) => [s.gen === kvGen, s.settled]);
+    want.object = [[false, false], [false, false]];
+    got.before = await publicOf(env, domain);
+    want.before = domain ? [200, 301] : [200];
+    const cardsBefore = keysOf(env, 'card:t');
+    const parkedBefore = parkedDrafts(env).length;
+    got.stop = await answered(await call(env, 'PUT', '/_api/card/t/stop', { reason: 'take it down' }));
+    want.stop = [409, STOPPED_UNFINISHED];
+    got.afterStop = await publicOf(env, domain);
+    want.afterStop = domain ? [404, 404] : [404];
+    got.resume = await answered(await call(env, 'DELETE', '/_api/card/t/stop'));
+    want.resume = [409, UNFINISHED];
+    got.afterResume = await publicOf(env, domain);
+    want.afterResume = want.afterStop;
+    got.pool = [await answered(await call(env, 'PUT', '/_api/card/t/pool', { in: true })), await answered(await call(env, 'DELETE', '/_api/card/t/pool'))];
+    want.pool = [[409, UNFINISHED], [409, UNFINISHED]];
+    got.poolKeys = keysOf(env, 'pool:t');
+    want.poolKeys = [];
+    got.preview = [await answered(await call(env, 'POST', '/_api/preview', { handle: 't', markdown: OTHER_CARD })), parkedDrafts(env).length - parkedBefore];
+    want.preview = [[409, UNFINISHED], 0];
+    got.save = await answered(await call(env, 'PUT', '/_api/card/t', { markdown: OTHER_CARD }));
+    want.save = [409, UNFINISHED];
+    got.dryRun = (await call(env, 'PUT', '/_api/card/t', { markdown: OTHER_CARD, dry_run: true })).status;
+    want.dryRun = 409;
+    got.saved = [keysOf(env, 'card:t').join() === cardsBefore.join(), env.CARDS._m.has(goneKey('t'))];
+    want.saved = [true, true];
+    // the DELETE retried, with the host / the object answering again: done, and every stop of the handle swept
+    heal();
+    got.retry = (await call(env, 'DELETE', '/_api/card/t')).status;
+    want.retry = 200;
+    got.settled = (await lifeSays(env, 'current')).settled;
+    want.settled = true;
+    got.stopKeysAfterRetry = keysOf(env, 'stop:t');
+    want.stopKeysAfterRetry = [];
+    got.afterRetry = await publicOf(env, domain);
+    want.afterRetry = domain ? [404, 404] : [404];
+    // CONTROL: the same writes, now settled, work as they always did
+    got.stopAgain = await answered(await call(env, 'PUT', '/_api/card/t/stop', {}));
+    want.stopAgain = [200, { handle: 't', stopped: true }];
+    got.resumeAgain = await answered(await call(env, 'DELETE', '/_api/card/t/stop'));
+    want.resumeAgain = [200, { handle: 't', stopped: false }];
+    const made = await call(env, 'PUT', '/_api/card/t', { markdown: OTHER_CARD });
+    got.made = [made.status, (await made.json()).created];
+    want.made = [200, true];
+    const served = await page(env, '/t');
+    const text = await served.text();
+    got.page = [served.status, text.includes('Newcomer'), text.includes('Tester')];
+    want.page = [200, true, false];
+    assert.deepEqual(got, want, row);
+  }
+});
+
+test('tile#399 r2 a preview whose re-check finds the lifetime changed answers 409 and leaves no draft parked', async () => {
+  const env = await reborn();
+  const parkedBefore = parkedDrafts(env).length;
+  // the lifetime ends between the preview's stamp and its re-check: a DELETE runs while the draft's put is held
+  const held = holdPut(env, (k) => k.startsWith(previewKey('')));
+  const pending = call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) });
+  await held.started;
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200, 'CONTROL: the delete');
+  held.release();
+  const late = await answered(await pending);
+  assert.deepEqual([late[0], late[1].stale_generation], [409, true]);
+  assert.equal(parkedDrafts(env).length, parkedBefore, 'a preview answered 409 left its draft parked');
 });
 
 test('🔴 a card adopted from KV and not yet settled is not answered from the object: the read stays on KV', async () => {
