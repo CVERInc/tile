@@ -192,6 +192,13 @@ and an abort does nothing on its own — whatever you run next has to see the si
 it throws with `code: 'TILE_RESTORE_FAILED'` (exported as `RESTORE_FAILED`) and a sentence saying where
 the renderer's own material is; calling it again retries.
 
+**A symbolic link in what a site supplies is refused.** `assetsDir`, `blogDir`, `pagetileDir` and
+`themeFile` (and the `<ir-dir>/posts` that `buildSite()` takes as the blog) may not be a link or hold
+one, wherever it points: staging puts the renderer back and rejects with `code: 'TILE_LINK_REFUSED'`
+(exported as `LINK_REFUSED`), naming the path. Links are never followed and never copied; put the
+file or directory itself there. A link *above* a directory you name (a temp directory that is itself
+a link) is yours and is fine.
+
 The 130/143 lives in `cli.mjs`, which is a program and may own the process's signals because it *is*
 the process.
 

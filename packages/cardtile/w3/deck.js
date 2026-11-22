@@ -498,11 +498,14 @@
   const dealt=i=>{ const k=tileCard(cells[i]); k.dataset.i=String(i); pre[i]=k; mat(k); return k; };
   for(let i=0;i<cells.length;i++) pre.push(null);
   function tileCard(c){
+    /* a video, slides, pasted HTML or a social row that writes back=#id: the engine names the back on the cell (data-back) and adds no door, so on the wall a tap on them is still theirs; in a pile the card turns over to that back like any other that names one */
+    const named=c.dataset.back&&drawers[c.dataset.back]?c.dataset.back:'';
     if(c.classList.contains('st-embed-video')){
       const btn=c.querySelector('.st-embed-video-btn'); const yt=btn&&btn.dataset.yt;
       btn&&btn.addEventListener('click',e=>{ if(!ON)return; /* on the wall the engine's own player answers */ e.preventDefault();e.stopPropagation(); const p=mk('div','deck-player','<iframe src="https://www.youtube-nocookie.com/embed/'+yt+'?autoplay=1&playsinline=1" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>'); p.addEventListener('click',ev=>{if(ev.target===p)p.remove();}); document.body.appendChild(p);});
-      return seat(c,yt?goBack('https://www.youtube.com/watch?v='+yt):null);
+      return named?seatNamed(c,named):seat(c,yt?goBack('https://www.youtube.com/watch?v='+yt):null);
     }
+    if(named) return seatNamed(c,named);
     const link=c.querySelector('a.st-gal-link, a.st-cell-link'); /* a picture's link or a link tile: both turn over to the address */ const trig=c.querySelector('[data-drawer]');
     if(trig&&drawers[trig.dataset.drawer]) return seatNamed(c,trig.dataset.drawer);   /* the back a tile names is the drawer's own body: on its card in a pile, in its drawer on the wall — one node, two homes. A second tile naming the same back shares that node (seatNamed, lend): it is on whichever of their cards is turned over. The engine's door (a whole-tile <a href="#id">) stays in the tile, for the wall; in a pile the card itself turns over and the stylesheet takes the door out (html.deck .st-back-door) — left tappable, the tap followed it (in the editor's preview frame #id resolves to the editor's own address and the frame loaded the editor inside itself) and the card never turned */
     if(link&&(/^https?:/.test(link.getAttribute('href')||'')||'same' in link.dataset||'blank' in link.dataset)){ return seat(c,goBack(link.href,link.dataset.pill,'same' in link.dataset,link.dataset.note)); }

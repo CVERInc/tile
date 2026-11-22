@@ -144,6 +144,63 @@ function mk(prefix, marker) {
 function isMdPunct(c) { return c !== undefined && /[\p{P}\p{S}]/u.test(c); }
 function isMdSpace(c) { return c === undefined || /\s/u.test(c); }
 
+// ── CJK neighbours ──────────────────────────────────────────────────────────────────────────────
+// The flanking rules were written for scripts that put a space between words. Their one use of
+// punctuation is to tell `"*emphasis*"` from `a*"b"*c`: a delimiter with punctuation on its inner
+// side only counts if its outer side is whitespace or more punctuation — if the pair stands where a
+// word boundary would. Chinese, Japanese and Korean prose has no such space, so the test refuses
+// what is ordinary writing there: `已經**手動關閉（Kill）**了` printed its four asterisks, because
+// the closer sits between `）` and a letter, and so did `他說**"好"**然後`.
+//
+// Two amendments, both confined to a delimiter with one of these characters beside it:
+//   • CJK and full-width punctuation does not count as punctuation for this test. It is written
+//     flush against the words around it and carries its own spacing in the glyph, so the letter on
+//     the far side says nothing about a word boundary.
+//   • A CJK character on the outer side stands where the whitespace would have been: with ordinary
+//     punctuation on the inner side, the delimiter still counts.
+// One limit on both, for a delimiter that would OPEN: the CJK punctuation on its inner side must be
+// an opening bracket or quote (isCjkOpening). A footnote mark is written `NT$990*，` or `附註*：`,
+// flush before a comma, colon or full stop, and two of them on a line must not become an italic
+// between them; an emphasis that starts with such a mark (`內容**：重要**`) is rare. With any other
+// CJK punctuation there, an opener is decided by CommonMark's rule alone. A closer keeps both
+// clauses whatever the punctuation is (`**完成。**下一步`).
+// With no such neighbour the clauses are inert and the rule is CommonMark's, character for
+// character. Underscores are unaffected either way (see scanRuns): `檔案_名稱_版本` stays literal
+// for the same reason `snake_case_name` does.
+//
+// Explicit blocks rather than `\p{Script=…}`: a property's membership moves with the Unicode
+// version of whichever engine is running this (U+00B7 MIDDLE DOT joined Han's script extensions in
+// one), and the same line must not render differently in the editor and on the page built from it.
+//   1100–11FF  Hangul Jamo                      2E80–A4CF  radicals, CJK symbols and punctuation,
+//   A960–A97F  Hangul Jamo Extended-A                      kana, Bopomofo, the unified ideographs, Yi
+//   AC00–D7FF  Hangul syllables, Jamo Ext-B     F900–FAFF  compatibility ideographs
+//   FE10–FE1F  vertical forms                   FE30–FE6F  compatibility and small form variants
+//   FF00–FFEF  half-width and full-width forms  D840–D8BF  see below
+// A character outside the BMP is two units here, and the first says which plane it is in: D840–D8BF
+// lead planes 2 and 3, which hold nothing but ideographs (𠮷, 𨋢). scanRuns keeps `prev` on that
+// first unit so the same test answers on both sides of a delimiter.
+const CJK_RE = /[\u1100-\u11FF\u2E80-\uA4CF\uA960-\uA97F\uAC00-\uD7FF\uD840-\uD8BF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE6F\uFF00-\uFFEF]/;
+function isCjk(c) { return c !== undefined && CJK_RE.test(c); }
+
+// The opening brackets and quotes among the characters above, listed for the same reason the blocks
+// are: every one of the 28 characters in them whose general category is Ps (open punctuation) or
+// Pi (initial quote) as of Unicode 17, and none other. 〈《「『【〔〖〘〚〝, the vertical forms
+// ︗︵︷︹︻︽︿﹁﹃﹇, the small forms ﹙﹛﹝, and （［｛｟｢. test/emphasis-cjk.test.cjs checks this
+// list against the running engine's Unicode tables.
+const CJK_OPENING_RE = /[\u3008\u300A\u300C\u300E\u3010\u3014\u3016\u3018\u301A\u301D\uFE17\uFE35\uFE37\uFE39\uFE3B\uFE3D\uFE3F\uFE41\uFE43\uFE47\uFE59\uFE5B\uFE5D\uFF08\uFF3B\uFF5B\uFF5F\uFF62]/;
+function isCjkOpening(c) { return c !== undefined && CJK_OPENING_RE.test(c); }
+
+// The first unit of the last character in `t`: the unit itself, or the lead half of a surrogate
+// pair. Both halves answer "neither whitespace nor punctuation" above, so which half `prev` holds
+// only ever matters to isCjk.
+function lastLead(t) {
+  const n = t.length;
+  if (!n) return undefined;
+  return n > 1 && isTrail(t[n - 1]) && isLead(t[n - 2]) ? t[n - 2] : t[n - 1];
+}
+function isLead(c) { return c >= '\uD800' && c <= '\uDBFF'; }
+function isTrail(c) { return c >= '\uDC00' && c <= '\uDFFF'; }
+
 const EL_RE = /<(\/?)([a-zA-Z][\w-]*)[^>]*>/y;
 
 // A `<` reaching this pass can only be markup the CALLER injected — escHtml turned every authored
@@ -200,13 +257,16 @@ function scanRuns(s) {
       const end = skipElement(s, i);
       if (end > i) {
         buf += s.slice(i, end);
-        const inner = elemText(s, i, end);
-        prev = inner ? inner[inner.length - 1] : undefined;
+        prev = lastLead(elemText(s, i, end));
         i = end; continue;
       }
       buf += c; prev = c; i++; continue;
     }
-    if (c !== '*' && c !== '_') { buf += c; prev = c; i++; continue; }
+    if (c !== '*' && c !== '_') {
+      buf += c;
+      if (!(isTrail(c) && prev !== undefined && isLead(prev))) prev = c;   // stay on a pair's first unit
+      i++; continue;
+    }
     let j = i;
     while (s[j] === c) j++;
     let next = s[j];
@@ -216,14 +276,28 @@ function scanRuns(s) {
     }
     const beforeSpace = isMdSpace(prev), afterSpace = isMdSpace(next);
     const beforePunct = isMdPunct(prev), afterPunct = isMdPunct(next);
-    const left = !afterSpace && (!afterPunct || beforeSpace || beforePunct);
-    const right = !beforeSpace && (!beforePunct || afterSpace || afterPunct);
+    // The two CJK clauses (see isCjk). Only a run with punctuation on one side can be moved by
+    // them, so the common run never pays for the test.
+    const beforeCjk = beforePunct || afterPunct ? isCjk(prev) : false;
+    const afterCjk = beforePunct || afterPunct ? isCjk(next) : false;
+    // An opener is the one exception: CJK punctuation on its inner side is waived only if it is an
+    // opening bracket or quote, and anything else there (`，` `。` `：` `、` `！` `）`) puts the run
+    // back under CommonMark's rule, outer-side clause included. See isCjkOpening.
+    const innerStop = afterPunct && afterCjk && !isCjkOpening(next);
+    const left = !afterSpace && (!afterPunct || beforeSpace || beforePunct || (!innerStop && (afterCjk || beforeCjk)));
+    const right = !beforeSpace && (!beforePunct || beforeCjk || afterSpace || afterPunct || afterCjk);
     flush();
     nodes.push({
       t: 'd', ch: c, n: j - i, orig: j - i,
       // Asterisks work intraword; underscores do not. That asymmetry is one extra clause here, and
       // it is what keeps `snake_case_name` literal — the rule a live page once lost, growing bare
       // underscores wherever an identifier appeared.
+      //
+      // It is also why the CJK clauses above cannot move an underscore. A clause only ever makes a
+      // run that flanked on one side flank on both, and a `_` flanking on both sides opens only
+      // after punctuation and closes only before it — which decides each such run the way it was
+      // already decided: it still cannot do the new thing and can still do the old one. A `_`
+      // between two letters, CJK or not, is as closed to emphasis as it was.
       canOpen: c === '*' ? left : left && (!right || beforePunct),
       canClose: c === '*' ? right : right && (!left || afterPunct),
     });
