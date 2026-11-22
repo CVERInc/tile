@@ -257,5 +257,5 @@ ok(kinNarrow.pages.every((p, i) => { const pos = positionAt(KIN_BOOK, kinNarrow,
   'kinsoku: a position taken in one layout lands on the page holding that text in the other');
 ok(kinNarrow.pages.every((p) => p.start === 0 || !RE_STARTS_CLOSED.test(quoted.slice(p.start))), 'kinsoku: no computed page opens on a closing mark');
 
-console.log(`\npagetile flow:${pass} passed, ${fail} failed`);
+console.log(`\npagetile flow: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
