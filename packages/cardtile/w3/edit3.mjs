@@ -124,12 +124,57 @@ let bridge = null, hostWaiting = !SANDBOX;
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* best-effort */ } }
 // Nothing goes live until Save; the draft lives in this browser; leaving with it unsaved asks first.
-function persist() {
-  if (SANDBOX) lsSet(DKEY, md === savedMd ? null : md);
-  else if (!hostWaiting) lsSet(hostDraftKey(), md === savedMd ? null : JSON.stringify({ base: savedMd, md }));
-  if (bridge) bridge.changed(md);
-  paintMain();
+function keep(text) {
+  if (SANDBOX) lsSet(DKEY, text === savedMd ? null : text);
+  else if (!hostWaiting) lsSet(hostDraftKey(), text === savedMd ? null : JSON.stringify({ base: savedMd, md: text }));
+  if (bridge) bridge.changed(text);
 }
+// a save that lands while the page is hidden must not take back what parkOpenSheet put in the draft: a
+// tab killed in the background (the case `visibilitychange` is there for) would lose the open sheet's words
+function persist() {
+  parked = false; keep(md); paintMain();
+  if (open && document.visibilityState === 'hidden') parkOpenSheet();
+}
+// 🩸 What is typed in an open sheet reaches `md` only on Done, so a frame hidden or unloaded with a sheet
+// open (the parent navigating away, the tab closed or put in the background) lost those words without a
+// question: the draft never held them and the parent was never told. So when the page goes away, the
+// tile the sheet WOULD keep is written to the draft and announced — and nothing else moves: the sheet stays
+// open, `md` stays what it was, no error is painted. `parked` says the draft is ahead of `md`; closing the
+// sheet without Done (or anything else that persists) writes `md` back.
+//   a sheet Done would refuse (a required field empty, a tile the engine cannot compose, a file it
+//   cannot read) parks nothing: the draft keeps what it held, never half a tile
+//   a tile just added (undoTo set) is parked like any other; Cancel, if the page comes back, still
+//   takes it out and the draft follows
+//   🩸 a sheet nobody touched parks nothing. Re-serializing a tile is not always the identity (quotes
+//   the engine finds unneeded, a hand-spelled file's spacing), so "the candidate differs from `md`" said
+//   "unsaved" for a sheet that was only opened. The test is against the candidate the sheet held when it
+//   opened (`open.untouched`, taken by markUntouched), whatever path the typing came in by.
+let parked = false;
+// the whole file the open sheet would keep, as text; null when Done would refuse it
+function sheetText() {
+  try {
+    if (open.whole) {
+      const t = el('f-__raw').value;
+      if (t !== md && whatIsWrong(t)) return null;
+      return t === md || t.endsWith('\n') ? t : t + '\n';
+    }
+    syncProse();
+    if (open.gaps && open.gaps().length) return null;
+    const c = sheetCandidate();
+    return c.error ? null : serializeCard(c.x);
+  } catch { return null; }
+}
+const markUntouched = () => { open.untouched = sheetText(); };
+function parkOpenSheet() {
+  if (!open || el('modal').hidden || hostWaiting) return;
+  let next = sheetText();
+  if (next == null) return;
+  if (next === open.untouched) { if (!parked) return; next = md; }   // nothing typed (or typed back)
+  keep(next); parked = next !== md;
+  if (bridge) bridge.flush();   // the page is going: the debounced announcement would never be sent
+}
+addEventListener('pagehide', parkOpenSheet);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') parkOpenSheet(); });
 const dirty = () => md !== savedMd;
 addEventListener('beforeunload', (e) => { if (dirty()) e.preventDefault(); });
 function read(text) { const x = parseCard(text); if (!x.blocks.length) x.blocks = [{ label: '', start: 0, count: 0 }]; return x; }
@@ -348,9 +393,11 @@ function edit(i, which, asMd = false) {
     const first = gaps[0] && fieldOf(gaps[0].id.slice(2));
     el('modal-why').textContent = first ? fmt(L.needs, { f: (first.querySelector(':scope > span')?.firstChild?.textContent || '').trim() }) : '';
   };
+  open.gaps = empty;
   body.oninput = body.onchange = gate; gate();
   const first = empty()[0] || body.querySelector('.prose-ed [contenteditable]') || body.querySelector('input:not([type=hidden]),textarea:not([hidden]),select'); if (first) first.focus({ preventScroll: true });
   notices.place();
+  markUntouched();
 }
 // Help text stays short on screen: a long explanation goes behind a "?" by its label, shown on tap. An
 // address in a hint never breaks in the middle, and a hint's last line never holds one lonely character.
@@ -465,13 +512,14 @@ function closeSheet(kept) {
   el('modal').hidden = true; open = null; pending = {}; prose = null;
   if (!kept && undoTo != null) { const back = undoTo; undoTo = null; md = back; m = read(md); persist(); draw(); }
   undoTo = null;
+  if (parked) persist();   // a draft parked from this sheet (parkOpenSheet) goes back to what was kept
   setPaint();   // back to Cards settings when the sheet was opened from there
 }
-function saveSheet() {
-  if (!open) return;
+// What Done would keep from the open sheet, as a whole model: { x }, or { error } when the engine refuses
+// the tile. It reads the form and changes nothing — not the file, not the screen.
+function sheetCandidate() {
   const { i, which, asMd } = open, cell = cellAt(i, which);
   syncProse();
-  for (const n of el('modal-body').querySelectorAll('.ctw-err')) n.textContent = '';
   let next, rename = null;
   if (asMd || !TYPES[cell.type]) {
     next = normalizeCell({ ...cell, body: el('f-__raw').value.replace(/\s+$/, '') });
@@ -479,7 +527,7 @@ function saveSheet() {
     const readField = (name) => { const n = document.getElementById(`f-${name}`); if (!n) return null; if (n.type === 'checkbox') return n.checked ? 'on' : ''; return name === '__body' ? n.value : n.value.trim(); };
     const visible = (name) => { const b = el('modal-body').querySelector(`[data-field="${name}"]`); return !!b && !b.hidden; };
     const out = composeCell(cell, TYPES[cell.type], { read: readField, visible }, formCtx());
-    if (out.error) { const e = document.getElementById(`e-${out.error.field}`); if (e) e.textContent = out.error.message; return; }
+    if (out.error) return { error: out.error };
     next = normalizeCell({ ...cell, rawParams: out.rawParams, body: out.body });
     rename = out.rename;
   }
@@ -489,6 +537,13 @@ function saveSheet() {
   if (which === 'default') x.drawers.find((d) => d.id === defId(x.pre)).cells = [withRaw(next, removeToken(next.rawParams || '', 'back'))];
   else if (which === 'back') x.drawers.find((d) => d.id === backId(x.cells[i])).cells = [withRaw(next, removeToken(next.rawParams || '', 'back'))];
   else { const id = backId(x.cells[i]); x.cells[i] = id ? withRaw(next, setToken(next.rawParams || '', 'back', '#' + id)) : next; }
+  return { x };
+}
+function saveSheet() {
+  if (!open) return;
+  for (const n of el('modal-body').querySelectorAll('.ctw-err')) n.textContent = '';
+  const { x, error } = sheetCandidate();
+  if (error) { const e = document.getElementById(`e-${error.field}`); if (e) e.textContent = error.message; return; }
   undoTo = null;
   closeSheet(true);
   commit(x);
@@ -1245,6 +1300,7 @@ function openRaw() {
   el('modal-foot').hidden = false; el('modal-why').textContent = '';
   el('modal-delete').hidden = true; el('modal-save').disabled = false;
   el('modal').hidden = false; el('f-__raw').focus();
+  markUntouched();
 }
 function saveRaw() {
   const t = el('f-__raw').value;
@@ -1325,6 +1381,7 @@ function paintMain() {
 // the real thing (the creation flow explains the account; the editor does not). host: the parent saves it.
 function doSave() {
   if (SANDBOX) { savedMd = md; lsSet(KEY, md); persist(); openDoor(); return; }
+  if (parked) persist();   // Save sends what was kept, never a sheet still open
   if (bridge && bridge.save()) { saving = true; paintMain(); }
 }
 el('editbtn').onclick = () => {

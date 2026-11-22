@@ -268,3 +268,18 @@ test('card:change says dirty:false when the draft is back to what was saved', ()
   assert.deepEqual(r.sent.at(-1).msg, { v: 1, type: 'card:change', md: THIN, dirty: false });
   assert.equal(r.bridge.savedMd, THIN);
 });
+
+test('flush sends a waiting card:change at once, exactly once; with nothing waiting it sends nothing', () => {
+  const r = rig();
+  r.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  r.bridge.flush();
+  assert.equal(r.sent.length, 0, 'nothing waiting');
+  const edited = THIN.replace('a bio', 'typed as the page left');
+  r.bridge.changed(edited);
+  r.bridge.flush();   // no tick: an unloading page runs no timers
+  assert.deepEqual(r.sent.map((s) => s.msg), [{ v: 1, type: 'card:change', md: edited, dirty: true }]);
+  assert.equal(r.sent[0].origin, HOST);
+  assert.equal(r.timers.size, 0, 'the debounce is not left to say it twice');
+  r.bridge.flush(); r.tick();
+  assert.equal(r.sent.length, 1);
+});

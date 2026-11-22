@@ -15,6 +15,8 @@
 //     which a browser treats as remove + insert — loses focus to <body>. `moveBefore` keeps it.
 //   - navigation: `location.reload()` and assigning `location.href` are counted, never performed
 //   - time: timers and animation frames run only when the test calls `window.tick(ms)`
+//   - form controls: `value`, `checked`, `disabled` and `type` start as the markup wrote them and then
+//     hold what a script set (the editor's sheets read their fields this way)
 import vm from 'node:vm';
 
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
@@ -30,9 +32,10 @@ const kebab = (s) => s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 
 // ── selectors: `a, b` lists of compounds joined by descendant / `>` / `+` / `~` ────────────────────
 // compound: tag, *, #id, .class, [a], [a=v], [a*=v], [a^=v], [a$=v], :not(list), :is(list),
-// :first-child, :last-child. Anything else throws — a selector this cannot read must not match
+// :first-child, :last-child, :scope (in a query: the node it was called on). Anything else throws — a selector this cannot read must not match
 // quietly as "nothing found".
 const selCache = new Map();
+let scopeOf = null;   // the node a querySelector(All) was called on, for the length of that call: what `:scope` is
 function parseSelector(src) {
   if (selCache.has(src)) return selCache.get(src);
   let i = 0;
@@ -63,6 +66,7 @@ function parseSelector(src) {
           tests.push(name === 'not' ? (e) => !matchList(e, inner) : (e) => matchList(e, inner));
         } else if (name === 'first-child') tests.push((e) => e.previousElementSibling == null);
         else if (name === 'last-child') tests.push((e) => e.nextElementSibling == null);
+        else if (name === 'scope') tests.push((e) => e === scopeOf);
         else throw new Error(`mini-dom: selector "${src}" uses :${name}, which this stand-in does not read`);
       } else if (/[\w-]/.test(c || '')) { const v = ident().toLowerCase(); tests.push((e) => e.localName === v); }
       else break;
@@ -164,6 +168,7 @@ class Node extends EventTargetLike {
   removeChild(n) { if (n.parentNode !== this) throw new Error('mini-dom: removeChild — not a child'); this._take(n); this._left(n); return n; }
   remove() { if (this.parentNode) this.parentNode.removeChild(this); }
   append(...ns) { for (const n of ns) this._put(typeof n === 'string' ? new Text(this.ownerDocument, n) : n, null); }
+  prepend(...ns) { const ref = this.firstChild; for (const n of ns) this._put(typeof n === 'string' ? new Text(this.ownerDocument, n) : n, ref); }
   before(...ns) { const p = this.parentNode; if (p) for (const n of ns) p._put(n, this); }
   after(...ns) { const p = this.parentNode; if (!p) return; const ref = this.nextSibling; for (const n of ns) p._put(n, ref); }
   replaceWith(n) { const p = this.parentNode; if (!p) return; p._put(n, this); p._take(this); p._left(this); }
@@ -183,7 +188,9 @@ class Fragment extends Node {
 function queryAll(root, s) {
   const list = parseSelector(s), out = [];
   const walk = (n) => { for (const c of n.childNodes) if (c instanceof Element) { if (matchList(c, list)) out.push(c); walk(c); } };
-  walk(root); return out;
+  const was = scopeOf; scopeOf = root;
+  try { walk(root); } finally { scopeOf = was; }
+  return out;
 }
 
 class Style {
@@ -234,6 +241,18 @@ export class Element extends Node {
   get href() { const h = this._a.get('href'); if (h == null) return ''; try { return new URL(h, this.ownerDocument.defaultView.location.href).href; } catch { return h; } }
   set href(v) { this._a.set('href', String(v)); }
   get src() { return this._a.get('src') || ''; } set src(v) { this._a.set('src', String(v)); }
+  // form controls, as far as a script reads and writes them: a control holds the value it was parsed with
+  // until something sets one (a set value is the control's state, not its attribute, as in a browser)
+  get value() {
+    if (this._v !== undefined) return this._v;
+    if (this.localName === 'textarea') return this.textContent;
+    if (this.localName === 'select') { const o = this.querySelectorAll('option'); const s = o.find((x) => x.hasAttribute('selected')) || o[0]; return s ? (s.getAttribute('value') ?? s.textContent) : ''; }
+    return this._a.get('value') ?? (this.localName === 'input' ? '' : undefined);
+  }
+  set value(v) { this._v = String(v ?? ''); }
+  get checked() { return this._c !== undefined ? this._c : this._a.has('checked'); } set checked(v) { this._c = !!v; }
+  get disabled() { return this._a.has('disabled'); } set disabled(v) { this.toggleAttribute('disabled', !!v); }
+  get type() { return this._a.get('type') || (this.localName === 'input' ? 'text' : this.localName === 'textarea' ? 'textarea' : ''); } set type(v) { this._a.set('type', String(v)); }
   get children() { return this.childNodes.filter((c) => c instanceof Element); }
   get firstElementChild() { return this.children[0] || null; }
   get lastElementChild() { const c = this.children; return c[c.length - 1] || null; }
