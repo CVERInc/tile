@@ -29,17 +29,24 @@ import { dirname, join } from 'node:path';
 const DIR = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_PATH = join(DIR, 'service-host-off.fixture.json');
 
-// ── the grid: 3 stages × 7 hosts × 34 requests = 714 answers (and the wide grid, further down) ──────────────────────────────────────
-const cardsFile = (title) => `---\ncard-page: t\ntitle: ${title}\n---\n\n## grid\n\n- [ ] %% card: profile w=6 %% Public bio\n`;
+// ── the grid: 3 stages × 7 hosts × 43 requests = 903 answers (and the wide grid, further down) ──────────────────────────────────────
+// (34 requests, 714 answers, until tile#372 added the 9 embed-address requests at the end of GRID_REQUESTS)
+const cardsFile = (title, more = '') => `---\ncard-page: t\ntitle: ${title}\n---\n\n## grid\n\n- [ ] %% card: profile w=6 %% Public bio\n${more}`;
+// tile#372: a person's page and the preview hold an `embed` (the one tile whose frame a stage of the page's
+// policy can write differently), so the grid compares those pages' bodies with an embed on them
+export const GRID_EMBED = '- [ ] %% card: embed w=6 %% <b id="t">x</b><script>t.textContent = "ran"</script>\n';
 export const GRID_PREVIEW = 'b'.repeat(32);
+/** the hash of GRID_EMBED's document on these files (the theme and accent are the same on both): the address
+ *  "enforce" writes for it. cardtile-page-csp.test.mjs checks that this is the address the pages name. */
+export const GRID_EMBED_HASH = 'bfda080bee9cb1d238bffd30108af9a38539425fbd8a04060b647ab9497d14f7';
 export const GRID_SEED = Object.freeze({
   feelreef: cardsFile('Stored platform page'),
-  aster: cardsFile('Aster'),
+  aster: cardsFile('Aster', GRID_EMBED),
   'pool:aster:0': 'in',
   'vanity:own.example': 'aster',
   'vanityof:aster:0': 'own.example',
   'vanitybind:aster:0:own.example': '1',
-  [`_preview:${GRID_PREVIEW}`]: cardsFile('A parked draft'),
+  [`_preview:${GRID_PREVIEW}`]: cardsFile('A parked draft', GRID_EMBED),
 });
 export const GRID_TOKEN = 'service-host-off-grid-token';
 const TOKEN_HASH = createHash('sha256').update(GRID_TOKEN).digest('hex');
@@ -64,6 +71,14 @@ export const GRID_REQUESTS = Object.freeze([
   ['POST /try/park (not a Cards file)', '/try/park', { method: 'POST', body: 'x' }],
   ['POST /report (text/plain)', '/report', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'x' }],
   ['POST /_api/cards (bearer)', '/_api/cards', { method: 'POST', headers: { ...AUTH, 'content-type': 'application/json' }, body: '{"handles":["aster","nobody"]}' }],
+  // tile#372: the address of GRID_EMBED's own document — a person's (`/aster/_embed/…`), the preview's, and the one a
+  // person's own domain names (`/_embed/…`; an unknown path on a shared host) — asked as a frame asks it, as a
+  // top-level page, and with no Sec-Fetch-Dest at all
+  ...[`/aster/_embed/${GRID_EMBED_HASH}`, `/_preview/${GRID_PREVIEW}/_embed/${GRID_EMBED_HASH}`, `/_embed/${GRID_EMBED_HASH}`].flatMap((p) => {
+    const short = p.replace(GRID_EMBED_HASH, '<embed>');
+    return [[`GET ${short} (iframe)`, p, { headers: { 'sec-fetch-dest': 'iframe' } }], [`GET ${short} (document)`, p, { headers: { 'sec-fetch-dest': 'document' } }],
+      [`GET ${short} (no Sec-Fetch-Dest)`, p, {}]];
+  }),
 ]);
 
 export const caseKey = (stage, host, name) => `${stage} ${host} ${name}`;
@@ -77,9 +92,9 @@ export function gridCases() {
 /**
  * One answer, as the fixture keeps it. `extra` is merged over the stage's settings (the new settings,
  * in the values under test; {} for the capture). The body is kept as its size and hash; the headers
- * and the store reads whole, in order.
+ * and the store reads whole, in order. `{ text: true }` keeps the body's text as well (a test's, never the fixture's).
  */
-export async function answerOf(worker, { stage, host, path, init }, extra = {}) {
+export async function answerOf(worker, { stage, host, path, init }, extra = {}, { text = false } = {}) {
   const reads = [];
   const CARDS = {
     async get(k) { reads.push(k); return Object.hasOwn(GRID_SEED, k) ? GRID_SEED[k] : null; },
@@ -88,7 +103,7 @@ export async function answerOf(worker, { stage, host, path, init }, extra = {}) 
   const env = { PREVIEW: 'false', MCP_TOKEN_HASH: TOKEN_HASH, ...GRID_STAGES[stage], ...extra, CARDS };
   const res = await worker.fetch(new Request(`https://${host}${path}`, init), env);
   const body = Buffer.from(await res.arrayBuffer());
-  return { status: res.status, bytes: body.length, sha: createHash('sha256').update(body).digest('hex'), headers: [...res.headers], reads };
+  return { status: res.status, bytes: body.length, sha: createHash('sha256').update(body).digest('hex'), headers: [...res.headers], reads, ...(text ? { text: body.toString('utf8') } : {}) };
 }
 
 /** the one clock every answer of the grid is asked under */
@@ -127,7 +142,7 @@ export function answerDiff(got, want) {
 //   · paths that try to name another authority;
 //   · a deployment that is not production (PREVIEW "true"), where the stand-ins are allowed to run.
 //
-// It is kept apart from the 714 so their keys and rows stay as they were captured. Its answers repeat
+// It is kept apart from the grid above so their keys and rows stay as they were captured. Its answers repeat
 // heavily (most are one of a few refusals), so the fixture keeps each distinct answer once and one
 // index per case, in wideCases() order.
 export const WIDE_STANDINS = 'service=cards-staging.feelreef.com people=staging.reef.cards legacy=card-staging.feelreef.com';

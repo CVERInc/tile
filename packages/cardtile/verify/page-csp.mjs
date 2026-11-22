@@ -10,7 +10,15 @@
 // `securitypolicyviolation`, no page error and no console error — in the page and in every frame — while
 // the deck comes up, a brand mark's fallback handler runs, a video opens its player, a back opens, the QR
 // opens, and a long file's next window is fetched. A page with an embed carries the same policy, and the
-// embed's own script runs: the embed is its own document (serve/cardtile-embed-document.mjs).
+// embed's own script runs: enforced, the embed is its own document (serve/cardtile-embed-document.mjs).
+// And what ships (`?stage=default`, the setting unset): every kind of page served for a person — the three
+// views, a page with an embed, a preview, a long file's window, the "no card" page and an expired preview —
+// comes with the report-only policy, boots, and the browser reports no violation but one: an embed stays a
+// srcdoc frame under report-only, so its own script runs AND is reported, in that frame, as "report" — the
+// one report a page with an embed makes, and one "enforce" does not repeat (there the embed is its own document).
+// And the default's review: a page loaded under "enforce" whose lazy embed is scrolled to after its owner edited
+// it shows an empty frame, not the "no card" page; after the setting went back ("off", or unset) the same frame
+// shows the embed; a page loaded with the setting unset and edited the same way still shows what it loaded.
 //
 // 🔴 CONSOLE ERRORS ARE NOT IGNORED, they are SORTED. Each engine has a short list of exact texts it prints
 // at error level that are not a policy violation (KNOWN, below), each with its reason and a condition:
@@ -85,6 +93,11 @@ const cards = { plain: PLAIN, hostile: HOSTILE_FRONT, broken: BROKEN_MARK, embed
   long: inView(long(ON_DEMAND_TILES + 40), 'list'), longembed: LONG_EMBED, prose: inView(proseNamingEmbed(ON_DEMAND_TILES + 1), 'list'),
   [`_preview:${'c'.repeat(32)}`]: EVERY_TILE };
 for (const v of VIEWS) { cards[`every-${v}`] = inView(EVERY_TILE, v); cards[`embedded-${v}`] = inView(EMBED, v); }
+// the default's review: an embed far below the fold (its frame is loading=lazy: nothing asks its address until it
+// is scrolled to), on a page an owner edits while a visitor has it open
+const BELOW = (said) => `---\ntitle: An embed below the fold\nview: wall\n---\n\n## grid\n\n${Array.from({ length: 160 }, (_, i) => `- [ ] %% card: text %% Tile ${i}.`).join('\n')}\n`
+  + `- [ ] %% card: embed w=6 %% <b id="t">x</b><script>t.textContent = "${said}"; ${PROBE}</script>\n`;
+cards.below = BELOW('ran');
 if (!EMBED.includes('postMessage') || !LONG_EMBED.includes('postMessage') || !ON_BACK.includes('postMessage')) throw new Error('an embed fixture lost its probe');
 const store = { get: async (k) => cards[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } };
 
@@ -105,6 +118,9 @@ const INJECTED = '<script>window.__ran = (window.__ran || []).concat("inline scr
 const PARENT_SCRIPT = '<script>window.__parentPwn = location.origin</script>';
 // r3: what the widget's server was asked (counted here, by the server: a browser's request events can miss a frame's first load)
 const widgetAsked = [];
+// the stage a request without `?stage=` is answered in — an embed frame's own request carries none, so moving this
+// is the Worker's setting moving while a page is open (the default's review: a rollback)
+let serverStage = 'enforce';
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
@@ -123,10 +139,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const arm = url.searchParams.get('arm') || '';
-    const stage = url.searchParams.get('stage') || 'enforce';
+    const stage = url.searchParams.get('stage') || serverStage;
     url.searchParams.delete('arm'); url.searchParams.delete('stage');
-    const envOf = (s) => ({ CARDS: store, ...(s === 'off' ? {} : { CARDS_PAGE_CSP: s }) });
-    const ask = (s) => worker.fetch(new Request(`http://localhost${url.pathname}${url.search}`, { headers: { accept: req.headers.accept || '*/*', 'accept-language': 'en' } }), envOf(s));
+    // `default` asks with the setting unset (report-only since tile#372); every other stage names itself, "off" included
+    const envOf = (s) => ({ CARDS: store, ...(s === 'default' ? {} : { CARDS_PAGE_CSP: s }) });
+    // Sec-Fetch-Dest is passed on as the browser sent it: an embed's address answers its document only to a frame
+    const dest = req.headers['sec-fetch-dest'];
+    const ask = (s) => worker.fetch(new Request(`http://localhost${url.pathname}${url.search}`, { headers: { accept: req.headers.accept || '*/*', 'accept-language': 'en', ...(dest ? { 'sec-fetch-dest': dest } : {}) } }), envOf(s));
     // 'srcdoc': the page as it is with the setting off (its embed a srcdoc frame), served under the policy
     const r = await ask(arm === 'srcdoc' ? 'off' : stage);
     const headers = Object.fromEntries(r.headers);
@@ -185,8 +204,8 @@ const baselines = new Map();   // path → the error texts its off twin printed
 /** a page with its ears on: violations (every frame), console errors, page errors; `policy` is the header it was served with */
 async function open(context, path, { expect404 = [] } = {}) {
   const page = await step(context.newPage(), `new page for ${path}`);
-  const heard = { console: [], errors: [], requests: [] };
-  page.on('console', (m) => { if (m.type() === 'error' && !expect404.some((u) => m.location().url.includes(u))) heard.console.push(m.text()); });
+  const heard = { console: [], consoleAt: [], errors: [], requests: [] };
+  page.on('console', (m) => { if (m.type() === 'error' && !expect404.some((u) => m.location().url.includes(u))) { heard.console.push(m.text()); heard.consoleAt.push(m.location().url); } });
   page.on('pageerror', (e) => heard.errors.push(String(e).slice(0, 200)));
   page.on('request', (q) => heard.requests.push(q.url()));
   const p = { page, heard, path, policy: null, stage: null };
@@ -231,13 +250,34 @@ async function sorted(context, p) {
   }
   return left;
 }
-const quiet = async (name, p, context) => {
-  const v = await violations(p.page);
-  check(v.length === 0, `${name}: no securitypolicyviolation in any frame${v.length ? ' — ' + JSON.stringify(v.slice(0, 4)) : ''}`);
+/** violations with the address of the frame that heard them */
+const violationsAt = async (page) => {
+  const out = [];
+  for (const f of page.frames()) { try { for (const v of await step(f.evaluate(() => window.__cspv || []), 'read violations', 5000)) out.push({ at: f.url(), v }); } catch { /* a frame that went away */ } }
+  return out;
+};
+// the default's review: under report-only an embed is a srcdoc frame, which inherits the page's report-only policy —
+// its own inline script runs and is REPORTED there. That one report is the only one accepted, and only where asked:
+// on a report-only page, heard in a srcdoc frame, an inline script, disposition "report". Nothing in the page itself.
+const SRCDOC_REPORT = (x) => x.at === 'about:srcdoc' && /^script-src-elem inline report$/.test(x.v);
+const SRCDOC_REPORT_LINE = /^\[Report Only\] Executing inline script violates the following Content Security Policy directive 'script-src /;
+const accepted2 = { srcdoc: 0 };
+const quiet = async (name, p, context, { srcdocReports = false } = {}) => {
+  const all = await violationsAt(p.page);
+  const allowed = srcdocReports && p.stage === 'report-only' ? all.filter(SRCDOC_REPORT) : [];
+  const v = all.filter((x) => !allowed.includes(x)).map((x) => `${x.v} @ ${x.at}`);
+  accepted2.srcdoc += allowed.length;
+  check(v.length === 0, `${name}: no securitypolicyviolation in any frame${allowed.length ? ` but ${allowed.length} report of the srcdoc embed's own script` : ''}${v.length ? ' — ' + JSON.stringify(v.slice(0, 4)) : ''}`);
+  if (srcdocReports && p.stage === 'report-only') {
+    // the same report, as the engine's own console line from that frame (in place: the page's listener keeps pushing here)
+    for (let i = p.heard.console.length - 1; i >= 0; i -= 1) {
+      if (SRCDOC_REPORT_LINE.test(p.heard.console[i]) && p.heard.consoleAt[i] === 'about:srcdoc') { p.heard.console.splice(i, 1); p.heard.consoleAt.splice(i, 1); accepted2.srcdoc += 1; }
+    }
+  }
   const left = await sorted(context, p);
   check(left.length === 0, `${name}: no console error${left.length ? ' — ' + JSON.stringify(left.slice(0, 3).map((t) => t.slice(0, 200))) : ''}`);
   check(p.heard.errors.length === 0, `${name}: no page error${p.heard.errors.length ? ' — ' + JSON.stringify(p.heard.errors.slice(0, 3)) : ''}`);
-  p.heard.console.length = 0; p.heard.errors.length = 0;
+  p.heard.console.length = 0; p.heard.consoleAt.length = 0; p.heard.errors.length = 0;
   await step(p.page.evaluate(() => { window.__cspv = []; }), 'clear violations', 5000).catch(() => {});
 };
 const msgs = (p) => step(p.page.evaluate(() => window.__msgs), 'read messages', 5000);
@@ -294,7 +334,9 @@ try {
       const f = await step(context.newPage(), 'new page');
       if (embedPolicy) {
         await f.route(/\/_embed\/[0-9a-f]{64}/, async (route) => {
-          const r = await route.fetch();
+          // this request IS a frame's: say so, whether or not the interception kept the browser's Sec-Fetch-Dest
+          const q = route.request();
+          const r = await route.fetch({ headers: { ...q.headers(), 'sec-fetch-dest': q.frame().parentFrame() ? 'iframe' : 'document' } });
           await route.fulfill({ response: r, headers: { ...r.headers(), 'content-security-policy': embedPolicy } });
         });
       }
@@ -329,6 +371,36 @@ try {
         check(state.boot === 'ready' && !state.off && state.view === view && state.strings, `every tile, ${view}, ${stage}: the deck came up in its view (${JSON.stringify(state)})`);
         await p.page.waitForTimeout(600);
         await quiet(`every tile, ${view}, ${stage}`, p, context);
+        await close(p);
+      }
+    });
+
+    // 1b. tile#372 — what ships: the setting UNSET. Every kind of page the Worker serves for a person comes
+    // with the report-only policy, its own scripts all run, and the browser reports nothing — a report-only
+    // policy that would refuse the page's own boot is worse than none.
+    await section('default', async () => {
+      const kinds = [...VIEWS.map((v) => [`every tile, ${v}`, `/every-${v}`, 'deck']),
+        ['a page with an embed', '/embedded-wall', 'embed'], ['a preview', `/_preview/${'c'.repeat(32)}`, 'deck'],
+        ['the second window of a long file', '/long?w=2', 'deck'], ['the "no card" page', '/nobody', 'deck'],
+        ['an expired preview', `/_preview/${'9'.repeat(32)}`, 'static']];
+      for (const [label, path, kind] of kinds) {
+        const at = `${path}${path.includes('?') ? '&' : '?'}stage=default`;
+        const p = await open(context, at, { expect404: [path.split('?')[0]] });
+        check(p.stage === 'report-only' && !!p.policy, `default, ${label}: served with the report-only policy`);
+        if (kind !== 'static') {
+          await p.page.waitForFunction(() => window.__deckBoot === 'ready', null, { timeout: 10000 }).catch(() => {});
+          const state = await step(p.page.evaluate(() => ({ boot: window.__deckBoot, off: document.documentElement.hasAttribute('data-deck-off'), strings: !!window.__deckStrings })), 'read state');
+          check(state.boot === 'ready' && !state.off && state.strings, `default, ${label}: the deck came up (${JSON.stringify(state)})`);
+        }
+        if (kind === 'embed') {
+          const frames = await step(p.page.evaluate(() => [...document.querySelectorAll('iframe[sandbox]')].map((f) => (f.hasAttribute('srcdoc') ? 'srcdoc' : f.getAttribute('src')))), 'read frames');
+          check(JSON.stringify(frames) === '["srcdoc"]', `default, ${label}: the embed is a srcdoc frame, as with the setting off (${JSON.stringify(frames)})`);
+          await eagerFrames(p);
+          const e = await embedRan(p);
+          check(e.ran && e.opaque && e.blocked && !e.escaped, `default, ${label}: the embed's own script ran, in an opaque origin (${JSON.stringify(e)})`);
+        }
+        await p.page.waitForTimeout(600);
+        await quiet(`default, ${label}`, p, context, { srcdocReports: kind === 'embed' });
         await close(p);
       }
     });
@@ -448,12 +520,14 @@ try {
         const p = await open(context, `/embedded-${view}?stage=${stage}`);
         check(p.stage === stage, `an embed, ${view}, ${stage}: served with the policy`);
         const src = await step(p.page.evaluate(() => [...document.querySelectorAll('iframe[sandbox]')].map((f) => `${f.getAttribute('sandbox')} ${f.getAttribute('src')} ${f.hasAttribute('srcdoc')}`)), 'read frames');
-        check(src.length === 1 && new RegExp(`^allow-scripts /embedded-${view}/_embed/[0-9a-f]{64} false$`).test(src[0]), `an embed, ${view}, ${stage}: its frame is its own document, same sandbox (${JSON.stringify(src)})`);
+        // enforced: its own document; report-only: the srcdoc frame it is with the setting off (the default's review)
+        const want = stage === 'enforce' ? new RegExp(`^allow-scripts /embedded-${view}/_embed/[0-9a-f]{64} false$`) : /^allow-scripts null true$/;
+        check(src.length === 1 && want.test(src[0]), `an embed, ${view}, ${stage}: its frame is ${stage === 'enforce' ? 'its own document' : 'srcdoc'}, same sandbox (${JSON.stringify(src)})`);
         await eagerFrames(p);
         const e = await embedRan(p);
         check(e.ran && e.opaque, `an embed, ${view}, ${stage}: the embed's own script ran, in an opaque origin (${JSON.stringify(e)})`);
         check(e.blocked && !e.escaped, `an embed, ${view}, ${stage}: reaching into the page throws SecurityError`);
-        await quiet(`an embed, ${view}, ${stage}`, p, context);
+        await quiet(`an embed, ${view}, ${stage}`, p, context, { srcdocReports: true });
         await close(p);
       }
       // on a back
@@ -482,28 +556,30 @@ try {
         await quiet('a long file with an embed in its second window', p, context);
         await close(p);
       }
-      // the embed's document opened as a page of its own: still an opaque origin (the document's own policy)
+      // the embed's address opened as a page of its own (the browser asks it as a document, not a frame): the empty
+      // document, still in an opaque origin — the author's HTML is never a top-level page (the default's closing review)
       {
-        const p = await open(context, '/embedded-wall');
+        const p = await open(context, '/embedded-wall', { expect404: ['/_embed/'] });
         const src = await step(p.page.evaluate(() => document.querySelector('iframe[sandbox]').getAttribute('src')), 'read frame');
-        await visit(p, src);
+        const resp = await step(p.page.goto(base + src, { waitUntil: 'load', timeout: STEP_MS }), `load ${src}`);
         await p.page.waitForTimeout(300);
         const top = await step(p.page.evaluate(() => {
           let cookie = 'readable';
           try { void document.cookie; } catch (e) { cookie = e.name; }
-          return { origin: self.origin, text: (document.getElementById('t') || {}).textContent, cookie };
+          return { origin: self.origin, text: (document.getElementById('t') || {}).textContent, body: document.body ? document.body.innerHTML : null, cookie };
         }), 'read the document');
-        check(top.origin === 'null' && top.text === 'ran' && top.cookie === 'SecurityError', `an embed's document opened directly: its script runs in an opaque origin, no cookie (${JSON.stringify(top)})`);
+        check(resp && resp.status() === 404 && top.origin === 'null' && top.text === undefined && !top.body && top.cookie === 'SecurityError',
+          `an embed's address opened directly: the empty document, in an opaque origin — the embed's script does not run there (${JSON.stringify({ status: resp && resp.status(), ...top })})`);
         await close(p);
         // r2: another site framing the embed's document DIRECTLY may (as it may frame the page): what it gets
         // is a sandboxed, opaque-origin document of HTML that is already public in the page it belongs to
         const direct = await framed(base + src);
         check(direct.embed && direct.embed.text === 'ran' && direct.embed.origin === 'null', `another site framing an embed's document directly: it loads in an opaque origin (${JSON.stringify(direct)})`);
       }
-      // r2 — a Cards page framed by ANOTHER site: its embed runs, enforced and report-only (and off, as srcdoc)
+      // r2 — a Cards page framed by ANOTHER site: its embed runs, enforced (its own document) and report-only and off (srcdoc)
       for (const stage of ['enforce', 'report-only', 'off']) {
         const n = await framed(`${base}/embedded-wall?stage=${stage}`);
-        check(n.page && n.embed && n.embed.text === 'ran' && n.embed.origin === 'null' && (stage === 'off' ? n.embed.url === 'about:srcdoc' : /\/embedded-wall\/_embed\/[0-9a-f]{64}$/.test(n.embed.url)),
+        check(n.page && n.embed && n.embed.text === 'ran' && n.embed.origin === 'null' && (stage !== 'enforce' ? n.embed.url === 'about:srcdoc' : /\/embedded-wall\/_embed\/[0-9a-f]{64}$/.test(n.embed.url)),
           `a Cards page framed by another site, ${stage}: its embed runs, in an opaque origin (${JSON.stringify(n)})`);
       }
       // 🔴 CONTROL: the same, with the embed's document given back the r1 header `frame-ancestors 'self'`: refused,
@@ -512,11 +588,12 @@ try {
         const n = await framed(`${base}/embedded-wall?stage=enforce`, "sandbox allow-scripts; frame-ancestors 'self'");
         check(n.page && !(n.embed && n.embed.text === 'ran'), `CONTROL: with frame-ancestors 'self' on the embed's document, a Cards page framed by another site loses its embed (${JSON.stringify(n)})`);
       }
-      // r2 — an embed's relative addresses: as in the srcdoc with the setting off, in every stage
+      // r2 — an embed's relative addresses: enforced (its own document) as in the srcdoc with the setting off.
+      // (Report-only serves the very bytes "off" does — the srcdoc — plus the header: cardtile-page-csp.test.mjs.)
       {
         const strip = (u) => String(u).replace(/\?stage=[a-z-]+/, '');   // the harness's own switch, not the page's address
         const seen = {};
-        for (const stage of ['off', 'enforce', 'report-only']) {
+        for (const stage of ['off', 'enforce']) {
           const p = await open(bare, `/aster?stage=${stage}`);
           await eagerFrames(p);
           await p.page.waitForFunction(() => window.__msgs.some((m) => m.data && m.data.relative), null, { timeout: 8000 }).catch(() => {});
@@ -547,16 +624,16 @@ try {
           check(away.length === 0, `relative addresses in an embed, ${stage}: no request left this server (${JSON.stringify(away.slice(0, 3))})`);
           await close(p);
         }
-        for (const stage of ['enforce', 'report-only']) {
+        for (const stage of ['enforce']) {
           const s = seen[stage];
           check(s.violations.length === 0 && JSON.stringify(s.lines) === JSON.stringify(seen.off.lines) && JSON.stringify(s.errors) === JSON.stringify(seen.off.errors),
             `relative addresses in an embed, ${stage}: after the clicks, no violation, and the engine's console and page errors say what they say for the srcdoc (${JSON.stringify({ on: [s.lines, s.errors], off: [seen.off.lines, seen.off.errors], v: s.violations.slice(0, 2) }).slice(0, 900)})`);
         }
-        for (const stage of ['off', 'enforce', 'report-only']) {
+        for (const stage of ['off', 'enforce']) {
           check(!!seen[stage].said && seen[stage].said.loaded && seen[stage].said.picture === `${base}/aster/favicon.ico`, `relative addresses in an embed, ${stage}: the picture aster/favicon.ico loads from /aster/favicon.ico (${JSON.stringify(seen[stage].said)})`);
           check(seen[stage].targets.popups === 0 && seen[stage].targets.top, `relative addresses in an embed, ${stage}: target=_blank opens nothing and target=_top moves nothing (${JSON.stringify(seen[stage].targets)})`);
         }
-        for (const stage of ['enforce', 'report-only']) {
+        for (const stage of ['enforce']) {
           check(JSON.stringify(seen[stage].said) === JSON.stringify(seen.off.said), `relative addresses in an embed, ${stage}: baseURI, picture and #x link as in the srcdoc (${JSON.stringify({ on: seen[stage].said, off: seen.off.said })})`);
           check(JSON.stringify(seen[stage].fragment) === JSON.stringify(seen.off.fragment), `relative addresses in an embed, ${stage}: a #x click does what it does in the srcdoc (${JSON.stringify({ on: seen[stage].fragment, off: seen.off.fragment, before: [seen[stage].before, seen.off.before] })})`);
         }
@@ -565,7 +642,7 @@ try {
       for (const [i, [what]] of AUTHOR_BASES.entries()) {
         const strip = (u) => String(u).replace(/\?stage=[a-z-]+/, '');
         const seen = {};
-        for (const stage of ['off', 'enforce', 'report-only']) {
+        for (const stage of ['off', 'enforce']) {
           widgetAsked.length = 0;
           const p = await open(bare, `/authorbase${i}?stage=${stage}`);
           await eagerFrames(p);
@@ -578,7 +655,7 @@ try {
         }
         check(!!seen.off.said, `an author's own base, ${what}: with the setting off the srcdoc says what its base is (${JSON.stringify(seen.off)})`);
         if (i < 2) check(seen.off.said && seen.off.said.text === 'widget ready' && JSON.stringify(seen.off.widget) === '["/app/widget.js"]', `an author's own base, ${what}, off: the widget loads, from /app/widget.js (${JSON.stringify(seen.off)})`);
-        for (const stage of ['enforce', 'report-only']) {
+        for (const stage of ['enforce']) {
           check(JSON.stringify(seen[stage]) === JSON.stringify(seen.off), `an author's own base, ${what}, ${stage}: the base, the widget and its requests as in the srcdoc (${JSON.stringify({ on: seen[stage], off: seen.off })})`);
         }
       }
@@ -599,6 +676,67 @@ try {
         check(frames.length === 1 && frames[0] === 'srcdoc' && inside === 'x' && !m.some((x) => x.data && x.data.embed === 'ran') && (v.some((x) => /^script-src/.test(x)) || said > 0),
           `CONTROL: as srcdoc under the page's policy the embed's script does NOT run (${JSON.stringify({ v: v.slice(0, 2), said, inside, frames, policy: c.stage, messages: m.slice(0, 3) })}) — why it is its own document`);
         await close(c);
+      }
+    });
+
+    // 4b. the default's review — an embed far below the fold (its frame loading=lazy), on a page a visitor has open:
+    // what the frame shows when they scroll to it after the owner edited the embed, or after the setting moved
+    await section('edited and rolled back', async () => {
+      const frameShows = async (p) => {
+        // scrolled to as a visitor scrolls — a screen at a time, the frame left lazy — then read (the deck lays the
+        // tiles out again, so the frame the visitor reaches is found by scrolling, not by the markup's first frame)
+        let r = { url: null };
+        let seen = 0;
+        for (let i = 0; i < 120; i += 1) {
+          await step(p.page.evaluate(() => scrollBy(0, innerHeight)), 'scroll');
+          await p.page.waitForTimeout(100);
+          // a frame that has not navigated yet has no address (or about:blank): it is not read until it has one
+          const child = p.page.frames().find((x) => x.parentFrame() === p.page.mainFrame() && /^(https?:|about:srcdoc)/.test(x.url()));
+          if (!child) continue;
+          try {
+            r = { url: child.url(), ...(await step(child.evaluate(() => ({ t: (document.getElementById('t') || {}).textContent ?? null, text: (document.body ? document.body.textContent : '').trim().slice(0, 80),
+              main: !!document.querySelector('main'), bytes: document.documentElement.outerHTML.length })), 'read the frame', 5000)) };
+          } catch { r = { url: child.url(), unreadable: true }; }
+          if (r.t === 'ran' || r.unreadable) break;
+          // an empty document says nothing: read it again a few times after it is there, then take it
+          if (r.url && r.t === null && ++seen > 8) break;
+        }
+        if (!r.url) {
+          r.where = await step(p.page.evaluate(() => { const f = document.querySelector('iframe[sandbox]'); const b = f.getBoundingClientRect(); return { top: Math.round(b.top), h: Math.round(b.height), w: Math.round(b.width), vh: innerHeight, loading: f.getAttribute('loading'), shown: getComputedStyle(f).display }; }), 'where', 5000).catch((e) => String(e));
+          r.frames = p.page.frames().map((x) => x.url());
+          r.asked = p.heard.requests.filter((u) => u.includes('/_embed/'));
+        }
+        return r;
+      };
+      const cases = [
+        // [what, the stage the page was loaded in, what happens while it is open, what its embed's frame must show]
+        ['enforced, then the owner edits the embed', 'enforce', () => { cards.below = BELOW('ran, edited'); }, 'empty'],
+        ['enforced, then the owner changes the theme (every embed\'s hash)', 'enforce', () => { cards.below = BELOW('ran').replace('view: wall\n', 'view: wall\ntheme: dark\n'); }, 'empty'],
+        ['enforced, then the setting goes back to "off"', 'enforce', () => { serverStage = 'off'; }, 'ran'],
+        ['enforced, then the setting goes back to unset (report-only)', 'enforce', () => { serverStage = 'default'; }, 'ran'],
+        ['enforced, then "off", then the owner edits the embed', 'enforce', () => { serverStage = 'off'; cards.below = BELOW('ran, edited'); }, 'empty'],
+        ['unset (report-only), then the owner edits the embed — the reviewer\'s case', 'default', () => { cards.below = BELOW('ran, edited'); }, 'ran'],
+        ['"off", then the owner edits the embed', 'off', () => { cards.below = BELOW('ran, edited'); }, 'ran'],
+      ];
+      for (const [what, stage, meanwhile, want] of cases) {
+        cards.below = BELOW('ran'); serverStage = 'enforce';
+        const p = await open(context, `/below?stage=${stage}`, { expect404: want === 'empty' ? ['/_embed/'] : [] });
+        try {
+          await p.page.waitForFunction(() => window.__deckBoot === 'ready', null, { timeout: 10000 }).catch(() => {});
+          const frames = await step(p.page.evaluate(() => [...document.querySelectorAll('iframe[sandbox]')].map((f) => (f.hasAttribute('srcdoc') ? 'srcdoc' : f.getAttribute('src')))), 'read frames');
+          const asked = () => p.heard.requests.filter((u) => u.includes('/_embed/')).length;
+          check(frames.length === 1 && (stage === 'enforce' ? /\/below\/_embed\/[0-9a-f]{64}$/.test(frames[0]) : frames[0] === 'srcdoc') && asked() === 0,
+            `${what}: the embed is ${stage === 'enforce' ? 'its own document' : 'srcdoc'}, and nothing asked its address before it was scrolled to (${JSON.stringify({ frames, asked: asked() })})`);
+          meanwhile();
+          const r = await frameShows(p);
+          if (want === 'empty') {
+            check(r.url && /\/below\/_embed\/[0-9a-f]{64}$/.test(r.url) && !r.unreadable && r.t === null && r.text === '' && !r.main && asked() === 1,
+              `${what}: its frame shows an empty document — not the "no card" page (${JSON.stringify(r)})`);
+          } else {
+            check(r.t === 'ran' && !r.main && r.url === (stage === 'enforce' ? r.url : 'about:srcdoc'), `${what}: its frame shows the embed the page was loaded with (${JSON.stringify(r)})`);
+          }
+          await quiet(what, p, context, { srcdocReports: true });
+        } finally { serverStage = 'enforce'; cards.below = BELOW('ran'); await close(p); }
       }
     });
 
@@ -639,6 +777,8 @@ try {
       }
     });
     console.log(`  · accepted console texts: ${accepted.configuration} configuration (report-only without report-to), ${accepted.baseline} baseline (also printed with the setting off)`);
+    console.log(`  · accepted reports: ${accepted2.srcdoc} of a srcdoc embed's own script on a report-only page (event or console line, in that frame)`);
+    accepted2.srcdoc = 0;
     for (const [k, n] of accepted.where) console.log(`      ${n} × ${k}`);
     await step(browser.close(), `close ${name}`).catch((e) => check(false, String(e.message)));
   }
