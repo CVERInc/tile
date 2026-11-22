@@ -6,12 +6,14 @@
 // worker — is deployment, belongs to whoever runs the deployment, and is not here. See README.
 
 import { spawn } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { lstat, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { collectPages } from './mkpages.mjs';
 import { stageSite } from './stage.mjs';
 
 const exists = async (p) => { try { await stat(p); return true; } catch { return false; } };
+// The same question without following a link — for a path that comes from the site, not the caller.
+const present = async (p) => { try { await lstat(p); return true; } catch { return false; } };
 
 /** Where the renderer lives inside an engine checkout. One string, one place to change it. */
 export const RENDERER_SUBPATH = 'packages/sitetile/astro';
@@ -89,7 +91,11 @@ export async function buildSite({
 
   const pages = collectPages(irDir, { includePosts });
   const defaultBlog = path.join(irDir, 'posts');
-  const blog = blogDir ?? (!includePosts && await exists(defaultBlog) ? defaultBlog : undefined);
+  // 🔴 `present`, not `exists`: nobody NAMED this directory — it is taken because the site has
+  // one, so it is the site's own material. Asked by following, a `posts` that is a link leading
+  // nowhere was "not there", and the site built without a blog and without a word; asked this way
+  // it reaches stageSite, which refuses a link whether or not it leads anywhere.
+  const blog = blogDir ?? (!includePosts && await present(defaultBlog) ? defaultBlog : undefined);
 
   const abortError = () => Object.assign(
     new Error('buildSite: aborted — the build was stopped and the renderer has been put back.'),
@@ -176,5 +182,6 @@ export async function buildSite({
 
 export { collectPages } from './mkpages.mjs';
 export {
-  stageSite, safePagePath, themeNameFromPages, THEME_NAME_PATTERN, RESTORE_FAILED, ASTRO_SCRATCH,
+  stageSite, safePagePath, themeNameFromPages, THEME_NAME_PATTERN, RESTORE_FAILED, LINK_REFUSED,
+  ASTRO_SCRATCH,
 } from './stage.mjs';
