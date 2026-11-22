@@ -84,7 +84,7 @@ const AS_BEFORE = [['top', 'top'], ['center', 'center'], ['bottom', 'bottom'], [
 // Not a position. Each draws the default and is warned about as written (trimmed).
 const UNRECOGNISED = [
   ['middle', 'middle'], ['left', 'left'], ['centre', 'centre'], ['top-left', 'top-left'], ['1', '1'],
-  ['"top center"', 'top center'], ['" Upper "', 'Upper'], ['top,', 'top,'], ['ＴＯＰ', 'ＴＯＰ'],
+  ['"top center"', 'top center'], ['" Upper "', 'Upper'], ['top,', 'top,'], ['\uFF34\uFF2F\uFF30', '\uFF34\uFF2F\uFF30'],
 ];
 
 await test('🔴 heroVariant folds case and surrounding whitespace into one of the three positions', () => {
@@ -125,7 +125,7 @@ await test('🔴 string render: an unrecognised value draws the default hero and
 });
 
 await test('🔴 an unrecognised value is handed to the sink, as written (trimmed), once per render', () => {
-  for (const [typed, shown] of [['nowhere', 'nowhere'], ['" Sideways "', 'Sideways'], ['ＢＯＴＴＯＭ', 'ＢＯＴＴＯＭ'], ['"top  center"', 'top  center']]) {
+  for (const [typed, shown] of [['nowhere', 'nowhere'], ['" Sideways "', 'Sideways'], ['\uFF22\uFF2F\uFF34\uFF34\uFF2F\uFF2D', '\uFF22\uFF2F\uFF34\uFF34\uFF2F\uFF2D'], ['"top  center"', 'top  center']]) {
     takeWarned();
     render(`${LAYERS} logo-pos=${typed}`);
     assert.deepEqual(takeWarned(), [WARNING(shown)], `logo-pos=${typed}`);

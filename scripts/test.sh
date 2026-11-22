@@ -18,7 +18,10 @@ done
 # Person handles, links to private repos, and (where this machine has it) the private term list —
 # over every tracked file, not only the lines a push adds. The lists and why each lives where it does
 # are in the script's header; the matched text is never printed, because CI logs here are public.
-echo "→ forbidden terms"
+# The same run also refuses the shapes that need no list at all: e-mail addresses outside the reserved
+# example domains, well-known secret prefixes, and full-width Latin letters. Those used to be checked
+# only after a commit was already public; here they turn the pull request red instead.
+echo "→ forbidden terms (handles, private list, private-repo links, addresses, secret prefixes)"
 node scripts/forbidden-terms.mjs
 
 echo "→ build (inlines core + i18n; needs python3 + bash)"

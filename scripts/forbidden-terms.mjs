@@ -2,7 +2,7 @@
 // forbidden-terms — fail when a tracked file in this PUBLIC repo carries a term that must not be
 // published here. Run by scripts/test.sh, so the pre-push hook and CI ask the same question.
 //
-// Three kinds of term, and where each one's list lives is the whole design:
+// Four kinds of term, and where each one's list lives is the whole design:
 //
 //   1. PERSON HANDLES (who wrote or ruled something). Listed below only as salted hashes of a
 //      lowercased token, in scripts/forbidden-terms.hashes. A handle is a public login, so a hash is
@@ -23,10 +23,17 @@
 //      reader of a public repo. Not secret — the repo names are in the plain list below. Bare
 //      `repo#123` stays allowed: it names an issue without pretending to be a link.
 //
+//   4. SHAPES THAT NEED NO LIST (e-mail addresses, well-known secret prefixes, full-width Latin
+//      letters). Nothing here names anybody, so the patterns can be public — see the block above
+//      `portableKinds` for what each one is and what it deliberately leaves alone. Anything that has
+//      to be refused BY NAME (an account id, a host, a person) is not this tier's business: it goes
+//      in the private list of tier 2.
+//
 // 🔴 Hits are reported as `path:line` plus WHICH entry matched (handle #k / private #n / private
-// repo), never the matched text: CI logs on a public repo are public, and printing the term would
-// publish it in the act of refusing it. A path that itself matches is withheld wherever it would be
-// printed and named by its position in `git ls-files` instead. All three tiers apply to paths too.
+// repo / the kind of shape), never the matched text: CI logs on a public repo are public, and printing
+// the term would publish it in the act of refusing it. A path that itself matches is withheld wherever
+// it would be printed and named by its position in `git ls-files` instead. All four tiers apply to
+// paths too.
 //
 // Usage: node scripts/forbidden-terms.mjs [--root DIR] [--hashes FILE]
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -51,6 +58,80 @@ export const handleHash = (token) => createHash('sha256').update(SALT + token.to
 const ORG = 'CVERInc';
 const PRIVATE_REPOS = ['reef', 'tile-lab'];
 const PRIVATE_REPO_LINK = new RegExp(`${ORG}/(?:${PRIVATE_REPOS.map((r) => r.replace(/-/g, '\\-')).join('|')})(?![\\w-])`, 'i');
+
+// ── Tier 4: shapes that need no list ─────────────────────────────────────────────────────────────
+//
+// E-MAIL ADDRESSES. Each address on a line is judged on its own, so a fixture address cannot excuse a
+// real one that shares its line. An address is excused only when its WHOLE domain (everything after
+// the `@`, anchored at both ends) is one nobody receives mail at:
+//   · the reserved top-level domains `.test`, `.example`, `.invalid`, `.localhost`, and the reserved
+//     names example.com / example.org / example.net with their subdomains (RFC 2606, RFC 6761);
+//   · `<n>x.<image extension>` — the pixel-density suffix of an asset file name (`icon@2x.png`), which
+//     is a file name and never a mailbox. Image extensions only: `<n>x.com` is still an address;
+//   · the two fixture families this repo's own tests already use for hostile input and CommonMark
+//     autolinks: `evil.com` and the single-letter hosts `a.com` … `j.com`. New fixtures should use a
+//     reserved domain instead of growing this line.
+// And only a COMPLETE address is excused. The pattern is ASCII, so it stops at the first character it
+// cannot read; if what follows is a letter of another script, `_`, `-` or `%`, the domain it judged is
+// not the domain that was written, and the address is reported.
+const ADDRESS = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const ADDRESS_END = /^\.?(?:$|[\s"'`<>(){}[\],;:!?*|/\\&=#])/;
+const EXCUSED_DOMAIN = new RegExp('^(?:' + [
+  '(?:[a-z0-9-]+\\.)*example(?:\\.(?:com|org|net))?',
+  '(?:[a-z0-9-]+\\.)*(?:test|invalid|localhost)',
+  '[1-9]x\\.(?:png|jpe?g|gif|pdf|svg|heic|webp|avif)',
+  'evil\\.com', '[a-j]\\.com',
+].join('|') + ')$');
+function hasRealAddress(text) {
+  if (!text.includes('@')) return false;
+  for (const m of text.matchAll(ADDRESS)) {
+    const domain = m[0].slice(m[0].lastIndexOf('@') + 1).toLowerCase();
+    const complete = ADDRESS_END.test(text.slice(m.index + m[0].length));
+    if (!(complete && EXCUSED_DOMAIN.test(domain))) return true;
+  }
+  return false;
+}
+
+// SECRET PREFIXES. The prefix plus enough of a tail that prose about the prefix does not match (this
+// file and its test would otherwise refuse themselves). Each must START a token: a letter or digit
+// directly before it means it is the inside of some longer word.
+//
+// 🔴 How base64 is left alone, since a tracked stylesheet carries megabytes of it as font data: not by
+// skipping lines or files, but because none of these shapes can occur INSIDE a base64 run. Standard
+// base64 has no `@`, `_` or `-`, so an address and every prefix but one are unreachable; the access-key
+// id is letters and digits only, so it alone is required to stand clear of the base64 alphabet on both
+// sides. A key pasted after `=` or `"` still matches; twenty lucky characters in a font do not.
+const SECRETS = [
+  ['payment-provider secret key', /(?<![A-Za-z0-9])(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}/],
+  ['webhook signing secret', /(?<![A-Za-z0-9])whsec_[A-Za-z0-9]{16,}/],
+  ['GitHub token', /(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/],
+  ['Slack token', /(?<![A-Za-z0-9])xox[baprs]-[A-Za-z0-9-]{10,}/],
+  ['AWS access key id', /(?<![A-Za-z0-9+/])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9+/=])/],
+  ['PEM private key header', /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/],
+];
+const ANY_SECRET_HINT = /_(?:live|test)_|whsec_|gh[pousr]_|github_pat_|xox[baprs]-|AKIA|ASIA|PRIVATE KEY/;
+
+// FULL-WIDTH LATIN LETTERS. A name written in full-width forms shares no byte with its ASCII spelling,
+// so every list above walks past it. Three or more in a row is refused as a shape of its own (one or
+// two is how CJK text legitimately writes a unit or an initial), and the address and secret checks
+// above also run on the line with full-width forms folded to ASCII, so a full-width `@` hides nothing.
+const FULLWIDTH_RUN = /[Ａ-Ｚａ-ｚ]{3,}/;
+const FULLWIDTH_FORM = /[！-～]/g;
+const foldFullWidth = (s) => s.replace(FULLWIDTH_FORM, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+
+/** The KINDS of list-free shape found in `text` (one line, or a path) — never the matched text. */
+export function portableKinds(text) {
+  const kinds = [];
+  const wide = /[！-～]/.test(text);
+  const forms = wide ? [text, foldFullWidth(text)] : [text];
+  if (forms.some(hasRealAddress)) kinds.push('e-mail address');
+  for (const t of forms) {
+    if (!ANY_SECRET_HINT.test(t)) continue;
+    for (const [name, re] of SECRETS) if (re.test(t) && !kinds.includes(`secret prefix (${name})`)) kinds.push(`secret prefix (${name})`);
+  }
+  if (wide && FULLWIDTH_RUN.test(text)) kinds.push('full-width Latin letters');
+  return kinds;
+}
 
 function readHashes(file) {
   if (!fs.existsSync(file)) throw new Error(`forbidden-terms: hash list missing at ${file}`);
@@ -129,6 +210,7 @@ export function scan({ root = ROOT, hashesFile = HASHES, required = process.env.
       if (k) { found.push({ i, line: 0, what: `person handle #${k}` }); unsafePath.add(i); }
     }
     if (PRIVATE_REPO_LINK.test(rel)) { found.push({ i, line: 0, what: REPO_LINK_MSG }); unsafePath.add(i); }
+    for (const what of portableKinds(rel)) { found.push({ i, line: 0, what }); unsafePath.add(i); }
   });
   if (privateList) for (const { n, src } of privateList) {
     for (const i of grepLineSet(src, files.map((f) => f.replace(/\n/g, ' ')))) { found.push({ i, line: 0, what: `private list entry #${n}` }); unsafePath.add(i); }
@@ -147,7 +229,9 @@ export function scan({ root = ROOT, hashesFile = HASHES, required = process.env.
       if (!fs.statSync(path.join(root, rel)).isFile()) return; // a submodule
       buf = fs.readFileSync(path.join(root, rel));
     } catch { return; } // deleted in the work tree
-    if (buf.subarray(0, 8192).includes(0)) return; // binary
+    // Binary files are not read at all (a NUL in the first 8 KB): an image's bytes are not text, and
+    // its NAME was already judged above with the paths.
+    if (buf.subarray(0, 8192).includes(0)) return;
     const lines = buf.toString('utf8').split('\n');
     for (let l = 0; l < lines.length; l++) {
       const line = lines[l];
@@ -157,6 +241,7 @@ export function scan({ root = ROOT, hashesFile = HASHES, required = process.env.
         if (k) found.push({ i, line: l + 1, what: `person handle #${k}` });
       }
       if (PRIVATE_REPO_LINK.test(line)) found.push({ i, line: l + 1, what: REPO_LINK_MSG });
+      for (const what of portableKinds(line)) found.push({ i, line: l + 1, what });
     }
   });
   if (privateList && streamLines.length) {
@@ -183,6 +268,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const h of r.hits.slice(0, 50)) console.error(`    ${h}`);
     if (r.hits.length > 50) console.error(`    … and ${r.hits.length - 50} more`);
     console.error('  fix: replace a person with their role, and a private-repo link with a bare `repo#123`.');
+    console.error('  fix: write a made-up address on a reserved domain (`.test`, `.example`, example.com); remove a key and rotate it; write Latin letters in ASCII.');
     process.exit(1);
   }
   if (r.notes.some((n) => n.fatal)) process.exit(1);
