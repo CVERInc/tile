@@ -725,6 +725,21 @@ export function loadSite(contentGlob, pagePath) {
   return merged;
 }
 
+// The layer loadSite puts over the base for `pagePath`: the frontmatter of `content/<first
+// segment>/_site.md` when that file exists and sets anything (loadSite's own test), else null.
+// For site-chrome-keys.mjs, which must know whether a page's folder has a site config of its own,
+// and which of the two files set a key. Read-only; changes nothing loadSite returns.
+export function folderSiteLayer(contentGlob, pagePath) {
+  const seg = pagePath ? String(pagePath).split('/')[0] : '';
+  if (!seg) return null;
+  for (const [path, raw] of Object.entries(contentGlob || {})) {
+    if ((path.split('/content/')[1] || '') !== `${seg}/_site.md`) continue;
+    const meta = splitFrontmatter(String(raw || '')).meta;
+    return meta && Object.keys(meta).length ? meta : null;
+  }
+  return null;
+}
+
 // `site-title` is the catch-all's RESERVED per-page stash (pages/[...path].astro: "Reserved key, not
 // authorable"), not a site-layer key — SITE_LAYER_KEYS does not list it. Written in a `_site.md` it
 // used to reach every route that receives the config as-is (blog, archives, search, the 404) while

@@ -807,10 +807,13 @@ const ADDRESSES = [
   ['java\tscript:alert(1)', false, false],
   ['blob:https://example.test/1', false, false],
   ['file:///etc/hosts', false, false],
+  // a control character before the scheme: neither rule takes it (a Card link carrying any C0
+  // control or DEL is refused, whatever a URL parser would clean it into)
+  ['\thttps://example.test/', false, false],
+  ['\u0001https://example.test/', false, false],
+  ['\u000chttps://example.test/', false, false],
   // what a Card link may be and a hand-over address may not: not absolute http(s), or something before the scheme
   [' https://example.test/', true, false],
-  ['\thttps://example.test/', true, false],
-  ['\u0001https://example.test/', true, false],
   ['//example.test/x', true, false],
   ['/try/edit', true, false],
   ['try/edit', true, false],

@@ -73,11 +73,36 @@ test('P2: an authored \\u0001c0\\u0001 with no code span is kept as typed', () =
 test('P2: an authored \\u0001c0\\u0001 next to a real code span is not replaced by it', () => {
   assert.equal(inlineHtml('Keep \u0001c0\u0001 and `other` here.'), 'Keep \u0001c0\u0001 and ' + CODE('other') + ' here.');
 });
-test('P2: an authored placeholder in a link destination stays in the parsed href', () => {
-  const html = inlineHtml('[go](/\u0001c0\u0001) `foo`');
-  const [link] = elements(html, 'a');
-  assert.equal(attrs(link).href, '/\u0001c0\u0001');
-  assert.equal(link.childNodes.length, 1, 'the link holds only its label');
+// tile#408: `\u0001` is a C0 control character, and the destination gate (RE_DEST_CONTROL) refuses
+// any destination that carries one, so this placeholder-shaped destination never reaches an href.
+// What P2 protects still holds there: it renders exactly as any refused destination does (the label
+// as text), and nothing from the code span beside it takes its place.
+const stCode = (html) => elements(html, 'span').filter((el) => attrs(el).class === 'st-code');
+test('P2: an authored placeholder in a link destination is refused like any disallowed one, with nothing put in its place', () => {
+  for (const render of [inlineHtml, bodyHtml]) {
+    const html = render('[go](/\u0001c0\u0001) `foo`');
+    assert.equal(html, render('[go](javascript:x) `foo`'), 'rendered the way a refused scheme is');
+    assert.equal(elements(html, 'a').length, 0, html);
+    assert.equal(stCode(html).length, 1, html);
+    assert.equal(html.split('foo').length - 1, 1, 'the code span\'s text appears once, in its own span: ' + html);
+  }
+  assert.equal(inlineHtml('[go](/\u0001c0\u0001) `foo`'), 'go ' + CODE('foo'));
+  assert.equal(inlineHtml('[go](/\u0001c0\u0001)'), 'go');
+});
+// Where the gate does not apply, the same authored text still meets the placeholder logic: a link
+// label, and a destination-shaped run that forms no link (it is stashed and restored like a real one).
+test('P2: an authored placeholder in a link label stays in the label', () => {
+  for (const html of [inlineHtml('[\u0001c0\u0001](/real) `foo`'), bodyHtml('[\u0001c0\u0001](/real) `foo`')]) {
+    const links = elements(html, 'a');
+    assert.equal(links.length, 1, html);
+    assert.equal(attrs(links[0]).href, '/real');
+    assert.deepEqual(links[0].childNodes.map((n) => n.value), ['\u0001c0\u0001'], 'the link holds only its label: ' + html);
+    assert.equal(stCode(html).length, 1, html);
+  }
+});
+test('P2: an authored placeholder in a destination-shaped run that forms no link is kept as typed', () => {
+  assert.equal(inlineHtml('Keep ](\u0001c0\u0001) and `foo` here.'), 'Keep ](\u0001c0\u0001) and ' + CODE('foo') + ' here.');
+  assert.equal(bodyHtml('Keep ](\u0001c0\u0001) and `foo` here.'), '<p>Keep ](\u0001c0\u0001) and ' + CODE('foo') + ' here.</p>');
 });
 test('P2: authored placeholders in an image alt stay in the parsed alt', () => {
   assert.equal(attrs(elements(inlineHtml('![\u0001c0\u0001](a.png) `foo`'), 'img')[0]).alt, '\u0001c0\u0001');
