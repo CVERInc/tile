@@ -2,11 +2,11 @@
 // every answer is the one the cardtile worker gave before the settings existed.
 //
 // "Before" is a committed fixture, captured from the Worker that had no such code
-// (gen-service-host-off-fixture.mjs): 3 stages of reef.cards × 7 hosts × 34 requests, each with its
+// (gen-service-host-off-fixture.mjs): 3 stages of reef.cards × 7 hosts × 43 requests, each with its
 // status, headers, body hash and store reads. This file asks THIS tree's Worker the same cases.
 //
 // And a wide grid beside it (wideCases: 2 deployments × 3 stages × 18 hosts × 18 paths × 6 methods =
-// 11,664), for what the 714 never asked: the stand-ins' own hostnames, hosts spelled with another
+// 11,664), for what the 903 never asked: the stand-ins' own hostnames, hosts spelled with another
 // case, a port or a trailing dot, every method on every path, contradicting Host headers, and a
 // deployment that is not production.
 import assert from 'node:assert/strict';
@@ -18,12 +18,29 @@ import { gridCases, answerOf, answerDiff, atFixedClock, readFixture, GRID_STAGES
 const FIXTURE = readFixture();
 const CASES = gridCases();
 
-/** every case under `extra` settings → the list of mismatches against the fixture */
+// tile#372: the page's policy is sent report-only by default, so this tree's people's pages carry one header
+// the fixture's Worker did not send. That header is cardtile-page-csp.test.mjs's to check (where on the grid,
+// and that it is the only difference); here it is the one header not compared.
+const POLICY_HEADER = 'content-security-policy-report-only';
+const withoutPolicy = (a) => ({ ...a, headers: a.headers.filter(([k]) => k !== POLICY_HEADER) });
+// tile#372: the grid also asks the address of an embed's own document (`…/_embed/<embed>`), which main answered as a
+// path it did not know and this tree answers to a frame; how those answers differ from main is
+// cardtile-page-csp.test.mjs's to check. Here they are compared with THIS tree's answers with both settings unset:
+// what is checked is that the service host's settings move them no more than any other answer.
+const isEmbedRow = (c) => c.name.includes('/_embed/');
+const unset = new Map();
+async function baseline(c) {
+  if (!isEmbedRow(c)) return FIXTURE.answers[c.key];
+  if (!unset.has(c.key)) unset.set(c.key, withoutPolicy(await answerOf(worker, c, {})));
+  return unset.get(c.key);
+}
+
+/** every case under `extra` settings → the list of mismatches against the fixture (or, for an embed address, the unset tree) */
 async function mismatches(extra) {
   const out = [];
   await atFixedClock(async () => {
     for (const c of CASES) {
-      const d = answerDiff(await answerOf(worker, c, extra), FIXTURE.answers[c.key]);
+      const d = answerDiff(withoutPolicy(await answerOf(worker, c, extra)), await baseline(c));
       if (d) out.push(`${c.key}: ${d}`);
     }
   });
@@ -32,7 +49,8 @@ async function mismatches(extra) {
 
 test('CONTROL: the fixture holds the whole grid, and the grid reaches every kind of answer', () => {
   assert.equal(CASES.length, Object.keys(GRID_STAGES).length * GRID_HOSTS.length * GRID_REQUESTS.length);
-  assert.equal(CASES.length, 714);
+  assert.equal(CASES.length, 903);
+  assert.equal(CASES.filter(isEmbedRow).length, Object.keys(GRID_STAGES).length * GRID_HOSTS.length * 9);
   assert.equal(Object.keys(FIXTURE.answers).length, CASES.length, 'one answer per case');
   assert.match(FIXTURE.base, /^[0-9a-f]{40}$/);
   const statuses = new Set(Object.values(FIXTURE.answers).map((a) => a.status));
@@ -43,7 +61,7 @@ test('CONTROL: the fixture holds the whole grid, and the grid reaches every kind
   assert.ok(FIXTURE.answers['dark card.feelreef.com GET /try/edit'].bytes > 100000);
 });
 
-test('unset: all 714 answers are the fixture\'s, byte for byte, headers and store reads included', async () => {
+test('unset: all 903 answers are the fixture\'s, byte for byte, headers and store reads included (an embed address: this tree\'s own, cardtile-page-csp.test.mjs)', async () => {
   const bad = await mismatches({});
   console.log(`# service host off (unset): ${CASES.length} answers compared, ${bad.length} mismatches`);
   assert.deepEqual(bad, []);
@@ -65,7 +83,7 @@ const OFF_VALUES = [
   ['a line end after it', { CARDS_SERVICE_HOST: 'cards.feelreef.com\n' }],
 ];
 for (const [name, extra] of OFF_VALUES) {
-  test(`off (${name}): all 714 answers are the fixture's`, async () => {
+  test(`off (${name}): all 903 answers are the fixture's (an embed address: this tree's with the settings unset)`, async () => {
     const bad = await mismatches(extra);
     console.log(`# service host off (${name}): ${CASES.length} answers compared, ${bad.length} mismatches`);
     assert.deepEqual(bad, []);
@@ -88,7 +106,7 @@ test('CONTROL: the comparison can fail — with both settings on, answers differ
   let pages = 0;
   await atFixedClock(async () => {
     for (const c of CASES.filter((x) => x.stage === 'canonical' && !ROLES.includes(x.host))) {
-      const got = await answerOf(worker, c, ON), want = FIXTURE.answers[c.key];
+      const got = withoutPolicy(await answerOf(worker, c, ON)), want = await baseline(c);
       assert.equal(got.status, want.status, c.key);
       assert.deepEqual(got.headers, want.headers, c.key);
       assert.deepEqual(got.reads, want.reads, c.key);
@@ -111,7 +129,7 @@ async function wideMismatches(extra) {
   const out = [];
   await atFixedClock(async () => {
     for (let i = 0; i < WIDE.length; i++) {
-      const d = answerDiff(await wideAnswerOf(worker, WIDE[i], extra), FIXTURE.wide[i]);
+      const d = answerDiff(withoutPolicy(await wideAnswerOf(worker, WIDE[i], extra)), FIXTURE.wide[i]);
       if (d) out.push(`${WIDE[i].key}: ${d}`);
     }
   });
@@ -160,7 +178,7 @@ test('the wide comparison can fail — switched on, a stand-in answers as its ro
       asked += 1;
       const withList = await wideAnswerOf(worker, c, WITH);
       // against the Worker that had no such setting
-      if (answerDiff(withList, FIXTURE.wide[i])) moved[c.deployment].add(c.host);
+      if (answerDiff(withoutPolicy(withList), FIXTURE.wide[i])) moved[c.deployment].add(c.host);
       // against this Worker without the list: in production the list is not read at all
       if (c.deployment === 'production' && answerDiff(withList, await wideAnswerOf(worker, c, ON))) differ += 1;
     }
