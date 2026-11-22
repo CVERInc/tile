@@ -1597,10 +1597,12 @@ const router = {
     // the next request either way. Every miss — no card, stopped, a hash not on this card, a type
     // the route does not serve — is the answer this host gives a card that is not there: the no-card
     // page on ours (one page for every "no card", tile-lab#51), the small 404 on a creator's domain.
+    // tile#381: in the visitor's language and for the host they asked (`who`), as on every other
+    // missing page — never the Cards file's own `lang:`, which would tell a live handle from none.
     if (want === 'asset') {
       const ref = assetRef(url.pathname);
       const found = cardMd && ref ? await findAsset(onDemand ? allAssets(cardMd, index()) : parseCard(cardMd).assets, ref.hex, ref.ext) : null;
-      if (!found) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
+      if (!found) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
       const keeping = keepPicture(resolved.handle, gen, ref.hex, ref.ext, found.bytes);
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
       return pictureResponse(found, env, resolved.handle, at);
