@@ -427,8 +427,8 @@ test('an over-ceiling card whose bytes are NOT the embed\'s does not blame the e
 
 test('the shared definition: `embed` is a body of HTML, `slides` carries the carousel\'s params', () => {
   assert.ok(CELL_TYPES.embed.body, 'embed has no body — there is nowhere to paste');
-  assert.deepEqual(Object.keys(CELL_TYPES.embed.params), ['w']);
-  assert.deepEqual(Object.keys(CELL_TYPES.slides.params).sort(), ['bg', 'images', 'kind', 'narrow', 'origin', 'w']);
+  assert.deepEqual(Object.keys(CELL_TYPES.embed.params), ['back', 'w']);
+  assert.deepEqual(Object.keys(CELL_TYPES.slides.params).sort(), ['back', 'bg', 'images', 'kind', 'narrow', 'origin', 'w']);
   assert.deepEqual(CELL_TYPES.slides.params.kind.options, ['slider', 'bubbles']);
   assert.ok(PALETTE.includes('slides') && PALETTE.includes('embed'));
   assert.equal(BLANKS.slides.type, 'slides');

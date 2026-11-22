@@ -162,7 +162,14 @@ test('`back=` is honoured on exactly the types BACKS names', () => {
   assert.ok(opens('feature img=https://example.org/a.png back=#about %%'));
   assert.ok(!opens('slides kind=slider images=https://example.org/a.png back=#about %%'));
   assert.ok(!opens('text %% Some words.'), 'CONTROL: a tile with no back= opens nothing');
-  assert.match(BACKS.tileTypes, /`profile` and `text`.*`link` and `feature`.*`video`, `slides`, `social` and `embed` ignore/);
+  // the other four name their back for the stack and list views and open nothing on the wall (tile#351)
+  const names = (line) => /data-back="about"/.test(renderCardHTML(md(line), { deck: false }).split('data-drawer-panel')[0]);
+  for (const line of ['slides kind=slider images=https://example.org/a.png back=#about %%', 'video yt=dQw4w9WgXcQ back=#about %%', 'social back=#about %% [IG](https://instagram.com/x)', 'embed back=#about %% <p>hi</p>']) {
+    assert.ok(!opens(line), `${line}: opens the back on the wall`);
+    assert.ok(names(line), `${line}: does not name its back`);
+  }
+  assert.ok(!names('text back=#about %% Some words.'), 'a tile with a door names its back a second time');
+  assert.match(BACKS.tileTypes, /`profile` and `text`.*`link` and `feature`.*`video`, `slides`, `social` and `embed` turn over to it in the stack and list views; on the wall they do not open it/);
 });
 
 // ── GEOMETRY ─────────────────────────────────────────────────────────────────────────────────────
