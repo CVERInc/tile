@@ -36,6 +36,12 @@ const SAMPLES = [
   '**two** bold **runs**',
   'mixed **bold** and *italic* together',
   'nothing *unclosed here',
+  // CJK prose has no space between words, so emphasis sits flush against letters and full-width
+  // punctuation. The two dialects DISAGREED on the last two until tile's flanking rule learned
+  // about CJK neighbours: a Card showed them bold and italic, the editor printed the asterisks.
+  '已經**手動關閉**了',
+  '已經**手動關閉（Kill）**了',
+  '他說*（真的）*嗎',
 ];
 
 test('grammar agrees with tile: the same spans are bold and italic in both dialects', () => {
