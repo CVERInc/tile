@@ -55,7 +55,8 @@ const WIDTH = {
 
 // `back=#id` opens one of the card's `## back:` lanes as this tile's other side (reef#2725). RAW: the
 // editor sets it by picking a back, not by typing an id, and that picker is a separate change.
-// Honoured by the four types card-render gives a door or a back anchor (DOOR_TYPES + link/feature).
+// Honoured by the four types card-render gives a door or a back anchor (DOOR_TYPES + link/feature), and by
+// the four that name their back on the cell for the stack and list views (NAMED_BACK_TYPES, tile#351).
 const BACK = { disposition: DISPOSITION.RAW, label: 'back.label', hint: 'back.hint' };
 
 /**
@@ -215,6 +216,7 @@ export const CELL_TYPES = {
       // form fields that both mean "the label" and silently outrank each other is a worse editor
       // than one. Honoured, editable in the raw string, not offered twice.
       title: { disposition: DISPOSITION.RAW, label: 'type.video.title.label', hint: 'type.video.title.hint' },
+      back: BACK,
       w: WIDTH,
     },
   },
@@ -223,7 +225,7 @@ export const CELL_TYPES = {
     title: 'type.social.title',
     hint: 'type.social.hint',
     body: { label: 'type.social.body.label', control: CONTROL.AREA, hint: 'type.social.body.hint' },
-    params: {},
+    params: { back: BACK },
   },
 
   slides: {
@@ -248,6 +250,7 @@ export const CELL_TYPES = {
       origin: { disposition: DISPOSITION.RAW, label: 'type.slides.origin.label', hint: 'type.slides.origin.hint' },
       narrow: { disposition: DISPOSITION.RAW, label: 'type.slides.narrow.label', hint: 'type.slides.narrow.hint' },
       bg: { disposition: DISPOSITION.RAW, label: 'type.slides.bg.label', hint: 'type.slides.bg.hint' },
+      back: BACK,
       w: WIDTH,
     },
     spelling: LEGACY_SLIDES.fromSlides,
@@ -260,7 +263,7 @@ export const CELL_TYPES = {
     title: 'type.embed.title',
     hint: 'type.embed.hint',
     body: { label: 'type.embed.body.label', control: CONTROL.AREA, hint: 'type.embed.body.hint', rows: 10 },
-    params: { w: WIDTH },
+    params: { back: BACK, w: WIDTH },
     form: [{ source: SOURCE.BODY }, { source: SOURCE.PARAM, name: 'w' }],
     spelling: LEGACY_SLIDES.fromEmbed,
   },
@@ -529,7 +532,7 @@ export const CARD_SETTINGS = {
 export const BACKS = {
   lane: '`## back: <id>` starts a back lane; `## back: <id> | <Title>` gives it a title. The id is lower-cased and spaces become hyphens. The lane holds the cells of that back (the editor writes one). The older spelling `## drawer: <id>` is still read and kept as written.',
   tile: 'A tile points at a back with the param `back=#<id>`. It counts only when a lane with that id exists, and never inside a back.',
-  tileTypes: 'Honoured on `profile` and `text` (a layer over the whole tile opens the back) and on `link` and `feature` (their own link opens it). `video`, `slides`, `social` and `embed` ignore `back=`.',
+  tileTypes: 'Honoured on `profile` and `text` (a layer over the whole tile opens the back) and on `link` and `feature` (their own link opens it). `video`, `slides`, `social` and `embed` turn over to it in the stack and list views; on the wall they do not open it.',
   cardDefault: 'The frontmatter line `back: "#<id>"` names the default back: every tile without a back of its own, and that is not a link or a video, turns over to a copy of it. Write it in double quotes: a bare `#` starts a YAML comment.',
   none: "With no default back, such tiles turn over to the printed business card (the card's name, a QR code, its address). In the stack and list views a link without a back turns over to its address, and a video to its YouTube page.",
   inLinks: 'A `link` whose address is `#<id>` (`[About](#about)`) or a `feature` with `href=#<id>` opens that back too. Inside a back, such a cell is dropped.',

@@ -76,6 +76,55 @@ working tree and `HEAD`.
 
 *(Twenty of the original 21: example 353 was fixed — see the next section, which this ruler found.)*
 
+### The one deliberate departure from the spec: a CJK character beside the run
+
+The flanking rules assume a script that puts spaces between words. A delimiter with punctuation on
+its inner side only counts if its outer side is whitespace or more punctuation — and in Chinese,
+Japanese or Korean prose the outer side is usually the next word. So the spec, and this engine
+with it, printed the asterisks of `已經**手動關閉（Kill）**了`, and rendered
+`**粗體裡有*斜體（對）*的**` as an italic over the wrong half of the line.
+
+`scanRuns` has two extra clauses, described at `isCjk` in `cssmd.js`, and they apply only to a run
+with a CJK character beside it:
+
+1. CJK and full-width punctuation is not counted as punctuation for the flanking test.
+2. A CJK character on the outer side stands in for the whitespace, so ordinary punctuation on the
+   inner side does not stop the run.
+
+There is one limit on both. A run that would open, with CJK punctuation on its inner side (the
+character after it), gets neither clause unless that punctuation is an opening bracket or quote:
+one of the 28 Ps/Pi characters listed at `isCjkOpening`, such as `（` `「` `《` `【`. Followed by
+`，` `。` `：` `、` `！` `）` or any other CJK punctuation, an opener is decided by the spec's rule
+alone. A closer keeps both clauses whatever the punctuation is. Everywhere else the rule is the
+spec's, character for character, and the score above does not move.
+
+This is where the engine parts from `markdown-it-cjk-friendly`, which waives all CJK punctuation on
+either side: there, a footnote mark before a full-width comma or colon (`NT$990*，限量50名*。`)
+pairs with the next one into an italic.
+
+| | before | now |
+|---|---|---|
+| `已經**手動關閉（Kill）**了` | literal | bold |
+| `他說**"好"**然後` | literal | bold |
+| `Foo**（bar）**baz` | literal | bold |
+| `這是**（重要）**的`, `他說**「好」**然後` | literal | bold |
+| `Foo**(bar)**baz` | literal | literal — no CJK character beside either run |
+| `檔案_名稱_版本`, `他說_（真的）_嗎` | literal | literal — the intraword `_` rule is untouched |
+| `售價NT$990*，限量50名*。`, `附註*：說明。其他*：另計` | literal | literal — the openers sit before `，` and `：` |
+| `內容**：重要**`, `前面**。粗體**` | literal | literal — the price of the line above: bold that starts with a comma, colon or full stop needs a space or punctuation before it |
+| `5*（3+2）*4`, `價格*（含稅）與運費*（另計）`, `example.com/a*（b）*c` | literal | italic — the price of the first row: a mark before an opening bracket opens; `5*x*4` always was italic |
+
+Two known limits, both older than these clauses. A character the blocks at `isCjk` do not list is
+not a CJK neighbour: an ideograph followed by a variation selector (`葛󠄀**"城"**市`), and kana
+outside the BMP (`𛀁`). And a character outside the BMP, an emoji included, is read as a letter,
+never as the symbol it is, so `😀**(好)**😀` stays literal where `markdown-it-cjk-friendly` makes
+it bold.
+
+`test/emphasis-cjk.test.cjs` is the gate. Its expectations were checked against `markdown-it` with
+the `markdown-it-cjk-friendly` plugin, against the reference `commonmark` package for every row with
+no CJK neighbour, and against `commonmark` for the openers before CJK punctuation, where the plugin
+is not followed — never against this engine's own output.
+
 ## Structural whitespace is `[ \t]`, never `\s`
 
 CommonMark defines every block marker in terms of **spaces and tabs**. JS `\s` is far wider, and the

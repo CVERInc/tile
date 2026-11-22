@@ -7,7 +7,8 @@
 //      fuzz over each grammar's own alphabet — is read by the renderer's OLD inline readers (frozen
 //      verbatim below, from SiteLayout.astro / PostView.astro as they stood before they were
 //      replaced by imports of chrome-links.mjs) and by the module, and the two must agree on every
-//      field. 🔴 The frozen copies are temporary: they are the oracle for the move, and can go once
+//      field. (tile-lab#69 changed where a `Label=href` item splits; see LEGACY / ORACLE below.)
+//      🔴 The frozen copies are temporary: they are the oracle for the move, and can go once
 //      nobody needs to see that the move changed nothing. Two entries are NOT frozen copies but the
 //      live second readers chrome-links.mjs's header names — site-core.js's parseSidebarNav and
 //      lib/announce.mjs's `announce-href` — and those stay as a standing pin.
@@ -25,6 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { splitFrontmatter, parseSidebarNav } from './site-core.js';
 import { announceModel } from './astro/src/lib/announce.mjs';
 import {
@@ -34,13 +36,48 @@ import {
 } from './chrome-links.mjs';
 // Through the namespace, so a module without them fails the tests that use them, not the import.
 import * as chromeLinks from './chrome-links.mjs';
-const { encodeTarget, urlFragileChars } = chromeLinks;
+import * as labelEq from './label-eq.mjs';
+const { encodeTarget, urlFragileChars, compareLabelEq } = chromeLinks;
 
 const ENGINE = fileURLToPath(new URL('../..', import.meta.url));
 
 // ── the OLD readers, frozen verbatim ─────────────────────────────────────────────────────────────
 // Each takes the raw meta value (as `meta[key]` holds it) and returns what the layout consumed.
-const OLD = (() => {
+//
+// tile-lab#69 changed ONE thing in them: where a `Label=href` item splits. The frozen copies took
+// the LAST `=` (a greedy `(.*\S)`), which cut every query string in two; the module now splits by
+// label-eq.mjs's rule. So the frozen readers are a factory over the two splitters (anything with a
+// [Symbol.match], so the frozen `part.match(EQ_HREF)` lines stay as they were), built twice:
+//   LEGACY — the regexes as they were, verbatim. The compat table below holds the module to it over
+//            the touched keys' documented examples and fixtures: what parsed before parses the same.
+//   ORACLE — the new rule, spelled independently (the legacy regex first, then a regex over every
+//            candidate `=`, instead of the module's one pass over the item's words), so the
+//            parity, span and fuzz tests compare the module with it.
+const LEGACY_EQ_HREF = /^(.*\S)\s*=\s*(\S+)$/;
+const LEGACY_EQ_SPEC = /^(.*\S)\s*=\s*(\S.*)$/;
+// Every `=` whose label (what is before it, trailing whitespace aside) is non-blank and on one line.
+const HEAD_OK = /^[^\n\r\u2028\u2029]*\S\s*$/;
+const candidates = (s) => [...s.matchAll(/=/g)].map((m) => m.index).filter((i) => HEAD_OK.test(s.slice(0, i)))
+  .map((i) => { const href = s.slice(i + 1).replace(/^\s+/, ''); return { i, label: s.slice(0, i), href, hrefAt: s.length - href.length }; });
+// A link target by the rule: one whitespace-free run with one of the eight leads.
+const R3_TARGET = /^(?:https?:\/\/|mailto:|tel:|[/#?])\S*$/i;
+// The rule: the last `=` (the legacy match) when what follows it is a link target; otherwise the
+// first `=` followed by one; otherwise the last `=`.
+const R3_EQ_HREF = { [Symbol.match](s) {
+  const last = s.match(LEGACY_EQ_HREF);
+  if (!last || R3_TARGET.test(last[2])) return last;
+  const c = candidates(s).find((x) => R3_TARGET.test(x.href));
+  return c ? [s, c.label, c.href] : last;
+} };
+// header-actions, the same rule: "what follows" is a one-line spec, its link target the third word.
+const specTarget = (spec) => (/^\S.*$/.test(spec) ? spec.trim().split(/\s+/)[2] || '' : '');
+const R3_EQ_SPEC = { [Symbol.match](s) {
+  const last = s.match(LEGACY_EQ_SPEC);
+  if (!last || R3_TARGET.test(specTarget(last[2]))) return last;
+  const c = candidates(s).find((x) => R3_TARGET.test(specTarget(x.href)));
+  return c ? [s, c.label, c.href] : last;
+} };
+const frozenReaders = (EQ_HREF, EQ_SPEC, sidebarNav) => {
   const parseNavPart = (part) => { const m = part.match(/^(.*\S)\s+(\S+)$/); return m ? { label: m[1], href: m[2] } : { label: part, href: '#' }; };
   const parseNavIndented = (text) => {
     const root = { children: [] };
@@ -58,7 +95,7 @@ const OLD = (() => {
   const parseNavFlat = (text) => text.split('|').map((s) => s.trim()).filter(Boolean)
     .map((part) => ({ ...parseNavPart(part), children: [] }));
   const list = (v) => String(v || '').split(';').map((s) => s.trim()).filter(Boolean)
-    .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
+    .map((part) => { const m = part.match(EQ_HREF); return m ? { label: m[1].trim(), href: m[2].trim() } : null; })
     .filter(Boolean);
   // SiteLayout's parseHeaderAction, minus the two layout-only lookups (icon SVG, element ids) that
   // are computed from fields compared here.
@@ -88,7 +125,7 @@ const OLD = (() => {
       const head = ci >= 0 ? col.slice(0, ci).trim() : '';
       const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
       const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
-        const m = it.match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : { label: it, href: '' };
+        const m = it.match(EQ_HREF); return m ? { label: m[1].trim(), href: m[2].trim() } : { label: it, href: '' };
       });
       return { head, items };
     }),
@@ -96,12 +133,25 @@ const OLD = (() => {
     'sidebar-social': list,
     'breadcrumb-trail': list,
     'age-gate-note-links': list,
-    // site-core.js's parseSidebarNav is not frozen: it stays the reference renderer's (editor
-    // preview) reader, so this is a standing pin between the two, not a one-off check.
-    'sidebar-nav': (v) => parseSidebarNav(v),
-    'header-cta': (v) => { const m = String(v || '').match(/^(.*\S)\s*=\s*(\S+)$/); return m ? { label: m[1].trim(), href: m[2].trim() } : null; },
+    // ORACLE: site-core.js's parseSidebarNav is not frozen: it stays the reference renderer's
+    // (editor preview) reader, so this is a standing pin between the two, not a one-off check.
+    // LEGACY: parseSidebarNav as it stood before tile-lab#69, frozen.
+    'sidebar-nav': sidebarNav || ((v) => String(v || '').split(';;').map((c) => c.trim()).filter(Boolean).map((col) => {
+      const m = col.match(/:(?!\/\/)/);
+      const ci = m ? m.index : -1;
+      const head = ci >= 0 ? col.slice(0, ci).trim() : '';
+      const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
+      const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
+        const m2 = it.match(EQ_HREF);
+        if (!m2) return { label: it, href: '' };
+        const hw = m2[2].match(/^(.*?)\^(\d+(?:\.\d+)?)$/);
+        return hw ? { label: m2[1].trim(), href: hw[1], weight: Number(hw[2]) } : { label: m2[1].trim(), href: m2[2].trim() };
+      });
+      return { head, items };
+    })),
+    'header-cta': (v) => { const m = String(v || '').match(EQ_HREF); return m ? { label: m[1].trim(), href: m[2].trim() } : null; },
     'header-actions': (v) => String(v || '').split(';').map((s) => s.trim()).filter(Boolean)
-      .map((part) => { const m = part.match(/^(.*\S)\s*=\s*(\S.*)$/); return m ? parseHeaderAction(m[1].trim(), m[2].trim()) : null; })
+      .map((part) => { const m = part.match(EQ_SPEC); return m ? parseHeaderAction(m[1].trim(), m[2].trim()) : null; })
       .filter(Boolean),
     'blog-post-cta': (v) => {
       const ctaRaw = String(v || '').trim();
@@ -116,7 +166,9 @@ const OLD = (() => {
     'age-gate-back-url': (v) => String(v || '').trim(),
     'announce-href': (v) => announceModel({ announce: 'x', 'announce-href': v }, { safeHref: (h) => h }).href,
   };
-})();
+};
+const LEGACY = frozenReaders(LEGACY_EQ_HREF, LEGACY_EQ_SPEC, null);
+const OLD = frozenReaders(R3_EQ_HREF, R3_EQ_SPEC, (v) => parseSidebarNav(v));  // the ORACLE
 
 // The module's own reader for each key, in the shape the layout consumes.
 const NEW = {
@@ -161,18 +213,35 @@ function oldHrefs(key, model) {
 const tracked = (...globs) => execFileSync('git', ['-C', ENGINE, 'ls-files', '-z', '--', ...globs], { encoding: 'utf8' })
   .split('\0').filter(Boolean);
 const corpus = new Map(KEYS.map((k) => [k, new Set()]));
-const add = (k, v) => { if (corpus.has(k) && v != null) corpus.get(k).add(String(v)); };
+// `real`: for the tile-lab#69 compat table, the values of the keys that change touched — the
+// `Label=href` keys — that the repo's docs and fixtures hold: (a), (a2) and (b), minus this change's
+// own test files (their strings are the cases, not evidence). value → the first file it came from.
+const LABEL_EQ_KEYS = ['footer-cols', 'sidebar-nav', 'footer-social', 'sidebar-social', 'breadcrumb-trail',
+  'age-gate-note-links', 'header-cta', 'header-actions'];
+const real = new Map(LABEL_EQ_KEYS.map((k) => [k, new Map()]));
+const OWN_69 = ['packages/sitetile/label-href-split.test.mjs', 'packages/sitetile/label-eq.mjs'];
+const add = (k, v, from = null) => {
+  if (!corpus.has(k) || v == null) return;
+  corpus.get(k).add(String(v));
+  if (from && real.has(k) && !OWN_69.includes(from) && !real.get(k).has(String(v))) real.get(k).set(String(v), from);
+};
 
 // (a) the frontmatter of every tracked Markdown file, read by the renderer's own frontmatter parser
 //     (so a `nav: |` block arrives as the value the layout sees).
 let mdFiles = 0;
+let docLines = 0;
 for (const rel of tracked('*.md')) {
   let text;
   try { text = readFileSync(join(ENGINE, rel), 'utf8'); } catch { continue; }
   const { meta } = splitFrontmatter(text);
   let hit = false;
-  for (const k of KEYS) if (meta[k] != null) { add(k, meta[k]); hit = true; }
+  for (const k of KEYS) if (meta[k] != null) { add(k, meta[k], rel); hit = true; }
   if (hit) mdFiles++;
+  // (a2) every documented example: a `key: value` line anywhere in the file (a README's fenced
+  //      `_site.md` sample is not frontmatter, and it is what an author copies).
+  for (const m of text.matchAll(new RegExp(`^[ \\t]*(${KEYS.map((k) => k.replace(/-/g, '\\-')).join('|')}):[ \\t]*(\\S.*)$`, 'gm'))) {
+    add(m[1], m[2].trim(), rel); docLines++;
+  }
 }
 // (b) every single-line `key: value` written inside a tracked JS source (test IR, fixtures, smokes).
 const KEY_RE = new RegExp(`(?:^|\\\\n|\\n|['"\`])(${KEYS.map((k) => k.replace(/-/g, '\\-')).join('|')}):[ \\t]*([^\\n'"\`]*?)(?=\\\\n|\\n|['"\`]|$)`, 'g');
@@ -181,7 +250,7 @@ for (const rel of tracked('*.mjs', '*.js', '*.cjs')) {
   if (rel.startsWith('packages/sitetile/chrome-links')) continue;
   let text;
   try { text = readFileSync(join(ENGINE, rel), 'utf8'); } catch { continue; }
-  for (const m of text.matchAll(KEY_RE)) { const v = m[2].replace(/\\t/g, '\t').trim(); if (v && !v.includes('${')) { add(m[1], v); srcHits++; } }
+  for (const m of text.matchAll(KEY_RE)) { const v = m[2].replace(/\\t/g, '\t').trim(); if (v && !v.includes('${')) { add(m[1], v, rel); srcHits++; } }
 }
 // (c) the edge corpus — every shape the grammars disagree about, written down once.
 const EDGE = {
@@ -207,7 +276,33 @@ const EDGE = {
   'age-gate-back-url': ['/somewhere-else', ''],
   'announce-href': ['/news', ' /a b '],
 };
+// tile-lab#69, synthetic (neutral hosts): links whose target holds `=` (the shape the last-`=` split
+// cut in two), labels that hold `=`, and links whose last `=` is itself followed by a link (both
+// shapes that must keep reading as they did). The compat test below lists, by hand, exactly which
+// of these read differently.
+const EDGE_69 = {
+  'footer-cols': ['Shop: Item=https://shop.example/p?id=1#f ; Two=/b',
+    'Item=https://shop.example/s?a=1&b=2 ; Mail=mailto:me@x.example?subject=Hi&body=a=b ; Top=#k=v ; Q=?page=2',
+    'H: 1+1=2 is math=/math ; a=b=/c ; x=y=z',
+    'H: Rel=page.html?x=1',
+    'H: C#=F#=/langs ; Q=A?=/faq ; 2+2=4?=/quiz',
+    'H: Rating=#1=/top ; x=/y=/z ; Path=/=/root',
+    'H: Label== ; a=b==',
+    'H: In=/login?next=/home ; Share=https://x.example/i?url=https://y.example/a',
+    'H: Label=https://h.example/#section?name=/safe ; C#=F#?2=/langs ; A=/ok?x=1#part=/next ; A=/ok?foo?=https://h.example',
+    'H: In=/login?next=%2Fhome'],
+  'sidebar-nav': ['Tags: Sale=/tag?id=7^14 ; B=https://x.example/s?a=1', 'H: a=b=/c ; C#=F#=/langs ; x=/y=/z',
+    'H: Mail=mailto:me@x.example?subject=x'],
+  'footer-social': ['Shop=https://shop.example/p?id=1', 'a=b=/c ; Q=A?=/faq', 'Call=tel:+1-555-0100 ; Net=//cdn.example/x?y=1'],
+  'breadcrumb-trail': ['Cat=/c?page=2 ; Sub=/c/s', 'Path=/=/root'],
+  'age-gate-note-links': ['Shop A=https://x.example/a?ref=gate', 'Rating=#1=/top'],
+  'sidebar-social': ['Feed=https://x.example/feed?format=rss', '2+2=4?=/quiz'],
+  'header-cta': ['Buy=https://shop.example/p?id=1#f', '1+1=2 is math=/math', 'Mail=mailto:me@x.example?subject=Hi', 'Label==', 'x=/y=/z'],
+  'header-actions': ['Search = magnifier link /search?q=x&l=en mobile', '1+1=2 = cart link /cart',
+    'Shop = bag link https://shop.example/?a=b badge:2', 'C#=F# = globe link /langs'],
+};
 for (const [k, vs] of Object.entries(EDGE)) vs.forEach((v) => add(k, v));
+for (const [k, vs] of Object.entries(EDGE_69)) vs.forEach((v) => add(k, v));
 // (d) a seeded fuzz over every grammar's alphabet at once — offsets are where a port goes wrong.
 function mulberry32(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const rnd = mulberry32(0xC4120E);
@@ -224,11 +319,117 @@ for (const k of KEYS) for (let i = 0; i < 1500; i++) {
   add(k, s);
 }
 
+// (d2) tile-lab#69: a seeded fuzz over the `Label=href` keys with the atoms the split rule turns on —
+//      `=`, `?`, `#`, `&`, `key=` in and out of a query, every link-target lead, a bare path.
+const EQ_ATOMS = ['A', 'a b', '=', ' = ', '==', '/', '/a', '?', '#', '&', 'k', '?k=', '&k=', '?=', '&=', '//h.example', 'https://h.example',
+  'HTTP://H.example', 'mailto:m@h.example', 'tel:1', 'x.html', '^3', ';', ';;', ':', ' ', '\n', '\u2028', 'link', 'cart', 'toggle'];
+const rnd69 = mulberry32(0x69);
+for (const k of LABEL_EQ_KEYS) for (let i = 0; i < 3000; i++) {
+  let s = '';
+  const n = 1 + Math.floor(rnd69() * 10);
+  for (let j = 0; j < n; j++) s += EQ_ATOMS[Math.floor(rnd69() * EQ_ATOMS.length)];
+  add(k, s);
+}
+
 test('the corpus actually holds the repo\'s own chrome values', () => {
   assert.ok(mdFiles >= 5, `expected chrome keys in several tracked .md files, found ${mdFiles}`);
   assert.ok(srcHits >= 10, `expected chrome lines in tracked sources, found ${srcHits}`);
   for (const k of KEYS) assert.ok(corpus.get(k).size > 1000, `${k}: corpus is ${corpus.get(k).size}`);
   assert.deepEqual([...CHROME_LINK_KEYS].sort(), [...KEYS].sort(), 'CHROME_LINK_KEYS must be exactly the keys this suite covers');
+});
+
+// ── tile-lab#69: the compat table ────────────────────────────────────────────────────────────────
+// Where LEGACY (the last-`=` split) and the module disagree, on a given value set.
+const changedOn = (sets) => {
+  const out = [];
+  for (const [k, vs] of sets) for (const v of vs) if (!isDeepStrictEqual(NEW[k](v), LEGACY[k](v))) out.push(`${k}: ${v}`);
+  return out.sort();
+};
+
+test('compat (tile-lab#69): the touched keys\' documented examples and fixtures parse exactly as before', (t) => {
+  let n = 0, multi = 0;
+  for (const [k, vs] of real) {
+    n += vs.size;
+    for (const v of vs.keys()) if (LEGACY[k](v) !== null && [...v.split(/;/)].some((it) => (it.match(/=/g) || []).length > 1)) multi++;
+  }
+  assert.ok(docLines >= 5, `expected documented chrome examples in tracked .md files, found ${docLines}`);
+  assert.ok(n >= 10, `the touched keys' real values are ${n}`);
+  for (const [, vs] of real) for (const from of vs.values()) assert.ok(!OWN_69.includes(from), from);
+  assert.deepEqual(changedOn([...real].map(([k, vs]) => [k, [...vs.keys()]])), [], 'a value that parsed before must parse identically after');
+  t.diagnostic(`compat table: ${n} documented/fixture values of the ${LABEL_EQ_KEYS.length} touched keys `
+    + `(${[...real].map(([k, vs]) => `${k} ${vs.size}`).join(', ')}); ${multi} hold an item with two \`=\`; 0 read differently`);
+});
+
+test('compat (tile-lab#69): of the edge values, only the cut links read differently', () => {
+  // each of these was a cut link before (the label swallowed the target up to its last `=`), and
+  // what followed its last `=` did not start a link
+  assert.deepEqual(changedOn(Object.entries(EDGE)), [
+    'footer-cols: H: A = /a ; B ; C=/c=d',
+    'header-actions: A = i link /a=b',
+    'header-actions: S = m l /a ; T = m l https://x.example/t?q=1 mobile',
+    'header-cta: Buy = /shop?a=b',
+  ]);
+});
+
+test('compat (tile-lab#69): of the synthetic values, exactly the cut links read differently', () => {
+  assert.deepEqual(changedOn(Object.entries(EDGE_69)), [
+    'age-gate-note-links: Shop A=https://x.example/a?ref=gate',
+    'breadcrumb-trail: Cat=/c?page=2 ; Sub=/c/s',
+    'footer-cols: H: In=/login?next=%2Fhome',
+    'footer-cols: Item=https://shop.example/s?a=1&b=2 ; Mail=mailto:me@x.example?subject=Hi&body=a=b ; Top=#k=v ; Q=?page=2',
+    'footer-cols: Shop: Item=https://shop.example/p?id=1#f ; Two=/b',
+    'footer-social: Call=tel:+1-555-0100 ; Net=//cdn.example/x?y=1',
+    'footer-social: Shop=https://shop.example/p?id=1',
+    'header-actions: Search = magnifier link /search?q=x&l=en mobile',
+    'header-actions: Shop = bag link https://shop.example/?a=b badge:2',
+    'header-cta: Buy=https://shop.example/p?id=1#f',
+    'header-cta: Mail=mailto:me@x.example?subject=Hi',
+    'sidebar-nav: H: Mail=mailto:me@x.example?subject=x',
+    'sidebar-nav: Tags: Sale=/tag?id=7^14 ; B=https://x.example/s?a=1',
+    'sidebar-social: Feed=https://x.example/feed?format=rss',
+  ]);
+  assert.deepEqual(headerCtaOf('Buy=https://shop.example/p?id=1#f'), { label: 'Buy', href: 'https://shop.example/p?id=1#f' });
+  assert.deepEqual(LEGACY['header-cta']('Buy=https://shop.example/p?id=1#f'), { label: 'Buy=https://shop.example/p?id', href: '1#f' });
+});
+
+test('compareLabelEq: old vs new readings of a list of values, only the ones that differ', () => {
+  const vals = [['footer-cols', 'H: A=/a?x=1 ; B=/b'], ['footer-cols', 'H: A=/a ; B=/b'], ['nav', 'A /a?x=1'],
+    ['header-cta', 'x=/y=/z'], 'Shop=https://shop.example/p?id=1', ['header-actions', 'S = m link /s?q=1']];
+  const d = compareLabelEq(vals);
+  assert.deepEqual(d.map((x) => [x.key, x.value]), [['footer-cols', 'H: A=/a?x=1 ; B=/b'], ['footer-social', 'Shop=https://shop.example/p?id=1'],
+    ['header-actions', 'S = m link /s?q=1']]);
+  assert.deepEqual(d[0].before, LEGACY['footer-cols']('H: A=/a?x=1 ; B=/b'));
+  assert.deepEqual(d[0].after, footerColsOf('H: A=/a?x=1 ; B=/b'));
+  assert.deepEqual(d[1].before, [{ label: 'Shop=https://shop.example/p?id', href: '1' }]);
+  // and it puts the module's split back: a reader called afterwards reads the new way
+  assert.deepEqual(headerCtaOf('Buy=/p?id=1'), { label: 'Buy', href: '/p?id=1' });
+  // every synthetic value: compareLabelEq agrees with the frozen LEGACY readers
+  const all = Object.entries(EDGE_69).flatMap(([k, vs]) => vs.map((v) => [k, v]));
+  assert.deepEqual(compareLabelEq(all).map((x) => `${x.key}: ${x.value}`).sort(), changedOn(Object.entries(EDGE_69)));
+  for (const x of compareLabelEq(all)) assert.deepEqual(x.before, LEGACY[x.key](x.value));
+});
+
+// Legacy first, as a property of every value in the corpus (docs, fixtures, edge, both fuzzes), not
+// of chosen rows: an item whose last-`=` reading already gave a link target reads exactly as before.
+test('compat (tile-lab#69): every item whose old href starts a link reads exactly as it did', (t) => {
+  const { splitLabelEq, legacySplitLabelEq, splitLabelSpec, legacySplitLabelSpec, isLinkTarget } = labelEq;
+  let kept = 0, moved = 0, same = 0;
+  for (const k of LABEL_EQ_KEYS) for (const v of corpus.get(k)) for (const item of v.split(';')) {
+    const was = legacySplitLabelEq(item);
+    const now = splitLabelEq(item);
+    assert.equal(now === null, was === null, `an item splits now iff it split before: ${JSON.stringify(item)}`);
+    if (was && isLinkTarget(was.rest)) { assert.deepEqual(now, was, JSON.stringify(item)); kept++; }
+    else if (was && !isDeepStrictEqual(now, was)) {
+      assert.ok(isLinkTarget(now.rest) && now.restAt < was.restAt, `a moved split moves left, onto a link target: ${JSON.stringify(item)}`);
+      moved++;
+    } else if (was) same++;
+    const wasS = legacySplitLabelSpec(item);
+    const nowS = splitLabelSpec(item);
+    assert.equal(nowS === null, wasS === null, `spec: ${JSON.stringify(item)}`);
+    if (wasS && isLinkTarget(wasS.rest.trim().split(/\s+/)[2] || '')) assert.deepEqual(nowS, wasS, `spec: ${JSON.stringify(item)}`);
+  }
+  assert.ok(kept > 1000 && moved > 100 && same > 1000, `kept ${kept}, moved ${moved}, same ${same}`);
+  t.diagnostic(`items: ${kept} old readings that were links kept verbatim; ${moved} cut links now read from where the link starts; ${same} others unchanged`);
 });
 
 for (const k of KEYS) {
@@ -437,7 +638,10 @@ test('writer: a footer item keeps its collapsed `>>` tail, and `>>` in its new h
 test('writer: a query keeps its delimiters — a grammar that cannot hold them raw refuses', () => {
   const list = 'A=/old ; B=/b';
   const a = parseChromeLinks('footer-social', list)[0];
-  assert.throws(() => withHref('footer-social', list, a, '/new?x=1'), /^Error: withHref: /);
+  // tile-lab#69: when what follows an item's last `=` does not start a link, the item splits at the
+  // first `=` that is followed by one, so this `=` in a query is held raw (it used to be refused:
+  // the last-`=` split would have cut the link)
+  assert.equal(withHref('footer-social', list, a, '/new?x=1'), 'A=/new?x=1 ; B=/b');
   assert.throws(() => withHref('footer-social', list, a, '/new?x;y'), /^Error: withHref: /);
   // whitespace and never-valid characters in a query are still encoded
   assert.equal(withHref('footer-social', list, a, '/new?qa b'), 'A=/new?qa%20b ; B=/b');
