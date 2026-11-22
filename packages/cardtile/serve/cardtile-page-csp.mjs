@@ -6,20 +6,23 @@
 // bug would be script on every page. This module says which scripts a page may run, so that a
 // script the renderer did not write does not run even when the escaping fails.
 //
-// 🔴 A HEADER, ON EVERY PERSON'S PAGE. With the setting on, every person's page and every preview
-// carries the policy, whatever the page holds: nothing a person writes, and nothing in the rendered
-// page, decides whether it is sent. The page's bytes are the same as with the setting off, but for
-// one attribute of an embed's frame (below). Nothing here changes the renderer or the deck (the
-// editor's own module carries the renderer, so a change there would change the editor's page
-// whatever this setting says).
+// 🔴 A HEADER, ON EVERY PERSON'S PAGE. Unless the setting is "off", every person's page, every preview
+// and both "no card" pages carry the policy, whatever the page holds: nothing a person writes, and
+// nothing in the rendered page, decides whether it is sent. The page's bytes are the same as with the
+// setting off, but for one attribute of an embed's frame (below). Nothing here changes the renderer or
+// the deck (the editor's own module carries the renderer, so a change there would change the editor's
+// page whatever this setting says).
 //
-//   CARDS_PAGE_CSP   unset, or anything but the two values below   off: no header, every answer as before
-//                    "report-only"   Content-Security-Policy-Report-Only: <the policy>
-//                    "enforce"       Content-Security-Policy: <the policy>
+//   CARDS_PAGE_CSP   unset, or anything but the two values below   report-only (the default):
+//                                    Content-Security-Policy-Report-Only: <the policy>
+//                    "enforce"       Content-Security-Policy: <the policy> — a later step, after the
+//                                    reports have been read
+//                    "off"           no header, every answer as before (the way back)
 //
-// Compared with `===`: nothing is trimmed or lowercased, so a typo is off. Both stages send the SAME
-// policy text — report-only is the policy enforcement will send, byte for byte. No `report-to` /
-// `report-uri`: this Worker has no endpoint that takes reports, and one would be a new write door.
+// Compared with `===`: nothing is trimmed or lowercased, so a typo is the default, report-only — which
+// refuses nothing. Both stages send the SAME policy text — report-only is the policy enforcement will
+// send, byte for byte. No `report-to` / `report-uri`: this Worker has no endpoint that takes reports,
+// and one would be a new write door; a browser reports in its console.
 //
 // ── what the policy allows, and where each allowance comes from ─────────────────────────────────
 //
@@ -72,10 +75,10 @@ const HEADER_OF = /* @__PURE__ */ Object.freeze({
   enforce: 'Content-Security-Policy',
 });
 
-/** pageCspStage: env → 'off' | 'report-only' | 'enforce'. Pure, and the ONLY reader of the setting. */
+/** pageCspStage: env → 'off' | 'report-only' | 'enforce' (report-only by default). Pure, and the ONLY reader of the setting. */
 export function pageCspStage(env) {
   const v = env?.[PAGE_CSP_SETTING];
-  return v === 'report-only' || v === 'enforce' ? v : 'off';
+  return v === 'off' || v === 'enforce' ? v : 'report-only';
 }
 /** the response header a stage sends the policy in (undefined for 'off') */
 export const pageCspHeaderName = (stage) => (Object.hasOwn(HEADER_OF, stage) ? HEADER_OF[stage] : undefined);

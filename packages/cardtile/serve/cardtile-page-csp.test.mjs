@@ -35,6 +35,14 @@ import { DECK_HEAD_JS, DECK_JS_PATH } from '../w3/deck-page.mjs';
 import { ON_DEMAND_TILES } from './size-tier.mjs';
 import { PNG, EVERY_TILE, PLAIN, WITH_EMBED, HOSTILE_FRONT, long, proseNamingEmbed, wordsNamingEmbed, EMBED_ON_BACK, OTHER_EMBED, RELATIVE_EMBED } from './cardtile-page-csp-fixtures.mjs';
 
+import { BLANKS } from '../ai-ops.mjs';
+import { isTemplateOnly } from '../card-blank.mjs';
+
+// a file that is still only the blank template (the starter card-blank-noindex.test.mjs builds)
+const BLANK_TEMPLATE = ['---', 'card-page: blank', 'title: Blank', 'theme: light', 'cols: 6', '---', '', '## grid', '',
+  `- [ ] %% card: ${BLANKS.profile.type} ${BLANKS.profile.rawParams} %% ${BLANKS.profile.body}`,
+  `- [ ] %% card: ${BLANKS.social.type} ${BLANKS.social.rawParams} %%`,
+  ...BLANKS.social.body.split('\n').map((l) => `\t${l.trim()}`), ''].join('\n');
 const ENFORCED = 'content-security-policy';
 const REPORTED = 'content-security-policy-report-only';
 
@@ -46,7 +54,9 @@ const CARDS = { every: EVERY_TILE, plain: PLAIN, embedded: WITH_EMBED, hostile: 
 // the window of `longembedded` that holds its embed (its last tile)
 const EMBED_WINDOW = Math.ceil((ON_DEMAND_TILES + 41) / WINDOW_TILES);
 const store = () => ({ get: async (k) => CARDS[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } });
-const ask = (path, settings = {}, init = {}) => worker.fetch(new Request(`http://localhost${path}`, init), { CARDS: store(), ...settings });
+// the page WITHOUT the policy is the page asked with the setting "off"; unset is the default, report-only
+const OFF = { CARDS_PAGE_CSP: 'off' };
+const ask = (path, settings = OFF, init = {}) => worker.fetch(new Request(`http://localhost${path}`, init), { CARDS: store(), ...settings });
 const ON = { CARDS_PAGE_CSP: 'enforce' };
 
 // ── the static check: an independent reading of a page against a policy ────────────────────────
@@ -92,27 +102,85 @@ function refusals(page, policy) {
 }
 
 // ── the setting ────────────────────────────────────────────────────────────────────────────────
-test('the setting: exactly "report-only" and "enforce" are on; unset and anything else is off', () => {
+test('the setting: report-only by default; exactly "enforce" enforces and exactly "off" is off; anything else is the default', () => {
   assert.deepEqual([...PAGE_CSP_STAGES], ['off', 'report-only', 'enforce']);
   assert.equal(pageCspStage({ CARDS_PAGE_CSP: 'report-only' }), 'report-only');
   assert.equal(pageCspStage({ CARDS_PAGE_CSP: 'enforce' }), 'enforce');
-  for (const v of [undefined, null, '', 'off', 'on', '1', 'true', true, 1, 'Enforce', 'ENFORCE', ' enforce', 'enforce ', 'enforce\n', 'enforced', 'report', 'report_only', 'Report-Only', 'report-only ', ['enforce'], { toString: () => 'enforce' }]) {
-    assert.equal(pageCspStage({ CARDS_PAGE_CSP: v }), 'off', `${JSON.stringify(v)} must be off`);
+  assert.equal(pageCspStage({ CARDS_PAGE_CSP: 'off' }), 'off');
+  for (const v of [undefined, null, '', 'on', '1', 'true', true, 1, 0, false, 'Off', 'OFF', ' off', 'off ', 'off\n', 'false', 'none', 'Enforce', 'ENFORCE', ' enforce', 'enforce ', 'enforce\n', 'enforced', 'report', 'report_only', 'Report-Only', 'report-only ', ['enforce'], ['off'], { toString: () => 'off' }]) {
+    assert.equal(pageCspStage({ CARDS_PAGE_CSP: v }), 'report-only', `${JSON.stringify(v)} must be the default, report-only`);
   }
-  assert.equal(pageCspStage(undefined), 'off');
-  assert.equal(pageCspStage(null), 'off');
+  assert.equal(pageCspStage(undefined), 'report-only');
+  assert.equal(pageCspStage(null), 'report-only');
+  assert.equal(pageCspStage({}), 'report-only');
   assert.equal(pageCspHeaderName('report-only'), 'Content-Security-Policy-Report-Only');
   assert.equal(pageCspHeaderName('enforce'), 'Content-Security-Policy');
   for (const s of ['off', 'toString', '__proto__', undefined]) assert.equal(pageCspHeaderName(s), undefined);
 });
 
-test('unset: a person\'s page, a preview and the .md exits carry no policy header', async () => {
-  for (const path of ['/every', '/plain', `/_preview/${'c'.repeat(32)}`, '/every.md']) {
-    const r = await ask(path);
-    assert.equal(r.status, 200, path);
+test('"off": a person\'s page, a preview, the "no card" pages and the .md exits carry no policy header', async () => {
+  for (const path of ['/every', '/plain', `/_preview/${'c'.repeat(32)}`, '/every.md', '/nope', `/_preview/${'9'.repeat(32)}`]) {
+    const r = await ask(path, OFF);
+    assert.equal(r.status, /nope|9{32}/.test(path) ? 404 : 200, path);
     assert.equal(r.headers.get(ENFORCED), null, path);
     assert.equal(r.headers.get(REPORTED), null, path);
   }
+});
+
+// ── what a person's pages carry by default (tile#372: shipped report-only) ───────────────────────
+// Every kind of page the Worker serves for a person, with the setting UNSET: the three deck views, a long
+// file's window, a preview, the blank template, the rendered "no card" page, the small 404 of a person's own
+// domain, an expired preview — each carries the report-only policy and no enforcing one; an embed's own
+// document carries ITS policy (enforced: an opaque-origin sandbox — the page's script-src would refuse the
+// author's script, see cardtile-embed-document.mjs).
+test('unset: every page the Worker serves for a person carries the report-only policy, and none the enforcing one', async () => {
+  const seed = { ...CARDS, stack: EVERY_TILE.replace('---\n', '---\nview: stack\n'), list: EVERY_TILE.replace('---\n', '---\nview: list\n'),
+    wall: EVERY_TILE.replace('---\n', '---\nview: wall\n'), blank: BLANK_TEMPLATE,
+    aster: WITH_EMBED, 'vanity:own.example': 'aster', 'vanityof:aster:0': 'own.example', 'vanitybind:aster:0:own.example': '1' };
+  const env = { CARDS: { get: async (k) => seed[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } } };
+  const get = (u, init) => worker.fetch(new Request(u, init), env);
+  const kinds = [
+    ['deck: stack view', 'http://localhost/stack', 200], ['deck: list view', 'http://localhost/list', 200], ['deck: wall view', 'http://localhost/wall', 200],
+    ['deck: a ?view= switch', 'http://localhost/every?view=list', 200], ['deck: a long file\'s window', `http://localhost/long?w=2`, 200],
+    ['deck: HEAD', 'http://localhost/every', 200, { method: 'HEAD' }],
+    ['a page with an embed', 'http://localhost/embedded', 200], ['a person\'s own domain', 'https://own.example/', 200],
+    ['a preview', `http://localhost/_preview/${'c'.repeat(32)}`, 200], ['the blank template', 'http://localhost/blank', 200],
+    ['no card: an unknown handle', 'http://localhost/nobody', 404], ['no card: an unknown path under a handle', 'http://localhost/every/nope', 404],
+    ['no card: an own domain\'s unknown path', 'https://own.example/wp-login.php', 404],
+    ['an expired preview', `http://localhost/_preview/${'9'.repeat(32)}`, 404],
+  ];
+  assert.equal(isTemplateOnly(BLANK_TEMPLATE), true, 'control: the blank fixture is the blank template');  const sentOn = [];
+  for (const [what, u, status, init] of kinds) {
+    const r = await get(u, init);
+    assert.equal(r.status, status, `${what}: ${u}`);
+    assert.match(r.headers.get('content-type') || '', /^text\/html/, what);
+    const policy = r.headers.get(REPORTED);
+    assert.ok(policy, `${what}: no report-only policy`);
+    assert.equal(r.headers.get(ENFORCED), null, `${what}: an enforcing policy`);
+    const d = directives(policy);
+    for (const [k, v] of [['object-src', ["'none'"]], ['base-uri', ["'none'"]], ['default-src', ["'none'"]], ['frame-src', ["'self'", 'https://www.youtube-nocookie.com']]]) {
+      assert.deepEqual(d[k], v, `${what}: ${k}`);
+    }
+    assert.equal(d['frame-ancestors'], undefined, `${what}: frame-ancestors (today any site may frame a page)`);
+    assert.equal(d['report-uri'] ?? d['report-to'], undefined, `${what}: a report endpoint (this Worker has none)`);
+    if (r.status === 200 && init?.method !== 'HEAD') assert.deepEqual(refusals(await r.text(), policy), [], `${what}: the page does not fit its own policy`);
+    sentOn.push(what);
+  }
+  // the embed's own document
+  const page = await (await get('http://localhost/embedded')).text();
+  const [f] = framesOf(page);
+  assert.ok(f && f.src && !f.srcdoc, 'by default an embed is its own document');
+  const doc = await get(`http://localhost${f.src}`);
+  assert.equal(doc.status, 200);
+  assert.equal(doc.headers.get(ENFORCED), EMBED_DOCUMENT_POLICY);
+  assert.equal(doc.headers.get('x-content-type-options'), 'nosniff');
+  // …and the markdown exits: nosniff, no page policy
+  for (const u of ['http://localhost/every.md']) {
+    const md = await get(u);
+    assert.equal(md.headers.get('x-content-type-options'), 'nosniff', u);
+    assert.equal(md.headers.get(REPORTED), null, u);
+  }
+  console.log(`# cardtile page csp default: ${sentOn.length} page kinds carry the report-only policy: ${sentOn.join(' | ')}`);
 });
 
 test('report-only sends the policy in the report-only header alone; enforce in the enforcing header alone; the text is one text', async () => {
@@ -454,7 +522,7 @@ test('r2 finding 1: an embed\'s relative addresses resolve as they did in its sr
   ];
   let resolved = 0;
   for (const [what, pageUrl, pageBase, get] of shapes) {
-    const offFrames = framesOf(await (await get(pageUrl, {})).text());
+    const offFrames = framesOf(await (await get(pageUrl, OFF)).text());
     assert.equal(offFrames.length, 2, `${what}: two embeds`);
     for (const stage of ['report-only', 'enforce']) {
       const onFrames = framesOf(await (await get(pageUrl, { CARDS_PAGE_CSP: stage })).text());
@@ -571,7 +639,7 @@ test('r3: an author\'s own `<base href>` is honoured as in its srcdoc — the re
     for (const [where, pageUrl, pageBase, seedOf, extra] of shapes) {
       const seed = seedOf(md);
       const get = (u, s) => worker.fetch(new Request(u), { CARDS: { get: async (k) => seed[k] ?? null, async getWithMetadata(k) { return { value: await this.get(k), metadata: null }; } }, ...extra, ...s });
-      const [off] = framesOf(await (await get(pageUrl, {})).text());
+      const [off] = framesOf(await (await get(pageUrl, OFF)).text());
       const srcdocDoc = fromSrcdoc(off.srcdoc);
       assert.ok(srcdocDoc.endsWith(html), `${what}, ${where}: the author's HTML is the end of the srcdoc document`);
       // where the srcdoc's relative addresses go (the browser's answer, above)
@@ -665,7 +733,7 @@ test('setting off: the embed address is an unknown path, answer for answer (stat
   const bad = [];
   await atFixedClock(async () => {
     for (const stage of Object.keys(GRID_STAGES)) for (const host of GRID_HOSTS) for (const [path, sibling] of pairs) for (const init of [{}, { method: 'HEAD' }, { method: 'POST', body: 'x' }]) {
-      for (const extra of [{}, { CARDS_PAGE_CSP: 'off' }, { CARDS_PAGE_CSP: 'Enforce' }]) {
+      for (const extra of [OFF]) {
         const got = await answerOf(worker, { stage, host, path, init }, extra);
         const asked = await answerOf(worker, { stage, host, path: sibling, init }, extra);
         // a redirect names the path it was asked: that one header is the sibling's path, and is read as ours
@@ -705,18 +773,18 @@ test('r1: the boot line under the review\'s adversarial values — hashed, and r
 });
 
 // ── where it is NOT sent ───────────────────────────────────────────────────────────────────────
-test('only a person\'s page and a preview: not the editor, the API, the report page, the nothing-here page, the .md exits, pictures or the deck\'s files', async () => {
+test('only a person\'s page, a preview and the "no card" pages: not the editor, the API, the report page, the .md exits, pictures or the deck\'s files', async () => {
   const split = { CARD_CANONICAL_HOST: 'reef.cards', PREVIEW: 'false' };
   const own = [];
   for (const [host, path, settings, init] of [
-    ['localhost', '/try/edit', {}], ['localhost', '/edit?host=https://feelreef.com', {}], ['localhost', '/nope', {}], ['localhost', '/', {}],
+    ['localhost', '/try/edit', {}], ['localhost', '/edit?host=https://feelreef.com', {}],
     ['localhost', '/every.md', {}], ['localhost', '/every', {}, { headers: { accept: 'text/markdown' } }], ['localhost', '/every/avatar', {}], ['localhost', '/every/favicon.ico', {}],
-    ['localhost', DECK_JS_PATH, {}], ['localhost', DECK_JS_PATH.replace(/\.js$/, '.css'), {}], ['localhost', '/_api/card/every', {}], ['localhost', '/.well-known/security.txt', {}],
-    ['reef.cards', '/report', split], ['reef.cards', '/nope', split], ['unbound.example', '/', {}],
+    ['localhost', DECK_JS_PATH, {}], ['localhost', DECK_JS_PATH.replace(/\.js$/, '.css'), {}], ['localhost', '/_api/card/every', {}], ['reef.cards', '/.well-known/security.txt', { CARD_CANONICAL_HOST: 'reef.cards', PREVIEW: 'false' }],
+    ['reef.cards', '/report', split],
   ]) {
     const scheme = host === 'localhost' ? 'http' : 'https';
-    const off = await worker.fetch(new Request(`${scheme}://${host}${path}`, init), { CARDS: store(), ...settings });
-    for (const stage of ['report-only', 'enforce']) {
+    const off = await worker.fetch(new Request(`${scheme}://${host}${path}`, init), { CARDS: store(), ...settings, ...OFF });
+    for (const stage of [undefined, 'report-only', 'enforce']) {
       const r = await worker.fetch(new Request(`${scheme}://${host}${path}`, init), { CARDS: store(), ...settings, CARDS_PAGE_CSP: stage });
       assert.equal(r.status, off.status, `${host}${path}`);
       assert.deepEqual([...r.headers], [...off.headers], `${host}${path} ${stage}: the setting changed this answer's headers`);
@@ -728,12 +796,15 @@ test('only a person\'s page and a preview: not the editor, the API, the report p
   assert.deepEqual(own, ['localhost/edit?host=https://feelreef.com', 'reef.cards/report']);
 });
 
-// ── off is the before-fixture; on adds a header and nothing else ───────────────────────────────
+// ── the fixture holds the default (report-only); "off" takes the one header away; "enforce" renames it ──
+// service-host-off.fixture.json is captured with every setting unset — since tile#372 that is report-only,
+// so a person's page, a preview and a "no card" page carry the report-only header there.
 const FIXTURE = readFixture();
 const CASES = gridCases();
-test('off values: all 714 answers of the before-fixture, byte for byte, headers and store reads included', async () => {
-  for (const [name, extra] of [['unset', {}], ['empty', { CARDS_PAGE_CSP: '' }], ['"off"', { CARDS_PAGE_CSP: 'off' }], ['"1"', { CARDS_PAGE_CSP: '1' }], ['"true"', { CARDS_PAGE_CSP: 'true' }],
-    ['another case', { CARDS_PAGE_CSP: 'Enforce' }], ['a trailing space', { CARDS_PAGE_CSP: 'report-only ' }], ['a typo', { CARDS_PAGE_CSP: 'reportonly' }]]) {
+const sorted = (headers) => [...headers].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+test('the default: all 714 answers of the fixture, byte for byte, headers and store reads included, under every spelling that is not "off" or "enforce"', async () => {
+  for (const [name, extra] of [['unset', {}], ['"report-only"', { CARDS_PAGE_CSP: 'report-only' }], ['empty', { CARDS_PAGE_CSP: '' }], ['"1"', { CARDS_PAGE_CSP: '1' }],
+    ['"Off"', { CARDS_PAGE_CSP: 'Off' }], ['another case', { CARDS_PAGE_CSP: 'Enforce' }], ['a trailing space', { CARDS_PAGE_CSP: 'off ' }], ['a typo', { CARDS_PAGE_CSP: 'enforced' }]]) {
     const bad = [];
     await atFixedClock(async () => {
       for (const c of CASES) { const d = answerDiff(await answerOf(worker, c, extra), FIXTURE.answers[c.key]); if (d) bad.push(`${c.key}: ${d}`); }
@@ -743,30 +814,34 @@ test('off values: all 714 answers of the before-fixture, byte for byte, headers 
   }
 });
 
-test('on: of the same 714, only people\'s pages and the preview change, and only by the one header', async () => {
-  for (const stage of ['report-only', 'enforce']) {
-    const header = pageCspHeaderName(stage).toLowerCase();
+test('"off" and "enforce": of the same 714, only people\'s pages, the preview and the "no card" pages differ, and only by the one header', async () => {
+  for (const stage of ['off', 'enforce']) {
     const changed = [];
     await atFixedClock(async () => {
       for (const c of CASES) {
         const got = await answerOf(worker, c, { CARDS_PAGE_CSP: stage });
         const want = FIXTURE.answers[c.key];
-        const added = got.headers.filter(([k]) => k === header);
-        const rest = { ...got, headers: got.headers.filter(([k]) => k !== header) };
-        // the report page and host mode have a policy of their own in the fixture: that one is not ours
-        const theirs = want.headers.some(([k]) => k === header);
-        assert.equal(answerDiff(theirs ? got : rest, want), '', `${stage} ${c.key}`);
-        if (added.length && !theirs) {
-          assert.equal(added.length, 1);
-          assert.equal(got.status, 200, c.key);
+        const ours = want.headers.find(([k]) => k === REPORTED);
+        // the report page and host mode have an enforcing policy of their own in the fixture: that one is not ours
+        const expected = !ours ? want : {
+          ...want,
+          headers: stage === 'off' ? want.headers.filter(([k]) => k !== REPORTED) : sorted(want.headers.map(([k, v]) => [k === REPORTED ? ENFORCED : k, v])),
+        };
+        assert.equal(answerDiff({ ...got, headers: ours && stage === 'enforce' ? sorted(got.headers) : got.headers }, expected), '', `${stage} ${c.key}`);
+        if (ours) {
+          assert.ok([200, 404].includes(got.status), c.key);
           assert.ok(got.headers.some(([k, v]) => k === 'content-type' && v === 'text/html; charset=utf-8'), c.key);
           changed.push(c.key);
         }
       }
     });
     const paths = [...new Set(changed.map((k) => k.split(' ').slice(2).join(' ')))].sort();
-    console.log(`# cardtile page csp ${stage}: ${changed.length} of ${CASES.length} answers carry the header; requests: ${paths.join(' | ')}`);
+    console.log(`# cardtile page csp ${stage}: ${changed.length} of ${CASES.length} answers differ from the default by the one header; requests: ${paths.join(' | ')}`);
     assert.ok(changed.length > 0);
-    for (const p of paths) assert.match(p, /^(GET|HEAD) \/(\?lang=ja|\?ref=aster|aster|aster\?utm=qr|feelreef|_preview\/b{32})?$/, `an answer that is not a person's page carries the header: ${p}`);
+    // a person's page, a preview, a "no card" page — nothing the fixture asks that is a file, an API, the editor or the report
+    for (const k of changed) {
+      const p = k.split(' ').slice(2).join(' ');
+      assert.doesNotMatch(p, /\.md$|\/avatar|favicon|_api|\/edit|\/try\/|\/report|\.well-known|\/_cards\//, `an answer that is not a page carries the header: ${k}`);
+    }
   }
 });

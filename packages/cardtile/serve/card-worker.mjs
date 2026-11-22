@@ -804,10 +804,15 @@ const notFoundSource = (locale, face) => {
 // the small 404 it was (card-icon.test.mjs catch-all, reef#1090): bots probe those all day, and a
 // feelreef page is not ours to put on somebody's domain. It names nothing, so it leaks nothing.
 const SMALL_404 = '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>';
+// tile#372 — both "no card" pages are served on the people's origin, so they carry the page's policy
+// like any person's page (cardtile-page-csp.mjs): the rendered one runs the deck, the small one runs nothing.
+const small404 = async (env) => html(SMALL_404, 404, env, '', {}, false, await pageCspHeaders(env, SMALL_404));
 // `who` = { locale, face }: the visitor's language and the host they asked. `handle` and `at` reach
 // the robots header only (robotsTag), never the body.
-const notFound = (env, handle = '', at = {}, who = {}) =>
-  html(withServiceTry(renderCardHTML(notFoundSource(who.locale, who.face), { handle: '', cardUrl: '' }), env), 404, env, handle, at, false, VARY_VISITOR_LANG);
+const notFound = async (env, handle = '', at = {}, who = {}) => {
+  const page = withServiceTry(renderCardHTML(notFoundSource(who.locale, who.face), { handle: '', cardUrl: '' }), env);
+  return html(page, 404, env, handle, at, false, { ...VARY_VISITOR_LANG, ...(await pageCspHeaders(env, page)) });
+};
 
 /**
  * withServiceTry: (a rendered page, env) → the same page whose "make your own" address is the editor
@@ -1407,9 +1412,10 @@ const router = {
     if (pv) {
       const draft = await previewDraft(pv[1]);
       if (!draft) {
-        return new Response('<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>', {
+        const expired = '<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>';
+        return new Response(expired, {
           status: 404,
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' },
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow', ...(await pageCspHeaders(env, expired)) },
         });
       }
       const videos = await resolveChannels(draft, ytFetch, channelShare);
@@ -1423,7 +1429,7 @@ const router = {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
           'X-Robots-Tag': 'noindex, nofollow',
-          // what a person wrote, rendered on the people's origin: the page's policy (cardtile-page-csp.mjs; nothing unless CARDS_PAGE_CSP is set)
+          // what a person wrote, rendered on the people's origin: the page's policy (cardtile-page-csp.mjs; report-only unless CARDS_PAGE_CSP says otherwise)
           ...(await pageCspHeaders(env, preview)),
         },
       });
@@ -1526,7 +1532,7 @@ const router = {
       vanityHandle ? { [host]: vanityHandle } : {}, extraHosts, { rootPage: !(hosts === 'split' && host === CARDS_HOST) });
     // a host of ours with no root card and no handle in the path: the nothing-here page. An unbound
     // creator's domain keeps the small 404 (see SMALL_404) — it is not our door to put our page on.
-    if (!resolved) return routesByPath(host, extraHosts) ? notFound(env, '', {}, who) : html(SMALL_404, 404, env);
+    if (!resolved) return routesByPath(host, extraHosts) ? notFound(env, '', {}, who) : small404(env);
 
     // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
     // Card exits read the body and stop marker in parallel before any exit or redirect.
@@ -1538,7 +1544,7 @@ const router = {
     // pictureStrategy). Unset — every deployment today — its paths are unknown paths, as they always were.
     const pictures = pictureStrategy(env);
     // tile#372: and an embed's own document only while the page's policy is on (cardtile-embed-document.mjs)
-    if (!want || (want === 'asset' && pictures === 'inline') || (want === 'embed' && pageCspStage(env) === 'off')) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
+    if (!want || (want === 'asset' && pictures === 'inline') || (want === 'embed' && pageCspStage(env) === 'off')) return vanityHandle ? small404(env) : notFound(env, resolved.handle, at, who);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
@@ -1570,7 +1576,7 @@ const router = {
     const cardMd = stopped != null ? null : liveMd;
     // An absent card on a creator's host has no public binding, even when a pointer remains.
     // Use the unbound response, including its robots headers, on every card exit.
-    if (cardMd == null && !routesByPath(host, extraHosts)) return html(SMALL_404, 404, env);
+    if (cardMd == null && !routesByPath(host, extraHosts)) return small404(env);
     // Missing and stopped shared-host identities perform the same ordered reads, including
     // the legacy deletion marker. Its value never changes the public absence response.
     if (cardMd == null) await store.get(`gone:${resolved.handle}`);
@@ -1600,7 +1606,7 @@ const router = {
     if (want === 'asset') {
       const ref = assetRef(url.pathname);
       const found = cardMd && ref ? await findAsset(onDemand ? allAssets(cardMd, index()) : parseCard(cardMd).assets, ref.hex, ref.ext) : null;
-      if (!found) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at);
+      if (!found) return vanityHandle ? small404(env) : notFound(env, resolved.handle, at);
       const keeping = keepPicture(resolved.handle, gen, ref.hex, ref.ext, found.bytes);
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
       return pictureResponse(found, env, resolved.handle, at);
@@ -1622,7 +1628,7 @@ const router = {
       } else if (cardMd != null) model = parseCard(cardMd);
       const doc = model ? embedDocumentOf(await embedDocuments(model, (k) => frontmatter(cardMd, k)), h) : null;
       // r2: the visitor's language and the host they asked, as on every other missing page
-      if (doc == null) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
+      if (doc == null) return vanityHandle ? small404(env) : notFound(env, resolved.handle, at, who);
       // its relative addresses resolve against the Cards' own address on this host, as in the srcdoc (r2):
       // `/` on a one-card host (a person's domain, the root card), `/<handle>` on a shared one; an author's own
       // base is honoured as it was there (r3)
@@ -1793,7 +1799,7 @@ const router = {
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
     }
     // tile#372 — the page's Content-Security-Policy (cardtile-page-csp.mjs): on every person's page while
-    // CARDS_PAGE_CSP is exactly "report-only" or "enforce", whatever the page holds; nothing otherwise.
+    // CARDS_PAGE_CSP is not exactly "off" (report-only by default), whatever the page holds.
     const csp = await pageCspHeaders(env, page, { afterPaint: plan.pictures ? plan.pictures.afterPaint : '' });
     return html(page, 200, env, resolved.handle, at, blank, { ...probe, ...(chromeLang ? VARY_VISITOR_LANG : {}), ...csp });
   },

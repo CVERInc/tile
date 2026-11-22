@@ -3,13 +3,13 @@
 // An embed is the author's own HTML and script, in `<iframe sandbox="allow-scripts">` (an opaque
 // origin: no storage, cookie or DOM of the page). Written as `srcdoc`, the frame's document INHERITS
 // the parent's Content-Security-Policy, and the parent's script-src (cardtile-page-csp.mjs) refuses the
-// author's script. So while the page's policy is on (CARDS_PAGE_CSP "report-only" or "enforce"), every
+// author's script. So while the page's policy is on (by default, and unless CARDS_PAGE_CSP is exactly "off"), every
 // embed frame of a page is written with `src` instead: a same-origin address that answers with the
 // document the srcdoc held plus, at most, one `<base href>` (embedDocumentBody, below), under a policy of its own.
 // The page's policy is then the same on every page, whatever the page holds, and nothing a person
 // writes decides whether it is sent.
 //
-// With the setting off none of this runs: the frame stays srcdoc and the address is an unknown path.
+// With the setting "off" none of this runs: the frame stays srcdoc and the address is an unknown path.
 //
 //   ADDRESS   <base>_embed/<sha256 of the document, 64 hex>[?w=<n>]
 //             base is where the page's own pictures live (`/<handle>/`, `/` on a person's own domain,
