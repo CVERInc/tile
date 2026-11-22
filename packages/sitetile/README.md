@@ -253,7 +253,13 @@ whitespace is trimmed, and an empty value is omitted. The tagline applies only
 to the columned footer. Omitting these keys preserves existing footer HTML.
 
 `;;` separates columns; `;` separates items within a column. A column starts with
-`Heading:`. Items use `Label=href`; omit `=href` for plain text.
+`Heading:`. Items use `Label=href`; omit `=href` for plain text. An item splits at
+its first `=` followed by a link target — a strong one (`http(s)://`, `//`, `/`,
+`#`, `?`, `mailto:`, `tel:`) or a bare path with no `=` before its `?`/`#` —
+except that a later `=` followed by a strong target takes the split unless it
+ends a `key=` in the query of the target chosen so far; with no such `=`, it
+splits at the last `=`. So an href may hold `=` (`Shop=/p?id=1`,
+`In=/login?next=/home`), and a label keeps the `=` it held before (`a=b=/c`).
 
 Each column keeps `rf-foot-col` and adds `rf-foot-col--<n>` (1-based position)
 and `rf-foot-col--<slug>` (the heading in lowercase ASCII, with runs of
