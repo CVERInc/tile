@@ -141,17 +141,24 @@ test('a page under a locale folder with no locale _site.md keeps its translated 
   for (const k of Object.keys(own)) if (!LOCALE_NEUTRAL_CHROME_KEYS.includes(k)) assert.equal(meta[k], own[k], `${k}: the page's translated value stands`);
 });
 
-test('a page under a locale folder WITH a locale _site.md: the full list, each ignored key named against the file that sets it', () => {
-  const layer = { nav: 'ホーム /ja-jp', footer: '利用規約 /ja-jp/terms' };
-  const siteConfig = { nav: layer.nav, footer: layer.footer, copyright: '© Kite', fonts: 'https://fonts.example/a.css', announce: 'Notice' };
-  const own = { nav: 'ホーム /ja-jp | お店 /ja-jp/shop', footer: '利用規約 /ja-jp/terms', copyright: '© 凧', fonts: 'https://elsewhere.example/x.css', announce: 'お知らせ' };
+test('a page under a locale folder WITH a locale _site.md: only what that file sets is reserved, named against it', () => {
+  const layer = { nav: 'ホーム /ja-jp', footer: '利用規約 /ja-jp/terms', 'site-key': 'site-ja' };
+  const siteConfig = { nav: layer.nav, footer: layer.footer, 'site-key': layer['site-key'], copyright: '© Kite', fonts: 'https://fonts.example/a.css', announce: 'Notice' };
+  const own = { nav: 'ホーム /ja-jp | お店 /ja-jp/shop', footer: '利用規約 /ja-jp/terms', 'site-key': 'site-x', copyright: '© 凧', fonts: 'https://elsewhere.example/x.css', announce: 'お知らせ' };
   const merged = { ...siteConfig, ...own };
   const { meta, ignored, from } = resolveSiteChrome(own, siteConfig, merged, siteChromeScope('ja-jp/about', ['ja-jp'], layer));
-  assert.deepEqual(ignored.sort(), ['copyright', 'fonts', 'nav']);
-  assert.deepEqual(from, { nav: 'content/ja-jp/_site.md', copyright: 'content/_site.md', fonts: 'content/_site.md' });
+  assert.deepEqual(ignored.sort(), ['nav', 'site-key']);
+  assert.deepEqual(from, { nav: 'content/ja-jp/_site.md', 'site-key': 'content/ja-jp/_site.md' });
   assert.equal(meta.nav, layer.nav);
-  assert.equal(meta.copyright, '© Kite');
+  assert.equal(meta['site-key'], 'site-ja');
+  // set only by content/_site.md, which does not govern ja-jp pages: the page's value stands, unreported
+  assert.equal(meta.copyright, '© 凧', 'the base file\'s English copyright replaced the page\'s');
+  assert.equal(meta.fonts, 'https://elsewhere.example/x.css');
   assert.equal(meta.announce, 'お知らせ', 'announce is the page\'s');
+  // the locale home is a page of the locale too
+  const home = resolveSiteChrome({ copyright: '© 凧' }, siteConfig, { ...siteConfig, copyright: '© 凧' }, siteChromeScope('ja-jp', ['ja-jp'], layer));
+  assert.deepEqual(home.ignored, []);
+  assert.equal(home.meta.copyright, '© 凧');
   // a folder that is not a locale, with a site config of its own: the same, named against that file
   const shop = resolveSiteChrome({ nav: 'Mine /' }, { nav: 'Shop /shop' }, { nav: 'Mine /' }, siteChromeScope('shop/hats', ['ja-jp'], { nav: 'Shop /shop' }));
   assert.deepEqual(shop.from, { nav: 'content/shop/_site.md' });
@@ -266,13 +273,13 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     const ja = html('ja-jp/about');
     assert.ok(ja.includes('お問い合わせ'), 'ja-jp/about does not wear the footer content/ja-jp/_site.md sets');
     assert.ok(!ja.includes('お店'), 'ja-jp/about replaced the nav content/ja-jp/_site.md sets');
-    assert.ok(ja.includes('© Kite Lantern') && !ja.includes('© 灯籠凧'), 'ja-jp/about replaced the copyright content/_site.md sets');
+    // copyright is set only by content/_site.md, which does not govern ja-jp pages: the page's own stands
+    assert.ok(ja.includes('© 灯籠凧') && !ja.includes('© Kite Lantern'), 'ja-jp/about wears the English copyright only content/_site.md sets');
     assert.ok(ja.includes('春の凧が入荷しました'), 'ja-jp/about lost its own announcement');
     const once = (line) => assert.equal(log.split(line).length - 1, 1, `expected exactly one build-log line:\n${line}\nlog was:\n${log.slice(-3000)}`);
     once(siteChromeWarning('nav', 'content/ja-jp/about.md', 'content/ja-jp/_site.md'));
     once(siteChromeWarning('footer', 'content/ja-jp/about.md', 'content/ja-jp/_site.md'));
-    once(siteChromeWarning('copyright', 'content/ja-jp/about.md', 'content/_site.md', 'content/ja-jp/_site.md'));
-    assert.ok(!/announce in content\/ja-jp\/about\.md is IGNORED/.test(log), 'the page\'s own announcement was reported');
-    assert.equal((log.match(/ is IGNORED /g) || []).length, 3, 'the build log names something else:\n' + log.slice(-3000));
+    assert.ok(!/(copyright|announce) in content\/ja-jp\/about\.md is IGNORED/.test(log), 'a key the ja-jp page keeps was reported');
+    assert.equal((log.match(/ is IGNORED /g) || []).length, 2, 'the build log names something else:\n' + log.slice(-3000));
   });
 }

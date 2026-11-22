@@ -136,7 +136,7 @@ A content page renders from `{ ..._site.md, ...its own frontmatter }`, so a page
 
 Not on the list, so a page may still set them or turn them off for itself: `announce` + `announce-*` (a page's own announcement, or none) and `age-gate` + `age-gate-*` (the age gate is a per-page feature), and everything a page says about itself.
 
-**Locale folders.** A page in a locale folder (`content/ko-kr/…`, and the locale home `content/ko-kr.md`) whose folder has no `_site.md` keeps its translated chrome: only `favicon`, `fonts`, `analytics-token`, `site-key`, `generator` and `kaito-corpus`, which no translation changes, are reserved. Once `content/ko-kr/_site.md` exists, the full list applies to that locale's pages; a key only `content/_site.md` sets is named against that file, and the log says `content/ko-kr/_site.md` can set it for the locale.
+**Locale folders.** A page in a locale folder (`content/ko-kr/…`, and the locale home `content/ko-kr.md`) whose folder has no `_site.md` keeps its translated chrome: only `favicon`, `fonts`, `analytics-token`, `site-key`, `generator` and `kaito-corpus`, which no translation changes, are reserved. Once `content/ko-kr/_site.md` exists, it governs that locale's pages: a key on the list is reserved there only when `content/ko-kr/_site.md` itself sets it, and the log names that file. A key only `content/_site.md` sets stays the page's.
 
 A key `_site.md` leaves unset still comes from the page, and a site with no `_site.md` is untouched, so a site that keeps its chrome on its pages renders as it did. The list, the reasons, and the keys deliberately left to the page are in `site-chrome-keys.mjs` (pure, import-free; both page routes call it through `applySiteChrome` in `astro/src/lib/locale-editions.mjs`).
 

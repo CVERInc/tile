@@ -25,8 +25,10 @@
 // translated chrome lives on the page: its site config is `content/_site.md`, in the site's
 // default language, and putting that back would replace a Korean nav with the English one. Such a
 // page keeps every key below except LOCALE_NEUTRAL_CHROME_KEYS — the ones a language cannot mean
-// anything for. Once the folder has a `_site.md`, the locale has a site config and the full list
-// applies, as for any other page. (siteChromeScope says which case a page is in.)
+// anything for. Once the folder has a `_site.md`, that file is the locale's site config and governs
+// its pages: a key on the list is reserved there only when `content/<loc>/_site.md` itself sets it.
+// A key only `content/_site.md` sets stays the page's, since the base file's value is in the site's
+// default language. (siteChromeScope says which case a page is in.)
 //
 // WHAT THE RULE DOES NOT DO, deliberately:
 //   · A key the site config leaves unset still comes from the page. A site with no `_site.md`
@@ -134,9 +136,12 @@ export function resolveSiteChrome(own, siteConfig, merged, scope = null) {
   if (!siteConfig || !own) return { meta, ignored, from };
   const sc = scope || {};
   const translatedHere = !!sc.localeFolder && !sc.layerFile;
+  const localeGoverned = !!sc.localeFolder && !!sc.layerFile;
   for (const key of Object.keys(own)) {
     if (!isSiteChromeKey(key) || !Object.prototype.hasOwnProperty.call(siteConfig, key)) continue;
     if (translatedHere && !LOCALE_NEUTRAL_CHROME_KEYS.includes(key)) continue;
+    // a locale's own _site.md governs its pages: a key only content/_site.md sets is the page's
+    if (localeGoverned && !(sc.layerKeys || []).includes(key)) continue;
     const site = said(siteConfig[key]);
     if (site === '' || site === said(own[key])) continue;
     meta[key] = siteConfig[key];

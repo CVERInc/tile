@@ -6,7 +6,7 @@
 #     those, with nothing in the build log.
 #   ja-jp/ HAS a _site.md that sets nav and footer. For ja-jp pages those are the site's: a page's
 #     own line for them is ignored and named against content/ja-jp/_site.md. copyright, which only
-#     this file sets, is ignored on such a page too and named against this file.
+#     this file sets, stays the page's: content/ja-jp/_site.md governs ja-jp pages and leaves it unset.
 brand: Kite Lantern
 lang: en-US
 locales: en-US, ko-KR, ja-JP
