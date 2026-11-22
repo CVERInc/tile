@@ -329,6 +329,40 @@ ok(wholeWords, 'kinsoku: in that text no line starts inside a word that fits a l
   + (firstSplit ? ' — first split: ' + JSON.stringify(firstSplit) : ''));
 ok(joined > 50,'kinsoku: …and that random text did put a spaced mark at a line edge (' + joined + ' layouts), so the check above compared a real join');
 
+// ── 6c. kinsoku review (tile#388 round 3): a narrow mark that begins a word is not a closing mark ──
+// ".NET", ".com", "’90s", ".5": a narrow closing mark joins only when no narrow letter or digit
+// follows it, so this Latin text lays out exactly as before kinsoku, at every width.
+for (const [text, width] of [['We ported the service to .NET last year', 36], ['Music from the ’90s still sells', 42], ['It costs .5 dollars', 42]]) {
+  const firstDiff = (() => { for (let w = 20; w <= 400; w++) { const got = lineTexts(text, layoutFlow(text, { ...KIN, width: w })), want = oracleLines(text, w, KIN.fontSize); if (JSON.stringify(got) !== JSON.stringify(want)) return { w, got, want }; } return null; })();
+  ok(!firstDiff, 'kinsoku: "' + text + '" lays out as before kinsoku at widths 20–400 (it moved at ' + width + ')'
+    + (firstDiff ? ' — first difference: ' + JSON.stringify(firstDiff) : ''));
+}
+const WORD_MARKS = ['.5', '.NET', '’90s', '.com', ',x', ')a', '…b', '”c', '!1', '.рф', ']9'];
+let wordMarksSame = true, firstWordMarkDiff = null, wordMarkAtStart = 0;
+for (let t = 0; t < 120; t++) {
+  const text = Array.from({ length: 10 + rand(30) }, () => (rand(4) === 0 ? WORD_MARKS[rand(WORD_MARKS.length)] : latinWord())).join(' ');
+  for (let width = 20; width <= 300; width += 7) {
+    const got = lineTexts(text, layoutFlow(text, { ...KIN, width })), want = oracleLines(text, width, KIN.fontSize);
+    if (want.some((l, i) => i > 0 && /^[.,)…”!\]’]/.test(l))) wordMarkAtStart++;
+    if (wordMarksSame && JSON.stringify(got) !== JSON.stringify(want)) { wordMarksSame = false; firstWordMarkDiff = { text, width, got, want }; }
+  }
+}
+ok(wordMarksSame, 'kinsoku: Latin text whose spaced marks begin a word (".5", ".NET", "’90s" …) lays out exactly as before kinsoku, at widths 20–300'
+  + (firstWordMarkDiff ? ' — first difference: ' + JSON.stringify(firstWordMarkDiff) : ''));
+ok(wordMarkAtStart > 50, 'kinsoku: …and that text did put such a word at a line start (' + wordMarkAtStart + ' layouts), so the check above compared a real case');
+// a mark set apart by a space and ending its word still joins: a sentence-final "." never opens a line
+// (from the width "done ." fits on a line; below that the joined run is laid out as never joined, 6b)
+const finalDot = 'We said it was done . Then we left';
+let dotWouldOpen = 0, dotOpens = false;
+for (let w = Math.ceil(defaultMeasure('done .', KIN.fontSize)); w <= 200; w++) {
+  if (oracleLines(finalDot, w, KIN.fontSize).some((l, i) => i > 0 && l.startsWith('.'))) dotWouldOpen++;
+  if (lineTexts(finalDot, layoutFlow(finalDot, { ...KIN, width: w })).some((l, i) => i > 0 && l.startsWith('.'))) dotOpens = true;
+}
+ok(dotWouldOpen > 0 && !dotOpens, 'kinsoku: a spaced sentence-final "." never opens a line (it did before kinsoku at ' + dotWouldOpen + ' widths)');
+// after a wide glyph a narrow closing mark joins as before, whatever follows it
+eq(lineTexts('一二三四五”六', layoutFlow('一二三四五”六', { ...KIN, width: 50 })), ['一二三四', '五”六'], 'kinsoku: a curly closing quote after a wide glyph stays with it');
+eq(lineTexts('ｱｲｳｴ漢字｡ｶﾅ', layoutFlow('ｱｲｳｴ漢字｡ｶﾅ', { ...KIN, width: 50 })), ['ｱｲｳｴ漢', '字｡ｶﾅ'], 'kinsoku: a half-width full stop before half-width kana stays with the glyph before it');
+
 // a long run of opening brackets joins one unit at a time: linear, not quadratic in the run's length
 // (one untimed run first, then the best of three: the check is the algorithm, not a cold JIT or a busy host)
 const brackets = '（'.repeat(100000);

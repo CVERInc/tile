@@ -66,13 +66,25 @@ const RE_UNIT_SRC = '[' + WIDE + ']\\p{M}*[ \\t\\r]*|(?:[^ \\t\\r\\n' + WIDE + '
 // where it is. A joined run wider than a whole line keeps its original units (`parts`) and is laid
 // out from them as if it had never been joined: it breaks at the last unit boundary that fits, and
 // only a single unit wider than a line is broken by glyph — so a long word or URL beside a bracket
-// is never split where it used to fit. In latin text only a mark set apart by a space joins
-// ("costs .5" keeps ".5" on the line of "costs", as "word )" keeps ")" with "word").
-// (every mark is one BMP code unit: a unit's first code unit, and only the last code unit of the
-// unit before, are looked at — so a long run of joins stays linear)
+// is never split where it used to fit. A narrow closing mark (ASCII, half-width, the curly quotes,
+// the ellipsis) joins only when the glyph after it is not a narrow letter or digit: there it begins
+// a word — ".NET", ".com", "’90s", ".5" — and latin text lays out as without kinsoku. So in latin
+// text only a mark set apart by a space and then ending its word joins ("word )" keeps ")" with
+// "word"); after a wide glyph ("五,六", "好”我") the mark joins as the full-width ones do.
+// (every mark is one BMP code unit: a unit's first code unit, the one after it, and only the last
+// code unit of the unit before, are looked at — so a long run of joins stays linear)
 const codeUnits = (marks) => new Set(Array.from(marks, (c) => c.charCodeAt(0)));
 const NO_START = codeUnits('，。、；：！？」』）》〉】〕］｝’”…‥,.;:!?)]}｡､｣');
 const NO_END = codeUnits('「『（《〈【〔［｛‘“([{｢');
+// a narrow letter or digit: not a wide glyph, not half-width kana or hangul
+const RE_NARROW_ALNUM = new RegExp('(?![' + WIDE + '\\uFF61-\\uFFDC])[\\p{L}\\p{N}]', 'uy');
+const closesHere = (text, at) => {
+  const c = text.charCodeAt(at);
+  if (!NO_START.has(c)) return false;
+  if (RE_WIDE.test(text[at])) return true;
+  RE_NARROW_ALNUM.lastIndex = at + 1;
+  return !RE_NARROW_ALNUM.test(text);
+};
 function unitsOf(text, from, to) {
   const units = [];
   const re = new RegExp(RE_UNIT_SRC, 'gu');
@@ -83,7 +95,7 @@ function unitsOf(text, from, to) {
     const word = text.slice(m.index, end).replace(/[ \t\r]+$/, '');
     const unit = { start: m.index, end, word };
     const prev = units[units.length - 1];
-    if (prev && word && (NO_START.has(word.charCodeAt(0)) || NO_END.has(prev.word.charCodeAt(prev.word.length - 1)))) {
+    if (prev && word && (closesHere(text, m.index) || NO_END.has(prev.word.charCodeAt(prev.word.length - 1)))) {
       if (!prev.parts) prev.parts = [{ start: prev.start, end: prev.end, word: prev.word }];
       prev.parts.push(unit);
       prev.word = text.slice(prev.start, m.index + word.length);
