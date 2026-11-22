@@ -2883,11 +2883,22 @@ function heroHeadingless(s) {
 // 🩸 It used to be written onto the section as typed, by both renderers: the stylesheet selects on
 // `[data-logo-pos="top"]`, so `logo-pos=TOP` drew the default while the page said `TOP`, and
 // nothing said so. A value that is not a position draws the default, as `media=` and `shape=` do,
-// and — when a RENDERER asks (`opts.report`, as tagcloudLinks has it) and the hero is the layered
-// one that draws it — is recorded on the drop queue, once per render, as the author wrote it.
+// and — when a RENDERER asks (`opts.report`) and the hero is the layered one that draws it — is
+// warned about the way an unrecognised `blog-date-format` is (astro/src/lib/blog.mjs
+// warnUnknownDateFormat): one console.warn per distinct value, naming the values it expected.
+// (Not the drop queue: that is for refused destinations, and nothing in a build reads it.)
 // Takes the parsed params (or just `{ layers, layout, logo, 'logo-pos' }` — Hero.astro passes those
 // four by name so the coral-params scan still sees them read there).
 const HERO_LOGO_POS = ['top', 'center', 'bottom'];
+// Keyed by the value as written (trimmed, cut at 200), so a build that renders the hero once per
+// locale says it once, and two different bad values are both heard. Module-scoped, like blog.mjs's.
+const _warnedLogoPos = new Set();
+function warnUnknownLogoPos(value) {
+  const shown = value.length > 200 ? value.slice(0, 200) + '…' : value;
+  if (_warnedLogoPos.has(shown)) return;
+  _warnedLogoPos.add(shown);
+  console.warn(`[sitetile] Unrecognised logo-pos "${shown}" — expected one of: ${HERO_LOGO_POS.join(', ')}. Falling back to bottom.`);
+}
 function heroVariant(pm, opts) {
   const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
   const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];
@@ -2898,9 +2909,7 @@ function heroVariant(pm, opts) {
   const posRaw = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']).trim() : '';
   const pos = posRaw.toLowerCase();
   const posKnown = HERO_LOGO_POS.indexOf(pos) >= 0;
-  if (opts && opts.report && kind === 'layers' && pos && !posKnown) {
-    recordDrop('logo-pos=' + (posRaw.length > 200 ? posRaw.slice(0, 200) + '…' : posRaw), '(hero-logo-pos-unknown)');
-  }
+  if (opts && opts.report && kind === 'layers' && pos && !posKnown) warnUnknownLogoPos(posRaw);
   return { kind, layerList, layout, logo, logoPos: posKnown ? pos : 'bottom' };
 }
 

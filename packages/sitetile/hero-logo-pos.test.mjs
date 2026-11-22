@@ -18,8 +18,8 @@
 // What holds now, in one place — heroVariant, the selection both renderers already share:
 //   1. the value is trimmed and lower-cased, then matched against the three positions;
 //   2. anything else draws the default (`bottom`), the way `media=` and `shape=` fall back to theirs,
-//      and is recorded once per render on the drop queue (takeDropWarnings) — the queue a tagcloud
-//      item the renderer cannot read already goes to;
+//      and is warned about the way an unrecognised `blog-date-format` already is: one console.warn
+//      per distinct value, naming the values expected (blog.mjs warnUnknownDateFormat);
 //   3. a value that was already one of the three renders the same bytes as before.
 //
 // The NAME side is deliberately untouched and pinned at the end: an assignment is the name, `=`,
@@ -51,7 +51,14 @@ const page = (params, title = 'Title') => '---\nsitetile-page: home\ntitle: Hero
   + `## ${title}\n%% sitetile: hero ${params} %%\n\nBody.\n\n## Next\n\nMore.\n`;
 const render = (params, title) => renderSiteToHtml(parseSite(page(params, title)));
 const posOf = (html) => (/\bdata-logo-pos="([^"]*)"/.exec(html) || [])[1];
-const UNKNOWN = '(hero-logo-pos-unknown)';
+// The warning channel: console.warn, captured here. Only logo-pos lines are kept; anything else
+// passes through. Once per distinct value per process, so each warning case below uses a value no
+// other case in this file renders.
+const warned = [];
+const realWarn = console.warn;
+console.warn = (...a) => { const m = String(a[0]); if (/logo-pos/.test(m)) warned.push(m); else realWarn(...a); };
+const takeWarned = () => warned.splice(0);
+const WARNING = (shown) => `[sitetile] Unrecognised logo-pos "${shown}" — expected one of: top, center, bottom. Falling back to bottom.`;
 
 // What the author typed after `logo-pos=`, and the position the hero must draw.
 const FOLDED = [
@@ -65,7 +72,7 @@ const FOLDED = [
 ];
 // CONTROLS: the three values, written the way they already worked.
 const AS_BEFORE = [['top', 'top'], ['center', 'center'], ['bottom', 'bottom'], ['"top"', 'top'], ['"center"', 'center']];
-// Not a position. Each draws the default and is recorded as written (trimmed).
+// Not a position. Each draws the default and is warned about as written (trimmed).
 const UNRECOGNISED = [
   ['middle', 'middle'], ['left', 'left'], ['centre', 'centre'], ['top-left', 'top-left'], ['1', '1'],
   ['"top center"', 'top center'], ['" Upper "', 'Upper'], ['top,', 'top,'], ['ＴＯＰ', 'ＴＯＰ'],
@@ -108,50 +115,58 @@ await test('🔴 string render: an unrecognised value draws the default hero and
   }
 });
 
-await test('🔴 an unrecognised value is recorded once per render, as written, with its page', () => {
-  for (const [typed, shown] of UNRECOGNISED) {
-    takeDropWarnings();
+await test('🔴 an unrecognised value is warned about, as written (trimmed), once per value', () => {
+  for (const [typed, shown] of [['nowhere', 'nowhere'], ['" Sideways "', 'Sideways'], ['ＢＯＴＴＯＭ', 'ＢＯＴＴＯＭ'], ['"top  center"', 'top  center']]) {
+    takeWarned();
     render(`${LAYERS} logo-pos=${typed}`);
-    assert.deepEqual(takeDropWarnings(), [{ scheme: UNKNOWN, dest: `logo-pos=${shown}`, page: 'home' }], `logo-pos=${typed}`);
+    assert.deepEqual(takeWarned(), [WARNING(shown)], `logo-pos=${typed}`);
+    render(`${LAYERS} logo-pos=${typed}`);
+    assert.deepEqual(takeWarned(), [], `logo-pos=${typed}: warned a second time`);
   }
   // An UNTITLED hero is the path that asks heroVariant most often (the h1 owner, the heading test,
-  // the render): still one record, because only the render reports.
-  takeDropWarnings();
-  render(`${LAYERS} logo-pos=middle`, '');
-  assert.equal(takeDropWarnings().length, 1, 'an untitled layered hero');
+  // the render): still one warning.
+  takeWarned();
+  render(`${LAYERS} logo-pos=underneath`, '');
+  assert.equal(takeWarned().length, 1, 'an untitled layered hero');
   // A long value is cut the way an unreadable tagcloud item is.
-  takeDropWarnings();
   render(`${LAYERS} logo-pos=${'x'.repeat(5000)}`);
-  const [long] = takeDropWarnings();
-  assert.equal(long.dest, `logo-pos=${'x'.repeat(200)}…`);
-});
-
-await test('nothing is recorded for a value the hero understood, or for no value at all', () => {
-  for (const [typed] of [...FOLDED, ...AS_BEFORE, [''], ['""'], ['"  "']]) {
-    takeDropWarnings();
-    render(typed === '' ? LAYERS : `${LAYERS} logo-pos=${typed}`);
-    assert.deepEqual(takeDropWarnings(), [], `logo-pos=${typed}`);
-  }
-});
-
-await test('only a render reports: asking which variant a hero is, or which section owns the h1, records nothing', () => {
+  assert.deepEqual(takeWarned(), [WARNING(`${'x'.repeat(200)}…`)]);
+  // One channel: the drop queue (refused destinations) is not where this goes.
   takeDropWarnings();
-  const site = parseSite(page(`${LAYERS} logo-pos=middle`, ''));
-  heroVariant(parseParams(site.sections[0].params));
-  heroHeadingless(site.sections[0]);
-  pageH1Index(site.sections);
+  render(`${LAYERS} logo-pos=offstage`);
+  assert.equal(takeWarned().length, 1);
   assert.deepEqual(takeDropWarnings(), []);
 });
 
-await test('a hero that draws no logo-pos has nothing to record, and still writes no data-logo-pos', () => {
+await test('nothing is warned about for a value the hero understood, or for no value at all', () => {
+  takeWarned();
+  for (const [typed] of [...FOLDED, ...AS_BEFORE, [''], ['""'], ['"  "']]) {
+    render(typed === '' ? LAYERS : `${LAYERS} logo-pos=${typed}`);
+    assert.deepEqual(takeWarned(), [], `logo-pos=${typed}`);
+  }
+});
+
+await test('only a render warns: asking which variant a hero is, or which section owns the h1, says nothing', () => {
+  takeWarned();
+  const site = parseSite(page(`${LAYERS} logo-pos=elsewhere`, ''));
+  heroVariant(parseParams(site.sections[0].params));
+  heroHeadingless(site.sections[0]);
+  pageH1Index(site.sections);
+  assert.deepEqual(takeWarned(), []);
+  // 🔴 CONTROL: the same value does warn once a render asks.
+  renderSiteToHtml(site);
+  assert.deepEqual(takeWarned(), [WARNING('elsewhere')]);
+});
+
+await test('a hero that draws no logo-pos has nothing to warn about, and still writes no data-logo-pos', () => {
   // `logo-pos=` is the layered hero's. The legacy and `layout=` heroes never drew it — whatever its
   // value — so there is no drawn position for a value to have been dropped from.
-  for (const params of ['logo-pos=middle', 'logo-pos=TOP', 'layout=split logo-pos=middle', 'layout=split logo-pos=TOP', 'layers=" | " logo-pos=middle']) {
-    takeDropWarnings();
+  for (const params of ['logo-pos=hither', 'logo-pos=TOP', 'layout=split logo-pos=thither', 'layout=split logo-pos=TOP', 'layers=" | " logo-pos=yon']) {
+    takeWarned();
     const html = render(params);
     assert.ok(!/data-logo-pos/.test(html), `${params}: a hero with no layers grew a data-logo-pos`);
     assert.equal(html, render(params.replace(/\s*logo-pos=\S+/, '')), `${params}: the hero changed`);
-    assert.deepEqual(takeDropWarnings(), [], params);
+    assert.deepEqual(takeWarned(), [], params);
   }
 });
 
@@ -182,23 +197,20 @@ function emitAsHeroAstro(params, title = 'Title') {
 
 await test('🔴 emitHero, fed as Hero.astro feeds it, writes the same position the string render does', () => {
   for (const [typed, want] of [...FOLDED, ...AS_BEFORE, ...UNRECOGNISED.map(([t]) => [t, 'bottom'])]) {
-    takeDropWarnings();
     const built = emitAsHeroAstro(`${LAYERS} logo-pos=${typed}`);
     assert.equal(posOf(built), want, `logo-pos=${typed}`);
     assert.equal(posOf(built), posOf(render(`${LAYERS} logo-pos=${typed}`)), `logo-pos=${typed}: the two renderers disagree`);
   }
-  takeDropWarnings();
-  emitAsHeroAstro(`${LAYERS} logo-pos=middle`, '');
-  const got = takeDropWarnings();
-  assert.equal(got.length, 1, 'the built page records an unrecognised value once');
-  assert.equal(got[0].scheme, UNKNOWN);
-  assert.equal(got[0].dest, 'logo-pos=middle');
+  takeWarned();
+  emitAsHeroAstro(`${LAYERS} logo-pos=yonder`, '');
+  assert.deepEqual(takeWarned(), [WARNING('yonder')], 'the built page warns about an unrecognised value once');
 });
 
 // ── the NAME side, which this change leaves alone ────────────────────────────────────────────────
 // One assignment form — name, `=`, value, nothing between — and case-sensitive names, in every
-// reader of a param: parseParams is the only one sitetile has, and a Card's cells are read through
-// it too (cardtile/yt.test.mjs holds `channel = x` to "not an assignment" from both of its sides).
+// reader of a param: parseParams is the only one sitetile has, and cardtile cells are read through
+// it too — channelsIn included, since tile#325 (cardtile/yt.test.mjs holds `channel = x` to "not an
+// assignment" from both of its sides).
 // So `logo-pos = top` and `Logo-Pos=top` set no `logo-pos`, there is no value here to fold, and the
 // hero is the default one — with `top` / `Logo-Pos` left in the params as names no hero reads.
 await test('the name side is unchanged: a spaced `=` is not an assignment, and names are case-sensitive', () => {
@@ -212,10 +224,10 @@ await test('the name side is unchanged: a spaced `=` is not an assignment, and n
   ];
   for (const [raw, want] of rows) assert.deepEqual(parseParams(raw), want, raw);
   for (const params of ['logo-pos = top', 'logo-pos =top', 'logo-pos= top', 'Logo-Pos=top', 'LOGO-POS=top']) {
-    takeDropWarnings();
+    takeWarned();
     assert.equal(parseParams(params)['logo-pos'], undefined, params);
     assert.equal(posOf(render(`${LAYERS} ${params}`)), 'bottom', params);
-    assert.deepEqual(takeDropWarnings(), [], `${params}: there is no logo-pos value to record`);
+    assert.deepEqual(takeWarned(), [], `${params}: there is no logo-pos value to warn about`);
   }
 });
 
