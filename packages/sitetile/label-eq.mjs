@@ -4,8 +4,8 @@
 //
 // THE RULE (tile-lab#69), in one sentence: an item splits at its last `=`, as it always has, when
 // what follows is a link target that starts with `http://`, `https://`, `//`, `/`, `#`, `?`,
-// `mailto:` or `tel:`; otherwise it splits at the first `=` that is followed by such a target;
-// otherwise at the last `=`.
+// `mailto:` or `tel:` (schemes match in any case: `HTTPS://`, `MAILTO:`); otherwise it splits at the
+// first `=` that is followed by such a target; otherwise at the last `=`.
 //
 // What that means:
 //   - Every item whose last-`=` reading already gave such a link reads EXACTLY as before — a label
@@ -14,8 +14,9 @@
 //   - A bare relative path is not such a target, so `Rel=page.html?x=1` still splits at its last `=`
 //     (label `Rel=page.html?x`, href `1`), as before; start the path with `/` to have it read whole.
 //   - A link whose query value itself starts a link (`In=/login?next=/home`) keeps the old reading
-//     (label `In=/login?next`, href `/home`): such an `=` must be written `%3D`, or the value's first
-//     character percent-encoded (`In=/login?next=%2Fhome`).
+//     (label `In=/login?next`, href `/home`). To keep it whole, percent-encode the value's first
+//     character (`In=/login?next=%2Fhome`). Not the key's `=`: `/login?next%3D/home` reads as the
+//     key `next=/home` with an empty value. `%3D` is right only for an `=` inside a value (`q=a%3D/b`).
 // (blog-post-cta is not this grammar: it always split at the first `=` and keeps the whole rest.)
 //
 // One pass: the words of the item are found once, then each `=` is judged in constant time.
