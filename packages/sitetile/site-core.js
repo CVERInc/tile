@@ -50,6 +50,9 @@ import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
 // the same proxied poster; the click-to-play script is this package's own, one copy for both renderers.
 import { youtubeVideoOf, posterPath } from '../cardtile/yt.mjs';
 import { YOUTUBE_LINE_SCRIPT } from './youtube-line-script.js';
+// The one `Label=href` split rule (tile-lab#69); label-eq.mjs is pure and import-free, so the editor
+// bundle carries only it.
+import { splitLabelEq } from './label-eq.mjs';
 
 const FRONTMATTER_KEY = 'sitetile-page';
 const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people', 'links'];
@@ -298,13 +301,15 @@ function parseSidebarNav(raw) {
     const head = ci >= 0 ? col.slice(0, ci).trim() : '';
     const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
     const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
-      const m = it.match(/^(.*\S)\s*=\s*(\S+)$/);
+      // `Label=href` splits where label-eq.mjs's rule says (splitLabelEq), so a query string stays
+      // in the href.
+      const m = splitLabelEq(it);
       if (!m) return { label: it, href: '' };
       // optional `^weight` suffix on the href = per-item font size in px (weighted tag cloud —
       // WP tag-cloud widgets size each tag by post count; harvested from live). Purely visual,
       // omit → renders at the group's default size, so existing sidebar-navs are unaffected.
-      const hw = m[2].match(/^(.*?)\^(\d+(?:\.\d+)?)$/);
-      return hw ? { label: m[1].trim(), href: hw[1], weight: Number(hw[2]) } : { label: m[1].trim(), href: m[2].trim() };
+      const hw = m.rest.match(/^(.*?)\^(\d+(?:\.\d+)?)$/);
+      return hw ? { label: m.label, href: hw[1], weight: Number(hw[2]) } : { label: m.label, href: m.rest };
     });
     return { head, items };
   });

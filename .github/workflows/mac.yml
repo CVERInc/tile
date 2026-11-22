@@ -1,0 +1,57 @@
+name: Mac app
+
+# Builds hosts/mac the way a person would (scripts/build-app.sh), which ends by asking the built app,
+# from its install path, whether it can find its own engine (--verify-resources). Nothing else in CI
+# builds the Mac app: between 2026-08-12 and 2026-10-14 main could not produce a working one, that
+# check would have said so on any build, and nobody ran one. Refs CVERInc/tile#132.
+#
+# Separate from ci.yml on purpose: it runs only when something the Mac app is built from changes,
+# so it never slows an unrelated PR. Do not make it a required check — a path-filtered workflow
+# that does not run leaves a required check waiting forever.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'hosts/mac/**'
+      # sync-engine.sh copies these in; build-editor-core.sh emits dist/editor-core.js from
+      # packages/core + packages/cssmd + i18n; check-l10n.py compares Localization/ against i18n/.
+      - 'packages/core/**'
+      - 'packages/cssmd/**'
+      - 'i18n/**'
+      - 'Sortable.min.js'
+      - 'styles.css'
+      - 'scripts/build-editor-core.sh'
+      - '.github/workflows/mac.yml'
+  pull_request:
+    paths:
+      - 'hosts/mac/**'
+      # Same list as push above; keep the two in step.
+      - 'packages/core/**'
+      - 'packages/cssmd/**'
+      - 'i18n/**'
+      - 'Sortable.min.js'
+      - 'styles.css'
+      - 'scripts/build-editor-core.sh'
+      - '.github/workflows/mac.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    # A cold debug build (including fetching flintfind) is a few minutes. Without a ceiling, a hang
+    # holds the runner for the default six hours before anyone sees red.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      # The dev channel, ad-hoc signed. Exits non-zero if the engine sync, the localization check,
+      # the build, the signature, --verify-resources or --report-sandbox fails.
+      - name: Build marktile.app and verify it finds its engine
+        run: bash hosts/mac/scripts/build-app.sh debug "$RUNNER_TEMP/marktile.app"
