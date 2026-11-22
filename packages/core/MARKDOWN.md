@@ -76,6 +76,32 @@ working tree and `HEAD`.
 
 *(Twenty of the original 21: example 353 was fixed — see the next section, which this ruler found.)*
 
+### The one deliberate departure from the spec: a CJK character beside the run
+
+The flanking rules assume a script that puts spaces between words. A delimiter with punctuation on
+its inner side only counts if its outer side is whitespace or more punctuation — and in Chinese,
+Japanese or Korean prose the outer side is usually the next word. So the spec, and this engine
+with it, printed the asterisks of `已經**手動關閉（Kill）**了`, and rendered
+`**粗體裡有*斜體（對）*的**` as an italic over the wrong half of the line.
+
+`scanRuns` has two extra clauses, described at `isCjk` in `cssmd.js`: CJK and full-width punctuation
+is not counted as punctuation for the flanking test, and a CJK character on the outer side stands in
+for the whitespace. They apply only to a run with such a character beside it. Everywhere else the
+rule is the spec's, character for character, and the score above does not move.
+
+| | before | now |
+|---|---|---|
+| `已經**手動關閉（Kill）**了` | literal | bold |
+| `他說**"好"**然後` | literal | bold |
+| `Foo**（bar）**baz` | literal | bold |
+| `Foo**(bar)**baz` | literal | literal — no CJK character beside either run |
+| `檔案_名稱_版本`, `他說_（真的）_嗎` | literal | literal — the intraword `_` rule is untouched |
+| `5*（3+2）*4` | literal | italic — the price of it; `5*x*4` always was |
+
+`test/emphasis-cjk.test.cjs` is the gate. Its expectations were checked against `markdown-it` with
+the `markdown-it-cjk-friendly` plugin, and against the reference `commonmark` package for every row
+with no CJK neighbour — never against this engine's own output.
+
 ## Structural whitespace is `[ \t]`, never `\s`
 
 CommonMark defines every block marker in terms of **spaces and tabs**. JS `\s` is far wider, and the
