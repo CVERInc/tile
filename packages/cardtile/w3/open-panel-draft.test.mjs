@@ -144,12 +144,21 @@ test('a tile the engine refuses to compose keeps the PRIOR draft', async () => {
   assert.ok(prior.includes('Kept by Done.'));
   e.pen(1);
   e.input('f-text', 'Half a link');
-  // composeCell's own refusal (a link with no address), reached without the sheet's gate: the value
-  // is emptied with no input event, as a script or an autofill clearing the field would
+  // composeCell's own refusal (a link with no address), reached PAST the sheet's required-field gate:
+  // the gate skips a row that is not shown, composeCell still reads it. The address row is hidden and
+  // emptied with no input event, so the gate sees nothing missing and Done stays enabled.
+  e.doc.querySelector('#modal-body [data-field="url"]').hidden = true;
   e.$('f-url').value = '';
-  e.pagehide();
+  e.pagehide(); e.visibility('hidden');
+  assert.equal(e.stored(DRAFT_KEY), prior, 'the draft is byte for byte what it was');
+  assert.equal(e.errors(), '', 'no error is painted in a sheet nobody is looking at');
+  assert.equal(e.$('modal').hidden, false);
+  // proof the refusal above was the engine's, not the gate's: Done itself is refused by composeCell
+  e.visibility('visible');
+  assert.equal(e.$('modal-save').disabled, false, 'the gate saw nothing missing');
+  e.$('modal-save').click();
+  assert.notEqual(e.$('e-url').textContent, '', 'Done paints composeCell\'s refusal on the address');
   assert.equal(e.stored(DRAFT_KEY), prior);
-  assert.equal(e.errors(), '');
 });
 
 test('a tile just added (not Done yet): its words are parked; Cancel, if the page comes back, still takes it out', async () => {
