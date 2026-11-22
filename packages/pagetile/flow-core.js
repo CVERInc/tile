@@ -57,6 +57,34 @@ function defaultMeasure(str, fontSize) {
 // between any two glyphs. A combining mark always stays in the unit of the glyph before it. Offsets
 // are absolute in the text.
 const RE_UNIT_SRC = '[' + WIDE + ']\\p{M}*[ \\t\\r]*|(?:[^ \\t\\r\\n' + WIDE + ']\\p{M}*)+[ \\t\\r]*|[ \\t\\r]+';
+//
+// Kinsoku: a closing mark never starts a line and an opening bracket never ends one. Both are kept
+// by taking the break opportunity away — a unit that begins with a closing mark joins the unit
+// before it, and the unit after an opening bracket joins the bracket's — spaces between included.
+// The full-width marks, their ASCII and half-width-form twins, the curly quotes and the ellipsis.
+// A mark with nothing before it on its line (the start of the text, after a hard break) stays
+// where it is. A joined run wider than a whole line keeps its original units (`parts`) and is laid
+// out from them as if it had never been joined: it breaks at the last unit boundary that fits, and
+// only a single unit wider than a line is broken by glyph — so a long word or URL beside a bracket
+// is never split where it used to fit. A narrow closing mark (ASCII, half-width, the curly quotes,
+// the ellipsis) joins only when the glyph after it is not a narrow letter or digit: there it begins
+// a word — ".NET", ".com", "’90s", ".5" — and latin text lays out as without kinsoku. So in latin
+// text only a mark set apart by a space and then ending its word joins ("word )" keeps ")" with
+// "word"); after a wide glyph ("五,六", "好”我") the mark joins as the full-width ones do.
+// (every mark is one BMP code unit: a unit's first code unit, the one after it, and only the last
+// code unit of the unit before, are looked at — so a long run of joins stays linear)
+const codeUnits = (marks) => new Set(Array.from(marks, (c) => c.charCodeAt(0)));
+const NO_START = codeUnits('，。、；：！？」』）》〉】〕］｝’”…‥,.;:!?)]}｡､｣');
+const NO_END = codeUnits('「『（《〈【〔［｛‘“([{｢');
+// a narrow letter or digit: not a wide glyph, not half-width kana or hangul
+const RE_NARROW_ALNUM = new RegExp('(?![' + WIDE + '\\uFF61-\\uFFDC])[\\p{L}\\p{N}]', 'uy');
+const closesHere = (text, at) => {
+  const c = text.charCodeAt(at);
+  if (!NO_START.has(c)) return false;
+  if (RE_WIDE.test(text[at])) return true;
+  RE_NARROW_ALNUM.lastIndex = at + 1;
+  return !RE_NARROW_ALNUM.test(text);
+};
 function unitsOf(text, from, to) {
   const units = [];
   const re = new RegExp(RE_UNIT_SRC, 'gu');
@@ -65,7 +93,14 @@ function unitsOf(text, from, to) {
   while ((m = re.exec(text)) && m.index < to) {
     const end = Math.min(m.index + m[0].length, to);
     const word = text.slice(m.index, end).replace(/[ \t\r]+$/, '');
-    units.push({ start: m.index, end, word });
+    const unit = { start: m.index, end, word };
+    const prev = units[units.length - 1];
+    if (prev && word && (closesHere(text, m.index) || NO_END.has(prev.word.charCodeAt(prev.word.length - 1)))) {
+      if (!prev.parts) prev.parts = [{ start: prev.start, end: prev.end, word: prev.word }];
+      prev.parts.push(unit);
+      prev.word = text.slice(prev.start, m.index + word.length);
+      prev.end = end;
+    } else units.push(unit);
   }
   return units;
 }
@@ -99,24 +134,30 @@ function layoutFlow(text, opts) {
       if (m && m.index >= block.end) m = null;
       segs.push([at, m ? m.index : block.end]);
     }
+    // one break unit `u` of width `w` onto the lines
+    const place = (u, w) => {
+      if (line.width > 0 && line.width + line.trail + w > o.width) open(u.start);
+      if (w > o.width) {
+        // a word wider than a whole line (a long URL) is broken by character, never overflowed
+        let at = u.start;
+        for (const ch of u.word.match(RE_GLYPH)) {
+          const cw = measure(ch, fs);
+          if (line.width > 0 && line.width + cw > o.width) open(at);
+          line.width += cw; line.trail = 0; at += ch.length;
+        }
+      } else {
+        line.width += (line.width > 0 ? line.trail : 0) + w;
+      }
+      // trailing spaces hang at a line end and become the gap before the next word
+      line.trail = measure(src.slice(u.start + u.word.length, u.end), fs);
+    };
     for (const [segStart, segEnd] of segs) {
       open(segStart);
       for (const u of unitsOf(src, segStart, segEnd)) {
         const w = measure(u.word, fs);
-        if (line.width > 0 && line.width + line.trail + w > o.width) open(u.start);
-        if (w > o.width) {
-          // a word wider than a whole line (a long URL) is broken by character, never overflowed
-          let at = u.start;
-          for (const ch of u.word.match(RE_GLYPH)) {
-            const cw = measure(ch, fs);
-            if (line.width > 0 && line.width + cw > o.width) open(at);
-            line.width += cw; line.trail = 0; at += ch.length;
-          }
-        } else {
-          line.width += (line.width > 0 ? line.trail : 0) + w;
-        }
-        // trailing spaces hang at a line end and become the gap before the next word
-        line.trail = measure(src.slice(u.start + u.word.length, u.end), fs);
+        // a joined run wider than a whole line is laid out from its own units, as if never joined
+        if (u.parts && w > o.width) for (const p of u.parts) place(p, measure(p.word, fs));
+        else place(u, w);
       }
     }
     line.gap = o.fontSize * o.lineHeight * o.paragraphGap;   // the space after a paragraph

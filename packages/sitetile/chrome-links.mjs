@@ -1,9 +1,11 @@
 // chrome-links.mjs — THE reader, and the one writer, of every link-bearing chrome key a site's
 // frontmatter (`_site.md`, or a page that overrides it) carries.
 //
-// 🔴 PURE AND IMPORT-FREE. The renderer imports it (SiteLayout.astro, PostView.astro) and anything
-// outside this repo that has to know where a chrome link's target sits — a tool that
-// rewrites links when pages move — vendors this file verbatim. There is no second copy of these
+// 🔴 PURE. Its one import is label-eq.mjs (also pure and import-free: where a `Label=href` item
+// splits, kept apart so the editor bundle carries only that). The renderer imports it
+// (SiteLayout.astro, PostView.astro) and anything outside this repo that has to know where a chrome
+// link's target sits — a tool that rewrites links when pages move — vendors this file and
+// label-eq.mjs verbatim, side by side. There is no second copy of these
 // grammars anywhere in this repo, and there must not be one anywhere else: two review rounds of a
 // re-implementation elsewhere found it disagreeing with the layout, and the only fix that stays
 // fixed is that both sides run THIS code.
@@ -36,12 +38,15 @@
 // The per-key readers (navMenuOf, footerColsOf, …) return exactly the shapes the layout renders
 // from — no offsets on them, so nothing about where an href sat can leak into a template or a diff.
 
+import { splitLabelEq, splitLabelSpec, legacySplitLabelEq, legacySplitLabelSpec } from './label-eq.mjs';
+export { isLinkTarget, splitLabelEq } from './label-eq.mjs';
+
 // `Label /href` — the href is the item's last whitespace-free run (nav, footer).
 const LABEL_SPACE_HREF = /^(.*\S)\s+(\S+)$/;
-// `Label=href` — the href is the run after the LAST `=` that has no whitespace after it.
-const LABEL_EQ_HREF = /^(.*\S)\s*=\s*(\S+)$/;
-// `aria-label = icon type target [reveal] [flags…]` (header-actions).
-const LABEL_EQ_SPEC = /^(.*\S)\s*=\s*(\S.*)$/;
+// `Label=href` — where an item splits is label-eq.mjs's rule (tile-lab#69; the rule is stated there
+// in one sentence). Every `Label=href` reader — the ones below and site-core.js's parseSidebarNav —
+// splits through it; there is no second rule. `split` is swapped only inside compareLabelEq.
+let split = { href: splitLabelEq, spec: splitLabelSpec };
 // sidebar-nav's optional `^weight` suffix on an href (a tag-cloud font size).
 const HREF_WEIGHT = /^(.*?)\^(\d+(?:\.\d+)?)$/;
 
@@ -122,8 +127,8 @@ export function footerLinksOf(value) {
 
 // One `Label=href` item at `pos`, or null when it has no `=href`.
 function eqItem(text, pos) {
-  const m = text.match(LABEL_EQ_HREF);
-  return m ? at({ label: m[1].trim(), href: m[2].trim() }, pos + text.length - m[2].length, m[2].length) : null;
+  const m = split.href(text);
+  return m ? at({ label: m.label, href: m.rest }, pos + m.restAt, m.rest.length) : null;
 }
 
 /** `footer-social` / `sidebar-social` / `breadcrumb-trail` / `age-gate-note-links`:
@@ -158,12 +163,12 @@ export function sidebarNavOf(value) {
   return pieces(String(value || ''), ';;', 0).map((col) => {
     const m = col.text.match(/:(?!\/\/)/);
     return groupOf(col, m ? m.index : -1, (it) => {
-      const m2 = it.text.match(LABEL_EQ_HREF);
+      const m2 = split.href(it.text);
       if (!m2) return { label: it.text, href: '' };
-      const hrefAt = it.at + it.text.length - m2[2].length;
-      const hw = m2[2].match(HREF_WEIGHT);
-      return hw ? at({ label: m2[1].trim(), href: hw[1], weight: Number(hw[2]) }, hrefAt, hw[1].length)
-        : at({ label: m2[1].trim(), href: m2[2].trim() }, hrefAt, m2[2].length);
+      const hrefAt = it.at + m2.restAt;
+      const hw = m2.rest.match(HREF_WEIGHT);
+      return hw ? at({ label: m2.label, href: hw[1], weight: Number(hw[2]) }, hrefAt, hw[1].length)
+        : at({ label: m2.label, href: m2.rest }, hrefAt, m2.rest.length);
     });
   });
 }
@@ -201,10 +206,10 @@ const WHOLE_HREF_KEYS = ['copyright-href', 'language-href', 'header-actions-cart
  *  second word is `toggle`; a link's target — its third word — is an href. */
 export function headerActionsOf(value) {
   return pieces(String(value || ''), ';', 0).map((p) => {
-    const m = p.text.match(LABEL_EQ_SPEC);
+    const m = split.spec(p.text);
     if (!m) return null;
-    const spec = m[2].trim();
-    const specAt = p.at + p.text.length - m[2].length;
+    const spec = m.rest.trim();
+    const specAt = p.at + m.restAt;
     const words = [...spec.matchAll(/\S+/g)];
     const t = words.map((w) => w[0]);
     const iconName = t[0] || '';
@@ -217,7 +222,7 @@ export function headerActionsOf(value) {
       else if (tok === 'badge' || tok.startsWith('badge:')) badge = tok.indexOf(':') >= 0 ? tok.slice(tok.indexOf(':') + 1) : '';
     }
     const side = reveal.startsWith('drawer:') ? reveal.slice(7) : 'right';
-    const action = { label: m[1].trim(), iconName, type, target, reveal, side, badge, mobile, key: target || iconName };
+    const action = { label: m.label, iconName, type, target, reveal, side, badge, mobile, key: target || iconName };
     return type === 'link' && target ? at(action, specAt + words[2].index, target.length) : action;
   }).filter(Boolean);
 }
@@ -268,6 +273,29 @@ function read(key, value) {
 /** See the header. A key that is not in CHROME_LINK_KEYS has no links. */
 export function parseChromeLinks(key, value) {
   return read(key, value)[1].map(({ label, href, start, end }) => ({ label, href, start, end }));
+}
+
+// The keys whose items are `Label=href` (or, for header-actions, `aria-label = spec`).
+const LABEL_EQ_KEYS = ['footer-cols', 'sidebar-nav', 'footer-social', 'sidebar-social', 'breadcrumb-trail',
+  'age-gate-note-links', 'header-cta', 'header-actions'];
+
+/** Old (last `=`, before tile-lab#69) vs new reading of chrome values. `values` is a list of
+ *  `[key, value]` pairs; a bare string is read as one `footer-social` item list. → the ones that read
+ *  differently, as [{ key, value, before, after }] (before/after: the key's reader's result). Keys
+ *  that have no `Label=href` items are skipped. Read-only: nothing is written anywhere. */
+export function compareLabelEq(values) {
+  const out = [];
+  for (const entry of values || []) {
+    const [key, value] = typeof entry === 'string' ? ['footer-social', entry] : entry;
+    if (!LABEL_EQ_KEYS.includes(key)) continue;
+    const after = READERS[key][0](value);
+    const was = split;
+    split = { href: legacySplitLabelEq, spec: legacySplitLabelSpec };
+    let before;
+    try { before = READERS[key][0](value); } finally { split = was; }
+    if (JSON.stringify(before) !== JSON.stringify(after)) out.push({ key, value, before, after });
+  }
+  return out;
 }
 
 // The characters that are syntax in each key's grammar, beyond whitespace (always syntax: every

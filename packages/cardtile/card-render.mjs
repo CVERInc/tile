@@ -549,8 +549,18 @@ const backTarget = (p, ctx) => {
 // door: a tap on them already means play, swipe, whatever the HTML does, or one of their icons, and a door
 // would take that away. Their back still shows where a card turns over as a whole (the deck views).
 const DOOR_TYPES = new Set(['profile', 'text']);
+// Those four NAME their back instead (tile#351): `data-back="<id>"` on the cell, and nothing else — no
+// element, nothing to press, no style keyed on it — so the wall is what it was. The deck reads it to seat
+// that back on the tile's card in stack and list (w3/deck.js, tileCard).
+const NAMED_BACK_TYPES = new Set(['video', 'slides', 'embed', 'social']);
 function renderCell(cell, place, ctx) {
   const html = renderCellBody(cell, place, ctx);
+  if (html && NAMED_BACK_TYPES.has(cell.type)) {
+    const named = backTarget(cell.params || {}, ctx);
+    const end = html.indexOf('>');
+    // only on the cell's own opening tag; a shape this does not recognise is left as it is
+    return named && end > 0 && html.startsWith('<div class="st-cell') ? html.slice(0, end) + ` data-back="${esc(named)}"` + html.slice(end) : html;
+  }
   const id = DOOR_TYPES.has(cell.type) ? backTarget(cell.params || {}, ctx) : '';
   if (!html || !id) return html;
   const at = html.indexOf('>') + 1;

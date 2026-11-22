@@ -17,7 +17,7 @@ import BlogIndexView from '../components/BlogIndexView.astro';
 import PostView from '../components/PostView.astro';
 import DateArchiveView from '../components/DateArchiveView.astro';
 import { parseSite, sourceRevision } from '@sitetile';
-import { contentPageRel } from '../lib/locale-editions.mjs';
+import { contentPageRel, applySiteChrome } from '../lib/locale-editions.mjs';
 import { allPosts, listedPosts, siteMeta, loadSite, postUrl, postHasPage, indexUrl, homePagingForwards, blogBase, blogInstalled, toPath, buildPostSidebar, postCards, localeBlogCorpora, blogSwitchLocales } from '../lib/blog.mjs';
 import { tagLocalesSource, pageLocalesOrWarn, siteLayerBannerMeta } from '../packages/lingo/locale.mjs';
 import { DYNAMIC_CORAL_CSS_KEY } from '../lib/dynamic-coral-css.mjs';
@@ -88,7 +88,8 @@ export function getStaticPaths() {
   // Recursive glob so NESTED pages route faithfully: content/legal/terms.md → /legal/terms.
   const files = import.meta.glob('../../content/**/*.md', { query: '?raw', import: 'default', eager: true });
   // site-config layer: `content/_site.md` chrome (+ `content/<locale>/_site.md` override),
-  // inherited UNDER each page's own frontmatter (page keys win). null when absent → legacy
+  // inherited UNDER each page's own frontmatter (page keys win, except for site chrome the config
+  // itself sets — see site-chrome-keys.mjs). null when absent → legacy
   // per-page behavior (SPEC-site-data-model). loadSite is called PER PAGE with its rel path so a
   // Lingo page (ja-jp/about) gets its locale's chrome.
   for (const [path, raw] of Object.entries(files)) {
@@ -138,6 +139,13 @@ export function getStaticPaths() {
     // Reserved key, not authorable: a page setting `site-title:` itself is overwritten here.
     const ownMeta = { ...site.meta };
     if (siteConfig) site.meta = { ...siteConfig, ...site.meta, 'site-title': siteConfig.title || '' };
+    // Site chrome the site config sets is not a page's to change (site-chrome-keys.mjs has the keys
+    // and the reasons): the site config's value is put back, and the page's line is named in the
+    // build log against the file that sets it. A key the site config leaves unset still comes from
+    // the page, with no site config nothing is touched, and a page in a locale folder with no
+    // `_site.md` of its own keeps its translated chrome — so a site that keeps its chrome on its
+    // pages renders as it did.
+    applySiteChrome(files, rel, ownMeta, siteConfig, site.meta);
     // #1888 — banner sentences are site layer only (base + this page's locale _site.md): the page's
     // own banner keys are put back and named, so the layout warns `page-level` by source, not value.
     site.meta = siteLayerBannerMeta(ownMeta, siteConfig, site.meta);

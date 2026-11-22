@@ -273,7 +273,7 @@ test('r3#4 `backdrop: …/a&#x110000;` — no exception, the save takes the norm
 // parser and must never reach execution code: its only job is to fail when someone adds an output
 // point that does not go through the renderer's registry (`attrUrl` / `cssAttrUrl`).
 import { renderCardHTML } from './card-worker.mjs';
-import { cardDestinations } from './card-destinations.mjs';
+import { cardDestinations, cardLinkReport } from './card-destinations.mjs';
 
 test('every external URL in a feature-complete card\'s render was registered by the renderer', () => {
   const md = [
@@ -381,10 +381,21 @@ test('r4#2b `https://e.example/a\\b` — a backslash is a slash to an http URL p
   assert.ok(!d.some((u) => u.includes('\\')));
 });
 
-test('r4#2c U+0000 in `bg=` — the queried value carries U+FFFD (what CSS parses), never NUL', () => {
-  const d = cardDestinations(mk('- [ ] %% card: embed kind=bubbles images=https://i.example/1.png bg="https://e.example/a\u0000b" %%'));
-  assert.ok(d.some((u) => u.includes('%EF%BF%BD')), JSON.stringify(d));
-  assert.ok(!d.some((u) => u.includes('\u0000') || u.includes('%00')));
+// A destination carrying a control character used to be written (CSS turns U+0000 into U+FFFD, so
+// that spelling was the one queried). The shared destination policy now refuses every C0 control
+// and DEL, so there is nothing to fetch and nothing to query: the value is reported as refused,
+// which is what makes a save name it instead of storing it.
+test('r4#2c U+0000 in `bg=` — refused by the destination policy: never written, never queried, reported', () => {
+  const md = mk('- [ ] %% card: embed kind=bubbles images=https://i.example/1.png bg="https://e.example/a\u0000b" %%');
+  const r = cardLinkReport(md);
+  assert.deepEqual(r.destinations, ['https://i.example/1.png'], JSON.stringify(r.destinations));
+  assert.deepEqual(r.refused, ['https://e.example/a\u0000b'], JSON.stringify(r.refused));
+  const html = renderCardHTML(md, {});
+  assert.ok(!html.includes('e.example') && !html.includes('\u0000'), 'none of it reaches the page');
+  // the form feed, the one CSS reads as a line break, the same way
+  const ff = cardLinkReport(mk('- [ ] %% card: embed kind=bubbles images=https://i.example/1.png bg="https://e.example/a\u000cb" %%'));
+  assert.deepEqual(ff.destinations, ['https://i.example/1.png']);
+  assert.deepEqual(ff.refused, ['https://e.example/a\u000cb']);
 });
 
 test('r5#1 `img=` / `href=` written `https:/\\evil.example/x` — resolved like the browser, queried and refused (422)', async () => {

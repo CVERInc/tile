@@ -50,6 +50,9 @@ import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
 // the same proxied poster; the click-to-play script is this package's own, one copy for both renderers.
 import { youtubeVideoOf, posterPath } from '../cardtile/yt.mjs';
 import { YOUTUBE_LINE_SCRIPT } from './youtube-line-script.js';
+// The one `Label=href` split rule (tile-lab#69); label-eq.mjs is pure and import-free, so the editor
+// bundle carries only it.
+import { splitLabelEq } from './label-eq.mjs';
 
 const FRONTMATTER_KEY = 'sitetile-page';
 const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people', 'links'];
@@ -298,13 +301,15 @@ function parseSidebarNav(raw) {
     const head = ci >= 0 ? col.slice(0, ci).trim() : '';
     const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
     const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
-      const m = it.match(/^(.*\S)\s*=\s*(\S+)$/);
+      // `Label=href` splits where label-eq.mjs's rule says (splitLabelEq), so a query string stays
+      // in the href.
+      const m = splitLabelEq(it);
       if (!m) return { label: it, href: '' };
       // optional `^weight` suffix on the href = per-item font size in px (weighted tag cloud —
       // WP tag-cloud widgets size each tag by post count; harvested from live). Purely visual,
       // omit → renders at the group's default size, so existing sidebar-navs are unaffected.
-      const hw = m[2].match(/^(.*?)\^(\d+(?:\.\d+)?)$/);
-      return hw ? { label: m[1].trim(), href: hw[1], weight: Number(hw[2]) } : { label: m[1].trim(), href: m[2].trim() };
+      const hw = m.rest.match(/^(.*?)\^(\d+(?:\.\d+)?)$/);
+      return hw ? { label: m.label, href: hw[1], weight: Number(hw[2]) } : { label: m.label, href: m.rest };
     });
     return { head, items };
   });
@@ -1004,6 +1009,11 @@ function isSiteFile(text) {
 // nothing on any page while every check stayed quiet. A hyphen BEFORE the first word character is
 // not part of the name (`--wide=1` is `wide`), and a hyphen in a VALUE was never in question
 // (`align=top-left`).
+//
+// An ASSIGNMENT is the name, `=` and the value with nothing between them, and a name is
+// case-sensitive — `logo-pos = top` and `Logo-Pos=top` do not set `logo-pos` — unlike the
+// `Label = /href` items of the nav and footer frontmatter (chrome-links.mjs), where the `=` splits
+// an item that `;` has already delimited and may be padded.
 function parseParams(raw) {
   const map = {};
   if (!raw) return map;
@@ -1120,8 +1130,35 @@ const _dropWarnings = [];
 function recordDrop(rawDest, schemeOverride) {
   let scheme = '(unparseable)';
   if (schemeOverride) scheme = schemeOverride;
+  // Named for what refused it: such a value resolves to an allowed scheme, and reporting that
+  // scheme would tell the author nothing about why the destination was dropped.
+  else if (RE_DEST_CONTROL.test(decodeEntitiesOnce(rawDest))) scheme = '(control character)';
   else try { scheme = new URL(decodeEntitiesOnce(rawDest), SAFE_HREF_BASE).protocol || '(none)'; } catch { /* keep '(unparseable)' */ }
   _dropWarnings.push({ scheme, dest: String(rawDest == null ? '' : rawDest) });
+}
+// A destination that carries a C0 control character (U+0000–U+001F) or DEL (U+007F) is refused
+// outright, whatever it would resolve to. 🩸 The URL parser is the wrong witness for these: it
+// REMOVES tab/LF/CR, trims leading and trailing controls and percent-encodes the rest before it
+// answers, so the scheme check passed on a string the parser had quietly cleaned — while every
+// caller went on to write the ORIGINAL string, controls included. In an `href`/`src` attribute
+// that is inert. Inside a CSS string it is not: CSS reads a form feed (U+000C) as a line break,
+// a raw line break ends a quoted string, and `bg="/a.png<U+000C>);position:fixed;inset:0;…"`
+// closed the hero's `url("…")` and opened declarations of its own in that element's inline
+// style — the full-viewport overlay cssUrlString was written to stop, through the one newline
+// it did not escape. An address a browser would have to repair before using is not one this
+// file needs to emit, so the gate refuses it here, once, for every sink: the destination
+// degrades to plain text (or to no image) like any other refused one and is reported the same
+// way. Checked on the entity-decoded value, the string a caller writes; `safeCodePoint` already
+// keeps an entity from decoding to a C0 control other than tab/LF/CR, and those three are
+// refused here with the rest.
+const RE_DEST_CONTROL = /[\u0000-\u001f\u007f]/;
+// The first control character RE_DEST_CONTROL refuses in `dest`, as `U+XXXX`, read the way the gate
+// reads it (entity-decoded once); null when there is none. For a host that tells an author WHY a
+// destination was refused (cardtile's save): a control character is not a scheme, and saying it
+// was would point the author at the wrong part of the address.
+function destControlCharacter(dest) {
+  const m = RE_DEST_CONTROL.exec(decodeEntitiesOnce(dest));
+  return m ? `U+${m[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}` : null;
 }
 // hrefAllowed: the policy itself, with no side effect — isSafeHref is this plus the drop record. A
 // host that renders outside a site build (cardtile's Card Worker) asks THIS, so the one allowlist is
@@ -1129,6 +1166,7 @@ function recordDrop(rawDest, schemeOverride) {
 function hrefAllowed(dest) {
   const raw = decodeEntitiesOnce(dest);
   if (raw === '') return true;
+  if (RE_DEST_CONTROL.test(raw)) return false;
   try { return SAFE_HREF_SCHEMES.has(new URL(raw, SAFE_HREF_BASE).protocol); } catch { return false; }
 }
 function isSafeHref(dest) {
@@ -1148,7 +1186,11 @@ const SAFE_IMAGE_DATA_RE = /^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,/
 function imageSrcAllowed(dest) {
   const raw = decodeEntitiesOnce(dest);
   if (raw === '') return true;
-  const stripped = raw.replace(/[\u0009\u000a\u000d]/g, '').replace(/^[\u0000-\u0020]+/, '');
+  // Before the `data:` exception, which would otherwise admit a control character on its own.
+  if (RE_DEST_CONTROL.test(raw)) return false;
+  // A leading space is all a URL parser still trims from what is left (the controls it also
+  // trims or removes were refused on the line above).
+  const stripped = raw.replace(/^ +/, '');
   if (SAFE_IMAGE_DATA_RE.test(stripped)) return true;
   return hrefAllowed(raw);
 }
@@ -1203,7 +1245,9 @@ function safeSrc(dest) {
 // gets refused, not silently rewritten to `/b`.
 const RE_DOTDOT_SEGMENT = /(^|\/)\.\.(?:\/|$)/;
 function isSafeInternalPath(dest) {
-  const raw = decodeEntitiesOnce(dest).replace(/[\u0009\u000a\u000d]/g, '').replace(/\\/g, '/');
+  // The family's control-character rule (RE_DEST_CONTROL): refused, so nothing is left to strip.
+  if (RE_DEST_CONTROL.test(decodeEntitiesOnce(dest))) { recordDrop(dest); return false; }
+  const raw = decodeEntitiesOnce(dest).replace(/\\/g, '/');
   if (raw === '' || !raw.startsWith('/') || raw.startsWith('//')) { recordDrop(dest); return false; }
   if (RE_DOTDOT_SEGMENT.test(raw.split(/[?#]/, 1)[0])) { recordDrop(dest); return false; }
   return true;
@@ -1241,11 +1285,18 @@ function escHrefAttr(dest) { return escAttr(decodeEntitiesOnce(dest)); }
 // is unaffected: a browser decodes HTML entities in an attribute value BEFORE handing it to the
 // CSS parser, so `&quot;` round-trips back to `"` first and the CSS parser sees exactly the
 // quoted string built here.
+//
+// 🩸 "A raw line break" was written as CR and LF. CSS has a third: a form feed (U+000C) is turned
+// into a line feed before tokenizing, so it ended the string exactly as the other two would have
+// (see RE_DEST_CONTROL — the gate now refuses such a destination before it gets here). This
+// function no longer keeps a list of which controls CSS happens to treat specially: every C0
+// control and DEL is written as its own CSS hex escape (a line feed is still `\A `), so the
+// string holds for any caller, gated or not. A value without one is written exactly as before.
 function cssUrlString(u) {
   return String(u == null ? '' : u)
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .replace(/\r\n|[\r\n]/g, '\\A ');
+    .replace(/[\u0000-\u001f\u007f]/g, (c) => '\\' + c.charCodeAt(0).toString(16).toUpperCase() + ' ');
 }
 
 // A markdown image whose src is a VIDEO file (`![](…/clip.mp4)`) renders a real <video>, not a broken
@@ -1833,9 +1884,12 @@ const RE_CELL_BR = /<br\s*\/?>/i;
 // bullets `・` (U+30FB) and `•` (U+2022) that a CJK author reaches for. One definition, because the
 // same characters mean the same thing wherever an item is written by hand (see the dialogue block).
 const RE_CELL_BULLET = /^\s*[-*+・•]\s+/;
+// An item's whole lead: an author who types a second marker after the first (`- - x`, `• - x`) means
+// one item, so every marker in the run is dropped, not just the first.
+const RE_CELL_BULLET_RUN = new RegExp('^(?:' + RE_CELL_BULLET.source.slice(1) + ')+');
 function cellListHtml(parts, className = 'st-cell-list') {
   if (parts.length > 1 && parts.every((p) => RE_CELL_BULLET.test(p))) {
-    return '<ul class="' + className + '">' + parts.map((p) => '<li>' + inlineHtml(p.replace(RE_CELL_BULLET, '')) + '</li>').join('') + '</ul>';
+    return '<ul class="' + className + '">' + parts.map((p) => '<li>' + inlineHtml(p.replace(RE_CELL_BULLET_RUN, '')) + '</li>').join('') + '</ul>';
   }
   return null;
 }
@@ -1967,6 +2021,25 @@ function speechIsListItem(body, i) {
   if (RE_ITEM_LINK.test(text)) return true;
   const next = body.slice(i + 1).find((l) => l.trim());
   return next != null && (RE_TURN_BULLET.test(next) || RE_LIST_ORDERED.test(next));
+}
+
+// An Obsidian callout (GitHub alerts are the same shape): a quote block whose FIRST line opens with
+// `[!type]`, optionally a fold marker (`-`/`+`), optionally a title after a space.
+//
+//     > [!note] Optional title
+//     > The body.
+//
+// There is no callout design here and this adds none. What it prevents is the tag being printed:
+// it used to land in the paragraph as literal text. The block renders as the same `st-quote` it
+// always was, minus the tag; the type is kept as `st-callout-<type>` (lower-cased) so a stylesheet
+// can pick it up later. A title is the author's own words and stays, as its own paragraph. The
+// fold marker is an interaction this renderer does not have and goes with the tag. Only the first
+// line is a tag — `[!x]` anywhere else is text — so no block without one renders differently.
+const RE_CALLOUT_HEAD = /^\[!([A-Za-z][A-Za-z0-9-]*)\][+-]?(?:\s+(.*?))?\s*$/;
+function calloutHead(buf) {
+  const m = RE_CALLOUT_HEAD.exec((buf[0] || '').trim());
+  if (!m) return null;
+  return { type: m[1].toLowerCase(), buf: (m[2] ? [m[2], ''] : []).concat(buf.slice(1)) };
 }
 
 // Quote lines → paragraphs (a blank `>` line separates them; soft newlines fold to spaces).
@@ -2407,14 +2480,15 @@ function bodyHtml(body, opts) {
         const turn = verdict.turns[b];
         if (turn) { run.push(turn); continue; }
         flushRun();
+        const callout = calloutHead(buf);                                     // `> [!type]` — see RE_CALLOUT_HEAD
         // a blank quote line (`>` with no text) separates paragraphs inside the quote.
-        const paras = quoteParas(buf);
+        const paras = quoteParas(callout ? callout.buf : buf);
         // R2-P2-03: a quote block whose only line was `> <!-- comment -->` never reaches `buf` at all
         // (the block-comment check above swallows the whole line before it is collected) — `buf` comes
         // out empty, quoteParas' own filter(Boolean) already drops the resulting empty paragraph, and
         // this guard keeps an empty `<blockquote>` shell from being emitted for it either.
         if (!paras.length) continue;
-        out.push('<blockquote class="st-quote">' + paras.map((p) => '<p>' + inlineHtml(p) + '</p>').join('') + '</blockquote>');
+        out.push('<blockquote class="st-quote' + (callout ? ' st-callout-' + callout.type : '') + '">' + paras.map((p) => '<p>' + inlineHtml(p) + '</p>').join('') + '</blockquote>');
       }
       flushRun();
       continue;
@@ -2873,16 +2947,46 @@ function heroHeadingless(s) {
 //   · `layout=…` — the param's label; non-empty → the columned hero.
 //   · otherwise the legacy hero, which never draws `logo=`.
 // `logo` is the `logo=` destination after `safeSrc` (null when absent or refused).
-// Takes the parsed params (or just `{ layers, layout, logo }` — Hero.astro passes those three by
-// name so the coral-params scan still sees them read there).
-function heroVariant(pm) {
+// `logoPos` is `logo-pos=` as one of HERO_LOGO_POS — where the layered hero's title block sits. The
+// value is read with its case and surrounding whitespace folded (`TOP`, `" top "` are `top`).
+// 🩸 It used to be written onto the section as typed, by both renderers: the stylesheet selects on
+// `[data-logo-pos="top"]`, so `logo-pos=TOP` drew the default while the page said `TOP`, and
+// nothing said so. A value that is not a position draws the default, as `media=` and `shape=` do,
+// and — when the CALLER hands in a sink (`opts.report`, a function) and the hero is the layered one
+// that draws it — the sink is given one message naming the value and the values expected.
+// (Not the drop queue: that is for refused destinations, and nothing in a build reads it.)
+// 🔴 NO STATE AND NO CONSOLE HERE. site-core also runs inside long-lived processes (reef-mcp's
+// checks call renderSiteToHtml for one tenant after another), where a module-level "said it once"
+// set grew without bound, silenced tenant B because tenant A had used the same value, and wrote
+// tenant text into a shared server log. So this only CALLS the sink, every time it is asked; what
+// to do with the message — print it, deduplicate it, drop it — is the caller's. The Astro build
+// passes one that prints to the build log once per build (astro/src/lib/build-log.mjs); a caller
+// that passes nothing is told nothing.
+// Takes the parsed params (or just `{ layers, layout, logo, 'logo-pos' }` — Hero.astro passes those
+// four by name so the coral-params scan still sees them read there).
+const HERO_LOGO_POS = ['top', 'center', 'bottom'];
+// The value as written (trimmed), cut at 200 the way an unreadable tagcloud item is, and QUOTED with
+// JSON.stringify so a control character in it (`logo-pos=\x1b[31m…`) reaches a log as `\u001b`, not
+// as a terminal escape. JSON.stringify leaves DEL and the C1 range (U+007F–U+009F) alone, and a
+// UTF-8 terminal acts on C1 too, so those are escaped the same way.
+function unknownLogoPosMessage(value) {
+  const shown = value.length > 200 ? value.slice(0, 200) + '…' : value;
+  const quoted = JSON.stringify(shown).replace(/[\u007f-\u009f]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+  return `[sitetile] Unrecognised logo-pos ${quoted} — expected one of: ${HERO_LOGO_POS.join(', ')}. Falling back to bottom.`;
+}
+function heroVariant(pm, opts) {
   const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
   const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];
   const layout = pm.layout ? (typeof pm.layout === 'object' ? pm.layout.label : pm.layout) : null;
   const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
   const logo = logoRaw ? safeSrc(logoRaw) : null;
   const kind = layerList.length ? 'layers' : layout ? 'layout' : 'legacy';
-  return { kind, layerList, layout, logo };
+  const posRaw = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']).trim() : '';
+  const pos = posRaw.toLowerCase();
+  const posKnown = HERO_LOGO_POS.indexOf(pos) >= 0;
+  const report = opts && typeof opts.report === 'function' ? opts.report : null;
+  if (report && kind === 'layers' && pos && !posKnown) report(unknownLogoPosMessage(posRaw));
+  return { kind, layerList, layout, logo, logoPos: posKnown ? pos : 'bottom' };
 }
 
 // The section types whose renderer can write the section's title as the page <h1>: the Astro
@@ -2920,7 +3024,7 @@ function pageH1Index(sections) {
 }
 
 // `ctx` is the page-level runtime data a section can need that the section itself does not carry —
-// today only the `action=inbox` form reads it: { lang, meta, path } (see renderSiteToHtml).
+// the `action=inbox` form reads { lang, meta, path }, the layered hero `report` (see renderSiteToHtml).
 function renderSection(s, hero, ctx) {
   // 🩸 #1933: the page's FIRST section carries its title as <h1> in the built page (Section.astro
   // `index === 0`); a string render that always wrote <h2> described a page with no h1. Only the
@@ -2958,7 +3062,7 @@ function renderSection(s, hero, ctx) {
       // `.st-hero-text.st-hero-overlay` block. `logo=` renders the h1 as an image whose alt is the title.
       // `logo=` renders the h1 as an image (alt = title); shared by the layered and `layout=` heroes, as in Hero.astro.
       // heroVariant: the ONE variant selection (Hero.astro and heroHeadingless call it too, reef#2857 r2).
-      const variant = heroVariant(pm);
+      const variant = heroVariant(pm, { report: ctx.report });   // the caller's sink, or none
       const { layerList, logo } = variant;
       // reef#2857: a text-free hero (heroHeadingless) writes no heading element.
       // reef#2869: its heading is the <h1> only when this hero IS the page's h1 owner (`hero`,
@@ -2972,7 +3076,7 @@ function renderSection(s, hero, ctx) {
           ? '<' + HH + ' class="st-hero-logo st-hero-title"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></' + HH + '>'
           : '<' + HH + ' class="st-hero-title">' + inlineHtml(s.title) + '</' + HH + '>';
       if (layerList.length) {
-        const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
+        const logoPos = variant.logoPos;   // heroVariant: one of top|center|bottom
         const lEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
         const stage = '<div class="st-hero-stage" aria-hidden="true">' + layerList.map((src, i) => {
           const srcOk = safeSrc(src);
@@ -3485,7 +3589,7 @@ function _stampDropWarnings(site, before) {
  * Render a parsed site to the reference HTML string.
  *
  * @param {object} site  parseSite() output.
- * @param {{path?: string, contentRels?: Set<string>}} [opts]
+ * @param {{path?: string, contentRels?: Set<string>, report?: (message: string) => void}} [opts]
  *   `path` — the URL path this page is served at (what Form.astro reads as `Astro.url.pathname`).
  *   🔴 PASS IT FOR ANY NON-ROOT PAGE: an `action=inbox` form writes it into `return_to` and into
  *   the "send another" link, and the default is '/', so a page at /contact/ rendered without it
@@ -3496,13 +3600,16 @@ function _stampDropWarnings(site, before) {
  *   way the built page's is (a locale prefix is used only when that locale's home file exists);
  *   absent → the locale prefix of `path` alone decides.
  *   `lang` and `locales` come from the site's own frontmatter, as PageView hands them to Form.astro.
+ *   `report` — a function given one message string for each author param the render could not
+ *   use (today: a layered hero's unrecognised `logo-pos=`), every time it is met. Absent → nothing
+ *   is said anywhere: these messages are neither printed nor remembered here (heroVariant).
  */
 function renderSiteToHtml(site, opts) {
   const _before = _dropWarnings.length;
   const o = opts || {};
   const pathname = String(o.path || '/').split(/[?#]/)[0];
   const ctx = { lang: (site.meta || {}).lang, meta: site.meta || {}, path: pathname,
-    contentRels: o.contentRels };
+    contentRels: o.contentRels, report: typeof o.report === 'function' ? o.report : undefined };
   const h1At = pageH1Index(site.sections);
   const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === h1At, { ...ctx, index: i }), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
@@ -3782,6 +3889,8 @@ export {
   safeHref, safeSrc,
   // the same policy without the build-time drop record (cardtile's Card links and images)
   hrefAllowed, imageSrcAllowed,
+  // …and the one reason that policy gives that is not a scheme: the control character, named
+  destControlCharacter,
   // reef#2857: the text-free hero predicate and the page-h1 owner both renderers share.
   heroHeadingless, pageH1Index,
   // reef#2857 r2: the hero variant selection (Hero.astro) and the h1-capable type test (Section.astro).

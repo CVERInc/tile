@@ -144,7 +144,7 @@ import { withDeck, DECK_CSS_PATH, DECK_JS_PATH, DECK_TRY_URL } from '../w3/deck-
 import { handleReport, REPORT_PATH } from './card-report.mjs';
 import { standIn, hostName } from './host-standins.mjs';
 import { pageCspHeaders, pageCspStage } from './cardtile-page-csp.mjs';
-import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, framesAsDocuments, hasSrcdocFrame, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
+import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, embedMissResponse, framesAsDocuments, hasSrcdocFrame, isFrameRequest, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -804,10 +804,15 @@ const notFoundSource = (locale, face) => {
 // the small 404 it was (card-icon.test.mjs catch-all, reef#1090): bots probe those all day, and a
 // feelreef page is not ours to put on somebody's domain. It names nothing, so it leaks nothing.
 const SMALL_404 = '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>';
+// tile#372 — both "no card" pages are served on the people's origin, so they carry the page's policy
+// like any person's page (cardtile-page-csp.mjs): the rendered one runs the deck, the small one runs nothing.
+const small404 = async (env) => html(SMALL_404, 404, env, '', {}, false, await pageCspHeaders(env, SMALL_404));
 // `who` = { locale, face }: the visitor's language and the host they asked. `handle` and `at` reach
 // the robots header only (robotsTag), never the body.
-const notFound = (env, handle = '', at = {}, who = {}) =>
-  html(withServiceTry(renderCardHTML(notFoundSource(who.locale, who.face), { handle: '', cardUrl: '' }), env), 404, env, handle, at, false, VARY_VISITOR_LANG);
+const notFound = async (env, handle = '', at = {}, who = {}) => {
+  const page = withServiceTry(renderCardHTML(notFoundSource(who.locale, who.face), { handle: '', cardUrl: '' }), env);
+  return html(page, 404, env, handle, at, false, { ...VARY_VISITOR_LANG, ...(await pageCspHeaders(env, page)) });
+};
 
 /**
  * withServiceTry: (a rendered page, env) → the same page whose "make your own" address is the editor
@@ -1392,13 +1397,16 @@ const router = {
         && !isCurrentGen(meta, await generationOf(env.CARDS, meta.handle));
       return row && !stale ? row.value : null;
     };
-    // tile#372 — one embed of a preview, as its own document (cardtile-embed-document.mjs). Only while the
-    // page's policy is on; off, this path is not looked at here and is answered below as it always was.
-    const pve = pageCspStage(env) !== 'off' ? /^\/_preview\/([0-9a-f]{32})\/_embed\/([0-9a-f]{64})$/.exec(url.pathname) : null;
+    // tile#372 — one embed of a preview, as its own document (cardtile-embed-document.mjs). Previews write it
+    // only under "enforce", and it answers in EVERY stage (a preview loaded before the setting moved still asks
+    // it); a hash the draft does not hold, a draft that is gone, or a request that is not a frame's (a top-level
+    // page, no Sec-Fetch-Dest: isFrameRequest) is the empty document.
+    const pve = /^\/_preview\/([0-9a-f]{32})\/_embed\/([0-9a-f]{64})$/.exec(url.pathname);
     if (pve) {
+      if (!isFrameRequest(request)) return embedMissResponse();
       const draft = await previewDraft(pve[1]);
       const doc = draft ? embedDocumentOf(await embedDocuments(parseCard(draft), (k) => frontmatter(draft, k)), pve[2]) : null;
-      if (doc == null) return new Response('', { status: 404, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
+      if (doc == null) return embedMissResponse();
       // its relative addresses resolve against the preview's own address, as in the srcdoc (r2); an author's
       // own base is honoured as it was there (r3)
       return new Response(embedDocumentBody(doc, `/_preview/${pve[1]}`, url.href), { headers: embedDocumentHeaders({ preview: true }) });
@@ -1407,15 +1415,16 @@ const router = {
     if (pv) {
       const draft = await previewDraft(pv[1]);
       if (!draft) {
-        return new Response('<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>', {
+        const expired = '<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>';
+        return new Response(expired, {
           status: 404,
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' },
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow', ...(await pageCspHeaders(env, expired)) },
         });
       }
       const videos = await resolveChannels(draft, ytFetch, channelShare);
       const rendered = withServiceTry(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), env);
-      // tile#372: with the page's policy on, each embed is its own document (cardtile-embed-document.mjs)
-      const preview = pageCspStage(env) !== 'off' && hasSrcdocFrame(rendered)
+      // tile#372: with the page's policy enforced, each embed is its own document (cardtile-embed-document.mjs)
+      const preview = pageCspStage(env) === 'enforce' && hasSrcdocFrame(rendered)
         ? framesAsDocuments(rendered, await embedDocuments(parseCard(draft), (k) => frontmatter(draft, k)), `/_preview/${pv[1]}/`)
         : rendered;
       return new Response(preview, {
@@ -1423,7 +1432,7 @@ const router = {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
           'X-Robots-Tag': 'noindex, nofollow',
-          // what a person wrote, rendered on the people's origin: the page's policy (cardtile-page-csp.mjs; nothing unless CARDS_PAGE_CSP is set)
+          // what a person wrote, rendered on the people's origin: the page's policy (cardtile-page-csp.mjs; report-only unless CARDS_PAGE_CSP says otherwise)
           ...(await pageCspHeaders(env, preview)),
         },
       });
@@ -1526,7 +1535,7 @@ const router = {
       vanityHandle ? { [host]: vanityHandle } : {}, extraHosts, { rootPage: !(hosts === 'split' && host === CARDS_HOST) });
     // a host of ours with no root card and no handle in the path: the nothing-here page. An unbound
     // creator's domain keeps the small 404 (see SMALL_404) — it is not our door to put our page on.
-    if (!resolved) return routesByPath(host, extraHosts) ? notFound(env, '', {}, who) : html(SMALL_404, 404, env);
+    if (!resolved) return routesByPath(host, extraHosts) ? notFound(env, '', {}, who) : small404(env);
 
     // Is this path the card at all? Unknown paths cost no store read and no render. See cardPath.
     // Card exits read the body and stop marker in parallel before any exit or redirect.
@@ -1537,8 +1546,8 @@ const router = {
     // tile#339: the picture route exists only while the local switch is set (asset-urls.mjs
     // pictureStrategy). Unset — every deployment today — its paths are unknown paths, as they always were.
     const pictures = pictureStrategy(env);
-    // tile#372: and an embed's own document only while the page's policy is on (cardtile-embed-document.mjs)
-    if (!want || (want === 'asset' && pictures === 'inline') || (want === 'embed' && pageCspStage(env) === 'off')) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
+    // (tile#372: an embed's own address is known in every stage, whatever the page's policy — see below)
+    if (!want || (want === 'asset' && pictures === 'inline')) return vanityHandle ? small404(env) : notFound(env, resolved.handle, at, who);
     // liveCard reads `gen:` then that generation's body and stop (reef#2618 r3, card-api genKey): a body
     // or stop written in a deleted lifetime is under a key this never reads, so it falls through to the
     // no-card 404 exactly as a missing body does.
@@ -1570,7 +1579,7 @@ const router = {
     const cardMd = stopped != null ? null : liveMd;
     // An absent card on a creator's host has no public binding, even when a pointer remains.
     // Use the unbound response, including its robots headers, on every card exit.
-    if (cardMd == null && !routesByPath(host, extraHosts)) return html(SMALL_404, 404, env);
+    if (cardMd == null && !routesByPath(host, extraHosts)) return small404(env);
     // Missing and stopped shared-host identities perform the same ordered reads, including
     // the legacy deletion marker. Its value never changes the public absence response.
     if (cardMd == null) await store.get(`gone:${resolved.handle}`);
@@ -1602,7 +1611,7 @@ const router = {
     if (want === 'asset') {
       const ref = assetRef(url.pathname);
       const found = cardMd && ref ? await findAsset(onDemand ? allAssets(cardMd, index()) : parseCard(cardMd).assets, ref.hex, ref.ext) : null;
-      if (!found) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
+      if (!found) return vanityHandle ? small404(env) : notFound(env, resolved.handle, at, who);
       const keeping = keepPicture(resolved.handle, gen, ref.hex, ref.ext, found.bytes);
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
       return pictureResponse(found, env, resolved.handle, at);
@@ -1610,9 +1619,17 @@ const router = {
 
     // tile#372 — one embed's document, by its hash (cardtile-embed-document.mjs). On both hosts, before the
     // page's 301, like a picture. The document is made from the stored file's own `embed` tiles — the
-    // window `?w=<n>` names, for a file served in windows — and answered only when one has this hash. Every
-    // miss is the answer this host gives a card that is not there, as for a picture.
+    // window `?w=<n>` names, for a file served in windows — and answered only when one has this hash.
+    // 🔴 In EVERY stage of the page's policy: pages write this address only under "enforce", but a page loaded
+    // then (cached 60 s, or open in a tab) asks it after the setting went back. And every miss — an embed edited
+    // away, a theme or accent changed (every embed's hash), a stopped or missing file on a shared host — is the
+    // empty document, never the "no card" page: only an embed's frame asks this address, and that page would be
+    // drawn inside the frame's box. (A person's own domain whose file is gone answered above, like every address there.)
+    // 🔴 And only to a frame (Sec-Fetch-Dest "iframe" or "frame", isFrameRequest): opened as a page of its own, or
+    // asked with no such header, the address is the empty document too — an author's HTML and script are never a
+    // top-level page here (the default's closing review).
     if (want === 'embed') {
+      if (!isFrameRequest(request)) return embedMissResponse();
       const h = EMBED_TAIL_RE.exec(url.pathname.slice(url.pathname.lastIndexOf('/_embed/')))[1];
       let model = null;
       if (cardMd != null && onDemand) {
@@ -1623,8 +1640,7 @@ const router = {
         if (n >= 1 && n <= plan.count) model = windowOf(cardMd, index(), plan, n - 1, { front });
       } else if (cardMd != null) model = parseCard(cardMd);
       const doc = model ? embedDocumentOf(await embedDocuments(model, (k) => frontmatter(cardMd, k)), h) : null;
-      // r2: the visitor's language and the host they asked, as on every other missing page
-      if (doc == null) return vanityHandle ? html(SMALL_404, 404, env) : notFound(env, resolved.handle, at, who);
+      if (doc == null) return embedMissResponse();
       // its relative addresses resolve against the Cards' own address on this host, as in the srcdoc (r2):
       // `/` on a one-card host (a person's domain, the root card), `/<handle>` on a shared one; an author's own
       // base is honoured as it was there (r3)
@@ -1777,9 +1793,10 @@ const router = {
         : await picturePlan(cardMd, parseCard(cardMd).assets, assetBase(resolved.handle, !!vanityHandle), pictures);
     const pageCtx = { ...resolved, canonicalUrl, ...(windowUrl ? { windowUrl } : {}), videos, ...(plan.assetUrls ? { assetUrls: plan.assetUrls } : {}), ...(plan.pictures ? { pictures: plan.pictures } : {}), ...(chromeLang ? { chromeLang } : {}), ...(pool !== undefined ? { pool } : {}) };
     const rendered = withServiceTry(win ? renderSource(win.src, { ...pageCtx, pager: win.pager, ...(win.last ? {} : { poolTile: false }) }) : renderCardHTML(cardMd, pageCtx), env);
-    // tile#372 — with the page's policy on, each embed is its own document (cardtile-embed-document.mjs): its frame
-    // names `<base>_embed/<hash>` (in a file served in windows, `?w=<n>` too) instead of holding it as srcdoc
-    const page = pageCspStage(env) !== 'off' && hasSrcdocFrame(rendered)
+    // tile#372 — with the page's policy ENFORCED, each embed is its own document (cardtile-embed-document.mjs): its
+    // frame names `<base>_embed/<hash>` (in a file served in windows, `?w=<n>` too) instead of holding it as srcdoc.
+    // Report-only (the default) and "off" keep the srcdoc: report-only refuses nothing, so its script runs as it did.
+    const page = pageCspStage(env) === 'enforce' && hasSrcdocFrame(rendered)
       ? framesAsDocuments(rendered, await embedDocuments(win ? win.src.model : parseCard(cardMd), (k) => frontmatter(cardMd, k)),
         assetBase(resolved.handle, !!vanityHandle), win ? `?w=${win.n}` : '')
       : rendered;
@@ -1795,7 +1812,7 @@ const router = {
       if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(keeping); else await keeping;
     }
     // tile#372 — the page's Content-Security-Policy (cardtile-page-csp.mjs): on every person's page while
-    // CARDS_PAGE_CSP is exactly "report-only" or "enforce", whatever the page holds; nothing otherwise.
+    // CARDS_PAGE_CSP is not exactly "off" (report-only by default), whatever the page holds.
     const csp = await pageCspHeaders(env, page, { afterPaint: plan.pictures ? plan.pictures.afterPaint : '' });
     return html(page, 200, env, resolved.handle, at, blank, { ...probe, ...(chromeLang ? VARY_VISITOR_LANG : {}), ...csp });
   },

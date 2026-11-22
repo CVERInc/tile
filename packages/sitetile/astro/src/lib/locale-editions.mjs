@@ -18,8 +18,24 @@
 // page once. The root-home/locales[0] mismatch sentence is NOT emitted here — the chooser route owns
 // that line of the build log (one caller, one line).
 import { parseSite, isSiteFile } from '@sitetile';
-import { loadSite } from './blog.mjs';
-import { toUrlLocale, sameLocale, lingoEnabled, parseLocales, defaultLocaleOf, tagLocalesSource, localesSourceOf, pageLocalesOrWarn } from '../packages/lingo/locale.mjs';
+import { loadSite, folderSiteLayer } from './blog.mjs';
+import { toUrlLocale, sameLocale, lingoEnabled, parseLocales, defaultLocaleOf, tagLocalesSource, localesSourceOf, pageLocalesOrWarn, warnOnce } from '../packages/lingo/locale.mjs';
+import { resolveSiteChrome, siteChromeScope, siteChromeWarning } from '../../../site-chrome-keys.mjs';
+import { EDITION_TAGS } from '../../../locale-tags.mjs';
+
+// The Lingo locale folders (`content/ko-kr/…`): every edition's URL form, Simplified Chinese included.
+const LOCALE_FOLDERS = Object.freeze(Object.keys(EDITION_TAGS).map((l) => l.toLowerCase()));
+
+/**
+ * Site chrome for one content page, the way both page routes apply it (site-chrome-keys.mjs): puts
+ * back what the site config sets and the page may not change, in `merged`, and logs each ignored
+ * line once, against the file that sets it. `files` = the content glob, `rel` = the page's rel.
+ */
+export function applySiteChrome(files, rel, own, siteConfig, merged) {
+  const scope = siteChromeScope(rel, LOCALE_FOLDERS, folderSiteLayer(files, rel));
+  const { ignored, from } = resolveSiteChrome(own, siteConfig, merged, scope);
+  for (const key of ignored) warnOnce(siteChromeWarning(key, `content/${rel}.md`, from[key], scope.layerFile));
+}
 
 /**
  * The rel ("home", "ja-jp/about", "zh-tw/404") a content file is ROUTED at by [...path].astro's
@@ -56,7 +72,13 @@ export function localeEditions(files) {
     // tile#279 r3 — the reserved `site-title` is re-stamped AFTER the home's own keys, exactly as the
     // catch-all ([...path].astro) does: a home page that writes `site-title:` must not rename the site
     // on /language and /<loc>/404, which read this meta.
+    const ownMeta = { ...site.meta };
     if (cfg) site.meta = { ...cfg, ...site.meta, 'site-title': cfg['site-title'] ?? '' };
+    // …and so is the site chrome the config sets (site-chrome-keys.mjs), by the same function the
+    // catch-all calls: the chooser and the per-locale 404 wear this meta, and a home page must not
+    // give them a header or footer the site config does not. warnOnce: the same sentence the
+    // catch-all logs for this file, so the build log carries it once.
+    applySiteChrome(files, rel, ownMeta, cfg, site.meta);
     homesByRel[rel] = site.meta;
   }
   const rootHome = homesByRel.home;
