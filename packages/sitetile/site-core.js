@@ -1004,6 +1004,11 @@ function isSiteFile(text) {
 // nothing on any page while every check stayed quiet. A hyphen BEFORE the first word character is
 // not part of the name (`--wide=1` is `wide`), and a hyphen in a VALUE was never in question
 // (`align=top-left`).
+//
+// An ASSIGNMENT is the name, `=` and the value with nothing between them, and a name is
+// case-sensitive — `logo-pos = top` and `Logo-Pos=top` do not set `logo-pos` — unlike the
+// `Label = /href` items of the nav and footer frontmatter (chrome-links.mjs), where the `=` splits
+// an item that `;` has already delimited and may be padded.
 function parseParams(raw) {
   const map = {};
   if (!raw) return map;
@@ -2873,16 +2878,30 @@ function heroHeadingless(s) {
 //   · `layout=…` — the param's label; non-empty → the columned hero.
 //   · otherwise the legacy hero, which never draws `logo=`.
 // `logo` is the `logo=` destination after `safeSrc` (null when absent or refused).
-// Takes the parsed params (or just `{ layers, layout, logo }` — Hero.astro passes those three by
-// name so the coral-params scan still sees them read there).
-function heroVariant(pm) {
+// `logoPos` is `logo-pos=` as one of HERO_LOGO_POS — where the layered hero's title block sits. The
+// value is read with its case and surrounding whitespace folded (`TOP`, `" top "` are `top`).
+// 🩸 It used to be written onto the section as typed, by both renderers: the stylesheet selects on
+// `[data-logo-pos="top"]`, so `logo-pos=TOP` drew the default while the page said `TOP`, and
+// nothing said so. A value that is not a position draws the default, as `media=` and `shape=` do,
+// and — when a RENDERER asks (`opts.report`, as tagcloudLinks has it) and the hero is the layered
+// one that draws it — is recorded on the drop queue, once per render, as the author wrote it.
+// Takes the parsed params (or just `{ layers, layout, logo, 'logo-pos' }` — Hero.astro passes those
+// four by name so the coral-params scan still sees them read there).
+const HERO_LOGO_POS = ['top', 'center', 'bottom'];
+function heroVariant(pm, opts) {
   const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
   const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];
   const layout = pm.layout ? (typeof pm.layout === 'object' ? pm.layout.label : pm.layout) : null;
   const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
   const logo = logoRaw ? safeSrc(logoRaw) : null;
   const kind = layerList.length ? 'layers' : layout ? 'layout' : 'legacy';
-  return { kind, layerList, layout, logo };
+  const posRaw = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']).trim() : '';
+  const pos = posRaw.toLowerCase();
+  const posKnown = HERO_LOGO_POS.indexOf(pos) >= 0;
+  if (opts && opts.report && kind === 'layers' && pos && !posKnown) {
+    recordDrop('logo-pos=' + (posRaw.length > 200 ? posRaw.slice(0, 200) + '…' : posRaw), '(hero-logo-pos-unknown)');
+  }
+  return { kind, layerList, layout, logo, logoPos: posKnown ? pos : 'bottom' };
 }
 
 // The section types whose renderer can write the section's title as the page <h1>: the Astro
@@ -2958,7 +2977,7 @@ function renderSection(s, hero, ctx) {
       // `.st-hero-text.st-hero-overlay` block. `logo=` renders the h1 as an image whose alt is the title.
       // `logo=` renders the h1 as an image (alt = title); shared by the layered and `layout=` heroes, as in Hero.astro.
       // heroVariant: the ONE variant selection (Hero.astro and heroHeadingless call it too, reef#2857 r2).
-      const variant = heroVariant(pm);
+      const variant = heroVariant(pm, { report: true });
       const { layerList, logo } = variant;
       // reef#2857: a text-free hero (heroHeadingless) writes no heading element.
       // reef#2869: its heading is the <h1> only when this hero IS the page's h1 owner (`hero`,
@@ -2972,7 +2991,7 @@ function renderSection(s, hero, ctx) {
           ? '<' + HH + ' class="st-hero-logo st-hero-title"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></' + HH + '>'
           : '<' + HH + ' class="st-hero-title">' + inlineHtml(s.title) + '</' + HH + '>';
       if (layerList.length) {
-        const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
+        const logoPos = variant.logoPos;   // heroVariant: one of top|center|bottom
         const lEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
         const stage = '<div class="st-hero-stage" aria-hidden="true">' + layerList.map((src, i) => {
           const srcOk = safeSrc(src);

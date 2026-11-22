@@ -34,10 +34,12 @@ const media = pm.media === 'logo' ? 'logo' : 'avatar';   // foreground image var
 // in), `eyebrow="…"` (optional, same as split), CTA via a links-only paragraph in the body (or the
 // legacy `cta=` param, same fallback as split).
 // reef#2857 r2: `layout`, `layerList` and `logo` come from site-core's heroVariant — the one variant
-// selection the string render and heroHeadingless also read (see below). The three params are read
-// HERE by name, not handed over as the whole `pm` bag: reef-mcp's coral-params table scans this file
-// for `pm.<name>` (coral-params.test.mjs).
-const variant = heroVariant({ layers: pm.layers, layout: pm.layout, logo: pm.logo });
+// selection the string render and heroHeadingless also read (see below). So does `logoPos`: the
+// `logo-pos=` value with its case and whitespace folded, the default for one that is not a position.
+// The four params are read HERE by name, not handed over as the whole `pm` bag: reef-mcp's
+// coral-params table scans this file for `pm.<name>` / `pm['<name>']` (coral-params.test.mjs).
+// `report`: this is a render, so a `logo-pos=` it cannot place goes on the drop queue.
+const variant = heroVariant({ layers: pm.layers, layout: pm.layout, logo: pm.logo, 'logo-pos': pm['logo-pos'] }, { report: true });
 const layout = variant.layout;
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 // `marquee="A|B|C"` — OPT-IN animated background word-marquee: one horizontally-scrolling row per
@@ -62,7 +64,7 @@ const parallax = pm.parallax != null;
 // `imgTag` gates every image src on `isSafeImageSrc`; `safeSrc` shares that ONE policy (here for
 // `logo=`, in emitHero for each layer and each extracted image). `null` degrades to no image.
 const logo = variant.logo;   // heroVariant: `logo=` after safeSrc
-const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
+const logoPos = variant.logoPos;   // heroVariant: one of top|center|bottom
 ---
 <Fragment set:html={emitHero(section, { media, layout, eyebrow, marqueeWords, enter, layerList, parallax, logo, logoPos, cta: pm.cta, bgOk, owner: hero }, { inline: inlineHtml, block: bodyHtml })} />
 
