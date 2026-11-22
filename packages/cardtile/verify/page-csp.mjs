@@ -143,7 +143,9 @@ const server = http.createServer(async (req, res) => {
     url.searchParams.delete('arm'); url.searchParams.delete('stage');
     // `default` asks with the setting unset (report-only since tile#372); every other stage names itself, "off" included
     const envOf = (s) => ({ CARDS: store, ...(s === 'default' ? {} : { CARDS_PAGE_CSP: s }) });
-    const ask = (s) => worker.fetch(new Request(`http://localhost${url.pathname}${url.search}`, { headers: { accept: req.headers.accept || '*/*', 'accept-language': 'en' } }), envOf(s));
+    // Sec-Fetch-Dest is passed on as the browser sent it: an embed's address answers its document only to a frame
+    const dest = req.headers['sec-fetch-dest'];
+    const ask = (s) => worker.fetch(new Request(`http://localhost${url.pathname}${url.search}`, { headers: { accept: req.headers.accept || '*/*', 'accept-language': 'en', ...(dest ? { 'sec-fetch-dest': dest } : {}) } }), envOf(s));
     // 'srcdoc': the page as it is with the setting off (its embed a srcdoc frame), served under the policy
     const r = await ask(arm === 'srcdoc' ? 'off' : stage);
     const headers = Object.fromEntries(r.headers);
@@ -332,7 +334,9 @@ try {
       const f = await step(context.newPage(), 'new page');
       if (embedPolicy) {
         await f.route(/\/_embed\/[0-9a-f]{64}/, async (route) => {
-          const r = await route.fetch();
+          // this request IS a frame's: say so, whether or not the interception kept the browser's Sec-Fetch-Dest
+          const q = route.request();
+          const r = await route.fetch({ headers: { ...q.headers(), 'sec-fetch-dest': q.frame().parentFrame() ? 'iframe' : 'document' } });
           await route.fulfill({ response: r, headers: { ...r.headers(), 'content-security-policy': embedPolicy } });
         });
       }
@@ -552,18 +556,20 @@ try {
         await quiet('a long file with an embed in its second window', p, context);
         await close(p);
       }
-      // the embed's document opened as a page of its own: still an opaque origin (the document's own policy)
+      // the embed's address opened as a page of its own (the browser asks it as a document, not a frame): the empty
+      // document, still in an opaque origin — the author's HTML is never a top-level page (the default's closing review)
       {
-        const p = await open(context, '/embedded-wall');
+        const p = await open(context, '/embedded-wall', { expect404: ['/_embed/'] });
         const src = await step(p.page.evaluate(() => document.querySelector('iframe[sandbox]').getAttribute('src')), 'read frame');
-        await visit(p, src);
+        const resp = await step(p.page.goto(base + src, { waitUntil: 'load', timeout: STEP_MS }), `load ${src}`);
         await p.page.waitForTimeout(300);
         const top = await step(p.page.evaluate(() => {
           let cookie = 'readable';
           try { void document.cookie; } catch (e) { cookie = e.name; }
-          return { origin: self.origin, text: (document.getElementById('t') || {}).textContent, cookie };
+          return { origin: self.origin, text: (document.getElementById('t') || {}).textContent, body: document.body ? document.body.innerHTML : null, cookie };
         }), 'read the document');
-        check(top.origin === 'null' && top.text === 'ran' && top.cookie === 'SecurityError', `an embed's document opened directly: its script runs in an opaque origin, no cookie (${JSON.stringify(top)})`);
+        check(resp && resp.status() === 404 && top.origin === 'null' && top.text === undefined && !top.body && top.cookie === 'SecurityError',
+          `an embed's address opened directly: the empty document, in an opaque origin — the embed's script does not run there (${JSON.stringify({ status: resp && resp.status(), ...top })})`);
         await close(p);
         // r2: another site framing the embed's document DIRECTLY may (as it may frame the page): what it gets
         // is a sandboxed, opaque-origin document of HTML that is already public in the page it belongs to

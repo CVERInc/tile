@@ -144,7 +144,7 @@ import { withDeck, DECK_CSS_PATH, DECK_JS_PATH, DECK_TRY_URL } from '../w3/deck-
 import { handleReport, REPORT_PATH } from './card-report.mjs';
 import { standIn, hostName } from './host-standins.mjs';
 import { pageCspHeaders, pageCspStage } from './cardtile-page-csp.mjs';
-import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, embedMissResponse, framesAsDocuments, hasSrcdocFrame, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
+import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, embedMissResponse, framesAsDocuments, hasSrcdocFrame, isFrameRequest, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -1399,9 +1399,11 @@ const router = {
     };
     // tile#372 — one embed of a preview, as its own document (cardtile-embed-document.mjs). Previews write it
     // only under "enforce", and it answers in EVERY stage (a preview loaded before the setting moved still asks
-    // it); a hash the draft does not hold, or a draft that is gone, is the empty document.
+    // it); a hash the draft does not hold, a draft that is gone, or a request that is not a frame's (a top-level
+    // page, no Sec-Fetch-Dest: isFrameRequest) is the empty document.
     const pve = /^\/_preview\/([0-9a-f]{32})\/_embed\/([0-9a-f]{64})$/.exec(url.pathname);
     if (pve) {
+      if (!isFrameRequest(request)) return embedMissResponse();
       const draft = await previewDraft(pve[1]);
       const doc = draft ? embedDocumentOf(await embedDocuments(parseCard(draft), (k) => frontmatter(draft, k)), pve[2]) : null;
       if (doc == null) return embedMissResponse();
@@ -1621,7 +1623,11 @@ const router = {
     // away, a theme or accent changed (every embed's hash), a stopped or missing file on a shared host — is the
     // empty document, never the "no card" page: only an embed's frame asks this address, and that page would be
     // drawn inside the frame's box. (A person's own domain whose file is gone answered above, like every address there.)
+    // 🔴 And only to a frame (Sec-Fetch-Dest "iframe" or "frame", isFrameRequest): opened as a page of its own, or
+    // asked with no such header, the address is the empty document too — an author's HTML and script are never a
+    // top-level page here (the default's closing review).
     if (want === 'embed') {
+      if (!isFrameRequest(request)) return embedMissResponse();
       const h = EMBED_TAIL_RE.exec(url.pathname.slice(url.pathname.lastIndexOf('/_embed/')))[1];
       let model = null;
       if (cardMd != null && onDemand) {

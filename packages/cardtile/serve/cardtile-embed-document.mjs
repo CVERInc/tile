@@ -13,7 +13,7 @@
 // author's script runs there as it always did (the browser reports it in its console, as it would refuse it
 // under "enforce" — which is why "enforce" serves it as its own document).
 //
-// 🔴 THE ADDRESS ANSWERS IN EVERY STAGE (tile#372, the default's review). A page is cached for 60 s and a tab
+// 🔴 THE ADDRESS ANSWERS IN EVERY STAGE, TO A FRAME (tile#372, the default's review). A page is cached for 60 s and a tab
 // stays open for as long as its visitor likes; its lazy frames ask their address when they are scrolled to.
 // So a page loaded under "enforce" asks its embeds' addresses after the setting went back to report-only or
 // "off" — they answer as they did. And a page loaded before its owner edited an embed (or the theme or the
@@ -33,6 +33,8 @@
 //             never read out of the rendered page: an address cannot be made to answer with another
 //             person's embed (their file is not read) or with any HTML that is not an embed of this file.
 //   BODY      that document with, at most, one `<base href>`, so it resolves as in the srcdoc: embedDocumentBody, below.
+//   WHO       Only an embed's frame (Sec-Fetch-Dest "iframe" or "frame"): every other request to the address gets
+//             the empty document — a top-level page, any other destination, no such header (isFrameRequest, below).
 //   HEADERS   embedDocumentHeaders, below.
 import { renderEmbedHtml } from '../card-render.mjs';
 
@@ -329,16 +331,34 @@ export const embedDocumentHeaders = ({ preview = false } = {}) => ({
   'Cross-Origin-Resource-Policy': 'same-origin',
   'Cache-Control': preview ? 'no-store' : 'public, max-age=60',
   'X-Robots-Tag': preview ? 'noindex, nofollow' : 'noindex',
+  // the answer depends on who asks (isFrameRequest, below): a cache never gives a frame's answer to a page
+  'Vary': 'Sec-Fetch-Dest',
 });
 
 /**
+ * isFrameRequest: (request) → whether an embed's frame is asking (Sec-Fetch-Dest exactly "iframe" or "frame").
+ * Only an embed's frame asks its address, and the address answers the embed's document to it alone. Anything
+ * else — a top-level page ("document"), any other destination, or a request with no Sec-Fetch-Dest — gets the
+ * empty document (embedMissResponse), in every stage: so an author's HTML and script are never a page of their
+ * own at an address of ours, where nothing links to them (the default's closing review: a sign-in form whose
+ * script sends each keystroke elsewhere, opened directly). A browser that sends no Sec-Fetch-Dest at all
+ * (before Chromium 80, Firefox 90, Safari 16.4) shows an empty frame where the embed is, and only under
+ * "enforce" — every other stage writes the frame srcdoc and asks no address.
+ */
+export const isFrameRequest = (request) => {
+  const dest = request.headers.get('sec-fetch-dest');
+  return dest === 'iframe' || dest === 'frame';
+};
+
+/**
  * embedMissResponse: () → what an embed address answers when the file (that window of it, that preview) has
- * no embed with its hash: the renderer's own empty head and nothing else, 404, under the embed document's
+ * no embed with its hash, or when it is not a frame that asks (isFrameRequest, above): the renderer's own empty head and nothing else, 404, under the embed document's
  * headers, never cached (an owner who undoes the edit is answered at once) and never indexed.
  *   · empty, not the "no card" page: this address is only ever asked by an embed's frame, and that page drawn
  *     in the frame's box is a second page inside the first (the review saw it);
  *   · the renderer's head rather than no body: a document with a doctype and a charset, the head every embed
  *     document starts with (no quirks mode, nothing for an engine to guess).
- * It names nothing, so it says nothing about the file: a hash that never was and one edited away answer alike.
+ * It names nothing, so it says nothing about the file: a hash that never was, one edited away, and a hash that is
+ * there asked by anything but a frame answer alike.
  */
 export const embedMissResponse = () => new Response(EMBED_DOC_HEAD, { status: 404, headers: embedDocumentHeaders({ preview: true }) });
