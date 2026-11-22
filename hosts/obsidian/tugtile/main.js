@@ -158,7 +158,13 @@ function isMdSpace(c) { return c === undefined || /\s/u.test(c); }
 //     the far side says nothing about a word boundary.
 //   • A CJK character on the outer side stands where the whitespace would have been: with ordinary
 //     punctuation on the inner side, the delimiter still counts.
-// With no such neighbour both clauses are inert and the rule is CommonMark's, character for
+// One limit on both, for a delimiter that would OPEN: the CJK punctuation on its inner side must be
+// an opening bracket or quote (isCjkOpening). A footnote mark is written `NT$990*，` or `附註*：`,
+// flush before a comma, colon or full stop, and two of them on a line must not become an italic
+// between them; an emphasis that starts with such a mark (`內容**：重要**`) is rare. With any other
+// CJK punctuation there, an opener is decided by CommonMark's rule alone. A closer keeps both
+// clauses whatever the punctuation is (`**完成。**下一步`).
+// With no such neighbour the clauses are inert and the rule is CommonMark's, character for
 // character. Underscores are unaffected either way (see scanRuns): `檔案_名稱_版本` stays literal
 // for the same reason `snake_case_name` does.
 //
@@ -175,6 +181,14 @@ function isMdSpace(c) { return c === undefined || /\s/u.test(c); }
 // first unit so the same test answers on both sides of a delimiter.
 const CJK_RE = /[\u1100-\u11FF\u2E80-\uA4CF\uA960-\uA97F\uAC00-\uD7FF\uD840-\uD8BF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE6F\uFF00-\uFFEF]/;
 function isCjk(c) { return c !== undefined && CJK_RE.test(c); }
+
+// The opening brackets and quotes among the characters above, listed for the same reason the blocks
+// are: every one of the 28 characters in them whose general category is Ps (open punctuation) or
+// Pi (initial quote) as of Unicode 17, and none other. 〈《「『【〔〖〘〚〝, the vertical forms
+// ︗︵︷︹︻︽︿﹁﹃﹇, the small forms ﹙﹛﹝, and （［｛｟｢. test/emphasis-cjk.test.cjs checks this
+// list against the running engine's Unicode tables.
+const CJK_OPENING_RE = /[\u3008\u300A\u300C\u300E\u3010\u3014\u3016\u3018\u301A\u301D\uFE17\uFE35\uFE37\uFE39\uFE3B\uFE3D\uFE3F\uFE41\uFE43\uFE47\uFE59\uFE5B\uFE5D\uFF08\uFF3B\uFF5B\uFF5F\uFF62]/;
+function isCjkOpening(c) { return c !== undefined && CJK_OPENING_RE.test(c); }
 
 // The first unit of the last character in `t`: the unit itself, or the lead half of a surrogate
 // pair. Both halves answer "neither whitespace nor punctuation" above, so which half `prev` holds
@@ -266,7 +280,11 @@ function scanRuns(s) {
     // them, so the common run never pays for the test.
     const beforeCjk = beforePunct || afterPunct ? isCjk(prev) : false;
     const afterCjk = beforePunct || afterPunct ? isCjk(next) : false;
-    const left = !afterSpace && (!afterPunct || afterCjk || beforeSpace || beforePunct || beforeCjk);
+    // An opener is the one exception: CJK punctuation on its inner side is waived only if it is an
+    // opening bracket or quote, and anything else there (`，` `。` `：` `、` `！` `）`) puts the run
+    // back under CommonMark's rule, outer-side clause included. See isCjkOpening.
+    const innerStop = afterPunct && afterCjk && !isCjkOpening(next);
+    const left = !afterSpace && (!afterPunct || beforeSpace || beforePunct || (!innerStop && (afterCjk || beforeCjk)));
     const right = !beforeSpace && (!beforePunct || beforeCjk || afterSpace || afterPunct || afterCjk);
     flush();
     nodes.push({

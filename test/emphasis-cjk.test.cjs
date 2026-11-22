@@ -8,8 +8,10 @@
 // Where the expected values come from: NOT from this engine. Every row below was checked against
 // two references while it was written — the `commonmark` package for rows with no CJK neighbour
 // (the rule there must be CommonMark's, unchanged), and `markdown-it` with the
-// `markdown-it-cjk-friendly` plugin for the rest. Neither is a dependency of this repo, so neither
-// can be the gate; this table is, exactly as test/emphasis.test.cjs is for the spec's own examples.
+// `markdown-it-cjk-friendly` plugin for the rest. The one exception is the section on openers
+// before CJK punctuation, where this engine parts from the plugin on purpose: its expected values
+// are the `commonmark` package's. Neither reference is a dependency of this repo, so neither can be
+// the gate; this table is, exactly as test/emphasis.test.cjs is for the spec's own examples.
 //
 // Structure is asserted, and the round trip alongside it: a delimiter that turns out to be a
 // marker moves into a hidden span, and one that does not must still be in the text as itself.
@@ -66,7 +68,6 @@ table([
   ['這是**「重點」**的地方', '這是<B>「重點」>的地方', 'corner brackets inside both markers'],
   ['他說*（真的）*嗎', '他說<I>（真的）>嗎', 'italic, full-width parentheses inside both markers'],
   ['**粗體。**後面', '<B>粗體。>後面', 'a full stop before the closer'],
-  ['前面**。粗體**', '前面<B>。粗體>', 'a full stop after the opener'],
   ['價格**１００元！**起', '價格<B>１００元！>起', 'full-width digits and exclamation mark'],
   ['これは**「重要」**です', 'これは<B>「重要」>です', 'Japanese, brackets inside'],
   ['**注意：**必ず', '<B>注意：>必ず', 'a full-width colon before the closer'],
@@ -121,6 +122,59 @@ table([
   ['這**很*重要（真的）*喔**！', '這<B>很<I>重要（真的）>喔>！', 'the same, mid-sentence'],
   ['**「*重點*」**的', '<B>「<I>重點>」>的', 'italic inside brackets inside bold'],
 ]);
+
+// ── an opener before CJK punctuation ────────────────────────────────────────────────────────────
+// A footnote mark sits flush before a full-width comma, colon or full stop: `NT$990*，`, `附註*：`.
+// Waiving every CJK punctuation mark on an opener's inner side (as markdown-it-cjk-friendly does)
+// turned two such marks on one line into an italic between them. Only an opening bracket or quote
+// is waived there now; with anything else the opener is decided by CommonMark's rule, and these
+// read exactly as CommonMark — and this engine before the CJK clauses — read them.
+literal('售價NT$990*，限量50名*。', 'footnote marks before a full-width comma and full stop');
+literal('NT$990*，限量*。', 'the same, shorter');
+literal('價格*，運費*。', 'footnote marks after CJK letters');
+literal('附註*：本價格不含稅。其他*：另計', 'marks before full-width colons');
+literal('見圖*、表*', 'a mark before an enumeration comma');
+literal('價格*。運費*。', 'marks before full stops');
+literal('重要*！真的*！', 'marks before full-width exclamation marks');
+literal('Note*：see below. Other*：n/a', 'Latin text with full-width colons from a CJK input method');
+// What the narrower rule gives up: an emphasis that STARTS with such a mark, CJK letter outside.
+literal('內容**：重要**', 'bold starting with a full-width colon — given up');
+literal('前面**。粗體**', 'bold starting with a full stop — given up');
+// What it does not catch: an opening bracket is still waived, wherever the run sits. These became
+// emphasis with the CJK clauses and stay that way — the cost of `已經**手動關閉（Kill）**了`.
+table([
+  ['價格*（含稅）與運費*（另計）', '價格<I>（含稅）與運費>（另計）', 'marks before opening brackets still pair — accepted cost'],
+  ['https://example.com/a*（b）*c', 'https://example.com/a<I>（b）>c', 'a URL with full-width brackets — accepted cost'],
+  ['5*（3+2）*4', '5<I>（3+2）>4', 'arithmetic with full-width brackets — accepted cost'],
+]);
+// …and the openers it is there for still open.
+table([
+  ['**（重要）**', '<B>（重要）>', 'bold around full-width brackets, alone'],
+  ['**「好」**', '<B>「好」>', 'bold around corner brackets, alone'],
+  ['這是**（重要）**的', '這是<B>（重要）>的', 'an opening bracket after the opener, CJK letters outside'],
+  ['他說*「好」*，然後*「不好」*。', '他說<I>「好」>，然後<I>「不好」>。', 'two italics, a comma between them'],
+]);
+// The list of opening brackets and quotes in cssmd.js, checked against this engine's own Unicode
+// tables: every punctuation mark or symbol in the CJK blocks, between two CJK letters, opens if and
+// only if it is Ps or Pi. A new Unicode version that adds one to those blocks turns this red.
+{
+  const m = src.match(/const CJK_RE = (\/.*\/);/);
+  const cjkRe = m ? new Function('return ' + m[1])() : null;
+  const wrong = cjkRe ? [] : ['no CJK_RE in cssmd.js'];
+  for (let u = 0; cjkRe && u < 0x10000; u++) {
+    if (u >= 0xD800 && u <= 0xDFFF) continue;
+    const c = String.fromCharCode(u);
+    if (!cjkRe.test(c) || !/[\p{P}\p{S}]/u.test(c) || /\s/u.test(c) || c === '*' || c === '_') continue;
+    const input = `甲*${c}乙*丙`;
+    const opens = shape(renderInlineMd(input)) === `甲<I>${c}乙>丙`;
+    if (opens !== /[\p{Ps}\p{Pi}]/u.test(c)) wrong.push(`U+${u.toString(16).toUpperCase()} ${c} ${opens ? 'opens' : 'does not open'}`);
+  }
+  try {
+    assert.deepStrictEqual(wrong, [], 'CJK punctuation after an opener: opens iff Ps or Pi');
+    console.log('PASS every CJK punctuation mark after an opener: opens iff it is an opening bracket or quote');
+    pass++;
+  } catch (e) { fail++; console.error('FAIL ' + e.message + '\n  ' + wrong.join('\n  ')); }
+}
 
 // ── what must STAY literal ──────────────────────────────────────────────────────────────────────
 // Whitespace still decides first: a run next to a space, an ideographic space included, opens or
