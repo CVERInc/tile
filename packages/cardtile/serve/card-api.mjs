@@ -1458,10 +1458,11 @@ async function readCard(env, store, handle) {
 }
 
 /**
- * the card the handle's object holds, or null when it does not speak for it (CardLifetime.held), did
- * not answer, or is not bound — and then the caller reads KV, which is what every read did before.
- * Unlike a write, a read has that second source: without the object nothing can have been written
- * that KV has not been handed, so a Worker with no binding answers its reads as it always did.
+ * what the handle's object says (CardLifetime.held): `{ gen, held: true, md, version }`, or
+ * `{ gen, held: false }` when it does not speak for the card — or null when it did not answer or is
+ * not bound, and then the caller reads KV, which is what every read did before. Unlike a write, a read
+ * has that second source: without the object nothing can have been written that KV has not been
+ * handed, so a Worker with no binding answers its reads as it always did.
  */
 async function objectCard(env, handle) {
   if (!env.CARD_LIFETIMES) return null;
@@ -1473,7 +1474,9 @@ async function objectCard(env, handle) {
   }
   if (!res.ok) return null;
   const held = await res.json().catch(() => null);
-  return held && held.held === true && typeof held.md === 'string' ? held : null;
+  if (!held || typeof held.gen !== 'string' || !VALID_GEN.test(held.gen)) return null;
+  if (held.held === true) return typeof held.md === 'string' ? held : null;
+  return { gen: held.gen, held: false };
 }
 
 /**
@@ -1481,10 +1484,17 @@ async function objectCard(env, handle) {
  * card when it holds one (so a read right after a write sees that write), else KV's. The public pages
  * do not come here: they read KV (liveCard), which is what KV is for. The stop is KV's either way —
  * it is not a card write and the object does not hold it.
+ *
+ * 🔴 When the object answers but does not hold the card, KV is read AT THE GENERATION THE OBJECT NAMED,
+ * never at KV's own `gen:<handle>`. A delete is a write too: right after one, this location's `gen:`
+ * may still name the deleted lifetime, and its body is then the deleted card — listed, previewed with
+ * its pictures, handed to whoever takes the handle next. The object's generation is the truth (only
+ * the object writes `gen:`), so under it the deleted card is under a key this never reads.
  */
 async function currentCard(env, store, handle) {
   const held = await objectCard(env, handle);
   if (!held) return liveCard(store, handle, { stop: true });
+  if (!held.held) return liveCard(store, handle, { stop: true, gen: held.gen });
   const stopped = await readGen(store, stopKey(handle, held.gen), legacyStopKey(handle), held.gen);
   return { md: held.md, gen: held.gen, stopped, version: held.version };
 }
