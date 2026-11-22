@@ -1258,6 +1258,12 @@ function cardWriteOk(op, b) {
   return true;
 }
 
+/** the handle's object did not answer and nothing was written: the 503 of every route that writes */
+const notWritten = (handle) => ({
+  error: 'write_failed',
+  why: `"${handle}" was not written: its write queue did not answer. Read the card again before retrying.`,
+});
+
 /**
  * a card write, sent to the handle's CardLifetime (its write queue) and answered as it answers. No
  * fallback to writing from here: the queue is what makes the check and the put one step (tile#209).
@@ -1268,7 +1274,7 @@ async function cardWrite(env, handle, op, body, extra = {}) {
     res = await lifetimeOf(env, handle).fetch(`https://card-lifetime/${op}`, { method: 'POST', body: JSON.stringify({ handle, ...body }) });
   } catch (e) {
     if (e && /is not bound/.test(e.message)) throw e;
-    return json({ error: 'write_failed', why: `"${handle}" was not written: its write queue did not answer. Read the card again before retrying.`, ...extra }, 503);
+    return json({ ...notWritten(handle), ...extra }, 503);
   }
   const answer = await res.json().catch(() => ({ error: 'write_failed', why: 'The write queue answered without a body. Read the card again before retrying.' }));
   // `extra` (the fenced route's `fence`) marks every refusal, the queue's own included; a success
@@ -1459,7 +1465,17 @@ async function readCard(env, store, handle) {
 
 /** a bound object did not answer an authenticated read; handleApi answers 503 `read_failed` */
 class ReadUnanswered extends Error {
-  constructor(handle, why) { super(`CardLifetime did not answer /held for "${handle}": ${why}`); this.handle = handle; }
+  constructor(handle, why, op = '/held') { super(`CardLifetime did not answer ${op} for "${handle}": ${why}`); this.handle = handle; }
+}
+/**
+ * the same on a route that writes (tile#399); handleApi answers 503 `write_failed` when nothing had
+ * been written yet, and `write_unconfirmed` when the write was made and the check after it got no answer
+ */
+class WriteUnanswered extends Error {
+  constructor(handle, wrote) {
+    super(`CardLifetime did not name the generation of "${handle}" ${wrote ? 'after' : 'before'} a write`);
+    this.handle = handle; this.wrote = wrote;
+  }
 }
 
 /**
@@ -1504,13 +1520,43 @@ async function objectCard(env, handle) {
  * its pictures, handed to whoever takes the handle next. The object's generation is the truth (only
  * the object writes `gen:`), so under it the deleted card is under a key this never reads.
  */
-async function currentCard(env, store, handle) {
+async function currentCard(env, store, handle, { stop = true } = {}) {
   const held = await objectCard(env, handle); // throws if the bound object did not answer
-  if (!held) return liveCard(store, handle, { stop: true }); // no object bound: KV alone, as before
-  if (!held.held) return liveCard(store, handle, { stop: true, gen: held.gen });
-  const stopped = await readGen(store, stopKey(handle, held.gen), legacyStopKey(handle), held.gen);
+  if (!held) return liveCard(store, handle, { stop }); // no object bound: KV alone, as before
+  if (!held.held) return liveCard(store, handle, { stop, gen: held.gen });
+  const stopped = stop ? await readGen(store, stopKey(handle, held.gen), legacyStopKey(handle), held.gen) : null;
   return { md: held.md, gen: held.gen, stopped, version: held.version };
 }
+
+/**
+ * the handle's current generation for an AUTHENTICATED route that keys a write by it (the serving
+ * stop, the exchange state) or checks one against it (a preview) — tile#399. From the handle's object,
+ * the generation's only writer (`/current`: a read, nothing is flushed or written), for the reason
+ * currentCard gives: right after a delete this location's `gen:<handle>` may still name the ended
+ * lifetime. Keyed by that, a stop, a resume or an exchange state lands where nothing reads it and is
+ * answered as done; compared with that, a write to a handle created again is answered 409 for a
+ * lifetime change that never happened, and one a delete did overtake is answered as written.
+ *
+ * 🔴 Never KV's own `gen:` when an object is bound and does not answer: that throws (ReadUnanswered).
+ * KV alone only when no object is bound, as before — then nothing has rotated a generation.
+ */
+async function currentGen(env, store, handle) {
+  if (!env.CARD_LIFETIMES) return generationOf(store, handle);
+  let res;
+  try {
+    res = await lifetimeOf(env, handle).fetch('https://card-lifetime/current', { method: 'POST', body: JSON.stringify({ handle }) });
+  } catch (e) {
+    throw new ReadUnanswered(handle, e && e.message, '/current');
+  }
+  if (!res.ok) throw new ReadUnanswered(handle, `answered ${res.status}`, '/current');
+  const current = await res.json().catch(() => null);
+  if (!current || typeof current.gen !== 'string' || !VALID_GEN.test(current.gen)) throw new ReadUnanswered(handle, 'no generation in the answer', '/current');
+  return current.gen;
+}
+/** an unanswered object, as a route that writes reports it; `wrote`: whether its write is already made */
+const asWrite = (handle, wrote = false) => (e) => { throw e instanceof ReadUnanswered ? new WriteUnanswered(handle, wrote) : e; };
+/** currentGen for a route that writes under it; `wrote: true` for the check AFTER its write */
+const writeGen = (env, store, handle, { wrote = false } = {}) => currentGen(env, store, handle).catch(asWrite(handle, wrote));
 
 /** what an authenticated read says about the public door: the JSON answers' `serving` field */
 const servingOf = (row) => ({ stopped: row.stopped });
@@ -1705,6 +1751,13 @@ export async function handleApi(request, env, url) {
     // a read whose object is bound and did not answer (see objectCard): refused whole, before anything
     // is written — list_cards stops at that handle, and a preview parks nothing
     if (e instanceof ReadUnanswered) return json({ error: 'read_failed', why: `"${e.handle}" was not read: its write queue did not answer. Read the card again.` }, 503);
+    // the same on a route that writes (tile#399): before its write, nothing was written; after it, the
+    // write is under the generation the object named at admission and only its confirmation is missing
+    if (e instanceof WriteUnanswered) {
+      return json(e.wrote
+        ? { error: 'write_unconfirmed', why: `"${e.handle}" was written, but not confirmed: its write queue did not answer. Read the card again before retrying.` }
+        : notWritten(e.handle), 503);
+    }
     throw e;
   }
 }
@@ -1774,7 +1827,15 @@ async function routeApi(request, env, url) {
     // carries a dead generation, so the renderer never shows it, and its TTL removes it. The stamp is
     // the protection; the re-read after the put only tells the caller.
     await store.put(previewKey(id), md, { expirationTtl: PREVIEW_TTL, metadata: { handle, gen } });
-    if ((await generationOf(store, handle)) !== gen) return json(staleWrite(handle), 409);
+    // 🔴 tile#399: re-read from the object, like the stamp (currentGen). KV's `gen:` beside the object's
+    // stamp answered 409 for a handle deleted and created again (the stamp new, `gen:` still the old
+    // one) and left that draft parked; and it passed a draft a delete had overtaken. An object that
+    // does not answer here confirms nothing: no URL is handed out, and the draft does not stay parked.
+    const now = await currentGen(env, store, handle).catch(async (e) => {
+      await store.delete(previewKey(id)).catch(() => {});
+      throw e;
+    });
+    if (now !== gen) return json(staleWrite(handle), 409);
     return json({
       url: `https://${url.host}/_preview/${id}`,
       expires_in_seconds: PREVIEW_TTL,
@@ -1858,7 +1919,11 @@ async function routeApi(request, env, url) {
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(stop[1])}.` }, 400);
     // A stop belongs to one lifetime, like the body (r3, see genKey): one admitted before a delete lands
     // on the deleted generation's key and cannot stop the next owner's card (codex r2 finding 3).
-    const gen = await generationOf(store, handle);
+    // 🔴 tile#399: which lifetime is the object's word (writeGen), at admission and again after the put.
+    // By KV's `gen:`, a stop or a resume sent after a delete landed on the ended generation's key and
+    // answered `stopped: true` / `false` with the card still serving / still stopped.
+    if (method !== 'PUT' && method !== 'DELETE') return json({ error: `${method} not allowed here.` }, 405);
+    const gen = await writeGen(env, store, handle);
     const key = stopKey(handle, gen);
     if (method === 'PUT') {
       const body = (await readJson(request)) || {};
@@ -1866,15 +1931,12 @@ async function routeApi(request, env, url) {
         stopped_at: new Date().toISOString(),
         reason: typeof body.reason === 'string' ? body.reason : '',
       }));
-      if ((await generationOf(store, handle)) !== gen) return json(staleWrite(handle), 409);
+      if ((await writeGen(env, store, handle, { wrote: true })) !== gen) return json(staleWrite(handle), 409);
       return json({ handle, stopped: true });
     }
-    if (method === 'DELETE') {
-      await store.delete(key);
-      if (gen === GEN0) await store.delete(legacyStopKey(handle));
-      return json({ handle, stopped: false });
-    }
-    return json({ error: `${method} not allowed here.` }, 405);
+    await store.delete(key);
+    if (gen === GEN0) await store.delete(legacyStopKey(handle));
+    return json({ handle, stopped: false });
   }
 
   // ── the exchange state (tile#336) ─────────────────────────────────────────────────────────────
@@ -1893,15 +1955,16 @@ async function routeApi(request, env, url) {
     try { handle = decodeURIComponent(pool[1]).toLowerCase(); } catch { handle = ''; }
     if (!VALID_HANDLE.test(handle)) return json({ error: `Bad handle ${JSON.stringify(pool[1])}.` }, 400);
     if (method !== 'PUT' && method !== 'DELETE') return json({ error: `${method} not allowed here.` }, 405);
-    const gen = await generationOf(store, handle);
+    // 🔴 tile#399: the lifetime is the object's word (writeGen) at all three reads, as for /stop
+    const gen = await writeGen(env, store, handle);
     const key = poolKey(handle, gen);
     if (method === 'PUT') {
       const body = await readJson(request);
       const inPool = body && typeof body === 'object' ? body.in : undefined;
       if (typeof inPool !== 'boolean') return json({ error: '`in` must be true or false. Nothing was written.' }, 400);
-      if ((await generationOf(store, handle)) !== gen) return json(staleWrite(handle), 409);
+      if ((await writeGen(env, store, handle)) !== gen) return json(staleWrite(handle), 409);
       await store.put(key, inPool ? POOL_IN : POOL_OUT);
-      if ((await generationOf(store, handle)) !== gen) return json(staleWrite(handle), 409);
+      if ((await writeGen(env, store, handle, { wrote: true })) !== gen) return json(staleWrite(handle), 409);
       return json({ handle, gen, in: inPool });
     }
     await store.delete(key);
@@ -1982,9 +2045,14 @@ async function routeApi(request, env, url) {
       if (typeof body.markdown !== 'string' || !body.markdown.length) {
         return json({ error: 'save_cards needs `markdown` — refusing to write an empty card.' }, 400);
       }
-      // the generation is captured HERE, at admission, before Web Risk's network wait (see commitCard)
-      const live = await liveCard(store, handle);
-      const current = live.md == null ? null : { md: live.md, version: await cardVersion(live.md) };
+      // the generation is captured HERE, at admission, before Web Risk's network wait (see commitCard).
+      // 🔴 tile#399: from the handle's object, with the card it holds (currentCard), not KV's `gen:`.
+      // The object refuses a save that names any generation but its own, so where `gen:` still named a
+      // deleted lifetime every save of the handle — the one creating it again first — was answered 409
+      // `stale_generation`, "deleted or created again while this write was in flight", with no delete
+      // in flight. A save admitted in a lifetime that then ends is still refused by the object.
+      const live = await currentCard(env, store, handle, { stop: false }).catch(asWrite(handle));
+      const current = live.md == null ? null : { md: live.md, version: live.version || await cardVersion(live.md) };
       // typeof, never String(): see list_cards
       if (body.base_version != null && typeof body.base_version !== 'string') {
         return json({ error: '`base_version` must be a string — the version you read.' }, 400);
@@ -1993,8 +2061,9 @@ async function routeApi(request, env, url) {
 
       // 🔴 The lock is checked BEFORE Web Risk, so a conflicted save costs nothing and — more to the
       // point — cannot half-happen. r3 (codex r2 P2): it is checked by the handle's object, against
-      // the card IT holds, never against this KV read — which may be stale, and must not veto a
-      // current base_version. The same call answers the size (in bytes) and the structural diff.
+      // the card IT holds, never against the read above — which is KV's while the object does not yet
+      // speak for the card, may be stale, and must not veto a current base_version. The same call
+      // answers the size (in bytes) and the structural diff.
       const create = body.create === true;
       const pre = await cardWrite(env, handle, 'save', { gen: live.gen, markdown: body.markdown, base, create, check: true, from: current ? current.version : null });
       const checked = await pre.json();
@@ -2003,7 +2072,7 @@ async function routeApi(request, env, url) {
       // 🔴 reef#2044 ②: refuse a save that links to a URL Google Web Risk lists. The destinations are
       // the RENDERER's output (card-destinations.mjs), never a markdown parse here — reef#2054 showed
       // a separate extractor drifts from what the visitor actually gets. Fail-open lives in url-risk.
-      // (Assembled on this KV read; the object checks it still links the same way if its card differs.)
+      // (Assembled on the admission read; the object checks it still links the same way if its card differs.)
       const { md } = assembleSave(body.markdown, current && current.md);
       const { destinations: dests, refused } = cardLinkReport(md, { base: `${url.origin}/${handle}/` });
       // Card link destinations accept only safe URL schemes: a link or picture the renderer would not
@@ -2032,8 +2101,8 @@ async function routeApi(request, env, url) {
 
       // 🔴 tile#209: the write happens in the handle's object, against the card IT holds (r2: never a
       // KV read). It checks base_version again and assembles the save again on the stored assets lane:
-      // everything above ran on a KV read, before Web Risk's wait, and a put_asset that landed since —
-      // or one KV has not caught up on — would otherwise be erased by a save that "passed" its lock.
+      // everything above ran on the admission read, before Web Risk's wait, and a put_asset that landed
+      // since — or one KV has not caught up on — would otherwise be erased by a save that "passed" its lock.
       // `from` and `dests` let it tell whether what it writes is still what Web Risk checked.
       const written = await cardWrite(env, handle, 'save', {
         gen: live.gen, markdown: body.markdown, base, create,
