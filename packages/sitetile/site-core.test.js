@@ -5,7 +5,9 @@ import assert from 'node:assert/strict';
 import {
   parseSite, serializeSite, isSiteFile, renderSiteToHtml, parseParams, FRONTMATTER_KEY,
   ctaButtonsHtml, linkButtonsHtml, bodyHtml, inlineHtml, ctaHtml, takeDropWarnings,
-  safeHref, safeSrc, safeInternalPath, quoteRunReport, softJoin, INBOX_FORM_SCRIPT } from './site-core.js';
+  safeHref, safeSrc, safeInternalPath, quoteRunReport, softJoin, INBOX_FORM_SCRIPT,
+  hrefAllowed, imageSrcAllowed, cssUrlString, parseParams as paramsOf, heroVariant } from './site-core.js';
+import { emitHero } from '../emit/hero.mjs';
 import { inboxFormCopy, DEFAULT_LANG } from './inbox-form-copy.js';
 import { contentRelsOf } from './locale.mjs';
 
@@ -1141,6 +1143,111 @@ test('safeInternalPath vs isSiteRelativePath: three inputs where this gate is st
     assert.equal(safeInternalPath(value), null, `${JSON.stringify(value)} must still be rejected here (decodes to a network-path reference)`);
   }
   takeDropWarnings();
+});
+
+// ── control characters in a destination ─────────────────────────────────────────────────────────
+// A URL parser cleans tab/LF/CR, leading and trailing controls and the rest (percent-encoded) out
+// of a value before it answers, so the scheme gate used to pass a string every caller then wrote
+// with the controls still in it. One of them, the form feed, is a line break to CSS.
+const CONTROLS = [...Array.from({ length: 0x20 }, (_, n) => n), 0x7f].map((n) => String.fromCharCode(n));
+const uPlus = (c) => 'U+' + c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0');
+
+test('destination gates: every C0 control character and DEL is refused, wherever it sits', () => {
+  assert.equal(CONTROLS.length, 33, 'U+0000–U+001F and U+007F');
+  takeDropWarnings();
+  for (const c of CONTROLS) {
+    for (const [where, link, img, path] of [
+      ['inside', '/a' + c + 'b', '/img/a' + c + 'b.png', '/thanks' + c + 'x'],
+      ['leading', c + '/a', c + '/img/a.png', c + '/thanks'],
+      ['trailing', '/a' + c, '/img/a.png' + c, '/thanks' + c],
+      ['absolute', 'https://example.test/a' + c + 'b', 'https://example.test/a' + c + 'b.png', '/thanks?to=' + c],
+    ]) {
+      const at = `${uPlus(c)} ${where}`;
+      assert.equal(hrefAllowed(link), false, `hrefAllowed admitted ${at}`);
+      assert.equal(safeHref(link), null, `safeHref returned ${at}`);
+      assert.equal(imageSrcAllowed(img), false, `imageSrcAllowed admitted ${at}`);
+      assert.equal(safeSrc(img), null, `safeSrc returned ${at}`);
+      assert.equal(safeInternalPath(path), null, `safeInternalPath returned ${at}`);
+    }
+    // the raster `data:` exception is not a way round it
+    assert.equal(safeSrc('data:image/png;base64,iVBOR' + c + 'w0KGgo='), null, `safeSrc returned a data: image carrying ${uPlus(c)}`);
+    assert.equal(safeSrc(c + 'data:image/png;base64,iVBORw0KGgo='), null, `safeSrc returned a data: image led by ${uPlus(c)}`);
+  }
+  // an entity that decodes to one (tab, LF and CR are the three the decoder lets through)
+  for (const ent of ['&#9;', '&#x9;', '&#10;', '&#x0a;', '&#13;', '&#x0D;', '&#127;', '&#x7f;']) {
+    assert.equal(safeHref('/a' + ent + 'b'), null, `safeHref returned a destination carrying ${ent}`);
+    assert.equal(safeSrc('/a' + ent + 'b.png'), null, `safeSrc returned a destination carrying ${ent}`);
+  }
+  const drops = takeDropWarnings();
+  assert.ok(drops.length > 0 && drops.every((d) => d.scheme === '(control character)'),
+    'each refusal is reported as a control character, not as the scheme the cleaned value resolves to: '
+    + JSON.stringify([...new Set(drops.map((d) => d.scheme))]));
+});
+
+test('destination gates: what an ordinary address may carry is still admitted, unchanged', () => {
+  takeDropWarnings();
+  for (const ok of ['/a b.png', ' /a.png', '/a.png ', '/a%0Cb.png', '/a%09b.png', '/img/照片.png', '/a.png?x=1&y=2#frag',
+    'https://example.test/a(1).png', 'cover.jpg', './a/b.png', 'data:image/png;base64,iVBORw0KGgo=', ' data:image/png;base64,iVBORw0KGgo=']) {
+    assert.equal(safeSrc(ok), ok, `safeSrc refused or rewrote ${JSON.stringify(ok)}`);
+  }
+  for (const ok of ['/about', '#top', 'mailto:a@example.test', 'tel:+15550100', 'https://example.test/a%0Ab', '/a b', '/p?a=1&amp;b=2']) {
+    assert.notEqual(safeHref(ok), null, `safeHref refused ${JSON.stringify(ok)}`);
+  }
+  assert.deepEqual(takeDropWarnings(), [], 'and nothing is reported for them');
+});
+
+const FF_BG = '/a.png\u000c);position:fixed;inset:0;z-index:9999;background:red;x:(';
+const heroTagOf = (html) => (html.match(/<section class="st-hero[^>]*>/) || [''])[0];
+
+test('hero bg=: a form feed cannot end the CSS string and open declarations of its own (string render)', () => {
+  const page = (bg) => '---\nsitetile-page: t\n---\n\n## Hi\n%% sitetile: hero bg="' + bg + '" %%\nBody.\n';
+  takeDropWarnings();
+  const tag = heroTagOf(renderSiteToHtml(parseSite(page(FF_BG))));
+  assert.ok(tag, 'the hero still renders');
+  assert.ok(!/style=/.test(tag), 'a bg= carrying a form feed writes no style attribute at all: ' + JSON.stringify(tag));
+  assert.ok(!tag.includes('\u000c') && !tag.includes('position:fixed'), 'none of it reaches the tag: ' + JSON.stringify(tag));
+  const drops = takeDropWarnings();
+  assert.deepEqual(drops.map((d) => d.scheme), ['(control character)'], 'the author is told, once: ' + JSON.stringify(drops));
+  // every other control character, in the same place
+  for (const c of CONTROLS) {
+    const t = heroTagOf(renderSiteToHtml(parseSite(page('/a.png' + c + ');position:fixed;x:('))));
+    // LF and CR end the line the marker is on, so the marker is not a hero marker at all
+    if (c === '\n' || c === '\r') { assert.ok(!t.includes('position:fixed'), uPlus(c)); continue; }
+    assert.ok(t && !/style=/.test(t), `${uPlus(c)} in bg= reached a style attribute: ${JSON.stringify(t)}`);
+  }
+  takeDropWarnings();
+  // the control: the same text WITHOUT a control character stays one quoted string, as before
+  const plain = heroTagOf(renderSiteToHtml(parseSite(page(FF_BG.replace('\u000c', '')))));
+  assert.ok(plain.includes('style="background-image:url(&quot;/a.png);position:fixed;inset:0;z-index:9999;background:red;x:(&quot;)"'), plain);
+});
+
+test('hero bg=: the built page\'s markup (the shared emitter, fed as Hero.astro feeds it) refuses it the same way', () => {
+  const emit = (bg) => {
+    const section = { title: 'Hi', body: 'Body.', id: 's1-hi', params: 'bg="' + bg + '"' };
+    const pm = paramsOf(section.params);
+    const variant = heroVariant({ layers: pm.layers, layout: pm.layout, logo: pm.logo });
+    return emitHero(section, { media: 'avatar', layout: variant.layout, marqueeWords: [], enter: false, layerList: variant.layerList,
+      parallax: false, logo: variant.logo, logoPos: 'bottom', cta: pm.cta, bgOk: pm.bg ? safeSrc(pm.bg) : null, owner: true },
+    { inline: inlineHtml, block: bodyHtml });
+  };
+  takeDropWarnings();
+  const tag = heroTagOf(emit(FF_BG));
+  assert.ok(tag && !/style=/.test(tag) && !tag.includes('position:fixed'), JSON.stringify(tag));
+  assert.ok(heroTagOf(emit('/img/bg.png')).includes('style="background-image:url(&quot;/img/bg.png&quot;)"'), 'an ordinary bg= is written as before');
+  takeDropWarnings();
+});
+
+test('cssUrlString: no C0 control or DEL survives into the CSS string, for a caller that skipped the gate', () => {
+  for (const c of CONTROLS) {
+    const out = cssUrlString('/a' + c + ');x:(');
+    assert.ok(!/[\u0000-\u001f\u007f]/.test(out), `${uPlus(c)} is written raw: ${JSON.stringify(out)}`);
+    assert.equal(out, '/a\\' + c.charCodeAt(0).toString(16).toUpperCase() + ' );x:(', `${uPlus(c)} is its own hex escape`);
+  }
+  // a value without one is written as it always was
+  assert.equal(cssUrlString('cover.jpg'), 'cover.jpg');
+  assert.equal(cssUrlString('a\nb'), 'a\\A b');
+  assert.equal(cssUrlString('a"b\\c'), 'a\\"b\\\\c');
+  assert.equal(cssUrlString('/a b.png?x=1&y=(2);z'), '/a b.png?x=1&y=(2);z');
 });
 
 // ── round 3: classification consistency — backslash/protocol-relative destinations ────────────

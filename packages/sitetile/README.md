@@ -117,6 +117,19 @@ inbox-bubble-color: accent
 
 Nothing changes inside the coral. It already reads those two knobs from its container through an open shadow root, so the custom properties inherit (see `packages/dynamic-corals/inbox-bubble/README.md`). Without the line, a theme or custom CSS that sets `--reef-inbox-accent` on `:root` or on a wrapper still works exactly as before. With the line, the inline style on the mount is closer to the bubble than either of those, so the theme accent wins. The key colours the corner bubble only: in the installed-app bottom bar the dock's own item colours apply, as they do for every accent source. If a custom theme drops `--gd-accent` entirely, the variable is invalid, the bubble falls back to its default black, and nothing breaks.
 
+### Site chrome — what `_site.md` sets, a page cannot change
+
+A content page renders from `{ ..._site.md, ...its own frontmatter }`, so a page's keys win. That is for what a page says about itself (title, description, share image, `noindex`, layout, look). Site chrome is the exception: when `_site.md` (with the page's locale `_site.md` over it) sets one of these to a non-blank value, the page's own line for it is ignored and named in the build log, and the build goes on.
+
+| | keys |
+|---|---|
+| who the site is | `brand`, `site-logo`, `favicon` |
+| the frame every page shares | `nav`, `header-cta`, `header-actions` + `header-actions-*`, `footer` + `footer-*`, `copyright`, `copyright-href`, `language-href`, `announce` + `announce-*`, `age-gate` + `age-gate-*` |
+| where assets, visitor data and identity go | `fonts`, `analytics-token`, `site-key`, `generator`, `assistant-name`, `kaito-corpus` |
+| the blog | every `blog-*` key |
+
+A key `_site.md` leaves unset still comes from the page, and a site with no `_site.md` is untouched, so a site that keeps its chrome on its pages renders as it did. The list, the reasons, and the keys deliberately left to the page are in `site-chrome-keys.mjs` (pure, import-free; `resolveSiteChrome` is the function both page routes call).
+
 ### `_headers` — the build owns it
 
 Every `*.svg` a built site serves is delivered with `Content-Disposition: attachment`: an uploaded vector file is an image, not a page, so it never opens as a document on the site's origin. `<img>` and CSS `url()` are unaffected; embedding an SVG with `<object>` or `<iframe>` no longer renders it. The build owns `dist/_headers`: put your own rules in `assets/_headers` (it reaches `public/` before the build, like any other asset) and they are kept first, byte for byte, with the platform's `/*.svg` rule appended once after them — rebuilding changes nothing, and a file that already carries the rule is left as it is. The merge runs at `astro:build:done` (`astro/svg-attachment-headers.mjs`), so anything that writes `dist/_headers` after the build replaces it and must merge the same way. A file with 100 rules already (Cloudflare Pages' limit) fails the build rather than shipping without the rule.

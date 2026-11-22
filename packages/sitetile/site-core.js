@@ -1120,15 +1120,35 @@ const _dropWarnings = [];
 function recordDrop(rawDest, schemeOverride) {
   let scheme = '(unparseable)';
   if (schemeOverride) scheme = schemeOverride;
+  // Named for what refused it: such a value resolves to an allowed scheme, and reporting that
+  // scheme would tell the author nothing about why the destination was dropped.
+  else if (RE_DEST_CONTROL.test(decodeEntitiesOnce(rawDest))) scheme = '(control character)';
   else try { scheme = new URL(decodeEntitiesOnce(rawDest), SAFE_HREF_BASE).protocol || '(none)'; } catch { /* keep '(unparseable)' */ }
   _dropWarnings.push({ scheme, dest: String(rawDest == null ? '' : rawDest) });
 }
+// A destination that carries a C0 control character (U+0000–U+001F) or DEL (U+007F) is refused
+// outright, whatever it would resolve to. 🩸 The URL parser is the wrong witness for these: it
+// REMOVES tab/LF/CR, trims leading and trailing controls and percent-encodes the rest before it
+// answers, so the scheme check passed on a string the parser had quietly cleaned — while every
+// caller went on to write the ORIGINAL string, controls included. In an `href`/`src` attribute
+// that is inert. Inside a CSS string it is not: CSS reads a form feed (U+000C) as a line break,
+// a raw line break ends a quoted string, and `bg="/a.png<U+000C>);position:fixed;inset:0;…"`
+// closed the hero's `url("…")` and opened declarations of its own in that element's inline
+// style — the full-viewport overlay cssUrlString was written to stop, through the one newline
+// it did not escape. An address a browser would have to repair before using is not one this
+// file needs to emit, so the gate refuses it here, once, for every sink: the destination
+// degrades to plain text (or to no image) like any other refused one and is reported the same
+// way. Checked on the entity-decoded value, the string a caller writes; `safeCodePoint` already
+// keeps an entity from decoding to a C0 control other than tab/LF/CR, and those three are
+// refused here with the rest.
+const RE_DEST_CONTROL = /[\u0000-\u001f\u007f]/;
 // hrefAllowed: the policy itself, with no side effect — isSafeHref is this plus the drop record. A
 // host that renders outside a site build (cardtile's Card Worker) asks THIS, so the one allowlist is
 // shared without the build-time queue growing for the life of a Worker isolate.
 function hrefAllowed(dest) {
   const raw = decodeEntitiesOnce(dest);
   if (raw === '') return true;
+  if (RE_DEST_CONTROL.test(raw)) return false;
   try { return SAFE_HREF_SCHEMES.has(new URL(raw, SAFE_HREF_BASE).protocol); } catch { return false; }
 }
 function isSafeHref(dest) {
@@ -1148,7 +1168,11 @@ const SAFE_IMAGE_DATA_RE = /^data:image\/(?:png|jpeg|jpg|gif|webp|avif);base64,/
 function imageSrcAllowed(dest) {
   const raw = decodeEntitiesOnce(dest);
   if (raw === '') return true;
-  const stripped = raw.replace(/[\u0009\u000a\u000d]/g, '').replace(/^[\u0000-\u0020]+/, '');
+  // Before the `data:` exception, which would otherwise admit a control character on its own.
+  if (RE_DEST_CONTROL.test(raw)) return false;
+  // A leading space is all a URL parser still trims from what is left (the controls it also
+  // trims or removes were refused on the line above).
+  const stripped = raw.replace(/^ +/, '');
   if (SAFE_IMAGE_DATA_RE.test(stripped)) return true;
   return hrefAllowed(raw);
 }
@@ -1203,7 +1227,9 @@ function safeSrc(dest) {
 // gets refused, not silently rewritten to `/b`.
 const RE_DOTDOT_SEGMENT = /(^|\/)\.\.(?:\/|$)/;
 function isSafeInternalPath(dest) {
-  const raw = decodeEntitiesOnce(dest).replace(/[\u0009\u000a\u000d]/g, '').replace(/\\/g, '/');
+  // The family's control-character rule (RE_DEST_CONTROL): refused, so nothing is left to strip.
+  if (RE_DEST_CONTROL.test(decodeEntitiesOnce(dest))) { recordDrop(dest); return false; }
+  const raw = decodeEntitiesOnce(dest).replace(/\\/g, '/');
   if (raw === '' || !raw.startsWith('/') || raw.startsWith('//')) { recordDrop(dest); return false; }
   if (RE_DOTDOT_SEGMENT.test(raw.split(/[?#]/, 1)[0])) { recordDrop(dest); return false; }
   return true;
@@ -1241,11 +1267,18 @@ function escHrefAttr(dest) { return escAttr(decodeEntitiesOnce(dest)); }
 // is unaffected: a browser decodes HTML entities in an attribute value BEFORE handing it to the
 // CSS parser, so `&quot;` round-trips back to `"` first and the CSS parser sees exactly the
 // quoted string built here.
+//
+// 🩸 "A raw line break" was written as CR and LF. CSS has a third: a form feed (U+000C) is turned
+// into a line feed before tokenizing, so it ended the string exactly as the other two would have
+// (see RE_DEST_CONTROL — the gate now refuses such a destination before it gets here). This
+// function no longer keeps a list of which controls CSS happens to treat specially: every C0
+// control and DEL is written as its own CSS hex escape (a line feed is still `\A `), so the
+// string holds for any caller, gated or not. A value without one is written exactly as before.
 function cssUrlString(u) {
   return String(u == null ? '' : u)
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .replace(/\r\n|[\r\n]/g, '\\A ');
+    .replace(/[\u0000-\u001f\u007f]/g, (c) => '\\' + c.charCodeAt(0).toString(16).toUpperCase() + ' ');
 }
 
 // A markdown image whose src is a VIDEO file (`![](…/clip.mp4)`) renders a real <video>, not a broken

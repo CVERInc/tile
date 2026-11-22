@@ -19,7 +19,8 @@
 // that line of the build log (one caller, one line).
 import { parseSite, isSiteFile } from '@sitetile';
 import { loadSite } from './blog.mjs';
-import { toUrlLocale, sameLocale, lingoEnabled, parseLocales, defaultLocaleOf, tagLocalesSource, localesSourceOf, pageLocalesOrWarn } from '../packages/lingo/locale.mjs';
+import { toUrlLocale, sameLocale, lingoEnabled, parseLocales, defaultLocaleOf, tagLocalesSource, localesSourceOf, pageLocalesOrWarn, warnOnce } from '../packages/lingo/locale.mjs';
+import { resolveSiteChrome, siteChromeWarning } from '../../../site-chrome-keys.mjs';
 
 /**
  * The rel ("home", "ja-jp/about", "zh-tw/404") a content file is ROUTED at by [...path].astro's
@@ -56,7 +57,13 @@ export function localeEditions(files) {
     // tile#279 r3 — the reserved `site-title` is re-stamped AFTER the home's own keys, exactly as the
     // catch-all ([...path].astro) does: a home page that writes `site-title:` must not rename the site
     // on /language and /<loc>/404, which read this meta.
+    const ownMeta = { ...site.meta };
     if (cfg) site.meta = { ...cfg, ...site.meta, 'site-title': cfg['site-title'] ?? '' };
+    // …and so is the site chrome the config sets (site-chrome-keys.mjs), by the same function the
+    // catch-all calls: the chooser and the per-locale 404 wear this meta, and a home page must not
+    // give them a header or footer the site config does not. warnOnce: the same sentence the
+    // catch-all logs for this file, so the build log carries it once.
+    for (const key of resolveSiteChrome(ownMeta, cfg, site.meta).ignored) warnOnce(siteChromeWarning(key, `content/${rel}.md`));
     homesByRel[rel] = site.meta;
   }
   const rootHome = homesByRel.home;
