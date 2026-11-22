@@ -257,5 +257,85 @@ ok(kinNarrow.pages.every((p, i) => { const pos = positionAt(KIN_BOOK, kinNarrow,
   'kinsoku: a position taken in one layout lands on the page holding that text in the other');
 ok(kinNarrow.pages.every((p) => p.start === 0 || !RE_STARTS_CLOSED.test(quoted.slice(p.start))), 'kinsoku: no computed page opens on a closing mark');
 
+// ── 6b. kinsoku review (tile#388 round 2): a joined run wider than a line never splits a word that fit ──
+// Such a run is laid out from its own units, exactly as before kinsoku: it breaks at the last unit
+// boundary that fits, and only a unit wider than a whole line is broken by glyph.
+const sentence = 'This is a sentence ... and more';
+eq(lineTexts(sentence, layoutFlow(sentence, KIN)), ['This is a ', 'sentence ', '... and ', 'more'],
+  'kinsoku: "sentence ..." is wider than the line — the word stays whole and the marks wrap, as before kinsoku');
+const bracketWord = '好好（abcdefghij';
+eq(lineTexts(bracketWord, layoutFlow(bracketWord, KIN)), ['好好（', 'abcdefghij'],
+  'kinsoku: "（abcdefghij" is wider than the line — the word that fits a line alone is not broken by glyph');
+
+// Latin-only text: the layout is the one from before kinsoku, line for line, up to the first line
+// that layout broke against the rule (a line opening on a mark set apart by a space — "word ..." —
+// or ending on "( "). The oracle below is that earlier line breaker for one Latin paragraph.
+const oracleLines = (text, width, fs) => {
+  const lines = [];
+  let line = null;
+  const open = (start) => { line = { start, width: 0, trail: 0 }; lines.push(line); };
+  open(0);
+  for (const m of text.matchAll(/[^ ]+ *| +/g)) {
+    const word = m[0].replace(/ +$/, ''), w = defaultMeasure(word, fs);
+    if (line.width > 0 && line.width + line.trail + w > width) open(m.index);
+    if (w > width) {
+      let at = m.index;
+      for (const ch of word) { const cw = defaultMeasure(ch, fs); if (line.width > 0 && line.width + cw > width) open(at); line.width += cw; line.trail = 0; at += ch.length; }
+    } else line.width += (line.width > 0 ? line.trail : 0) + w;
+    line.trail = defaultMeasure(m[0].slice(word.length), fs);
+  }
+  return lines.map((l, i) => text.slice(l.start, i + 1 < lines.length ? lines[i + 1].start : text.length));
+};
+let seed = 388;
+const rand = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 2147483648 * n); };
+const latinWord = () => {
+  const len = rand(8) === 0 ? 14 + rand(30) : 1 + rand(9);   // now and then a URL-long word
+  let w = Array.from({ length: len }, () => 'abcdefghijklmnopqrstuvwxyz'[rand(26)]).join('');
+  const deco = rand(10);
+  return deco === 0 ? w + ',' : deco === 1 ? w + '.' : deco === 2 ? '(' + w + ')' : deco === 3 ? w + '!' : w;
+};
+const SPACED = ['...', ')', '(', ',', '.5', ']', '!'];
+const latinText = (marks) => Array.from({ length: 10 + rand(30) }, () => (marks && rand(5) === 0 ? SPACED[rand(SPACED.length)] : latinWord())).join(' ');
+const RE_LATIN_CLOSED = /^[,.;:!?)\]}]/, RE_LATIN_OPEN = /[([{] *$/;
+// …and, with or without the oracle: a line starts inside a word only when that word alone is wider than the line
+const splitsAFittingWord = (text, lay, width) => lay.lines.some((l, i) => {
+  if (i === 0 || text[l.start - 1] === ' ') return false;
+  const from = text.lastIndexOf(' ', l.start) + 1, to = text.indexOf(' ', l.start);
+  return defaultMeasure(text.slice(from, to === -1 ? text.length : to), KIN.fontSize) <= width;
+});
+let plainSame = true, firstPlainDiff = null, markedSame = true, firstMarkedDiff = null, joined = 0, wholeWords = true, firstSplit = null;
+for (let t = 0; t < 120; t++) {
+  const plain = latinText(false), marked = latinText(true);
+  for (let width = 20; width <= 300; width += 9) {
+    const P = { ...KIN, width };
+    const gotPlain = lineTexts(plain, layoutFlow(plain, P)), wantPlain = oracleLines(plain, width, KIN.fontSize);
+    if (JSON.stringify(gotPlain) !== JSON.stringify(wantPlain) && plainSame) { plainSame = false; firstPlainDiff = { plain, width, gotPlain, wantPlain }; }
+    const markedLay = layoutFlow(marked, P);
+    if (wholeWords && splitsAFittingWord(marked, markedLay, width)) { wholeWords = false; firstSplit = { marked, width, got: lineTexts(marked, markedLay) }; }
+    const got = lineTexts(marked, markedLay), want = oracleLines(marked, width, KIN.fontSize);
+    let upTo = want.findIndex((l, i) => (i > 0 && RE_LATIN_CLOSED.test(l)) || (i < want.length - 1 && RE_LATIN_OPEN.test(l)));
+    if (upTo === -1) upTo = want.length; else { upTo = upTo > 0 && RE_LATIN_CLOSED.test(want[upTo]) ? upTo - 1 : upTo; joined++; }
+    if (JSON.stringify(got.slice(0, upTo)) !== JSON.stringify(want.slice(0, upTo)) || (upTo === want.length && got.length !== want.length)) {
+      if (markedSame) firstMarkedDiff = { marked, width, got, want, upTo };
+      markedSame = false;
+    }
+  }
+}
+ok(plainSame, 'kinsoku: Latin text with no mark set apart by a space lays out exactly as before kinsoku, at widths 20–300'
+  + (firstPlainDiff ? ' — first difference: ' + JSON.stringify(firstPlainDiff) : ''));
+ok(markedSame, 'kinsoku: Latin text with spaced marks lays out as before kinsoku up to the first line that broke the rule there'
+  + (firstMarkedDiff ? ' — first difference: ' + JSON.stringify(firstMarkedDiff) : ''));
+ok(wholeWords, 'kinsoku: in that text no line starts inside a word that fits a line by itself'
+  + (firstSplit ? ' — first split: ' + JSON.stringify(firstSplit) : ''));
+ok(joined > 50,'kinsoku: …and that random text did put a spaced mark at a line edge (' + joined + ' layouts), so the check above compared a real join');
+
+// a long run of opening brackets joins one unit at a time: linear, not quadratic in the run's length
+// (one untimed run first, then the best of three: the check is the algorithm, not a cold JIT or a busy host)
+const brackets = '（'.repeat(100000);
+let bestMs = Infinity;
+layoutFlow(brackets, KIN);
+for (let i = 0; i < 3; i++) { const t0 = performance.now(); layoutFlow(brackets, KIN); bestMs = Math.min(bestMs, performance.now() - t0); }
+ok(bestMs < 100, 'kinsoku: 100 000 opening brackets lay out in under 100 ms (best of three: ' + Math.round(bestMs) + ' ms)');
+
 console.log(`\npagetile flow: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
