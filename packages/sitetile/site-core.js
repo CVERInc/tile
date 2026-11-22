@@ -50,6 +50,9 @@ import { INBOX_FORM_SCRIPT } from './inbox-form-script.js';
 // the same proxied poster; the click-to-play script is this package's own, one copy for both renderers.
 import { youtubeVideoOf, posterPath } from '../cardtile/yt.mjs';
 import { YOUTUBE_LINE_SCRIPT } from './youtube-line-script.js';
+// The one `Label=href` split rule (tile-lab#69); label-eq.mjs is pure and import-free, so the editor
+// bundle carries only it.
+import { splitLabelEq } from './label-eq.mjs';
 
 const FRONTMATTER_KEY = 'sitetile-page';
 const KNOWN_TYPES = ['prose', 'hero', 'grid', 'gallery', 'carousel', 'cta', 'embed', 'collection', 'timeline', 'social', 'tagcloud', 'faq', 'form', 'people', 'links'];
@@ -298,13 +301,15 @@ function parseSidebarNav(raw) {
     const head = ci >= 0 ? col.slice(0, ci).trim() : '';
     const itemsRaw = ci >= 0 ? col.slice(ci + 1) : col;
     const items = itemsRaw.split(';').map((s) => s.trim()).filter(Boolean).map((it) => {
-      const m = it.match(/^(.*\S)\s*=\s*(\S+)$/);
+      // `Label=href` splits where label-eq.mjs's rule says (splitLabelEq), so a query string stays
+      // in the href.
+      const m = splitLabelEq(it);
       if (!m) return { label: it, href: '' };
       // optional `^weight` suffix on the href = per-item font size in px (weighted tag cloud —
       // WP tag-cloud widgets size each tag by post count; harvested from live). Purely visual,
       // omit → renders at the group's default size, so existing sidebar-navs are unaffected.
-      const hw = m[2].match(/^(.*?)\^(\d+(?:\.\d+)?)$/);
-      return hw ? { label: m[1].trim(), href: hw[1], weight: Number(hw[2]) } : { label: m[1].trim(), href: m[2].trim() };
+      const hw = m.rest.match(/^(.*?)\^(\d+(?:\.\d+)?)$/);
+      return hw ? { label: m.label, href: hw[1], weight: Number(hw[2]) } : { label: m.label, href: m.rest };
     });
     return { head, items };
   });
@@ -1004,6 +1009,11 @@ function isSiteFile(text) {
 // nothing on any page while every check stayed quiet. A hyphen BEFORE the first word character is
 // not part of the name (`--wide=1` is `wide`), and a hyphen in a VALUE was never in question
 // (`align=top-left`).
+//
+// An ASSIGNMENT is the name, `=` and the value with nothing between them, and a name is
+// case-sensitive — `logo-pos = top` and `Logo-Pos=top` do not set `logo-pos` — unlike the
+// `Label = /href` items of the nav and footer frontmatter (chrome-links.mjs), where the `=` splits
+// an item that `;` has already delimited and may be padded.
 function parseParams(raw) {
   const map = {};
   if (!raw) return map;
@@ -2873,16 +2883,46 @@ function heroHeadingless(s) {
 //   · `layout=…` — the param's label; non-empty → the columned hero.
 //   · otherwise the legacy hero, which never draws `logo=`.
 // `logo` is the `logo=` destination after `safeSrc` (null when absent or refused).
-// Takes the parsed params (or just `{ layers, layout, logo }` — Hero.astro passes those three by
-// name so the coral-params scan still sees them read there).
-function heroVariant(pm) {
+// `logoPos` is `logo-pos=` as one of HERO_LOGO_POS — where the layered hero's title block sits. The
+// value is read with its case and surrounding whitespace folded (`TOP`, `" top "` are `top`).
+// 🩸 It used to be written onto the section as typed, by both renderers: the stylesheet selects on
+// `[data-logo-pos="top"]`, so `logo-pos=TOP` drew the default while the page said `TOP`, and
+// nothing said so. A value that is not a position draws the default, as `media=` and `shape=` do,
+// and — when the CALLER hands in a sink (`opts.report`, a function) and the hero is the layered one
+// that draws it — the sink is given one message naming the value and the values expected.
+// (Not the drop queue: that is for refused destinations, and nothing in a build reads it.)
+// 🔴 NO STATE AND NO CONSOLE HERE. site-core also runs inside long-lived processes (reef-mcp's
+// checks call renderSiteToHtml for one tenant after another), where a module-level "said it once"
+// set grew without bound, silenced tenant B because tenant A had used the same value, and wrote
+// tenant text into a shared server log. So this only CALLS the sink, every time it is asked; what
+// to do with the message — print it, deduplicate it, drop it — is the caller's. The Astro build
+// passes one that prints to the build log once per build (astro/src/lib/build-log.mjs); a caller
+// that passes nothing is told nothing.
+// Takes the parsed params (or just `{ layers, layout, logo, 'logo-pos' }` — Hero.astro passes those
+// four by name so the coral-params scan still sees them read there).
+const HERO_LOGO_POS = ['top', 'center', 'bottom'];
+// The value as written (trimmed), cut at 200 the way an unreadable tagcloud item is, and QUOTED with
+// JSON.stringify so a control character in it (`logo-pos=\x1b[31m…`) reaches a log as `\u001b`, not
+// as a terminal escape. JSON.stringify leaves DEL and the C1 range (U+007F–U+009F) alone, and a
+// UTF-8 terminal acts on C1 too, so those are escaped the same way.
+function unknownLogoPosMessage(value) {
+  const shown = value.length > 200 ? value.slice(0, 200) + '…' : value;
+  const quoted = JSON.stringify(shown).replace(/[\u007f-\u009f]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+  return `[sitetile] Unrecognised logo-pos ${quoted} — expected one of: ${HERO_LOGO_POS.join(', ')}. Falling back to bottom.`;
+}
+function heroVariant(pm, opts) {
   const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
   const layerList = layersRaw ? String(layersRaw).split('|').map((x) => x.trim()).filter(Boolean) : [];
   const layout = pm.layout ? (typeof pm.layout === 'object' ? pm.layout.label : pm.layout) : null;
   const logoRaw = pm.logo ? (typeof pm.logo === 'object' ? (pm.logo.href || pm.logo.label) : String(pm.logo)) : null;
   const logo = logoRaw ? safeSrc(logoRaw) : null;
   const kind = layerList.length ? 'layers' : layout ? 'layout' : 'legacy';
-  return { kind, layerList, layout, logo };
+  const posRaw = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']).trim() : '';
+  const pos = posRaw.toLowerCase();
+  const posKnown = HERO_LOGO_POS.indexOf(pos) >= 0;
+  const report = opts && typeof opts.report === 'function' ? opts.report : null;
+  if (report && kind === 'layers' && pos && !posKnown) report(unknownLogoPosMessage(posRaw));
+  return { kind, layerList, layout, logo, logoPos: posKnown ? pos : 'bottom' };
 }
 
 // The section types whose renderer can write the section's title as the page <h1>: the Astro
@@ -2920,7 +2960,7 @@ function pageH1Index(sections) {
 }
 
 // `ctx` is the page-level runtime data a section can need that the section itself does not carry —
-// today only the `action=inbox` form reads it: { lang, meta, path } (see renderSiteToHtml).
+// the `action=inbox` form reads { lang, meta, path }, the layered hero `report` (see renderSiteToHtml).
 function renderSection(s, hero, ctx) {
   // 🩸 #1933: the page's FIRST section carries its title as <h1> in the built page (Section.astro
   // `index === 0`); a string render that always wrote <h2> described a page with no h1. Only the
@@ -2958,7 +2998,7 @@ function renderSection(s, hero, ctx) {
       // `.st-hero-text.st-hero-overlay` block. `logo=` renders the h1 as an image whose alt is the title.
       // `logo=` renders the h1 as an image (alt = title); shared by the layered and `layout=` heroes, as in Hero.astro.
       // heroVariant: the ONE variant selection (Hero.astro and heroHeadingless call it too, reef#2857 r2).
-      const variant = heroVariant(pm);
+      const variant = heroVariant(pm, { report: ctx.report });   // the caller's sink, or none
       const { layerList, logo } = variant;
       // reef#2857: a text-free hero (heroHeadingless) writes no heading element.
       // reef#2869: its heading is the <h1> only when this hero IS the page's h1 owner (`hero`,
@@ -2972,7 +3012,7 @@ function renderSection(s, hero, ctx) {
           ? '<' + HH + ' class="st-hero-logo st-hero-title"><img src="' + escAttr(logo) + '" alt="' + escAttr(s.title) + '" loading="eager" decoding="async"></' + HH + '>'
           : '<' + HH + ' class="st-hero-title">' + inlineHtml(s.title) + '</' + HH + '>';
       if (layerList.length) {
-        const logoPos = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']) : 'bottom';
+        const logoPos = variant.logoPos;   // heroVariant: one of top|center|bottom
         const lEyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
         const stage = '<div class="st-hero-stage" aria-hidden="true">' + layerList.map((src, i) => {
           const srcOk = safeSrc(src);
@@ -3485,7 +3525,7 @@ function _stampDropWarnings(site, before) {
  * Render a parsed site to the reference HTML string.
  *
  * @param {object} site  parseSite() output.
- * @param {{path?: string, contentRels?: Set<string>}} [opts]
+ * @param {{path?: string, contentRels?: Set<string>, report?: (message: string) => void}} [opts]
  *   `path` — the URL path this page is served at (what Form.astro reads as `Astro.url.pathname`).
  *   🔴 PASS IT FOR ANY NON-ROOT PAGE: an `action=inbox` form writes it into `return_to` and into
  *   the "send another" link, and the default is '/', so a page at /contact/ rendered without it
@@ -3496,13 +3536,16 @@ function _stampDropWarnings(site, before) {
  *   way the built page's is (a locale prefix is used only when that locale's home file exists);
  *   absent → the locale prefix of `path` alone decides.
  *   `lang` and `locales` come from the site's own frontmatter, as PageView hands them to Form.astro.
+ *   `report` — a function given one message string for each author param the render could not
+ *   use (today: a layered hero's unrecognised `logo-pos=`), every time it is met. Absent → nothing
+ *   is said anywhere: these messages are neither printed nor remembered here (heroVariant).
  */
 function renderSiteToHtml(site, opts) {
   const _before = _dropWarnings.length;
   const o = opts || {};
   const pathname = String(o.path || '/').split(/[?#]/)[0];
   const ctx = { lang: (site.meta || {}).lang, meta: site.meta || {}, path: pathname,
-    contentRels: o.contentRels };
+    contentRels: o.contentRels, report: typeof o.report === 'function' ? o.report : undefined };
   const h1At = pageH1Index(site.sections);
   const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === h1At, { ...ctx, index: i }), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
