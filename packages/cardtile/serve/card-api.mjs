@@ -1448,31 +1448,48 @@ const readJson = async (request) => {
  * get: handle → { md, version, gen, stopped } | null. Null is "no such card", never an error — and a
  * body from a deleted lifetime is no such card (see genKey). `stopped` is whether the public door
  * withholds this body (a serving stop in the same lifetime), read in the same parallel round as the
- * body (tile#338). Reading it never lifts or writes it.
+ * body (tile#338). Reading it never lifts or writes it. For the authenticated routes only: the card
+ * comes from currentCard, so a caller's own write is what it reads back (tile#365).
  */
-async function readCard(store, handle) {
-  const { md, gen, stopped } = await liveCard(store, handle, { stop: true });
-  if (md === null) return null;
-  return { md, version: await cardVersion(md), gen, stopped: stopped != null };
+async function readCard(env, store, handle) {
+  const { md, gen, stopped, version } = await currentCard(env, store, handle);
+  if (md == null) return null;
+  return { md, version: version || await cardVersion(md), gen, stopped: stopped != null };
+}
+
+/** a bound object did not answer an authenticated read; handleApi answers 503 `read_failed` */
+class ReadUnanswered extends Error {
+  constructor(handle, why) { super(`CardLifetime did not answer /held for "${handle}": ${why}`); this.handle = handle; }
 }
 
 /**
- * the card the handle's object holds, or null when it does not speak for it (CardLifetime.held), did
- * not answer, or is not bound — and then the caller reads KV, which is what every read did before.
- * Unlike a write, a read has that second source: without the object nothing can have been written
- * that KV has not been handed, so a Worker with no binding answers its reads as it always did.
+ * what the handle's object says (CardLifetime.held): `{ gen, held: true, md, version }`, or
+ * `{ gen, held: false }` when it does not speak for the card — or null when NO object is bound, and
+ * then the caller reads KV, which is what every read did before: with no binding, no object has
+ * written anything, so nothing can have been written that KV has not been handed.
+ *
+ * 🔴 A BOUND object that throws, answers non-ok or answers something that is not an answer throws
+ * ReadUnanswered (the route answers 503), never null. A bound object writes things KV may not have
+ * seen yet — a delete's new generation above all (/end) — and KV's own `gen:<handle>` read in its
+ * place may still name the deleted lifetime: the deleted card listed, read, and previewed with its
+ * pictures (tile#365). It also keeps list_cards to one failed call, not six subrequests per handle.
  */
 async function objectCard(env, handle) {
   if (!env.CARD_LIFETIMES) return null;
   let res;
   try {
     res = await lifetimeOf(env, handle).fetch('https://card-lifetime/held', { method: 'POST', body: JSON.stringify({ handle }) });
-  } catch {
-    return null;
+  } catch (e) {
+    throw new ReadUnanswered(handle, e && e.message);
   }
-  if (!res.ok) return null;
+  if (!res.ok) throw new ReadUnanswered(handle, `answered ${res.status}`);
   const held = await res.json().catch(() => null);
-  return held && held.held === true && typeof held.md === 'string' ? held : null;
+  if (!held || typeof held.gen !== 'string' || !VALID_GEN.test(held.gen)) throw new ReadUnanswered(handle, 'no generation in the answer');
+  if (held.held === true) {
+    if (typeof held.md !== 'string') throw new ReadUnanswered(handle, 'held, with no card in the answer');
+    return held;
+  }
+  return { gen: held.gen, held: false };
 }
 
 /**
@@ -1480,10 +1497,17 @@ async function objectCard(env, handle) {
  * card when it holds one (so a read right after a write sees that write), else KV's. The public pages
  * do not come here: they read KV (liveCard), which is what KV is for. The stop is KV's either way —
  * it is not a card write and the object does not hold it.
+ *
+ * 🔴 When the object answers but does not hold the card, KV is read AT THE GENERATION THE OBJECT NAMED,
+ * never at KV's own `gen:<handle>`. A delete is a write too: right after one, this location's `gen:`
+ * may still name the deleted lifetime, and its body is then the deleted card — listed, previewed with
+ * its pictures, handed to whoever takes the handle next. The object's generation is the truth (only
+ * the object writes `gen:`), so under it the deleted card is under a key this never reads.
  */
 async function currentCard(env, store, handle) {
-  const held = await objectCard(env, handle);
-  if (!held) return liveCard(store, handle, { stop: true });
+  const held = await objectCard(env, handle); // throws if the bound object did not answer
+  if (!held) return liveCard(store, handle, { stop: true }); // no object bound: KV alone, as before
+  if (!held.held) return liveCard(store, handle, { stop: true, gen: held.gen });
   const stopped = await readGen(store, stopKey(handle, held.gen), legacyStopKey(handle), held.gen);
   return { md: held.md, gen: held.gen, stopped, version: held.version };
 }
@@ -1675,6 +1699,17 @@ export function resourceOf(afterPrefix) {
  * same guard, same handlers, same answers (see `resourceOf`). The others have one spelling each.
  */
 export async function handleApi(request, env, url) {
+  try {
+    return await routeApi(request, env, url);
+  } catch (e) {
+    // a read whose object is bound and did not answer (see objectCard): refused whole, before anything
+    // is written — list_cards stops at that handle, and a preview parks nothing
+    if (e instanceof ReadUnanswered) return json({ error: 'read_failed', why: `"${e.handle}" was not read: its write queue did not answer. Read the card again.` }, 503);
+    throw e;
+  }
+}
+
+async function routeApi(request, env, url) {
   if (!url.pathname.startsWith(API_PREFIX)) return null;
 
   const denied = await authorize(request, env);
@@ -1704,7 +1739,7 @@ export async function handleApi(request, env, url) {
       if (typeof h !== 'string') continue;
       const handle = h.trim().toLowerCase();
       if (!VALID_HANDLE.test(handle)) continue;
-      const row = await readCard(store, handle);
+      const row = await readCard(env, store, handle);
       if (!row) continue;
       out.push({
         handle,
@@ -1914,7 +1949,7 @@ export async function handleApi(request, env, url) {
       return cardWrite(env, handle, 'asset', { kind: 'put', id, b64, mime: body.mime || 'image/webp' });
     }
     if (method === 'DELETE') return cardWrite(env, handle, 'asset', { kind: 'delete', id });
-    if (!(await readCard(store, handle))) return json({ error: `No card at "${handle}".` }, 404);
+    if (!(await readCard(env, store, handle))) return json({ error: `No card at "${handle}".` }, 404);
     return json({ error: `${method} not allowed here.` }, 405);
   }
 
