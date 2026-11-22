@@ -11,6 +11,9 @@
 // the deck comes up, a brand mark's fallback handler runs, a video opens its player, a back opens, the QR
 // opens, and a long file's next window is fetched. A page with an embed carries the same policy, and the
 // embed's own script runs: the embed is its own document (serve/cardtile-embed-document.mjs).
+// And what ships (`?stage=default`, the setting unset): every kind of page served for a person — the three
+// views, a page with an embed, a preview, a long file's window, the "no card" page and an expired preview —
+// comes with the report-only policy, boots, and the browser reports no violation.
 //
 // 🔴 CONSOLE ERRORS ARE NOT IGNORED, they are SORTED. Each engine has a short list of exact texts it prints
 // at error level that are not a policy violation (KNOWN, below), each with its reason and a condition:
@@ -125,7 +128,8 @@ const server = http.createServer(async (req, res) => {
     const arm = url.searchParams.get('arm') || '';
     const stage = url.searchParams.get('stage') || 'enforce';
     url.searchParams.delete('arm'); url.searchParams.delete('stage');
-    const envOf = (s) => ({ CARDS: store, ...(s === 'off' ? {} : { CARDS_PAGE_CSP: s }) });
+    // `default` asks with the setting unset (report-only since tile#372); every other stage names itself, "off" included
+    const envOf = (s) => ({ CARDS: store, ...(s === 'default' ? {} : { CARDS_PAGE_CSP: s }) });
     const ask = (s) => worker.fetch(new Request(`http://localhost${url.pathname}${url.search}`, { headers: { accept: req.headers.accept || '*/*', 'accept-language': 'en' } }), envOf(s));
     // 'srcdoc': the page as it is with the setting off (its embed a srcdoc frame), served under the policy
     const r = await ask(arm === 'srcdoc' ? 'off' : stage);
@@ -329,6 +333,34 @@ try {
         check(state.boot === 'ready' && !state.off && state.view === view && state.strings, `every tile, ${view}, ${stage}: the deck came up in its view (${JSON.stringify(state)})`);
         await p.page.waitForTimeout(600);
         await quiet(`every tile, ${view}, ${stage}`, p, context);
+        await close(p);
+      }
+    });
+
+    // 1b. tile#372 — what ships: the setting UNSET. Every kind of page the Worker serves for a person comes
+    // with the report-only policy, its own scripts all run, and the browser reports nothing — a report-only
+    // policy that would refuse the page's own boot is worse than none.
+    await section('default', async () => {
+      const kinds = [...VIEWS.map((v) => [`every tile, ${v}`, `/every-${v}`, 'deck']),
+        ['a page with an embed', '/embedded-wall', 'embed'], ['a preview', `/_preview/${'c'.repeat(32)}`, 'deck'],
+        ['the second window of a long file', '/long?w=2', 'deck'], ['the "no card" page', '/nobody', 'deck'],
+        ['an expired preview', `/_preview/${'9'.repeat(32)}`, 'static']];
+      for (const [label, path, kind] of kinds) {
+        const at = `${path}${path.includes('?') ? '&' : '?'}stage=default`;
+        const p = await open(context, at, { expect404: [path.split('?')[0]] });
+        check(p.stage === 'report-only' && !!p.policy, `default, ${label}: served with the report-only policy`);
+        if (kind !== 'static') {
+          await p.page.waitForFunction(() => window.__deckBoot === 'ready', null, { timeout: 10000 }).catch(() => {});
+          const state = await step(p.page.evaluate(() => ({ boot: window.__deckBoot, off: document.documentElement.hasAttribute('data-deck-off'), strings: !!window.__deckStrings })), 'read state');
+          check(state.boot === 'ready' && !state.off && state.strings, `default, ${label}: the deck came up (${JSON.stringify(state)})`);
+        }
+        if (kind === 'embed') {
+          await eagerFrames(p);
+          const e = await embedRan(p);
+          check(e.ran && e.opaque && e.blocked && !e.escaped, `default, ${label}: the embed's own script ran, in an opaque origin (${JSON.stringify(e)})`);
+        }
+        await p.page.waitForTimeout(600);
+        await quiet(`default, ${label}`, p, context);
         await close(p);
       }
     });
