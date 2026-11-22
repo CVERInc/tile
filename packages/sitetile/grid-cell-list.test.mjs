@@ -51,6 +51,17 @@ test('each split item still uses the safe inline Markdown renderer', () => {
     ['<span class="st-b"><span class="st-mk">**</span>a<span class="st-mk">**</span></span>', '&lt;script&gt;x&lt;/script&gt;']);
 });
 
+test('a run of markers before an item is dropped whole, in table and grid cells', () => {
+  for (const marker of ['-', '*', '+', '・', '•']) {
+    assert.deepEqual(items(bodyHtml(`| Label | - ${marker} a<br>${marker} - b<br>${marker} c |`)), ['a', 'b', 'c'], marker);
+  }
+  assert.deepEqual(items(bodyHtml('| Label | - - a<br>• - b |')), ['a', 'b']);
+  assert.deepEqual(items(render('- - a<br>- * b<br>+ c')), ['a', 'b', 'c']);
+  // A marker needs its space: emphasis right after the lead is text, not a second marker.
+  assert.deepEqual(items(bodyHtml('| Label | - *a*<br>- b |')),
+    ['<span class="st-i"><span class="st-mk">*</span>a<span class="st-mk">*</span></span>', 'b']);
+});
+
 test('table cell lists keep their existing output', () => {
   assert.deepEqual(items(bodyHtml('| Label | - a<br>- b |')), ['a', 'b']);
   assert.deepEqual(['-', '*', '+', '・', '•'].map((marker) =>

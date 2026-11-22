@@ -1833,9 +1833,12 @@ const RE_CELL_BR = /<br\s*\/?>/i;
 // bullets `・` (U+30FB) and `•` (U+2022) that a CJK author reaches for. One definition, because the
 // same characters mean the same thing wherever an item is written by hand (see the dialogue block).
 const RE_CELL_BULLET = /^\s*[-*+・•]\s+/;
+// An item's whole lead: an author who types a second marker after the first (`- - x`, `• - x`) means
+// one item, so every marker in the run is dropped, not just the first.
+const RE_CELL_BULLET_RUN = new RegExp('^(?:' + RE_CELL_BULLET.source.slice(1) + ')+');
 function cellListHtml(parts, className = 'st-cell-list') {
   if (parts.length > 1 && parts.every((p) => RE_CELL_BULLET.test(p))) {
-    return '<ul class="' + className + '">' + parts.map((p) => '<li>' + inlineHtml(p.replace(RE_CELL_BULLET, '')) + '</li>').join('') + '</ul>';
+    return '<ul class="' + className + '">' + parts.map((p) => '<li>' + inlineHtml(p.replace(RE_CELL_BULLET_RUN, '')) + '</li>').join('') + '</ul>';
   }
   return null;
 }
