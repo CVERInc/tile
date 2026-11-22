@@ -3025,6 +3025,30 @@ test('🔴 the full owner read right after put_asset carries the new picture whi
   assert.equal(parseCard(await res.text()).assets.extra?.b64, AVATAR_NEW, 'the full read answered the stale KV body');
 });
 
+test('🔴 list_cards right after put_asset answers the new version and asset count while KV lags', async () => {
+  const env = envWith({ t: CARD });
+  const before = (await liveCard(env.CARDS, 't')).md;
+  const put = await (await call(env, 'PUT', '/_api/card/t/asset/extra', { base64: AVATAR_NEW, mime: 'image/png' })).json();
+  const restore = lagKv(env, keyT(), before);
+  const listed = await (await call(env, 'POST', '/_api/cards', { handles: ['t'] })).json();
+  restore();
+  assert.equal(listed.cards[0]?.version, put.version, 'list_cards answered the version from before the put');
+  assert.equal(listed.cards[0].assets, 3, 'list_cards counted the stale KV lane');
+  // CONTROL: with KV caught up the answer is the same one
+  assert.deepEqual(await (await call(env, 'POST', '/_api/cards', { handles: ['t'] })).json(), listed);
+});
+
+test('🔴 a card just created while KV still misses it: list_cards lists it and its asset route is not a 404', async () => {
+  const env = firstContactEnv({});
+  const made = await (await call(env, 'PUT', '/_api/card/fresh', { markdown: thinCard(CARD), create: true })).json();
+  const restore = lagKv(env, cardKey('fresh', '0'), null); // this location has not seen the create yet
+  const listed = await (await call(env, 'POST', '/_api/cards', { handles: ['fresh'] })).json();
+  const asset = await call(env, 'GET', '/_api/card/fresh/asset/x');
+  restore();
+  assert.deepEqual(listed.cards.map((c) => [c.handle, c.version]), [['fresh', made.version]], 'list_cards took a lagging KV miss as no card');
+  assert.equal(asset.status, 405, 'the asset route answered "No card" for a card the object holds');
+});
+
 test('🔴 the read asks the object and changes nothing in it: no key written, no alarm armed — settled or at first contact', async () => {
   for (const firstContact of [false, true]) {
     const env = envWith({ t: CARD }, { firstContact });

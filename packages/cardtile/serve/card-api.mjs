@@ -1448,12 +1448,13 @@ const readJson = async (request) => {
  * get: handle → { md, version, gen, stopped } | null. Null is "no such card", never an error — and a
  * body from a deleted lifetime is no such card (see genKey). `stopped` is whether the public door
  * withholds this body (a serving stop in the same lifetime), read in the same parallel round as the
- * body (tile#338). Reading it never lifts or writes it.
+ * body (tile#338). Reading it never lifts or writes it. For the authenticated routes only: the card
+ * comes from currentCard, so a caller's own write is what it reads back (tile#365).
  */
-async function readCard(store, handle) {
-  const { md, gen, stopped } = await liveCard(store, handle, { stop: true });
-  if (md === null) return null;
-  return { md, version: await cardVersion(md), gen, stopped: stopped != null };
+async function readCard(env, store, handle) {
+  const { md, gen, stopped, version } = await currentCard(env, store, handle);
+  if (md == null) return null;
+  return { md, version: version || await cardVersion(md), gen, stopped: stopped != null };
 }
 
 /**
@@ -1704,7 +1705,7 @@ export async function handleApi(request, env, url) {
       if (typeof h !== 'string') continue;
       const handle = h.trim().toLowerCase();
       if (!VALID_HANDLE.test(handle)) continue;
-      const row = await readCard(store, handle);
+      const row = await readCard(env, store, handle);
       if (!row) continue;
       out.push({
         handle,
@@ -1914,7 +1915,7 @@ export async function handleApi(request, env, url) {
       return cardWrite(env, handle, 'asset', { kind: 'put', id, b64, mime: body.mime || 'image/webp' });
     }
     if (method === 'DELETE') return cardWrite(env, handle, 'asset', { kind: 'delete', id });
-    if (!(await readCard(store, handle))) return json({ error: `No card at "${handle}".` }, 404);
+    if (!(await readCard(env, store, handle))) return json({ error: `No card at "${handle}".` }, 404);
     return json({ error: `${method} not allowed here.` }, 405);
   }
 
