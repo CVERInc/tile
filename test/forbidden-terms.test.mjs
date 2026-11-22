@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const GATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'forbidden-terms.mjs');
-const { scan, handleHash } = await import(GATE);
+const { scan, handleHash, portableKinds } = await import(GATE);
 
 const PLANTED_HANDLE = 'zzplantedhandlezz';
 const PLANTED_PRIVATE = 'zzplantedprivatezz';
@@ -238,4 +238,122 @@ test('P3: a tracked file literally named "-" is scanned, not read as standard in
   process.env.CVER_FORBIDDEN_TERMS = priv;
   const r = scan({ root: repo({ '-': `clean\n${PLANTED_PRIVATE}\n`, 'b.md': 'clean\n' }), hashesFile: hashes });
   assert.deepEqual(r.hits, ['-:2: private list entry #1']);
+});
+
+// ── tier 4: shapes that need no list ─────────────────────────────────────────────────────────────
+// Every value below is made up, and every one that would be a hit is ASSEMBLED at run time: this file
+// is tracked, so the gate reads it too, and a literal here would turn the real tree red.
+const AT = '@';
+const addr = (local, domain) => local + AT + domain;
+const tail = (n) => 'Zz0'.repeat(Math.ceil(n / 3)).slice(0, n);
+const SECRET_SAMPLES = {
+  'payment-provider secret key': ['sk', 'live', tail(24)].join('_'),
+  'payment-provider secret key (test mode)': ['sk', 'test', tail(24)].join('_'),
+  'payment-provider secret key (restricted)': ['rk', 'live', tail(24)].join('_'),
+  'webhook signing secret': ['whsec', tail(32)].join('_'),
+  'GitHub token': ['ghp', tail(36)].join('_'),
+  'GitHub token (fine-grained)': ['github', 'pat', tail(22), tail(40)].join('_'),
+  'Slack token': ['xoxb', '000000000000', tail(24)].join('-'),
+  'AWS access key id': 'AKIA' + 'Z0'.repeat(8),
+  'PEM private key header': ['-----BEGIN', 'RSA', 'PRIVATE', 'KEY-----'].join(' '),
+  'PEM private key header (PKCS#8)': ['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' '),
+};
+const tier4 = (files) => {
+  const { hashes, priv } = lists();
+  process.env.CVER_FORBIDDEN_TERMS = priv;
+  return scan({ root: repo(files), hashesFile: hashes }).hits;
+};
+
+test('tier 4 RED: an address on a real-looking domain, and only its kind is reported', () => {
+  const real = addr('someone.made-up', 'made-up-mail-host.com');
+  assert.deepEqual(tier4({ 'a.md': `clean\ncontact ${real} today\n` }), ['a.md:2: e-mail address']);
+});
+
+test('tier 4 RED: two addresses on one line are judged separately — a reserved one does not excuse its neighbour', () => {
+  const line = `${addr('a', 'b.test')} ${addr('real', 'b.test.com')}`;
+  assert.deepEqual(tier4({ 'a.md': `${line}\n` }), ['a.md:1: e-mail address'], 'exactly one hit for the line');
+  // the same line with both on reserved domains is clean, so the hit above is the second address
+  assert.deepEqual(tier4({ 'a.md': `${addr('a', 'b.test')} ${addr('real', 'b.example')}\n` }), []);
+});
+
+test('tier 4 control: reserved and example domains, a density file name, a scoped package and an action ref are not addresses', () => {
+  const body = [
+    addr('a', 'b.test'), addr('a', 'sub.b.example'), addr('a', 'x.invalid'), addr('a', 'x.localhost'),
+    addr('a', 'example.com'), addr('a', 'www.example.org'), `<${addr('a', 'example.net')}>.`,
+    `sentence ending in ${addr('a', 'b.test')}.`,
+    'src="icon' + AT + '2x.png"', 'icon_16x16' + AT + '3x.webp', 'uses: actions/checkout' + AT + 'v4', 'npm i pkg' + AT + '1.2.3',
+  ].join('\n') + '\n';
+  assert.deepEqual(tier4({ 'a.md': body, ['img/icon' + AT + '2x.png']: 'not really an image\n' }), []);
+});
+
+test('tier 4 RED: an excuse needs the WHOLE domain and a COMPLETE address', () => {
+  const lines = [
+    addr('a', 'example.com.evil-made-up.net'), // reserved name as a prefix of a longer domain
+    addr('a', 'notexample.com'),              // not a subdomain of the reserved name
+    addr('a', '2x.com'),                      // the density shape with a real TLD
+    addr('a', 'b.test') + 'é.org',       // the ASCII pattern stops early: what it judged is not what was written
+    addr('a', 'b.test') + '_x.org',
+  ];
+  assert.deepEqual(tier4({ 'a.md': lines.join('\n') + '\n' }), lines.map((_, k) => `a.md:${k + 1}: e-mail address`));
+});
+
+for (const [label, sample] of Object.entries(SECRET_SAMPLES)) {
+  test(`tier 4 RED: secret prefix — ${label}`, () => {
+    const kind = `secret prefix (${label.replace(/ \((?:test mode|restricted|fine-grained|PKCS#8)\)$/, '')})`;
+    assert.deepEqual(tier4({ 'conf.js': `// clean\nconst k = "${sample}";\n` }), [`conf.js:2: ${kind}`]);
+    assert.deepEqual(portableKinds(`KEY=${sample}`), [kind], 'directly after an equals sign');
+  });
+}
+
+test('tier 4 control: prose about a prefix, and a prefix inside a longer word, are not secrets', () => {
+  const body = [
+    'keys start with ' + ['sk', 'live', ''].join('_') + ' or ' + ['ghp', ''].join('_'),
+    'const risk' + ['', 'live', tail(12)].join('_') + ' = 1;', // the prefix letters inside an identifier
+    'the ' + ['-----BEGIN', 'CERTIFICATE-----'].join(' ') + ' block is public',
+    'FAKIA' + 'Z0'.repeat(8),
+  ].join('\n') + '\n';
+  assert.deepEqual(tier4({ 'a.md': body }), []);
+});
+
+test('tier 4 control: a base64 blob is left alone, even one that happens to spell an access-key id', () => {
+  // deterministic filler over the whole base64 alphabet, with the key-id shape buried mid-run
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let blob = '';
+  for (let i = 0; i < 6000; i++) blob += B64[(i * 37 + (i >> 3) * 11) % 64];
+  const buried = blob.slice(0, 3000) + 'AKIA' + 'Z0'.repeat(8) + blob.slice(3000) + '==';
+  const css = `@font-face { font-family: "x"; src: url(data:font/woff2;base64,${buried}) format("woff2"); }\n`;
+  assert.deepEqual(tier4({ 'fonts.css': css, 'blob.txt': `${blob}\n${buried}\n` }), []);
+  // the same shape standing on its own in that file is still refused
+  assert.deepEqual(tier4({ 'fonts.css': css + 'id: ' + 'AKIA' + 'Z0'.repeat(8) + '\n' }), ['fonts.css:2: secret prefix (AWS access key id)']);
+});
+
+test('tier 4 control: a binary file is not read, and its name is still judged', () => {
+  const bytes = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0]), Buffer.from(addr('someone', 'made-up-mail-host.com'))]);
+  assert.deepEqual(tier4({ ['img/icon' + AT + '2x.png']: bytes }), []);
+  const hits = tier4({ [`img/${addr('someone', 'made-up-mail-host.com')}.png`]: bytes });
+  assert.equal(hits.length, 1);
+  assert.match(hits[0], /^\[path withheld[^\]]*\]: \(in the path\) e-mail address$/);
+});
+
+test('tier 4 RED: full-width Latin letters — a run of three, and a full-width form hiding another shape', () => {
+  const wide = (s) => s.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xFEE0));
+  assert.deepEqual(tier4({ 'a.md': `clean\nbrand ${wide('Made')}　${wide('Up')}\n` }), ['a.md:2: full-width Latin letters']);
+  // one or two full-width letters is ordinary CJK typography, and full-width punctuation is not a letter
+  assert.deepEqual(tier4({ 'a.md': `寬度 ${wide('A')}4，${wide('kg')}！\n` }), []);
+  // a full-width at-sign or underscore does not hide what the ASCII patterns look for
+  assert.deepEqual(portableKinds('someone' + wide(AT) + 'made-up-mail-host.com'), ['e-mail address']);
+  assert.deepEqual(portableKinds('sk' + wide('_') + 'live_' + tail(24)), ['secret prefix (payment-provider secret key)']);
+});
+
+test('tier 4 CLI: exits non-zero, names path:line and the kind, and never prints what matched', () => {
+  const { hashes, priv } = lists();
+  const real = addr('someone.made-up', 'made-up-mail-host.com');
+  const key = SECRET_SAMPLES['GitHub token'];
+  const root = repo({ ...filler(), 'leak.md': `write to ${real}\ntoken ${key}\n` });
+  const res = cli(root, hashes, { CVER_FORBIDDEN_TERMS: priv });
+  const out = res.stdout + res.stderr;
+  assert.equal(res.status, 1, out);
+  assert.match(res.stderr, /leak\.md:1: e-mail address$/m);
+  assert.match(res.stderr, /leak\.md:2: secret prefix \(GitHub token\)$/m);
+  for (const secret of [real, 'made-up-mail-host', key, key.slice(0, 12)]) assert.ok(!out.includes(secret), 'the refusal printed what it matched');
 });
