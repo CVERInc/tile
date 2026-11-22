@@ -105,7 +105,8 @@ back: "#about"
   lower-cased and spaces become hyphens. Files that say `## drawer: <id>` are still read and keep
   that word.
 - `back=#<id>` on a tile points it at that lane. It is honoured on `profile`, `text`, `link` and
-  `feature`; `video`, `slides`, `social` and `embed` ignore it. A pointer to a lane that does not
+  `feature`, which open it in every view. `video`, `slides`, `social` and `embed` turn over to it in
+  the stack and list views, and on the wall they do not open it. A pointer to a lane that does not
   exist does nothing.
 - A `link` whose address is `#<id>`, or a `feature` with `href=#<id>`, opens that back too.
 - `back: "#<id>"` in the frontmatter is the **default back**: every tile without a back of its own
