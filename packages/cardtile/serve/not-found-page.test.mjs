@@ -8,6 +8,8 @@
 //   3. asked on reef.cards it names and links reef.cards; on every other host of ours it is unchanged
 //   4. reef.cards answers /favicon.ico, /favicon.svg and /apple-touch-icon.png with an image even
 //      when the platform's own page is not there
+//   tile#381: a picture address that misses (the picture route on) is that same page, in the visitor's
+//      language, with the same Vary — and is never kept in the Worker's picture cache
 //
 // reef.cards is asked in both stages it answers in: the cutover (CARD_CANONICAL_HOST) and the open
 // stage (CARDS_HOST_OPEN, tile#299), where the request is re-addressed to the old host.
@@ -16,6 +18,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import worker, * as W from './card-worker.mjs';
 import { LOCALE_KEYS, SANDBOX_LOCALES } from '../w/sandbox-i18n.mjs';
 import { makeWindow } from '../w3/mini-dom.mjs';
@@ -186,6 +189,84 @@ test('tile#340 ①: a creator’s own domain keeps its small 404 in every langua
     assert.equal(r.body, '<!doctype html><meta charset=utf-8><title>Not found</title><p>Nothing here.</p>');
     assert.equal(r.header('vary'), 'Accept');
   }
+});
+
+// ── tile#381: a picture address that misses is the same page ─────────────────────────────────────
+//
+// With the picture route on (CARDTILE_PICTURES, tile#339), `/<handle>/a/<sha256>.<ext>` that finds
+// nothing answers the no-card page. It is a "nothing here" answer like the others, so it follows the
+// visitor (`?lang=`, Accept-Language) and says so in Vary. 🔴 And it is the VISITOR's language, never the
+// Cards file's own `lang:`: a page that took the file's language would tell a live handle (a hash not on
+// it) from one that never existed, which tile-lab#51 forbids.
+
+const PIC_HEX = createHash('sha256').update(Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64')).digest('hex');
+const NOT_HEX = 'c'.repeat(64);
+const WITH_LANG = CARDS_FILE.replace('title: Test Page', 'title: Test Page\nlang: de');
+const PICTURES = { CARDTILE_PICTURES: 'url' };
+/** every way a picture address misses on a shared host: [why, path, seed] */
+const PICTURE_MISSES = [
+  ['no Cards file', `/nobody/a/${NOT_HEX}.png`, {}],
+  ['a stopped Cards file, its own picture', `/t/a/${PIC_HEX}.gif`, STATES('t').stopped],
+  ['a deleted Cards file, its own picture', `/t/a/${PIC_HEX}.gif`, STATES('t').deleted],
+  ['a hash not on the Cards file', `/t/a/${NOT_HEX}.png`, { t: CARDS_FILE }],
+  ['its picture under another type', `/t/a/${PIC_HEX}.png`, { t: CARDS_FILE }],
+  ['a hash not on a Cards file that declares lang: de', `/t/a/${NOT_HEX}.png`, { t: WITH_LANG }],
+];
+
+test('tile#381: a missed picture address answers the no-card page in the visitor’s language, with Vary', async () => {
+  for (const [name, host, face] of FACES) {
+    const settings = { ...face, ...PICTURES };
+    // control: the route is on, so the misses below are misses and not unknown paths
+    const hit = await ask(host, `/t/a/${PIC_HEX}.gif`, { settings, seed: { t: CARDS_FILE } });
+    assert.equal(hit.status, 200, `${name}: CONTROL: the picture itself answers`);
+    assert.equal(hit.header('content-type'), 'image/gif', `${name}: CONTROL`);
+    for (const [key, tag] of [['ja', 'ja-JP'], ['zh', 'zh-TW'], ['en', null]]) {
+      for (const [how, q, headers] of [
+        ['Accept-Language', '', tag ? { 'accept-language': `${tag},en;q=0.5` } : {}],
+        ['?lang=', tag ? `?lang=${tag}` : '', { 'accept-language': tag ? 'de' : '' }],
+      ]) {
+        if (!tag && how === '?lang=') continue;
+        const missing = await ask(host, `/nobody${q}`, { settings, headers });
+        for (const [why, path, seed] of PICTURE_MISSES) {
+          const where = `${name} · ${key} by ${how} · ${why}`;
+          const r = await ask(host, `${path}${q}`, { settings, seed, headers });
+          assert.equal(r.status, 404, where);
+          assert.equal(htmlLang(r.body), tag || 'en-US', `${where}: <html lang>`);
+          assert.equal(sentence(r.body), WORDS[key], `${where}: the sentence`);
+          assert.equal(r.header('vary'), 'Accept, Accept-Language', `${where}: a cache must key this page by language`);
+          assert.equal(r.body, missing.body, `${where}: not the page every other missing address gets`);
+        }
+      }
+    }
+  }
+});
+
+test('tile#381: a missed picture is never kept, so one language’s 404 is never handed to another', async (t) => {
+  const kept = new Map();
+  const puts = [];
+  const before = globalThis.caches;
+  globalThis.caches = { default: {
+    async match(req) { const e = kept.get(req.url); return e ? new Response(e.body.slice(), { headers: e.headers }) : undefined; },
+    async put(req, res) { puts.push(req.url); kept.set(req.url, { body: new Uint8Array(await res.arrayBuffer()), headers: [...res.headers] }); },
+  } };
+  t.after(() => { globalThis.caches = before; });
+  const settings = PICTURES;
+  const asked = [];
+  for (const [why, path, seed] of PICTURE_MISSES) {
+    for (const [lang, tag] of [['ja', 'ja-JP'], ['en', null], ['ja', 'ja-JP']]) {
+      const r = await ask('card.feelreef.com', path, { settings, seed, headers: tag ? { 'accept-language': tag } : {} });
+      assert.equal(r.status, 404, why);
+      assert.equal(sentence(r.body), WORDS[lang], `${why} · ${lang} after another language asked the same address`);
+      assert.equal(r.header('vary'), 'Accept, Accept-Language', why);
+      assert.match(r.header('cache-control'), /max-age=60\b/, `${why}: the edge keeps it a minute, keyed by Vary`);
+      asked.push(why);
+    }
+  }
+  assert.equal(asked.length, PICTURE_MISSES.length * 3);
+  assert.deepEqual(puts, [], 'a 404 was put in the Worker’s picture cache');
+  // control: the fake cache is the one the route uses — a hit is kept
+  await ask('card.feelreef.com', `/t/a/${PIC_HEX}.gif`, { settings, seed: { t: CARDS_FILE } });
+  assert.equal(puts.length, 1, 'CONTROL: the found picture is kept');
 });
 
 // ── 2. no view switcher ───────────────────────────────────────────────────────────────────────────
