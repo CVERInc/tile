@@ -3586,7 +3586,7 @@ const UNFINISHED = { conflict: true, delete_unfinished: true, why: '"t" has a de
 const STOPPED_UNFINISHED = { conflict: true, delete_unfinished: true, stopped: true, why: '"t" is stopped: its public page no longer shows it. Its delete did not finish: retry the DELETE.' };
 /** what t's object itself says (`/current`, `/held`): the generation, and whether its lifetime is settled */
 const lifeSays = async (env, op) => {
-  const res = await env.CARD_LIFETIMES.get(env.CARD_LIFETIMES.idFromName('t')).fetch(`https://card-lifetime/${op}`, { method: 'POST', body: JSON.stringify({ handle: 't' }) });
+  const res = await env.CARD_LIFETIMES.get(env.CARD_LIFETIMES.idFromName('t')).fetch(`https://card-lifetime.invalid/${op}`, { method: 'POST', body: JSON.stringify({ handle: 't' }) });
   const { gen, settled } = await res.json();
   return { gen, settled };
 };
