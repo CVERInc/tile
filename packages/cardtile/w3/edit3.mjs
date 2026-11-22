@@ -129,7 +129,12 @@ function keep(text) {
   else if (!hostWaiting) lsSet(hostDraftKey(), text === savedMd ? null : JSON.stringify({ base: savedMd, md: text }));
   if (bridge) bridge.changed(text);
 }
-function persist() { parked = false; keep(md); paintMain(); }
+// a save that lands while the page is hidden must not take back what parkOpenSheet put in the draft: a
+// tab killed in the background (the case `visibilitychange` is there for) would lose the open sheet's words
+function persist() {
+  parked = false; keep(md); paintMain();
+  if (open && document.visibilityState === 'hidden') parkOpenSheet();
+}
 // 🩸 What is typed in an open sheet reaches `md` only on Done, so a frame hidden or unloaded with a sheet
 // open (the parent navigating away, the tab closed or put in the background) lost those words without a
 // question: the draft never held them and the parent was never told. So when the page goes away, the
@@ -140,24 +145,31 @@ function persist() { parked = false; keep(md); paintMain(); }
 //   cannot read) parks nothing: the draft keeps what it held, never half a tile
 //   a tile just added (undoTo set) is parked like any other; Cancel, if the page comes back, still
 //   takes it out and the draft follows
+//   🩸 a sheet nobody touched parks nothing. Re-serializing a tile is not always the identity (quotes
+//   the engine finds unneeded, a hand-spelled file's spacing), so "the candidate differs from `md`" said
+//   "unsaved" for a sheet that was only opened. The test is against the candidate the sheet held when it
+//   opened (`open.untouched`, taken by markUntouched), whatever path the typing came in by.
 let parked = false;
-function parkOpenSheet() {
-  if (!open || el('modal').hidden || hostWaiting) return;
-  let next;
+// the whole file the open sheet would keep, as text; null when Done would refuse it
+function sheetText() {
   try {
     if (open.whole) {
       const t = el('f-__raw').value;
-      if (t !== md && whatIsWrong(t)) return;
-      next = t === md || t.endsWith('\n') ? t : t + '\n';
-    } else {
-      syncProse();
-      if (open.gaps && open.gaps().length) return;
-      const c = sheetCandidate();
-      if (c.error) return;
-      next = serializeCard(c.x);
+      if (t !== md && whatIsWrong(t)) return null;
+      return t === md || t.endsWith('\n') ? t : t + '\n';
     }
-  } catch { return; }
-  if (next === md && !parked) return;   // nothing typed
+    syncProse();
+    if (open.gaps && open.gaps().length) return null;
+    const c = sheetCandidate();
+    return c.error ? null : serializeCard(c.x);
+  } catch { return null; }
+}
+const markUntouched = () => { open.untouched = sheetText(); };
+function parkOpenSheet() {
+  if (!open || el('modal').hidden || hostWaiting) return;
+  let next = sheetText();
+  if (next == null) return;
+  if (next === open.untouched) { if (!parked) return; next = md; }   // nothing typed (or typed back)
   keep(next); parked = next !== md;
   if (bridge) bridge.flush();   // the page is going: the debounced announcement would never be sent
 }
@@ -385,6 +397,7 @@ function edit(i, which, asMd = false) {
   body.oninput = body.onchange = gate; gate();
   const first = empty()[0] || body.querySelector('.prose-ed [contenteditable]') || body.querySelector('input:not([type=hidden]),textarea:not([hidden]),select'); if (first) first.focus({ preventScroll: true });
   notices.place();
+  markUntouched();
 }
 // Help text stays short on screen: a long explanation goes behind a "?" by its label, shown on tap. An
 // address in a hint never breaks in the middle, and a hint's last line never holds one lonely character.
@@ -1287,6 +1300,7 @@ function openRaw() {
   el('modal-foot').hidden = false; el('modal-why').textContent = '';
   el('modal-delete').hidden = true; el('modal-save').disabled = false;
   el('modal').hidden = false; el('f-__raw').focus();
+  markUntouched();
 }
 function saveRaw() {
   const t = el('f-__raw').value;

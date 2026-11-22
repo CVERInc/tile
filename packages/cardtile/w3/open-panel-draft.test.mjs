@@ -22,8 +22,8 @@ const HOST_KEY = 'cardtile:w3:host-draft:specimen';
 const CARD = ['---', 'card-page: specimen', 'title: Specimen', '---', '', '## cards', '',
   '- [ ] %% card: text w=6 %% Some words.', '- [ ] %% card: link w=3 %% [One](https://example.com/1)', ''].join('\n');
 
-/** the shipped editor, booted in a window of its own. host: framed by HOST and handed CARD. */
-async function boot({ host = false, storage = {} } = {}) {
+/** the shipped editor, booted in a window of its own. host: framed by HOST and handed `card` (CARD). */
+async function boot({ host = false, storage = {}, card = CARD } = {}) {
   const url = host ? `https://card.example/edit?host=${encodeURIComponent(HOST)}` : 'https://card.example/try/edit';
   const win = makeWindow(`<!doctype html><html><head><title>t</title></head><body>${EDIT3_BODY_HTML}</body></html>`, { url, storage });
   const posted = [];
@@ -48,7 +48,7 @@ async function boot({ host = false, storage = {} } = {}) {
   win.location.search = new URL(url).search;
   await win.run(`(async () => {${EDIT3_JS.replace(/await import\(ASSET\[/g, 'await __import(ASSET[')}\n})()`, 'edit3.js');
   if (host) {
-    win.dispatchEvent(Object.assign(new Event('message'), { origin: HOST, data: { v: 1, type: 'card:load', md: CARD, handle: 'specimen', cardUrl: 'https://card.example/specimen' } }));
+    win.dispatchEvent(Object.assign(new Event('message'), { origin: HOST, data: { v: 1, type: 'card:load', md: card, handle: 'specimen', cardUrl: 'https://card.example/specimen' } }));
     win.tick(1000); posted.length = 0;
   }
   const doc = win.document, $ = (id) => doc.getElementById(id);
@@ -207,6 +207,61 @@ test('nothing typed: an open sheet parks nothing', async () => {
   e.pagehide(); e.visibility('hidden');
   assert.equal(e.stored(HOST_KEY), null);
   assert.equal(e.posted.length, 0);
+});
+
+// 🩸 Re-serializing a tile is not the identity: quotes the engine finds unneeded go, and in a hand-spelled
+// file the other tiles' spacing and trailing whitespace are tidied. Comparing the candidate with the file
+// said "unsaved" for a sheet that was only opened, and the next load showed a dirty editor with no change.
+const SPELLED = ['---', 'card-page: specimen', 'title: Specimen', '---', '', '## cards', '',
+  '- [ ] %% card: link  w=3   title="A" %%   [One](https://example.com/1)  ',
+  '- [ ] %% card: text w=6 %% Trailing  spaces  ',
+  '- [ ] %% card: embed kind=slider images="https://i.example/1.png" %%', ''].join('\n');
+
+test('a sheet only opened parks nothing, even where re-serializing the file is not the identity', async () => {
+  for (let i = 0; i < 3; i++) {
+    const e = await boot({ host: true, card: SPELLED });
+    e.pen(i);
+    e.visibility('hidden'); e.pagehide();
+    assert.equal(e.changes().length, 0, `tile ${i}: no card:change`);
+    assert.equal(e.stored(HOST_KEY), null, `tile ${i}: no draft written`);
+  }
+});
+
+test('one character typed in such a file parks; typed back, the draft is the file again', async () => {
+  const e = await boot({ host: true, card: SPELLED });
+  e.pen(1);
+  e.win.prose.type('Trailing  spaces!');
+  e.visibility('hidden');
+  assert.ok(hostDraft(e).md.includes('%% card: text w=6 %% Trailing  spaces!'), 'the typed character is parked');
+  assert.equal(e.changes().at(-1).dirty, true);
+  e.visibility('visible');
+  e.win.prose.type('Trailing  spaces  ');
+  e.visibility('hidden');
+  assert.equal(e.stored(HOST_KEY), null, 'back to what the sheet opened with: no draft');
+  assert.deepEqual({ md: e.changes().at(-1).md, dirty: e.changes().at(-1).dirty }, { md: SPELLED, dirty: false });
+});
+
+// 🩸 A save that finished while the page was hidden wrote the file over the parked draft: a tab then killed
+// in the background lost the words typed in the open sheet.
+test('a save that lands while the page is hidden keeps the open sheet parked', async () => {
+  const e = await boot({ host: true });
+  e.pen(0); e.win.prose.type('Done words.'); e.$('modal-save').click(); e.win.tick(1000);
+  e.pen(1); e.input('f-text', 'Typed in open sheet');
+  const kd = Object.assign(new Event('keydown', { bubbles: true }), { metaKey: true, key: 's' });
+  kd.preventDefault = () => {};
+  e.doc.dispatchEvent(kd);
+  assert.ok(e.posted.some((p) => p.type === 'card:save'), 'Save went to the parent');
+  assert.equal(e.$('modal').hidden, false, 'the sheet is still open');
+  e.visibility('hidden');
+  assert.ok(hostDraft(e).md.includes('Typed in open sheet'), 'parked on hide');
+  e.win.dispatchEvent(Object.assign(new Event('message'), { origin: HOST, data: { v: 1, type: 'card:saved' } }));
+  e.win.tick(1000);
+  const d = hostDraft(e);
+  assert.ok(d, 'the draft is still there');
+  assert.ok(d.md.includes('Typed in open sheet'), 'with the open sheet\'s words');
+  assert.equal(d.base, CARD.replace('Some words.', 'Done words.'), 'on top of what was just saved');
+  const last = e.changes().at(-1);
+  assert.deepEqual({ dirty: last.dirty, md: last.md }, { dirty: true, md: d.md });
 });
 
 test('no sheet open: hiding the page writes nothing', async () => {
