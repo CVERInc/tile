@@ -291,6 +291,8 @@ test('🔴 the editor: finishing a sheet with a re-chosen picture leaves the fil
       commit: (x) => { out = serializeCard(x); },
       normalizeCell, setTitle, setToken, mergeAssets,
     };
+    // Done composes the tile in sheetCandidate (it also serves a page that is going away) and commits it in saveSheet
+    env.sheetCandidate = editorFn('w3/edit3.mjs', 'sheetCandidate', env);
     editorFn('w3/edit3.mjs', 'saveSheet', env)();
     assert.equal(out, MIXED, `saveSheet respelled a line (staged ${id})`);
   }
