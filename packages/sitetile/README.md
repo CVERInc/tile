@@ -119,16 +119,26 @@ Nothing changes inside the coral. It already reads those two knobs from its cont
 
 ### Site chrome — what `_site.md` sets, a page cannot change
 
-A content page renders from `{ ..._site.md, ...its own frontmatter }`, so a page's keys win. That is for what a page says about itself (title, description, share image, `noindex`, layout, look). Site chrome is the exception: when `_site.md` (with the page's locale `_site.md` over it) sets one of these to a non-blank value, the page's own line for it is ignored and named in the build log, and the build goes on.
+A content page renders from `{ ..._site.md, ...its own frontmatter }`, so a page's keys win. That is for what a page says about itself (title, description, share image, `noindex`, layout, look). Site chrome is the exception: when `content/_site.md` (with the `_site.md` of the page's folder over it) sets one of these to a non-blank value, the page's own line for it is ignored, and the build log names the line and the file that sets it. The build goes on. A key is on the list only where a page's own value is harmful or meaningless:
 
-| | keys |
+| key | why a page cannot change it |
 |---|---|
-| who the site is | `brand`, `site-logo`, `favicon` |
-| the frame every page shares | `nav`, `header-cta`, `header-actions` + `header-actions-*`, `footer` + `footer-*`, `copyright`, `copyright-href`, `language-href`, `announce` + `announce-*`, `age-gate` + `age-gate-*` |
-| where assets, visitor data and identity go | `fonts`, `analytics-token`, `site-key`, `generator`, `assistant-name`, `kaito-corpus` |
-| the blog | every `blog-*` key |
+| `brand`, `site-logo` | who the site says it is, in the header of every page |
+| `favicon` | the site's icon in the browser tab |
+| `nav`, `header-cta`, `header-actions` + `header-actions-*` | links and buttons in the header every page shares, read as the site's own (the cart keys say whose cart it is and where it leads) |
+| `footer` + `footer-*`, `copyright`, `copyright-href`, `language-href` | the same, in the footer |
+| `fonts` | the stylesheet the site loads from another address |
+| `analytics-token` | where visitor analytics go |
+| `site-key` | the site messages are sent under |
+| `generator` | what the site says built it |
+| `assistant-name`, `kaito-corpus` | the site's assistant: its name, and what it answers from |
+| every `blog-*` key | the blog is the site's; a page has no meaning for these |
 
-A key `_site.md` leaves unset still comes from the page, and a site with no `_site.md` is untouched, so a site that keeps its chrome on its pages renders as it did. The list, the reasons, and the keys deliberately left to the page are in `site-chrome-keys.mjs` (pure, import-free; `resolveSiteChrome` is the function both page routes call).
+Not on the list, so a page may still set them or turn them off for itself: `announce` + `announce-*` (a page's own announcement, or none) and `age-gate` + `age-gate-*` (the age gate is a per-page feature), and everything a page says about itself.
+
+**Locale folders.** A page in a locale folder (`content/ko-kr/…`, and the locale home `content/ko-kr.md`) whose folder has no `_site.md` keeps its translated chrome: only `favicon`, `fonts`, `analytics-token`, `site-key`, `generator` and `kaito-corpus`, which no translation changes, are reserved. Once `content/ko-kr/_site.md` exists, the full list applies to that locale's pages; a key only `content/_site.md` sets is named against that file, and the log says `content/ko-kr/_site.md` can set it for the locale.
+
+A key `_site.md` leaves unset still comes from the page, and a site with no `_site.md` is untouched, so a site that keeps its chrome on its pages renders as it did. The list, the reasons, and the keys deliberately left to the page are in `site-chrome-keys.mjs` (pure, import-free; both page routes call it through `applySiteChrome` in `astro/src/lib/locale-editions.mjs`).
 
 ### `_headers` — the build owns it
 
