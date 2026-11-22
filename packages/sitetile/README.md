@@ -254,12 +254,15 @@ to the columned footer. Omitting these keys preserves existing footer HTML.
 
 `;;` separates columns; `;` separates items within a column. A column starts with
 `Heading:`. Items use `Label=href`; omit `=href` for plain text. An item splits at
-its first `=` followed by a link target — a strong one (`http(s)://`, `//`, `/`,
-`#`, `?`, `mailto:`, `tel:`) or a bare path with no `=` before its `?`/`#` —
-except that a later `=` followed by a strong target takes the split unless it
-ends a `key=` in the query of the target chosen so far; with no such `=`, it
-splits at the last `=`. So an href may hold `=` (`Shop=/p?id=1`,
-`In=/login?next=/home`), and a label keeps the `=` it held before (`a=b=/c`).
+its last `=`, as it always has, when what follows is a link target that starts
+with `http://`, `https://`, `//`, `/`, `#`, `?`, `mailto:` or `tel:`; otherwise it
+splits at the first `=` that is followed by such a target; otherwise at the last
+`=`. So a label keeps the `=` it held before (`a=b=/c`), and a link with a query
+is read whole (`Shop=/p?id=1`). A path with none of those starts is not such a
+target, so `Rel=page.html?x=1` still splits at its last `=`. When a query value
+itself starts a link (`In=/login?next=/home`), the item splits there, as before:
+such an `=` must be written `%3D`, or the value's first character
+percent-encoded (`In=/login?next=%2Fhome`).
 
 Each column keeps `rf-foot-col` and adds `rf-foot-col--<n>` (1-based position)
 and `rf-foot-col--<slug>` (the heading in lowercase ASCII, with runs of

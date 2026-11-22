@@ -2,80 +2,92 @@
 // renderer's chrome reader (chrome-links.mjs) and the reference renderer (site-core.js, which the
 // editor bundles) both import it, so the bundle carries these few lines and not the whole reader.
 //
-// THE RULE (tile-lab#69), in one sentence: an item splits at its first `=` followed by a link target
-// — a strong one (`http(s)://`, `//`, `/`, `#`, `?`, `mailto:`, `tel:`) or a bare path with no `=`
-// before its `?`/`#` — except that a later `=` followed by a strong target takes the split unless it
-// ends a `key=` in the query of the target chosen so far; with no such `=`, it splits at the last
-// `=`, exactly as it always did.
+// THE RULE (tile-lab#69), in one sentence: an item splits at its last `=`, as it always has, when
+// what follows is a link target that starts with `http://`, `https://`, `//`, `/`, `#`, `?`,
+// `mailto:` or `tel:`; otherwise it splits at the first `=` that is followed by such a target;
+// otherwise at the last `=`.
 //
-// So a target keeps every `=` of its query (`Shop=/p?a=1&b=2`, `In=/login?next=/home`), and a label
-// keeps the `=` it held before (`a=b=/c`, `x=/y=/z`, `C#=F#=/langs`, `Q=A?=/faq`, `Rating=#1=/top`).
-// Before, every reader split at the LAST `=`, which cut every query string in two.
+// What that means:
+//   - Every item whose last-`=` reading already gave such a link reads EXACTLY as before — a label
+//     keeps its `=` (`a=b=/c`, `C#=F#=/langs`), and so does everything else that read as a link.
+//   - A link the last `=` cut in two is read whole: `Shop=/p?id=1`, `Top=#a=b`, `M=mailto:a@b?subject=x`.
+//   - A bare relative path is not such a target, so `Rel=page.html?x=1` still splits at its last `=`
+//     (label `Rel=page.html?x`, href `1`), as before; start the path with `/` to have it read whole.
+//   - A link whose query value itself starts a link (`In=/login?next=/home`) keeps the old reading
+//     (label `In=/login?next`, href `/home`): such an `=` must be written `%3D`, or the value's first
+//     character percent-encoded (`In=/login?next=%2Fhome`).
 // (blog-post-cta is not this grammar: it always split at the first `=` and keeps the whole rest.)
+//
+// One pass: the words of the item are found once, then each `=` is judged in constant time.
 
-const LINE_BREAK = /[\n\r\u2028\u2029]/;
-const STRONG_LEAD = /^(?:https?:\/\/|mailto:|tel:|[/#?])/i;
-// The split before tile-lab#69: the LAST `=` that has a whitespace-free run after it. Still the
-// answer when no `=` is followed by a target (`Label==` stays label `Label`, href `=`).
+const WS = /\s/;
+const LINE_BREAKS = ['\n', '\r', '\u2028', '\u2029'];
+const TARGET_LEAD = /(?:https?:\/\/|mailto:|tel:|[/#?])/iy;
+const leadsTargetAt = (s, at) => { TARGET_LEAD.lastIndex = at; return TARGET_LEAD.test(s); };
+// The split before tile-lab#69: the LAST `=` that has a whitespace-free run after it.
 const LEGACY_EQ_HREF = /^(.*\S)\s*=\s*(\S+)$/;
 // header-actions before tile-lab#69: `aria-label = icon type target …`, at the last `=`.
 const LEGACY_EQ_SPEC = /^(.*\S)\s*=\s*(\S.*)$/;
 
-/** A strong link target: one whitespace-free run that starts with a scheme or a path lead. */
-const isStrong = (t) => STRONG_LEAD.test(t) && !/\s/.test(t);
-/** A bare relative path: whitespace-free, no `=` before its `?`/`#`. */
-const isBare = (t) => t !== '' && !/\s/.test(t) && !t.split(/[?#]/)[0].includes('=');
-/** Is `s` a link target as a `Label=href` item reads one (strong or bare)? */
+/** Is `s` a link target as the rule means one: one whitespace-free run that starts with
+ *  `http://`, `https://`, `//`, `/`, `#`, `?`, `mailto:` or `tel:`? (Not a safety check.) */
 export function isLinkTarget(s) {
   const t = String(s ?? '');
-  return isStrong(t) || isBare(t);
+  return t !== '' && !WS.test(t) && leadsTargetAt(t, 0);
 }
-// `target` is the chosen target up to a later `=`: that `=` is part of its query when a `?` came
-// before it and it closes a non-empty key (`?next=`, `&b=`; not `?=` or `&=`).
-const endsQueryKey = (target) => target.includes('?') && /[^?&]$/.test(target);
 
-const fromMatch = (s, m) => (m ? { label: m[1].trim(), rest: m[2], restAt: s.length - m[2].length } : null);
+// The rule, for both grammars. A candidate `=` is one the old reader could have split at: a
+// non-blank, one-line label before it, and after it (whitespace aside) a non-empty rest that is one
+// whitespace-free run (href) or one line (spec). `target` is the rest itself (href) or its third
+// word (spec). Pick the last candidate if its target leads a link, else the first candidate whose
+// target does, else the last.
+function split(text, spec) {
+  const s = String(text ?? '');
+  const n = s.length;
+  const words = [];                                   // where each whitespace-free run starts
+  for (const m of s.matchAll(/\S+/g)) words.push(m.index);
+  if (!words.length) return null;
+  // A label never spans a line break: no `=` after the first word that follows one can split.
+  let brk = -1, lastBrk = -1;
+  for (const c of LINE_BREAKS) {
+    const a = s.indexOf(c);
+    if (a >= 0 && (brk < 0 || a < brk)) brk = a;
+    lastBrk = Math.max(lastBrk, s.lastIndexOf(c));
+  }
+  let labelEnd = n;
+  if (brk >= 0) { let w = 0; while (w < words.length && words[w] < brk) w++; labelEnd = w < words.length ? words[w] : n; }
+  // The rest must start at or after this: the last word of a value that ends in one (href), or the
+  // last line (spec).
+  const restFrom = spec ? lastBrk + 1 : (WS.test(s[n - 1]) ? Infinity : words[words.length - 1]);
+
+  let k = 0, lastAt = -1, lastRest = -1, lastLeads = false, firstAt = -1, firstRest = -1;
+  for (let i = s.indexOf('='); i >= 0 && i <= labelEnd; i = s.indexOf('=', i + 1)) {
+    if (i <= words[0]) continue;                      // a blank label
+    while (k < words.length && words[k] <= i) k++;    // words[k]: the first word that starts after i
+    const glued = i + 1 < n && !WS.test(s[i + 1]);    // the rest starts right after the `=`
+    const restAt = glued ? i + 1 : words[k];
+    if (restAt === undefined || restAt < restFrom) continue;
+    const targetAt = spec ? words[glued ? k + 1 : k + 2] : restAt;
+    const leads = targetAt !== undefined && leadsTargetAt(s, targetAt);
+    lastAt = i; lastRest = restAt; lastLeads = leads;
+    if (leads && firstAt < 0) { firstAt = i; firstRest = restAt; }
+  }
+  if (lastAt < 0) return null;
+  const [at, restAt] = lastLeads || firstAt < 0 ? [lastAt, lastRest] : [firstAt, firstRest];
+  return { label: s.slice(0, at).trim(), rest: s.slice(restAt), restAt };
+}
 
 /** Split a `Label=href` item. → { label (trimmed), rest (the href), restAt (offset of rest in text) }
  *  | null when the item has no `=href`. */
-export function splitLabelEq(text) {
-  const s = String(text ?? '');
-  let pick = null;
-  for (let i = s.indexOf('='); i >= 0; i = s.indexOf('=', i + 1)) {
-    const head = s.slice(0, i).trimEnd();
-    if (LINE_BREAK.test(head)) break;          // a label never spans a line break
-    if (!head.trim()) continue;
-    const raw = s.slice(i + 1);
-    const rest = raw.trimStart();
-    const restAt = i + 1 + raw.length - rest.length;
-    if (!pick) {
-      if (isLinkTarget(rest)) pick = { label: head.trim(), rest, restAt };
-    } else if (isStrong(rest) && !endsQueryKey(s.slice(pick.restAt, i))) {
-      pick = { label: head.trim(), rest, restAt };
-    }
-  }
-  return pick || fromMatch(s, s.match(LEGACY_EQ_HREF));
-}
+export function splitLabelEq(text) { return split(text, false); }
 
-// header-actions: the spec is one line, and only its third word (the target, an href) may hold `=`.
-const isActionSpec = (r) => r !== '' && !LINE_BREAK.test(r) && r.split(/\s+/).every((w, j) => j === 2 || !w.includes('='));
+/** Split a header action `aria-label = icon type target [reveal] [flags…]` by the same rule, where
+ *  "what follows" is the spec and its link target is the spec's third word: at the last `=` when
+ *  that word is a link target, else at the first `=` whose spec's third word is one, else at the
+ *  last `=`. Same shape as above; `rest` is the untrimmed spec. */
+export function splitLabelSpec(text) { return split(text, true); }
 
-/** Split a header action `aria-label = icon type target [reveal] [flags…]` at the first `=` after
- *  which only the target word holds `=` (else at the last `=`, as before). Same shape as above;
- *  `rest` is the untrimmed spec. */
-export function splitLabelSpec(text) {
-  const s = String(text ?? '');
-  for (let i = s.indexOf('='); i >= 0; i = s.indexOf('=', i + 1)) {
-    const head = s.slice(0, i).trimEnd();
-    if (LINE_BREAK.test(head)) break;
-    if (!head.trim()) continue;
-    const raw = s.slice(i + 1);
-    const rest = raw.trimStart();
-    if (isActionSpec(rest)) return { label: head.trim(), rest, restAt: i + 1 + raw.length - rest.length };
-  }
-  return fromMatch(s, s.match(LEGACY_EQ_SPEC));
-}
-
+const fromMatch = (s, m) => (m ? { label: m[1].trim(), rest: m[2], restAt: s.length - m[2].length } : null);
 /** The split as it was before tile-lab#69 (last `=`), for comparing old and new readings. */
 export const legacySplitLabelEq = (text) => { const s = String(text ?? ''); return fromMatch(s, s.match(LEGACY_EQ_HREF)); };
 export const legacySplitLabelSpec = (text) => { const s = String(text ?? ''); return fromMatch(s, s.match(LEGACY_EQ_SPEC)); };
