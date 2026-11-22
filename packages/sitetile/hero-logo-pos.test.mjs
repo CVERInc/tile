@@ -18,22 +18,26 @@
 // What holds now, in one place — heroVariant, the selection both renderers already share:
 //   1. the value is trimmed and lower-cased, then matched against the three positions;
 //   2. anything else draws the default (`bottom`), the way `media=` and `shape=` fall back to theirs,
-//      and is warned about the way an unrecognised `blog-date-format` already is: one console.warn
-//      per distinct value, naming the values expected (blog.mjs warnUnknownDateFormat);
+//      and is handed, as one message naming the values expected, to the sink the CALLER passed
+//      (`report`). site-core keeps no record of it and prints nothing: it also runs in long-lived
+//      processes, one tenant after another. The Astro build's sink (astro/src/lib/build-log.mjs)
+//      prints it to the build log once per build, as blog.mjs does an unrecognised blog-date-format;
 //   3. a value that was already one of the three renders the same bytes as before.
 //
 // The NAME side is deliberately untouched and pinned at the end: an assignment is the name, `=`,
 // the value, with nothing between them, and names are case-sensitive — in every reader of a param.
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseSite, parseParams, renderSiteToHtml, heroVariant, heroHeadingless, pageH1Index,
   takeDropWarnings, inlineHtml, bodyHtml, safeSrc } from './site-core.js';
 import { emitHero } from '../emit/hero.mjs';
-import { buildSite, RENDERER_SUBPATH } from '../build/index.mjs';
+import { RENDERER_SUBPATH } from '../build/index.mjs';
+import { warnOncePerBuild } from './astro/src/lib/build-log.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ENGINE = join(HERE, '..', '..');
@@ -49,16 +53,21 @@ async function test(name, fn) {
 const LAYERS = 'layers=/back.webp|/front.webp';
 const page = (params, title = 'Title') => '---\nsitetile-page: home\ntitle: Heroes\n---\n\n'
   + `## ${title}\n%% sitetile: hero ${params} %%\n\nBody.\n\n## Next\n\nMore.\n`;
-const render = (params, title) => renderSiteToHtml(parseSite(page(params, title)));
 const posOf = (html) => (/\bdata-logo-pos="([^"]*)"/.exec(html) || [])[1];
-// The warning channel: console.warn, captured here. Only logo-pos lines are kept; anything else
-// passes through. Once per distinct value per process, so each warning case below uses a value no
-// other case in this file renders.
+// The warning channel is the caller's sink. `warned` is the one most cases below pass; `render`
+// passes it unless told otherwise.
 const warned = [];
-const realWarn = console.warn;
-console.warn = (...a) => { const m = String(a[0]); if (/logo-pos/.test(m)) warned.push(m); else realWarn(...a); };
+const sink = (m) => { warned.push(m); };
 const takeWarned = () => warned.splice(0);
-const WARNING = (shown) => `[sitetile] Unrecognised logo-pos "${shown}" — expected one of: top, center, bottom. Falling back to bottom.`;
+const render = (params, title, opts = { report: sink }) => renderSiteToHtml(parseSite(page(params, title)), opts);
+// …and the console, watched: site-core must never write to it. Anything that mentions logo-pos is
+// kept (and fails the case that looks); the rest passes through.
+const consoleSaid = [];
+for (const k of ['log', 'info', 'warn', 'error', 'debug']) {
+  const real = console[k];
+  console[k] = (...a) => { const m = a.map(String).join(' '); if (/logo-pos/.test(m) && !/^\s+(ok|FAIL) /.test(m)) consoleSaid.push(m); else real(...a); };
+}
+const WARNING = (shown) => `[sitetile] Unrecognised logo-pos ${JSON.stringify(shown)} — expected one of: top, center, bottom. Falling back to bottom.`;
 
 // What the author typed after `logo-pos=`, and the position the hero must draw.
 const FOLDED = [
@@ -115,16 +124,17 @@ await test('🔴 string render: an unrecognised value draws the default hero and
   }
 });
 
-await test('🔴 an unrecognised value is warned about, as written (trimmed), once per value', () => {
+await test('🔴 an unrecognised value is handed to the sink, as written (trimmed), once per render', () => {
   for (const [typed, shown] of [['nowhere', 'nowhere'], ['" Sideways "', 'Sideways'], ['ＢＯＴＴＯＭ', 'ＢＯＴＴＯＭ'], ['"top  center"', 'top  center']]) {
     takeWarned();
     render(`${LAYERS} logo-pos=${typed}`);
     assert.deepEqual(takeWarned(), [WARNING(shown)], `logo-pos=${typed}`);
+    // site-core remembers nothing: the next render says it again, and deduplicating is the sink's.
     render(`${LAYERS} logo-pos=${typed}`);
-    assert.deepEqual(takeWarned(), [], `logo-pos=${typed}: warned a second time`);
+    assert.deepEqual(takeWarned(), [WARNING(shown)], `logo-pos=${typed}: the second render was silenced by the first`);
   }
   // An UNTITLED hero is the path that asks heroVariant most often (the h1 owner, the heading test,
-  // the render): still one warning.
+  // the render): still one message per render.
   takeWarned();
   render(`${LAYERS} logo-pos=underneath`, '');
   assert.equal(takeWarned().length, 1, 'an untitled layered hero');
@@ -136,6 +146,50 @@ await test('🔴 an unrecognised value is warned about, as written (trimmed), on
   render(`${LAYERS} logo-pos=offstage`);
   assert.equal(takeWarned().length, 1);
   assert.deepEqual(takeDropWarnings(), []);
+  assert.deepEqual(consoleSaid.splice(0), [], 'site-core wrote to the console');
+});
+
+await test('🔴 two tenants in one long-lived process share nothing, and with no sink nothing is said anywhere', () => {
+  // reef-mcp's checks call renderSiteToHtml for one site after another in one process.
+  consoleSaid.splice(0);
+  const a = [], b = [];
+  const tenantA = parseSite(page(`${LAYERS} logo-pos=sideways`));
+  const tenantB = parseSite(page(`${LAYERS} logo-pos=sideways`, 'Another site'));
+  renderSiteToHtml(tenantA, { report: (m) => a.push(m) });
+  renderSiteToHtml(tenantB, { report: (m) => b.push(m) });
+  assert.deepEqual(a, [WARNING('sideways')], 'tenant A');
+  assert.deepEqual(b, [WARNING('sideways')], 'tenant B was silenced because tenant A used the same value');
+  // A caller that passes no sink (every long-lived one today): no console line, no record kept that
+  // a later sink would see.
+  for (let i = 0; i < 50; i++) renderSiteToHtml(parseSite(page(`${LAYERS} logo-pos=tenant-${i}`)));
+  renderSiteToHtml(tenantA);
+  renderSiteToHtml(tenantA, { report: true });   // not a function: not a sink
+  assert.deepEqual(consoleSaid.splice(0), [], 'a render with no sink wrote to the console');
+  const later = [];
+  renderSiteToHtml(tenantA, { report: (m) => later.push(m) });
+  assert.deepEqual(later, [WARNING('sideways')]);
+  assert.deepEqual(a, [WARNING('sideways')], 'tenant A\'s sink heard about another render');
+});
+
+await test('🔴 a control character in the value reaches the message escaped, never raw', () => {
+  for (const [typed, escaped] of [
+    ['\x1b[31mred', '"\\u001b[31mred"'], ['a\x07b', '"a\\u0007b"'], ['x\x7fy', '"x\\u007fy"'],
+    ['\u009b31mred', '"\\u009b31mred"'], ['q"uote\\d', '"q\\"uote\\\\d"'],
+  ]) {
+    takeWarned();
+    render(`${LAYERS} logo-pos=${typed}`);
+    const said = takeWarned();
+    assert.equal(said.length, 1, JSON.stringify(typed));
+    assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(said[0]), `${JSON.stringify(typed)}: a raw control character in ${JSON.stringify(said[0])}`);
+    assert.ok(said[0].includes(` logo-pos ${escaped} — `), `${JSON.stringify(typed)}: ${said[0]}`);
+  }
+});
+
+await test('the build log\'s sink says each message once per build (build-log.mjs)', () => {
+  consoleSaid.splice(0);
+  for (let i = 0; i < 3; i++) render(`${LAYERS} logo-pos=hereabouts`, 'T', { report: warnOncePerBuild });
+  render(`${LAYERS} logo-pos=thereabouts`, 'T', { report: warnOncePerBuild });
+  assert.deepEqual(consoleSaid.splice(0), [WARNING('hereabouts'), WARNING('thereabouts')]);
 });
 
 await test('nothing is warned about for a value the hero understood, or for no value at all', () => {
@@ -154,7 +208,7 @@ await test('only a render warns: asking which variant a hero is, or which sectio
   pageH1Index(site.sections);
   assert.deepEqual(takeWarned(), []);
   // 🔴 CONTROL: the same value does warn once a render asks.
-  renderSiteToHtml(site);
+  renderSiteToHtml(site, { report: sink });
   assert.deepEqual(takeWarned(), [WARNING('elsewhere')]);
 });
 
@@ -178,8 +232,9 @@ await test('🔴 Hero.astro takes the position from heroVariant — it does not 
   const src = decomment(HERO_ASTRO);
   // The param is still read in the component, by name (coral-params.test.mjs), and its VALUE goes to
   // heroVariant with the other three…
-  assert.match(src, /heroVariant\(\s*\{[^}]*['"]logo-pos['"]\s*:\s*pm\s*\[\s*['"]logo-pos['"]\s*\][^}]*\}\s*,\s*\{\s*report:\s*true\s*\}\s*\)/,
-    'Hero.astro does not hand logo-pos to heroVariant (reporting)');
+  assert.match(src, /heroVariant\(\s*\{[^}]*['"]logo-pos['"]\s*:\s*pm\s*\[\s*['"]logo-pos['"]\s*\][^}]*\}\s*,\s*\{\s*report:\s*warnOncePerBuild\s*\}\s*\)/,
+    'Hero.astro does not hand logo-pos to heroVariant with the build log as the sink');
+  assert.match(src, /import\s*\{\s*warnOncePerBuild\s*\}\s*from\s*['"]\.\.\/\.\.\/lib\/build-log\.mjs['"]/, 'Hero.astro does not take its sink from build-log.mjs');
   // …and the position emitHero is given is heroVariant's answer.
   assert.match(src, /\blogoPos\s*=\s*variant\.logoPos\b/, 'Hero.astro derives logoPos somewhere other than heroVariant');
   assert.equal((src.match(/pm\s*\[\s*['"]logo-pos['"]\s*\]/g) || []).length, 1, 'logo-pos is read more than once in Hero.astro');
@@ -189,7 +244,7 @@ await test('🔴 Hero.astro takes the position from heroVariant — it does not 
 function emitAsHeroAstro(params, title = 'Title') {
   const section = { id: 'h', type: 'hero', title, params, body: 'Body.' };
   const pm = parseParams(section.params);
-  const variant = heroVariant({ layers: pm.layers, layout: pm.layout, logo: pm.logo, 'logo-pos': pm['logo-pos'] }, { report: true });
+  const variant = heroVariant({ layers: pm.layers, layout: pm.layout, logo: pm.logo, 'logo-pos': pm['logo-pos'] }, { report: sink });
   return emitHero(section, { media: pm.media === 'logo' ? 'logo' : 'avatar', layout: variant.layout, eyebrow: null, marqueeWords: [],
     enter: pm.enter != null, layerList: variant.layerList, parallax: pm.parallax != null, logo: variant.logo,
     logoPos: variant.logoPos, cta: pm.cta, bgOk: pm.bg ? safeSrc(pm.bg) : null, owner: true }, { inline: inlineHtml, block: bodyHtml });
@@ -241,6 +296,8 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     ['Unset', '', 'bottom'], ['Plain top', 'logo-pos=top', 'top'],
     ['Upper', 'logo-pos=TOP', 'top'], ['Padded', 'logo-pos=" top "', 'top'], ['Mixed', 'logo-pos=Center', 'center'],
     ['Padded upper', 'logo-pos="  BOTTOM "', 'bottom'], ['Unknown', 'logo-pos=middle', 'bottom'],
+    // The same bad value twice, and one carrying a terminal escape: the build log is the reader.
+    ['Unknown again', 'logo-pos=middle', 'bottom'], ['Escape', 'logo-pos=\x1b[31mred', 'bottom'],
   ];
   const tmp = process.env.TMPDIR || tmpdir();
   mkdirSync(tmp, { recursive: true });
@@ -250,7 +307,14 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     writeFileSync(join(ir, 'home.md'),
       '---\nsitetile-page: home\ntitle: Layered heroes\nlang: en-US\n---\n\n'
       + HEROES.map(([title, params]) => `## ${title}\n%% sitetile: hero ${LAYERS}${params ? ' ' + params : ''} %%\n\nBody of ${title}.\n`).join('\n'));
-    const result = await buildSite({ irDir: ir, engineDir: ENGINE, outDir: out, siteUrl: 'https://example.com' });
+    // `astro build` inherits buildSite's stdio, so the build runs in a child whose output is read
+    // here: the build log is where the warning is meant to arrive.
+    const runner = `const { buildSite } = await import(${JSON.stringify(pathToFileURL(join(ENGINE, 'packages', 'build', 'index.mjs')).href)});
+      const r = await buildSite(${JSON.stringify({ irDir: ir, engineDir: ENGINE, outDir: out, siteUrl: 'https://example.com' })});
+      process.stdout.write('\\n@@result ' + JSON.stringify({ code: r.code }) + '\\n');`;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', runner], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const buildLog = `${child.stdout || ''}\n${child.stderr || ''}`;
+    const result = JSON.parse((/@@result (\{.*\})/.exec(child.stdout || '') || [])[1] || '{"code":1}');
     const html = result.code === 0 ? readFileSync(join(out, 'index.html'), 'utf8') : '';
     const sections = [...html.matchAll(/<section\b([^>]*\bst-hero-layered\b[^>]*)>([\s\S]*?)<\/section>/g)]
       .map((m) => ({ tag: m[1], title: (/<h([12])[^>]*>([\s\S]*?)<\/h\1>/.exec(m[2]) || [])[2], pos: (/\bdata-logo-pos="([^"]*)"/.exec(m[1]) || [])[1] }));
@@ -268,6 +332,13 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
       assert.equal(shape(byTitle.get('Padded')), shape(byTitle.get('Plain top')));
       assert.equal(shape(byTitle.get('Unknown')), shape(byTitle.get('Unset')));
       assert.notEqual(shape(byTitle.get('Plain top')), shape(byTitle.get('Unset')), 'CONTROL: top and the default are the same section');
+    });
+    await test('🔴 build log: each unrecognised value is warned about once per build, its control characters escaped', () => {
+      const lines = buildLog.split('\n').filter((l) => /Unrecognised logo-pos/.test(l));
+      assert.equal(lines.filter((l) => l.includes(WARNING('middle'))).length, 1, `"middle" (two heroes): ${JSON.stringify(lines)}`);
+      assert.equal(lines.filter((l) => l.includes(WARNING('\x1b[31mred'))).length, 1, `the escape value: ${JSON.stringify(lines)}`);
+      assert.equal(lines.length, 2, `only the two values the page could not place: ${JSON.stringify(lines)}`);
+      for (const l of lines) assert.ok(!l.includes('\x1b'), `a raw ESC reached the build log: ${JSON.stringify(l)}`);
     });
   } finally {
     rmSync(ir, { recursive: true, force: true });

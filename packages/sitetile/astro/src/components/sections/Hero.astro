@@ -3,6 +3,7 @@
 // their values over, with sitetile's own markdown renderers.
 import { parseParams, inlineHtml, bodyHtml, safeSrc, heroVariant } from '@sitetile';
 import { emitHero } from '@emit/hero.mjs';
+import { warnOncePerBuild } from '../../lib/build-log.mjs';
 // reef#2869: `hero` (Section.astro: index === h1At, site-core pageH1Index) — only the page's h1
 // owner writes its heading as <h1>; emitHero writes <h2> anywhere else.
 const { section, hero } = Astro.props;
@@ -38,8 +39,9 @@ const media = pm.media === 'logo' ? 'logo' : 'avatar';   // foreground image var
 // `logo-pos=` value with its case and whitespace folded, the default for one that is not a position.
 // The four params are read HERE by name, not handed over as the whole `pm` bag: reef-mcp's
 // coral-params table scans this file for `pm.<name>` / `pm['<name>']` (coral-params.test.mjs).
-// `report`: this is a render, so a `logo-pos=` it cannot place is warned about (once per value).
-const variant = heroVariant({ layers: pm.layers, layout: pm.layout, logo: pm.logo, 'logo-pos': pm['logo-pos'] }, { report: true });
+// `report`: this is a build, so a `logo-pos=` it cannot place goes to the build log, once per build
+// (build-log.mjs — site-core itself prints nothing).
+const variant = heroVariant({ layers: pm.layers, layout: pm.layout, logo: pm.logo, 'logo-pos': pm['logo-pos'] }, { report: warnOncePerBuild });
 const layout = variant.layout;
 const eyebrow = pm.eyebrow ? (typeof pm.eyebrow === 'object' ? pm.eyebrow.label : pm.eyebrow) : null;
 // `marquee="A|B|C"` — OPT-IN animated background word-marquee: one horizontally-scrolling row per

@@ -2883,21 +2883,27 @@ function heroHeadingless(s) {
 // 🩸 It used to be written onto the section as typed, by both renderers: the stylesheet selects on
 // `[data-logo-pos="top"]`, so `logo-pos=TOP` drew the default while the page said `TOP`, and
 // nothing said so. A value that is not a position draws the default, as `media=` and `shape=` do,
-// and — when a RENDERER asks (`opts.report`) and the hero is the layered one that draws it — is
-// warned about the way an unrecognised `blog-date-format` is (astro/src/lib/blog.mjs
-// warnUnknownDateFormat): one console.warn per distinct value, naming the values it expected.
+// and — when the CALLER hands in a sink (`opts.report`, a function) and the hero is the layered one
+// that draws it — the sink is given one message naming the value and the values expected.
 // (Not the drop queue: that is for refused destinations, and nothing in a build reads it.)
+// 🔴 NO STATE AND NO CONSOLE HERE. site-core also runs inside long-lived processes (reef-mcp's
+// checks call renderSiteToHtml for one tenant after another), where a module-level "said it once"
+// set grew without bound, silenced tenant B because tenant A had used the same value, and wrote
+// tenant text into a shared server log. So this only CALLS the sink, every time it is asked; what
+// to do with the message — print it, deduplicate it, drop it — is the caller's. The Astro build
+// passes one that prints to the build log once per build (astro/src/lib/build-log.mjs); a caller
+// that passes nothing is told nothing.
 // Takes the parsed params (or just `{ layers, layout, logo, 'logo-pos' }` — Hero.astro passes those
 // four by name so the coral-params scan still sees them read there).
 const HERO_LOGO_POS = ['top', 'center', 'bottom'];
-// Keyed by the value as written (trimmed, cut at 200), so a build that renders the hero once per
-// locale says it once, and two different bad values are both heard. Module-scoped, like blog.mjs's.
-const _warnedLogoPos = new Set();
-function warnUnknownLogoPos(value) {
+// The value as written (trimmed), cut at 200 the way an unreadable tagcloud item is, and QUOTED with
+// JSON.stringify so a control character in it (`logo-pos=\x1b[31m…`) reaches a log as `\u001b`, not
+// as a terminal escape. JSON.stringify leaves DEL and the C1 range (U+007F–U+009F) alone, and a
+// UTF-8 terminal acts on C1 too, so those are escaped the same way.
+function unknownLogoPosMessage(value) {
   const shown = value.length > 200 ? value.slice(0, 200) + '…' : value;
-  if (_warnedLogoPos.has(shown)) return;
-  _warnedLogoPos.add(shown);
-  console.warn(`[sitetile] Unrecognised logo-pos "${shown}" — expected one of: ${HERO_LOGO_POS.join(', ')}. Falling back to bottom.`);
+  const quoted = JSON.stringify(shown).replace(/[\u007f-\u009f]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+  return `[sitetile] Unrecognised logo-pos ${quoted} — expected one of: ${HERO_LOGO_POS.join(', ')}. Falling back to bottom.`;
 }
 function heroVariant(pm, opts) {
   const layersRaw = pm.layers ? (typeof pm.layers === 'object' ? pm.layers.label : pm.layers) : null;
@@ -2909,7 +2915,8 @@ function heroVariant(pm, opts) {
   const posRaw = pm['logo-pos'] ? String(typeof pm['logo-pos'] === 'object' ? pm['logo-pos'].label : pm['logo-pos']).trim() : '';
   const pos = posRaw.toLowerCase();
   const posKnown = HERO_LOGO_POS.indexOf(pos) >= 0;
-  if (opts && opts.report && kind === 'layers' && pos && !posKnown) warnUnknownLogoPos(posRaw);
+  const report = opts && typeof opts.report === 'function' ? opts.report : null;
+  if (report && kind === 'layers' && pos && !posKnown) report(unknownLogoPosMessage(posRaw));
   return { kind, layerList, layout, logo, logoPos: posKnown ? pos : 'bottom' };
 }
 
@@ -2948,7 +2955,7 @@ function pageH1Index(sections) {
 }
 
 // `ctx` is the page-level runtime data a section can need that the section itself does not carry —
-// today only the `action=inbox` form reads it: { lang, meta, path } (see renderSiteToHtml).
+// the `action=inbox` form reads { lang, meta, path }, the layered hero `report` (see renderSiteToHtml).
 function renderSection(s, hero, ctx) {
   // 🩸 #1933: the page's FIRST section carries its title as <h1> in the built page (Section.astro
   // `index === 0`); a string render that always wrote <h2> described a page with no h1. Only the
@@ -2986,7 +2993,7 @@ function renderSection(s, hero, ctx) {
       // `.st-hero-text.st-hero-overlay` block. `logo=` renders the h1 as an image whose alt is the title.
       // `logo=` renders the h1 as an image (alt = title); shared by the layered and `layout=` heroes, as in Hero.astro.
       // heroVariant: the ONE variant selection (Hero.astro and heroHeadingless call it too, reef#2857 r2).
-      const variant = heroVariant(pm, { report: true });
+      const variant = heroVariant(pm, { report: ctx.report });   // the caller's sink, or none
       const { layerList, logo } = variant;
       // reef#2857: a text-free hero (heroHeadingless) writes no heading element.
       // reef#2869: its heading is the <h1> only when this hero IS the page's h1 owner (`hero`,
@@ -3513,7 +3520,7 @@ function _stampDropWarnings(site, before) {
  * Render a parsed site to the reference HTML string.
  *
  * @param {object} site  parseSite() output.
- * @param {{path?: string, contentRels?: Set<string>}} [opts]
+ * @param {{path?: string, contentRels?: Set<string>, report?: (message: string) => void}} [opts]
  *   `path` — the URL path this page is served at (what Form.astro reads as `Astro.url.pathname`).
  *   🔴 PASS IT FOR ANY NON-ROOT PAGE: an `action=inbox` form writes it into `return_to` and into
  *   the "send another" link, and the default is '/', so a page at /contact/ rendered without it
@@ -3524,13 +3531,16 @@ function _stampDropWarnings(site, before) {
  *   way the built page's is (a locale prefix is used only when that locale's home file exists);
  *   absent → the locale prefix of `path` alone decides.
  *   `lang` and `locales` come from the site's own frontmatter, as PageView hands them to Form.astro.
+ *   `report` — a function given one message string for each author param the render could not
+ *   use (today: a layered hero's unrecognised `logo-pos=`), every time it is met. Absent → nothing
+ *   is said anywhere: these messages are neither printed nor remembered here (heroVariant).
  */
 function renderSiteToHtml(site, opts) {
   const _before = _dropWarnings.length;
   const o = opts || {};
   const pathname = String(o.path || '/').split(/[?#]/)[0];
   const ctx = { lang: (site.meta || {}).lang, meta: site.meta || {}, path: pathname,
-    contentRels: o.contentRels };
+    contentRels: o.contentRels, report: typeof o.report === 'function' ? o.report : undefined };
   const h1At = pageH1Index(site.sections);
   const sectionsHtml = (site.sections || []).map((s, i) => withSectionId(renderSection(s, i === h1At, { ...ctx, index: i }), s.id)).join('\n');
   // `layout: sidebar` — two-column shell: fixed sidebar + main content column.
