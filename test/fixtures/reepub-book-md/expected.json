@@ -1,0 +1,124 @@
+{
+  "source": {
+    "repo": "CVERInc/reepub",
+    "sha": "888f49395a6322ad7d953de5e564c1eff819eeab",
+    "parser": "scripts/check-book-format.mjs#parseBookJS",
+    "licence": "MIT"
+  },
+  "books": {
+    "astral-title.md": {
+      "sha256": "b48c320496685b390a81fd006029d39e61525525620a25bc4088479049278990",
+      "direction": "ltr",
+      "kind": "flow",
+      "chapters": [
+        "𡒉"
+      ]
+    },
+    "bulleted-list.md": {
+      "sha256": "40bf540d6378ea522792c40c8983a9d58a3a6465213725a926d9380661a3a4a4",
+      "direction": "ltr",
+      "kind": "flow",
+      "chapters": [
+        "你的特殊知識可能是"
+      ]
+    },
+    "empty-chapter.md": {
+      "sha256": "44e77132eb9daeedc0981f7cd0d6161145ede5d33f30a4b6ad239fe8efaef96c",
+      "direction": "ltr",
+      "kind": "flow",
+      "chapters": [
+        "Front Matter",
+        "Deliberately Empty",
+        "Chapter One"
+      ]
+    },
+    "fence-containing-headings.md": {
+      "sha256": "b2b21342bea8b3e2bcc3cd1cafd1d20adbf0987cd03d39d55fd80187066c22e9",
+      "direction": "ltr",
+      "kind": "flow",
+      "chapters": [
+        "Real chapter"
+      ]
+    },
+    "heading-inside-blockquote.md": {
+      "sha256": "39bb6d7fd3abd080f66fa06ea2bd8f2bb0b9edcf303cb2af00bba17732566142",
+      "direction": "ltr",
+      "kind": "flow",
+      "chapters": [
+        "一般的章節標題"
+      ]
+    },
+    "inline-link.md": {
+      "sha256": "20b9ff5e5989b2d3313eca993c1168138b703b98e980859c5f50bc973b57d1e9",
+      "direction": "ltr",
+      "kind": "flow",
+      "chapters": [
+        "Where To Read More"
+      ]
+    },
+    "ltr-prose-only.md": {
+      "sha256": "c01e125561aefaca56a513b41f04003dd92ab7c7caa2d6b997e92d06d324c246",
+      "direction": "ltr",
+      "kind": "flow",
+      "chapters": [
+        "One",
+        "Two"
+      ]
+    },
+    "mixed-flow-and-plate.md": {
+      "sha256": "cf888eae103bae299946446c06a13c20dce626d694a66661485f79a3ec7d7bdd",
+      "direction": "rtl",
+      "kind": "flow",
+      "chapters": [
+        "第一章"
+      ]
+    },
+    "plates-only.md": {
+      "sha256": "07d141a0d2b7cc1d6f6ee9c160229146a8749c8994335be347fd79591b7ad206",
+      "direction": "rtl",
+      "kind": "fixed",
+      "chapters": [
+        "Chapter 1"
+      ],
+      "fixedPages": [
+        [
+          [
+            [
+              "p001.png",
+              null
+            ]
+          ],
+          [
+            [
+              "p002.png",
+              "the second plate"
+            ]
+          ],
+          [
+            [
+              "p003.png",
+              "a plate written the other way"
+            ]
+          ]
+        ]
+      ]
+    },
+    "rtl-vertical-cjk.md": {
+      "sha256": "5b3bc8ef11700c0e1769909b258eb7f81543d31093503274ce7e31729cc4603c",
+      "direction": "rtl",
+      "kind": "flow",
+      "chapters": [
+        "卷一",
+        "卷二"
+      ]
+    },
+    "xml-specials-in-title.md": {
+      "sha256": "274794f907d09235202073d3864cc1869e73ca5560ed090c93c85fe99c7ab7dd",
+      "direction": "ltr",
+      "kind": "flow",
+      "chapters": [
+        "A chapter with & < > \" in it"
+      ]
+    }
+  }
+}
