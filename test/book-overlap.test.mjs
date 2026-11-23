@@ -11,11 +11,15 @@
 //   1. chapter count            (`#` headings; empty chapters; `#` inside a fence or a blockquote is not one)
 //   2. chapter order            (the chapter titles, in source order)
 //   3. reading direction        (frontmatter `direction`, carried through)
-//   4. plate pages of `kind: fixed` books   (per chapter, per page, the images as [src, alt] in order)
+//   4. plate pages of `kind: fixed` books   (per chapter, the pages in order, each page's images as [src, alt])
+//      Image order WITHIN a page is not exercised: no vendored fixture has two or more images on one
+//      page, so only each page's images and the page order are proven. A check below goes red the day
+//      a fixture with 2+ images on a page arrives, so that order starts being tested on purpose.
 //
 // The expected values are NOT computed by book-core. They are reepub's parser output, captured once at
 // the pin into expected.json by capture.mjs beside the fixtures. A key written by the parser under
-// test could only ever agree with it.
+// test could only ever agree with it. reepub's parser does not run here: a change to it after the pin
+// is not seen until the pin moves (re-run capture.mjs; see the fixtures README).
 //
 // NOT GATED — the known divergence, an accident to be removed by moving both sides to one simpler
 // format (reef#2278, destination "a"). Listed so nobody reads a green run as covering them:
@@ -75,6 +79,11 @@ ok(files.length > 0, 'the corpus is not empty');
 ok(Object.values(EXPECTED.books).some((b) => b.kind === 'fixed' && b.fixedPages.flat(2).length > 0), 'at least one `kind: fixed` book with images (else the plate-page check is vacuous)');
 ok(Object.values(EXPECTED.books).some((b) => b.direction === 'rtl'), 'at least one rtl book (else the direction check cannot tell rtl from a default)');
 ok(Object.values(EXPECTED.books).some((b) => b.chapters.length > 1), 'at least one book with several chapters (else order is untested)');
+// The opposite case: a field no fixture exercises. Every plate page holds at most one image, so the
+// order of images within a page cannot go red. Say so on every run, and stop when that changes.
+const maxImagesOnAPage = Math.max(0, ...Object.values(EXPECTED.books).flatMap((b) => (b.fixedPages || []).flat(1).map((p) => p.length)));
+if (maxImagesOnAPage < 2) console.log(`note: at most ${maxImagesOnAPage} image on any plate page in the corpus; image order within a page is not exercised`);
+ok(maxImagesOnAPage < 2, `a fixture now has ${maxImagesOnAPage} images on one page: add a within-page image-order mutation below, then remove this check and the "not exercised" note in the header`);
 
 // ── the gate ─────────────────────────────────────────────────────────────────────────────
 const actual = {};
