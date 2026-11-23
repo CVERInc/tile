@@ -289,6 +289,11 @@ in their Inbox — as an aggregate, under 「AI 已答」, which never notifies 
   **not** once per session: a visitor who asks something on a second page sends the same
   `session_id` again, carrying the whole session, which is why the endpoint is idempotent on that
   id rather than inserting a row per request.
+- **The press for a person also sends when nothing is new** (reef#3802), if this session already
+  sent its questions on an earlier `pagehide`: the body is the same whole session, now with the
+  conversation `handle`, so the server links the row to the conversation it became, and deleting
+  that conversation deletes those questions too. Not when the session asked nothing, not without a
+  log, not without a handle, and not while a definite「no Inbox」stands.
 - **Each `POST /api/kaito` names the same session** (reef#3802): the body is
   `{kind, id, query, locale, session_id}`, where `session_id` is exactly the id this log sends,
   so the server can attach the exchange to the conversation the session reaches. It is not a
