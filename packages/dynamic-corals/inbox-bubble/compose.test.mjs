@@ -2158,13 +2158,13 @@ function twoTabs() {
 	};
 	let clock = 1_700_000_000_000;
 	let n = 0;
-	const open = () => {
+	const open = (probeClaim = async () => true) => {
 		const sent = [];
 		const log = createAiLog({
 			tenant: 'site:acme', kind: 'site', id: 'acme', storage,
 			now: () => clock, newId: () => `sid-${++n}`,
 			send: (p) => (sent.push(p), true),
-			probeClaim: async () => true
+			probeClaim
 		});
 		return { log, sent };
 	};
@@ -2896,4 +2896,22 @@ test('reef#3802: while「this site has no Inbox」stands, the question names no 
 	await f.settle();
 	assert.equal(f.log.unclaimed(), true);
 	assert.equal(f.log.session(), null);
+});
+
+test('reef#3802: a「no Inbox」another tab learned is honoured by session() too', async () => {
+	// 🩸 `session()` checked the answer in this tab's memory BEFORE re-reading storage, so a tab
+	// that mounted before the other one learned the answer went on naming the session. Every
+	// other method re-reads first; this one has to as well.
+	const browser = twoTabs();
+	const a = browser.open();
+	a.log.page('/');
+	const b = browser.open(async () => false);
+	b.log.page('/contact');
+	b.log.question('anyone there?', '/', null, '');
+	await browser.settle(); // tab B's probe answers no and writes it down
+	assert.equal(JSON.parse(browser.cells.get(aiLogKey('site:acme'))).claim, false);
+
+	// Tab A never probed — what it holds in memory is still the null it mounted with.
+	assert.equal(a.log.state().claim, null);
+	assert.equal(a.log.session(), null, 'the first tab named a session the browser already knows has no Inbox');
 });

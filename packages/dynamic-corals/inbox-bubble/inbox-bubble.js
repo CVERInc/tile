@@ -1848,11 +1848,16 @@ export function createAiLog(opts) {
 		 * it starts at `current()` — so a question asked at the edge of the idle window would name
 		 * one session and be filed under the next. Rotating here, and stamping `last` here, is what
 		 * makes the id the request carried the id its row is flushed under.
+		 *
+		 * 🩸 STORAGE FIRST, THEN THE ANSWER. The「no Inbox」check ran on this tab's memory before
+		 * `current()` re-read storage, so a tab that mounted before another tab learned the answer
+		 * went on naming a session. Re-read, then decide — the order every other method has.
 		 */
 		session() {
-			if (!state || unclaimedStands()) return null;
+			if (!state) return null;
 			const at = now();
 			state = current(at);
+			if (unclaimedStands()) return null;
 			state.last = at;
 			write(state);
 			return state.sid;
