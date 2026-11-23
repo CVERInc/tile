@@ -289,6 +289,13 @@ in their Inbox — as an aggregate, under 「AI 已答」, which never notifies 
   **not** once per session: a visitor who asks something on a second page sends the same
   `session_id` again, carrying the whole session, which is why the endpoint is idempotent on that
   id rather than inserting a row per request.
+- **Each `POST /api/kaito` names the same session** (reef#3802): the body is
+  `{kind, id, query, locale, session_id}`, where `session_id` is exactly the id this log sends,
+  so the server can attach the exchange to the conversation the session reaches. It is not a
+  second id and nothing new is stored for it. Without a log (ask-only, `data-ai-log="0"`), or
+  while a definite「no Inbox」stands, the key is absent and the body is the four keys it always
+  was. Asking counts as activity, so the id a question carries is the id its row is sent under,
+  even at the edge of the idle window. No other request carries it.
 - **A send that is refused changes nothing.** A beacon the browser will not take, a fetch that
   never arrives, anything but a 2xx: the questions stay in this browser and the next `pagehide`
   carries them. Only an accepted send moves the mark, and only the escalation press — which
