@@ -2924,3 +2924,74 @@ test('reef#3802: data-ai-log="0" — no log, so the question carries no session 
 		if (el) coral.unmount(el);
 	}
 });
+
+// reef#3802 P2-1, through the real mount(): ask, leave (the pagehide beacon carries the question
+// and no handle), then press for a person without asking again. The press must still tell the
+// server which conversation this session became, or deleting that conversation misses the row.
+const sessionPostsSince = (from) => requests.slice(from)
+	.filter((r) => r.init.method === 'POST' && new URL(r.url).pathname === '/api/inbox/session')
+	.map((r) => JSON.parse(r.init.body));
+const handOffSite = (url, init) => {
+	if (new URL(url).pathname === '/api/inbox/session' && init.method === 'POST') {
+		return { ok: true, status: 200, json: async () => ({ ok: true, stored: true }) };
+	}
+	return funnelSite(url, init);
+};
+
+test('reef#3802: a hand-off after the pagehide beacon, with no new question, still sends the handle', async () => {
+	const from = requests.length;
+	const before = new Set(windowListeners.get('pagehide') ?? []);
+	beacons.length = 0;
+	beaconResult = true;
+	respond = handOffSite;
+	let el;
+	try {
+		({ el } = await mountFresh({ 'data-kaito': '1' }));
+		await drain();
+		const root = panelOf(el);
+		await openBubble(root);
+		await askIn(root, 'do you ship to Japan?');
+		for (const fn of hidersSince(before)) fn({});
+		await drain();
+		assert.equal(beacons.length, 1, 'the pagehide beacon never left — this would not be the case');
+		const left = JSON.parse(beacons[0].body);
+		assert.equal('handle' in left, false);
+
+		await root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		await drain();
+		const linked = sessionPostsSince(from);
+		assert.equal(linked.length, 1, 'the hand-off sent no session body, so the row stays unlinked');
+		assert.equal(linked[0].handle, 'conv-422');
+		assert.equal(linked[0].session_id, left.session_id);
+		assert.deepEqual(linked[0].questions.map((q) => q.text), ['do you ship to Japan?']);
+	} finally {
+		respond = null;
+		if (el) coral.unmount(el);
+	}
+});
+
+test('reef#3802: data-ai-log="0" — the same hand-off sends no session body at all', async () => {
+	const from = requests.length;
+	const before = new Set(windowListeners.get('pagehide') ?? []);
+	beacons.length = 0;
+	respond = handOffSite;
+	let el;
+	try {
+		({ el } = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' }));
+		await drain();
+		const root = panelOf(el);
+		await openBubble(root);
+		await askIn(root, 'do you ship to Japan?');
+		for (const fn of hidersSince(before)) fn({});
+		await drain();
+		await root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		await drain();
+		const paths = requests.slice(from).map((r) => `${r.init.method || 'GET'} ${new URL(r.url).pathname}`);
+		assert.ok(paths.includes('POST /api/inbox'), `the hand-off never happened: ${paths}`);
+		assert.deepEqual(sessionPostsSince(from), []);
+		assert.deepEqual(beacons, []);
+	} finally {
+		respond = null;
+		if (el) coral.unmount(el);
+	}
+});

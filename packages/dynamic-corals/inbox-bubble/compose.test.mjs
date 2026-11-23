@@ -1594,6 +1594,66 @@ test('54: the press flushes with the handle and CLEARS the session', async () =>
 	assert.equal(quiet.sent.length, 0);
 });
 
+// reef#3802 P2-1: the questions already left on `pagehide`, WITHOUT a handle, and the visitor then
+// pressed for a person without asking again. The press used to send only when something was new,
+// so the server's row kept no conversation, and deleting that conversation deleted none of it.
+test('reef#3802: a press after the questions already left still sends the handle, under the same session', async () => {
+	const f = logFixture();
+	f.log.page('/pricing');
+	f.log.question('can I return it?', '/pricing', null, '');
+	await f.settle();
+	const flushed = f.log.flush();
+	assert.ok(flushed, 'the pagehide flush never left — the case below would not be this one');
+	assert.equal('handle' in flushed, false);
+	assert.equal(f.log.state().sent, 1);
+
+	const went = await f.log.escalated('conv-7');
+	assert.ok(went, 'the press sent nothing, so the row stays unlinked');
+	assert.equal(f.sent.length, 2);
+	assert.equal(went.handle, 'conv-7');
+	assert.equal(went.session_id, flushed.session_id, 'a different session links nothing');
+	// The body is the whole session, as every send is — reef refuses one with no questions.
+	assert.deepEqual(went.questions.map((q) => q.text), ['can I return it?']);
+	assert.equal(f.log.state().questions.length, 0, 'and once it is answered, the session is done');
+});
+
+test('reef#3802: a press sends nothing when the session asked nothing, the log is off, a no-Inbox stands, or there is no handle', async () => {
+	// Nothing asked at all: pages alone are not a session row.
+	const none = logFixture();
+	none.log.page('/');
+	assert.equal(await none.log.escalated('conv-1'), null);
+	assert.equal(none.sent.length, 0);
+
+	// `data-ai-log="0"` (and ask-only, which mounts with the same switch off).
+	const off = logFixture({ enabled: false });
+	off.log.page('/');
+	off.log.question('hello?', '/', null, '');
+	assert.equal(await off.log.escalated('conv-2'), null);
+	assert.equal(off.sent.length, 0);
+	assert.equal(off.cells.size, 0);
+
+	// A definite「no Inbox」in force when the press arrives, over questions an earlier claim sent.
+	const planted = logFixture();
+	const at = planted.at();
+	planted.cells.set('reef-inbox:ai:site:acme', JSON.stringify({
+		sid: 'sid-old', started: at, last: at, pages: ['/'],
+		questions: [{ text: 'sent before', page: '/', hit: null, lang: '', at }],
+		sent: 1, handle: null, claim: false, claimAt: at, probedAt: at
+	}));
+	const unclaimed = logFixture({ storage: planted.storage });
+	assert.equal(unclaimed.log.unclaimed(), true, 'the specimen is not a standing no');
+	assert.equal(await unclaimed.log.escalated('conv-3'), null);
+	assert.equal(unclaimed.sent.length, 0);
+
+	// Already sent, nothing new, and no conversation to name: a repeat would link nothing.
+	const blank = logFixture();
+	blank.log.question('asked once', '/', null, '');
+	await blank.settle();
+	assert.ok(blank.log.flush());
+	assert.equal(await blank.log.escalated(''), null);
+	assert.equal(blank.sent.length, 1);
+});
+
 test('54: a session spans pages and ends on idle, not on navigation', async () => {
 	const f = logFixture();
 	f.log.page('/');

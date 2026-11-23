@@ -1981,6 +1981,9 @@ export function createAiLog(opts) {
 			if (!state) return null;
 			const at = now();
 			state = current(at);
+			// Read before the press proves the claim below: a「no Inbox」in force when the visitor
+			// pressed is a reason not to resend what an earlier claim already sent.
+			const noStood = unclaimedStands();
 			state.handle = aiHandle(conv);
 			// 🩸 THE PROOF IS THE ID, SO THE ID IS WHAT IT IS CONDITIONED ON (review D11/E7). The
 			// handle was defended against a server that answered `ok:true` with no
@@ -1996,7 +1999,16 @@ export function createAiLog(opts) {
 			// The handle and the claim answer are facts already — a failed send must not cost
 			// them, so they are written before the network is asked anything.
 			write(state);
-			const payload = state.questions.length > state.sent && send ? aiSessionPayload(kind, id, state) : null;
+			// 🩸 NOTHING NEW IS NOT NOTHING TO SAY (reef#3802 P2-1). This used to send only when a
+			// question was unsent — but a visitor who asked, moved to another page (the `pagehide`
+			// beacon carries the questions and no handle) and then pressed for a person without
+			// asking again had nothing unsent, so the server's row never learned its conversation,
+			// and deleting that conversation deleted none of it. The body is the whole session, as
+			// every send is, so the server re-reads the same questions and links the row; with no
+			// handle there is nothing to link, and while a「no Inbox」stood there is nothing to resend.
+			const relink = state.sent > 0 && !!state.handle && !noStood;
+			const due = state.questions.length > state.sent || relink;
+			const payload = due && send ? aiSessionPayload(kind, id, state) : null;
 			if (!payload) return null;
 			let went = false;
 			try {
