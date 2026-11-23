@@ -1836,6 +1836,33 @@ export function createAiLog(opts) {
 		/** For tests and for the mount's own reads. Never a live reference. */
 		state: () => (state ? JSON.parse(JSON.stringify(state)) : null),
 
+		/**
+		 * The session id a KAITO question is asked under (reef#3802) — the id this log sends to
+		 * `/api/inbox/session`, so the server can tell which conversation an exchange belongs to.
+		 *
+		 * 🔴 THE SAME ID, NEVER A SECOND ONE. No log (ask-only, `data-ai-log="0"`) means no id, and
+		 * nothing is minted or stored to make one; while a definite「no Inbox」stands there is no
+		 * conversation to belong to, so none is named either.
+		 *
+		 * 🔴 THE ASK IS ACTIVITY. `question()` records the question when the answer comes back, and
+		 * it starts at `current()` — so a question asked at the edge of the idle window would name
+		 * one session and be filed under the next. Rotating here, and stamping `last` here, is what
+		 * makes the id the request carried the id its row is flushed under.
+		 *
+		 * 🩸 STORAGE FIRST, THEN THE ANSWER. The「no Inbox」check ran on this tab's memory before
+		 * `current()` re-read storage, so a tab that mounted before another tab learned the answer
+		 * went on naming a session. Re-read, then decide — the order every other method has.
+		 */
+		session() {
+			if (!state) return null;
+			const at = now();
+			state = current(at);
+			if (unclaimedStands()) return null;
+			state.last = at;
+			write(state);
+			return state.sid;
+		},
+
 		/** This page view, recorded at mount. Costs no request and reaches no network. */
 		page(path) {
 			if (!state) return;
@@ -3757,13 +3784,21 @@ function pageLocale() {
 	}
 }
 
-async function askKaito(apiBase, kind, id, query, copy) {
+/**
+ * `sessionId` is the question log's own session id (`aiLog.session()`, reef#3802) — the one its
+ * beacon sends — so the server can attach this exchange to the conversation that session reaches.
+ * It goes LAST and only when there is one: without a log the body is byte-for-byte what it was, and
+ * a server that ignores unknown keys reads the same four it always read.
+ */
+async function askKaito(apiBase, kind, id, query, copy, sessionId) {
+	const ask = { kind, id, query, locale: pageLocale() };
+	if (typeof sessionId === 'string' && sessionId) ask.session_id = sessionId.slice(0, 64);
 	let res;
 	try {
 		res = await fetch(`${apiBase}/api/kaito`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ kind, id, query, locale: pageLocale() })
+			body: JSON.stringify(ask)
 		});
 	} catch {
 		return null;
@@ -4186,7 +4221,8 @@ export async function mount(el, handoff = null) {
 	/**
 	 * The deferred question log (ruling 54). Built here, wired in exactly three places below —
 	 * this page view, each answered question, and the escalation — plus the one `pagehide`
-	 * listener at the bottom of `mount`.
+	 * listener at the bottom of `mount`, and one read: the session id each KAITO question is
+	 * asked under (reef#3802), which is this log's own and nobody else's.
 	 *
 	 * 🔴 IT IS HANDED ITS WORLD RATHER THAN REACHING FOR ONE, so the same object the browser
 	 * runs is the object `compose.test.mjs` drives with a plain Map and a counter.
@@ -4707,7 +4743,7 @@ export async function mount(el, handoff = null) {
 			// Asking again inside a guided journey is the funnel's「not resolved」. Before the ask, so
 			// it is the press that counts — not whatever the engine then answers.
 			funnel.followedUp(...funnelHere());
-			const answer = await askKaito(apiBase, kind, id, question, copy);
+			const answer = await askKaito(apiBase, kind, id, question, copy, aiLog.session());
 			if (disposed) return UNMOUNTED;
 
 			// 🔴 RECORDED HERE, WHERE THE OUTCOME IS KNOWN, AND NOWHERE ELSE. What goes in is the

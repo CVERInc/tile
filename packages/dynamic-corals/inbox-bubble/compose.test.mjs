@@ -2158,13 +2158,13 @@ function twoTabs() {
 	};
 	let clock = 1_700_000_000_000;
 	let n = 0;
-	const open = () => {
+	const open = (probeClaim = async () => true) => {
 		const sent = [];
 		const log = createAiLog({
 			tenant: 'site:acme', kind: 'site', id: 'acme', storage,
 			now: () => clock, newId: () => `sid-${++n}`,
 			send: (p) => (sent.push(p), true),
-			probeClaim: async () => true
+			probeClaim
 		});
 		return { log, sent };
 	};
@@ -2796,4 +2796,122 @@ test('#1866: statusFor picks the KAITO-only line only for askOnly, and never los
 		assert.ok(html.startsWith('&lt;b&gt;小美&lt;/b&gt;' + chip), `${locale}: the name was not escaped`);
 		assert.equal(html.includes(AI_CHIP_TOKEN), false, `${locale}: the sentinel reached the DOM`);
 	}
+});
+
+// ── reef#3802: the KAITO question names the session the beacon sends ───────────────────────
+//
+// A KAITO exchange belongs to an inbox conversation through the session id this log already
+// mints and already sends to `/api/inbox/session`. `session()` is how the question reads it: the
+// SAME id, never a second one. What is pinned here is that the id the question carries is the id
+// the log then records that question under and flushes — including across the two places the
+// session changes (thirty idle minutes, and the escalation press).
+
+test('reef#3802: session() is the id the flush sends, and asking it twice mints nothing', async () => {
+	let minted = 0;
+	const f = logFixture({ newId: () => `sid-${++minted}` });
+	f.log.page('/pricing');
+	assert.equal(f.log.session(), 'sid-1');
+	assert.equal(f.log.session(), 'sid-1');
+	f.log.question('do you ship to Japan?', '/pricing', null, '');
+	assert.equal(f.log.session(), 'sid-1');
+	f.log.question('and to Korea?', '/pricing', null, '');
+	await f.settle();
+	const went = f.log.flush();
+	assert.equal(went.session_id, 'sid-1');
+	assert.equal(went.questions.length, 2);
+	assert.equal(minted, 1, 'a second id was minted');
+});
+
+test('reef#3802: no session yet at the first question — it is created the way the log creates it, once', async () => {
+	let minted = 0;
+	const f = logFixture({ newId: () => `sid-${++minted}` });
+	// No `page()` has run, so nothing is in storage yet.
+	assert.equal(f.cells.size, 0);
+	const sid = f.log.session();
+	assert.equal(sid, 'sid-1');
+	assert.equal(JSON.parse(f.cells.get(aiLogKey('site:acme'))).sid, sid, 'the id the question carried is not the stored one');
+	f.log.question('first question', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.flush().session_id, sid);
+	assert.equal(minted, 1);
+});
+
+test('reef#3802: after thirty idle minutes the question carries the NEW session, the one its row goes under', async () => {
+	const f = logFixture();
+	f.log.page('/');
+	f.log.question('the old session', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.flush().session_id, 'sid-1');
+	f.tick(AI_LOG_IDLE_MS + 1);
+	const sid = f.log.session();
+	assert.equal(sid, 'sid-2', 'the question named the session that had gone cold');
+	f.tick(4000); // the answer takes a while
+	f.log.question('the new session', '/', null, '');
+	const went = f.log.flush();
+	assert.equal(went.session_id, sid);
+	assert.deepEqual(went.questions.map((q) => q.text), ['the new session']);
+});
+
+test('reef#3802: a question asked at the edge of the idle window does not split from its own row', async () => {
+	// 🔴 THE ASK IS ACTIVITY. Read at 29:59 of idleness and recorded when the answer comes back two
+	// seconds later, the question would name one session and be filed under the next — unless the
+	// read itself counts as the visitor still being here.
+	const f = logFixture();
+	f.log.page('/');
+	f.tick(AI_LOG_IDLE_MS - 1);
+	const sid = f.log.session();
+	assert.equal(sid, 'sid-1');
+	f.tick(2000);
+	f.log.question('asked at the edge', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.flush().session_id, sid);
+});
+
+test('reef#3802: after the escalation press clears the session, the next question carries the next one', async () => {
+	const f = logFixture();
+	f.log.page('/');
+	f.log.question('can I return it?', '/', null, '');
+	await f.settle();
+	const went = await f.log.escalated('conv-7');
+	assert.equal(went.session_id, 'sid-1');
+	const sid = f.log.session();
+	assert.equal(sid, f.log.state().sid);
+	assert.notEqual(sid, 'sid-1');
+	f.log.question('one more thing', '/', null, '');
+	assert.equal(f.log.flush().session_id, sid);
+});
+
+test('reef#3802: no log, no session id — and asking for one writes nothing', () => {
+	let minted = 0;
+	const off = logFixture({ enabled: false, newId: () => `sid-${++minted}` });
+	assert.equal(off.log.session(), null);
+	assert.equal(off.cells.size, 0, 'a disabled log wrote to storage');
+	assert.equal(minted, 0, 'a disabled log minted an id');
+});
+
+test('reef#3802: while「this site has no Inbox」stands, the question names no session', async () => {
+	const f = logFixture({ probeClaim: async () => false });
+	f.log.page('/');
+	f.log.question('anyone there?', '/', null, '');
+	await f.settle();
+	assert.equal(f.log.unclaimed(), true);
+	assert.equal(f.log.session(), null);
+});
+
+test('reef#3802: a「no Inbox」another tab learned is honoured by session() too', async () => {
+	// 🩸 `session()` checked the answer in this tab's memory BEFORE re-reading storage, so a tab
+	// that mounted before the other one learned the answer went on naming the session. Every
+	// other method re-reads first; this one has to as well.
+	const browser = twoTabs();
+	const a = browser.open();
+	a.log.page('/');
+	const b = browser.open(async () => false);
+	b.log.page('/contact');
+	b.log.question('anyone there?', '/', null, '');
+	await browser.settle(); // tab B's probe answers no and writes it down
+	assert.equal(JSON.parse(browser.cells.get(aiLogKey('site:acme'))).claim, false);
+
+	// Tab A never probed — what it holds in memory is still the null it mounted with.
+	assert.equal(a.log.state().claim, null);
+	assert.equal(a.log.session(), null, 'the first tab named a session the browser already knows has no Inbox');
 });

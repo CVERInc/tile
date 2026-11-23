@@ -2781,3 +2781,146 @@ test('tile#84 r2: a late answer does not overwrite a handle a newer mount wrote 
 		respond = null;
 	}
 });
+
+// ── reef#3802: the KAITO question names the session the beacon sends ───────────────────────
+//
+// compose.test.mjs pins `session()` against the log itself. What is measured HERE is the wiring,
+// against the real `mount()`: the bytes `POST /api/kaito` carries, compared with the bytes the
+// beacon carries — and every other request of the visit, which must carry neither.
+
+const kaitoBodies = (from) => requests.slice(from)
+	.filter((r) => new URL(r.url).pathname === '/api/kaito')
+	.map((r) => JSON.parse(r.init.body));
+/** The pagehide handlers registered since `before` — this test's mounts, never an earlier test's. */
+const hidersSince = (before) => (windowListeners.get('pagehide') ?? []).filter((fn) => !before.has(fn));
+async function askIn(root, text) {
+	composeBox(root).value = text;
+	await root.querySelector('.dc-inbox-form').emit('submit');
+	await drain();
+}
+
+test('reef#3802: every KAITO question carries the session id the beacon sends — one id across questions and pages', async () => {
+	const href = location.href;
+	const id = `s3802-${++seq}`;
+	const mounted = [];
+	const from = requests.length;
+	const before = new Set(windowListeners.get('pagehide') ?? []);
+	beacons.length = 0;
+	beaconResult = true;
+	respond = answering(GROUNDED);
+	try {
+		location.href = 'https://example.test/';
+		const first = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		mounted.push(first);
+		await mount(first);
+		await drain();
+		await openBubble(panelOf(first));
+		await askIn(panelOf(first), 'do you ship to Japan?');
+		await askIn(panelOf(first), 'and to Korea?');
+		// The next page: a new document and a new mount, the same session.
+		location.href = 'https://example.test/faq';
+		const second = new El({ 'data-kind': 'site', 'data-id': id, 'data-kaito': '1' });
+		mounted.push(second);
+		await mount(second);
+		await drain();
+		await openBubble(panelOf(second));
+		await askIn(panelOf(second), 'how long does it take?');
+		for (const fn of hidersSince(before)) fn({});
+		await drain();
+
+		const bodies = kaitoBodies(from);
+		assert.equal(bodies.length, 3, 'not one POST /api/kaito per question');
+		for (const body of bodies) {
+			// The old shape, in the old order, and one key after it — a server that ignores unknown
+			// keys reads exactly what it read before.
+			assert.deepEqual(Object.keys(body), ['kind', 'id', 'query', 'locale', 'session_id']);
+		}
+		const sids = [...new Set(bodies.map((b) => b.session_id))];
+		assert.equal(sids.length, 1, `the session id changed between questions: ${sids}`);
+		const [sid] = sids;
+		assert.equal(typeof sid, 'string');
+		assert.ok(sid.length > 0 && sid.length <= 64, sid);
+		// 🔴 THE SAME VALUE THE BEACON SENDS, measured on the beacon's own bytes.
+		assert.ok(beacons.length > 0, 'no beacon left — the comparison below would be empty');
+		for (const b of beacons) assert.equal(JSON.parse(b.body).session_id, sid);
+		assert.deepEqual(JSON.parse(beacons.at(-1).body).questions.map((q) => q.text),
+			['do you ship to Japan?', 'and to Korea?', 'how long does it take?']);
+		// And the one id this browser holds — no second key, no second id.
+		assert.equal(JSON.parse(storage.get(`reef-inbox:ai:site:${id}`)).sid, sid);
+		assert.deepEqual([...storage.keys()].filter((k) => k.endsWith(`:site:${id}`)).sort(),
+			[`reef-inbox:ai:site:${id}`, `reef-inbox:claim:site:${id}`, `reef-inbox:funnel:site:${id}`]);
+	} finally {
+		location.href = href;
+		respond = null;
+		for (const el of mounted) coral.unmount(el);
+	}
+});
+
+test('reef#3802: the session id goes to /api/kaito and /api/inbox/session, and to no other request', async () => {
+	const from = requests.length;
+	const before = new Set(windowListeners.get('pagehide') ?? []);
+	beacons.length = 0;
+	beaconResult = true;
+	// A cited answer on another page (so the funnel runs) and an Inbox that takes the hand-off.
+	respond = funnelSite;
+	let el;
+	try {
+		({ el } = await mountFresh({ 'data-kaito': '1' }));
+		await drain();
+		const root = panelOf(el);
+		await openBubble(root);
+		await askIn(root, 'do you ship to Japan?');
+		await root.querySelector('.dc-inbox-log').querySelector('.dc-inbox-tohuman').emit('click');
+		await drain();
+		for (const fn of hidersSince(before)) fn({});
+		await drain();
+
+		const sent = requests.slice(from);
+		const sids = new Set([
+			...kaitoBodies(from).map((b) => b.session_id),
+			...sent.filter((r) => r.init.method === 'POST' && new URL(r.url).pathname === '/api/inbox/session')
+				.map((r) => JSON.parse(r.init.body).session_id),
+			...beacons.map((b) => JSON.parse(b.body).session_id)
+		]);
+		assert.ok(sids.size > 0 && [...sids].every((s) => typeof s === 'string' && s), 'no session id to look for');
+		const paths = sent.map((r) => `${r.init.method || 'GET'} ${new URL(r.url).pathname}`);
+		// The ruler can read something: the hand-off, the funnel and the transcript all left.
+		for (const p of ['POST /api/inbox', 'POST /api/inbox/funnel', 'GET /api/inbox']) assert.ok(paths.includes(p), `${p} never left: ${paths}`);
+		const carriers = new Set(['POST /api/kaito', 'POST /api/inbox/session']);
+		for (const [i, r] of sent.entries()) {
+			if (carriers.has(paths[i])) continue;
+			const bytes = `${r.url} ${JSON.stringify(r.init.headers ?? {})} ${r.init.body ?? ''}`;
+			for (const sid of sids) assert.equal(bytes.includes(sid), false, `${paths[i]} carries the session id`);
+		}
+		// The same question of what this browser holds beside the log: the funnel's journey and the
+		// conversation handle are their own keys, and neither names the session.
+		const id = el.attrs['data-id'];
+		for (const [k, v] of storage) {
+			if (!k.endsWith(`:site:${id}`) || k === `reef-inbox:ai:site:${id}`) continue;
+			for (const sid of sids) assert.equal(String(v).includes(sid), false, `${k} holds the session id`);
+		}
+	} finally {
+		respond = null;
+		if (el) coral.unmount(el);
+	}
+});
+
+test('reef#3802: data-ai-log="0" — no log, so the question carries no session id and none is minted', async () => {
+	const from = requests.length;
+	respond = answering(GROUNDED);
+	let el;
+	try {
+		({ el } = await mountFresh({ 'data-kaito': '1', 'data-ai-log': '0' }));
+		await drain();
+		const root = panelOf(el);
+		await openBubble(root);
+		await askIn(root, 'do you ship to Japan?');
+		const bodies = kaitoBodies(from);
+		assert.equal(bodies.length, 1, 'the question never left — the key check below would be empty');
+		assert.deepEqual(Object.keys(bodies[0]), ['kind', 'id', 'query', 'locale']);
+		assert.equal(storage.has(`reef-inbox:ai:site:${el.attrs['data-id']}`), false);
+	} finally {
+		respond = null;
+		if (el) coral.unmount(el);
+	}
+});
