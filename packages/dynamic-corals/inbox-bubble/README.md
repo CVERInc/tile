@@ -565,14 +565,25 @@ just this coral, without changing any deployment's channels:
 
 ```sh
 node packages/dynamic-corals/build.mjs inbox-bubble --registry packages/dynamic-corals/inbox-bubble/out/registry
-sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.9.1/inbox-bubble.js
+sha256sum packages/dynamic-corals/inbox-bubble/out/registry/versions/inbox-bubble/0.9.3/inbox-bubble.js
 ```
 
 The registry directory passed to the build belongs to the caller. `out/` above is ignored
 scratch; deployment artifacts, channel pointers and `deploy.sh` live in the deployment
 repository described in [the registry README](../registry/README.md). A published version
-is immutable: if that deployment already has different bytes at 0.9.1, stop and choose a
+is immutable: if that deployment already has different bytes at 0.9.3, stop and choose a
 new version before publishing.
+
+**0.9.3 is 0.9.2 plus the question log's session on KAITO and the hand-off** (tile#420, tile#421,
+reef#3802; merged after 0.9.2 without a bump). Each `POST /api/kaito` now carries `session_id`, the
+same id the question log already sends, so the site's Inbox can attach a KAITO exchange to the
+conversation that session becomes; without a log (ask-only, `data-ai-log="0"`) or while a definite
+「no Inbox」stands, the key is absent and the body is the four keys it was. A tab that mounted before
+another tab learned「no Inbox」no longer names a session: it re-reads storage before it checks that
+answer. And a visitor who asked, moved to another page and then pressed for a person without asking
+again now sends the session once more with the conversation handle, so the site can link those
+questions to that conversation and deleting the conversation deletes them too. A patch version:
+every attribute keeps its meaning.
 
 **0.9.1 is 0.9.0 plus the not-claimed sentence** (tile#187, tile#318). A send refused with 404
 `not_claimed` shows the site form's `errorNotClaimed` sentence instead of a retry instruction, and
@@ -603,7 +614,7 @@ it is above the 0.7.12 floor.
 
 > **Historical for the version steps.** The first three steps are done: checked 2026-11-10, the
 > public registry serves `inbox-bubble` v0 = latest = 0.8.0 and `dock` v0 = latest = 0.1.0
-> (`X-Coral-Resolved`). Don't re-run them for a later version. To publish 0.9.1 (or any later
+> (`X-Coral-Resolved`). Don't re-run them for a later version. To publish 0.9.3 (or any later
 > patch), publish it as a new immutable version, repoint `latest` and then `v0` to it, and verify
 > `X-Coral-Resolved` and the body stamp name that version, as in "Publishing" above. The last two
 > steps are about the dock embed and the appbar engine, not a version number. They were not
