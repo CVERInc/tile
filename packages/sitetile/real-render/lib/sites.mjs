@@ -37,6 +37,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { siteLangTag } from '../../locale-tags.mjs';
 
 export const ARMS = ['plain', 'tokens', 'custom', 'tokens-layered', 'custom-layered'];
 
@@ -110,10 +111,15 @@ const SITE = {
 
 export const siteIdFor = (arm) => `site-${arm}`;
 export const siteLang = (arm) => SITE[arm].lang;
+/** The `<html lang>` the BUILD writes for this arm's `lang:`. Every arm is single-locale, so it is
+ *  siteLangTag, the helper SiteLayout itself calls: `en-US` → `en`, `zh-Hant` as written. 🩸 reef#3925:
+ *  the build started writing `en` on the three en-US arms and the matrix, still expecting the raw
+ *  `en-US`, went red on `lang` there. Asking the same helper keeps the two from drifting again. */
+export const builtLang = (arm) => siteLangTag(SITE[arm].lang);
 /**
  * The `<html lang>` a state's page must declare on this arm's site.
  *
- * Normally the site's own (`siteLang`). A state whose path names a locale (`copyLocale`, e.g.
+ * Normally the language the build writes for the site (`builtLang`). A state whose path names a locale (`copyLocale`, e.g.
  * `/zh-tw/shop/complete` → 'zh-TW') renders its copy in THAT locale whatever the site's language,
  * and the document must say so: the completion page re-declares the donor shell in the rendered
  * locale (square-shop 0e68a34, "the document's lang always describes the copy") — unless the
@@ -128,7 +134,7 @@ export const siteLang = (arm) => SITE[arm].lang;
  */
 export function expectedLang(arm, state) {
   const s = SITE[arm];
-  return state && state.copyLocale && state.copyLocale !== s.coralLocale ? state.copyLocale : s.lang;
+  return state && state.copyLocale && state.copyLocale !== s.coralLocale ? state.copyLocale : builtLang(arm);
 }
 /** Which theme treatment this arm wears: 'plain' | 'tokens' | 'custom'. */
 export const armTheme = (arm) => SITE[arm].theme;

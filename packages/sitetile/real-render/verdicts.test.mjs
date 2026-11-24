@@ -14,7 +14,8 @@
 // on an undeclared site, this goes red, and it is supposed to.
 import assert from 'node:assert/strict';
 import { verdicts, flattenFacts, modeDelta, modeDeltaVerdict, rgbOf } from './lib/probe.mjs';
-import { HEADING_OVERRIDE, THEME_TOKENS, ARMS, siteLang, expectedLang } from './lib/sites.mjs';
+import { HEADING_OVERRIDE, THEME_TOKENS, ARMS, siteLang, builtLang, expectedLang } from './lib/sites.mjs';
+import { siteLangTag } from '../locale-tags.mjs';
 import { STATES } from './lib/states.mjs';
 import { matchShopComplete, renderCompletion } from '../../dynamic-corals/square-shop/shop-function-template.js';
 
@@ -225,7 +226,8 @@ for (const st of STATES.filter((x) => x.family === 'shop completion')) {
   for (const arm of ARMS) {
     atest(`${st.id} on ${arm}: the matrix expects the <html lang> the Worker's completion page declares`, async () => {
       const u = new URL(st.path, 'https://shop.example.test');
-      const shell = `<!doctype html><html lang="${siteLang(arm)}"><head><title>Shop</title></head><body><header>N</header><main>G</main><footer>F</footer></body></html>`;
+      // The donor shell is the BUILT page, so it carries the lang the build writes (siteLangTag), not the raw `lang:`.
+      const shell = `<!doctype html><html lang="${siteLangTag(siteLang(arm))}"><head><title>Shop</title></head><body><header>N</header><main>G</main><footer>F</footer></body></html>`;
       const env = { ASSETS: { fetch: async (r) => (new URL(r.url).pathname === '/shop/' ? new Response(shell) : new Response('nf', { status: 404 })) } };
       const shop = matchShopComplete(u.pathname, [{ shopPath: '/shop', source: 'native' }]);
       assert.ok(shop, `${st.path} matches a completion route`);
@@ -239,7 +241,12 @@ atest('CONTROL: the locale-path state really does expect something other than th
   assert.equal(siteLang('plain'), 'en-US');
   assert.equal(expectedLang('plain', st), 'zh-TW');
   assert.equal(expectedLang('custom', st), 'zh-Hant', 'a shell already declaring the same language keeps its spelling');
-  assert.equal(expectedLang('plain', STATES.find((x) => x.id === 'shop-complete-paid')), 'en-US');
+  assert.equal(expectedLang('plain', STATES.find((x) => x.id === 'shop-complete-paid')), 'en',
+    'a site-language state expects what the build writes for lang: en-US (reef#3925), not the raw code');
+});
+atest('the matrix expects the lang the build writes: builtLang is siteLangTag of each arm\'s lang:', async () => {
+  for (const arm of ARMS) assert.equal(builtLang(arm), siteLangTag(siteLang(arm)), arm);
+  assert.deepEqual(ARMS.map(builtLang), ARMS.map((a) => ({ plain: 'en', tokens: 'en', custom: 'zh-Hant', 'tokens-layered': 'en', 'custom-layered': 'zh-Hant' })[a]));
 });
 for (const [name, fn] of asyncTests) {
   try { await fn(); passed++; console.log('  ✓ ' + name); }

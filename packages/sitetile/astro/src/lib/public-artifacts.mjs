@@ -8,7 +8,8 @@ import {
   publicFacingPosts,
   searchIndex,
 } from './blog.mjs';
-import { toBcp47 } from '../packages/lingo/locale.mjs';
+import { toBcp47, siteLangTag, lingoEnabled, parseLocales, localesSourceOf } from '../packages/lingo/locale.mjs';
+import { sitePackages } from '../../../site-packages.mjs';
 import { bubbleSearchOn } from './inbox-bubble.mjs';
 import { FEED_PATH, feedXml, feedIcon, latestBuildDate } from './feed.mjs';
 
@@ -25,6 +26,16 @@ export function buildReefPostsBody(posts, meta) {
   return JSON.stringify((posts || []).map((p) => ({ slug: p.slug, url: postUrl(p, meta) })));
 }
 
+// The feed's <language>, the same choice SiteLayout makes for <html lang>: toBcp47 on a Lingo site,
+// siteLangTag on a single-locale one (an edition code becomes its tag, anything else as written).
+// 🩸 reef#3925 r2: this ran toBcp47 on every site, so a single-locale `lang: en-GB` feed said `en`
+// and `lang: zh-HK` said zh-Hant. Pinned by single-locale-lang-tag.test.mjs.
+function feedLanguage(meta) {
+  if (!meta.lang) return '';
+  const hasLingo = lingoEnabled({ packages: sitePackages(meta), locales: parseLocales(meta.locales, localesSourceOf(meta)) });
+  return hasLingo ? toBcp47(meta.lang) : siteLangTag(meta.lang);
+}
+
 export function buildFeedBody(posts, meta, origin = '') {
   const publicPosts = publicFacingPosts(posts);
   const siteAuthor = String(meta['blog-author'] || '').trim();
@@ -39,7 +50,7 @@ export function buildFeedBody(posts, meta, origin = '') {
     title: feedTitle(meta),
     link: origin + blogBase(meta),
     description: feedDescription(meta),
-    language: meta.lang ? toBcp47(meta.lang) : '',
+    language: feedLanguage(meta),
     selfUrl: origin ? origin + FEED_PATH : '',
     buildDate: latestBuildDate(items),
     image: feedIcon(meta, origin), // tile#177 — the PNG this build emits, absolute; '' without an origin
