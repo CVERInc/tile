@@ -825,7 +825,9 @@ if (!existsSync(join(ASTRO, 'node_modules'))) {
     });
 
     // ── reef#1910 · 1: one declared locale is not an install ──────────────────────────
-    for (const [name, lang] of [['oneLocale', 'zh-TW'], ['oneLocaleLingo', 'ko']]) {
+    // reef#3925: the one language is written as its BCP-47 tag with or without Lingo, as RSS always
+    // did (zh-TW → zh-Hant, the way ko-KR → ko below). Before, the non-Lingo site said `zh-TW` here.
+    for (const [name, lang] of [['oneLocale', 'zh-Hant'], ['oneLocaleLingo', 'ko']]) {
       await test(`🔴 ${name}: no alternates, no x-default, no Language link, no chooser, no banner`, () => {
         const { outDir, pages } = site(name);
         assert.ok(Object.keys(pages).length >= 4, `only ${Object.keys(pages).length} pages built — the fixture shrank`);

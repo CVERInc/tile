@@ -431,7 +431,12 @@ const altLocales = !multilingual ? [] : Array.isArray(alternates) ? alternates.f
 });
 const localeTag = (l) => (hasLingo ? lingo.toBcp47(l) : l);
 const localeLabel = (l) => (hasLingo ? lingo.label(l) : l);
-const htmlLang = hasLingo && lang ? lingo.toBcp47(lang) : lang;
+// The document language (the root element's lang and JSON-LD inLanguage) is the BCP-47 tag whether or not
+// Lingo is on. 🩸 reef#3925: this was gated on hasLingo, so a single-locale `lang: zh-TW` site
+// wrote `zh-TW` here while its RSS feed (public-artifacts.mjs, always toBcp47) wrote `zh-Hant`,
+// and a Lingo site with the same `lang:` wrote `zh-Hant` too. A tag toBcp47 does not know passes
+// through unchanged. Pinned by single-locale-lang-tag.test.mjs.
+const htmlLang = lang ? lingo.toBcp47(lang) : lang;
 // Footer "Language" link → the PRIMARY switcher (/language). With Lingo on it's computed per-page:
 // locale-prefixed chooser + ?return=<current path> (so the chooser returns you to THIS page in the
 // chosen locale) + a localized link label. Absent Lingo → the static
