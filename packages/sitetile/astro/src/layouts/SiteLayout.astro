@@ -431,12 +431,13 @@ const altLocales = !multilingual ? [] : Array.isArray(alternates) ? alternates.f
 });
 const localeTag = (l) => (hasLingo ? lingo.toBcp47(l) : l);
 const localeLabel = (l) => (hasLingo ? lingo.label(l) : l);
-// The document language (the root element's lang and JSON-LD inLanguage) is the BCP-47 tag whether or not
-// Lingo is on. 🩸 reef#3925: this was gated on hasLingo, so a single-locale `lang: zh-TW` site
-// wrote `zh-TW` here while its RSS feed (public-artifacts.mjs, always toBcp47) wrote `zh-Hant`,
-// and a Lingo site with the same `lang:` wrote `zh-Hant` too. A tag toBcp47 does not know passes
-// through unchanged. Pinned by single-locale-lang-tag.test.mjs.
-const htmlLang = lang ? lingo.toBcp47(lang) : lang;
+// The document language (the root element's lang and JSON-LD inLanguage). A Lingo site runs it through
+// toBcp47, as before: every tag there is one of the editions. A single-locale site uses siteLangTag:
+// an edition code becomes its tag (`lang: zh-TW` → zh-Hant, what a Lingo site and RSS say), and any
+// other value is kept as written (en-GB, zh-HK, zh-Hant-HK, pt-BR, bare zh), because toBcp47 would
+// drop the region or turn zh-HK into zh-Hant. public-artifacts.mjs makes the same choice for RSS.
+// 🩸 reef#3925. Pinned by single-locale-lang-tag.test.mjs.
+const htmlLang = !lang ? lang : hasLingo ? lingo.toBcp47(lang) : lingo.siteLangTag(lang);
 // Footer "Language" link → the PRIMARY switcher (/language). With Lingo on it's computed per-page:
 // locale-prefixed chooser + ?return=<current path> (so the chooser returns you to THIS page in the
 // chosen locale) + a localized link label. Absent Lingo → the static

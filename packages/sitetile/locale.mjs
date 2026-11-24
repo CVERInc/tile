@@ -11,8 +11,8 @@
  * Never ABBREVIATE the data/URL code (no bare `zh`/`en`).
  */
 // The table itself (editions and their tags) is locale-tags.mjs: a leaf a browser bundle can import.
-import { LINGO_LOCALES, SIMPLIFIED, EDITION_TAGS, urlLocaleOfTag } from './locale-tags.mjs';
-export { LINGO_LOCALES, urlLocaleOfTag };
+import { LINGO_LOCALES, SIMPLIFIED, EDITION_TAGS, urlLocaleOfTag, siteLangTag } from './locale-tags.mjs';
+export { LINGO_LOCALES, urlLocaleOfTag, siteLangTag };
 const LINGO_BCP47 = Object.fromEntries(LINGO_LOCALES.map((l) => [l, EDITION_TAGS[l]]));
 export const LINGO_LABELS = {
   'en-US': 'English', 'ja-JP': '日本語', 'zh-TW': '繁體中文', 'ko-KR': '한국어',
