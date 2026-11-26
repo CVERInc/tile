@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -244,32 +244,25 @@ test('the emitted worker: the product page of a product with plans draws them fr
 	assert.ok(html.includes('/api/v2/shop/subscribe'));
 });
 
-// The frozen 178d9be template and core, emitted by the current emitter in a scratch tree: the
-// worker a Stripe Site had before plans existed, for the same fixture.
-function emitBaseWorker(name) {
-	const root = join(tmpdir(), `recurring-plans-base-${name}-${process.pid}`);
-	const dir = join(root, 'packages', 'dynamic-corals', 'square-shop');
-	mkdirSync(dir, { recursive: true });
-	mkdirSync(join(root, 'packages', 'sitetile'), { recursive: true });
-	writeFileSync(join(root, 'package.json'), '{"private":true,"type":"module"}');
-	cpSync(join(here, '..', '..', 'sitetile', 'query-redirects.mjs'), join(root, 'packages', 'sitetile', 'query-redirects.mjs'));
-	for (const f of readdirSync(here)) if (/\.(mjs|js)$/.test(f) && !/\.test\.mjs$/.test(f) && !/\.fixture\.js$/.test(f)) cpSync(join(here, f), join(dir, f));
-	cpSync(join(here, 'package.json'), join(dir, 'package.json'));
-	for (const f of ['shop-function-template.js', 'product-page-core.js']) cpSync(join(here, 'fixtures', 'recurring-plans-base-178d9be', f), join(dir, f));
-	const out = join(root, 'worker.mjs');
+// The worker a Stripe Site had before plans existed, for the same fixture: the frozen fa57bab emitter,
+// template and core that pages-behaviour-identity.test.mjs already keeps (and proves today's provider
+// product page identical to). Both workers are emitted with the same arguments.
+const BASE_EMITTER = join(here, 'fixtures', 'pages-identity-base-fa57bab', 'packages', 'dynamic-corals', 'square-shop', 'emit-shop-function.mjs');
+function emitWith(emitter, out) {
 	execFileSync('node', [
-		join(dir, 'emit-shop-function.mjs'),
+		emitter,
 		'--guild', 'g1', '--name', 'NORTHWIND',
 		'--shops', JSON.stringify([{ shopPath: '/shop', labels: {} }]),
 		'--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'stripe' }]),
 		'--api', 'https://api.example',
+		'--platform-origin', 'https://platform.example',
 		'--out', out
 	], { stdio: 'inherit' });
 	return out;
 }
 
-test('the emitted worker: against an RSP whose item answer has no plans, the product page is the page the 178d9be worker drew', async () => {
-	const base = await drive(emitBaseWorker('skew'), '/shop/tee', shellWith(''), { plans: false });
+test('the emitted worker: against an RSP whose item answer has no plans, the product page is the page the fa57bab worker drew', async () => {
+	const base = await drive(emitWith(BASE_EMITTER, join(tmpdir(), `recurring-plans-base-${process.pid}.mjs`)), '/shop/tee', shellWith(''), { plans: false });
 	for (const plans of [false, 'empty']) {
 		const now = await drive(emitWorker('product-skew-' + plans), '/shop/tee', shellWith(''), { plans });
 		assert.equal(now.html, base.html, 'the full page, byte for byte');
