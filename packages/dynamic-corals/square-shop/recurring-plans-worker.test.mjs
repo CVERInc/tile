@@ -1,10 +1,9 @@
 // Recurring plans on the edge: the shared render core and the emitted worker.
 //
-// A shop opts in with data-recurring="1" on its coral div. Only then does the generated site's
-// worker ask the catalogue for plans (`include=recurring`), draw them into the shop grid and into
-// the matching product page, with the interval and a Subscribe button. Everything below also pins
-// the other half: a shop that did not opt in sends the request it always sent and gets the bytes it
-// always got.
+// A Stripe shop's generated worker asks the catalogue for plans (`include=recurring`) and draws them
+// into the shop grid and into the matching product page, with the interval and a Subscribe button.
+// Everything below also pins the other half: a catalogue with no plans, and a shop on another
+// provider, get the request and the bytes they always got.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -154,13 +153,13 @@ test('the worker\'s interval words, Subscribe word and refusal sentences are the
 });
 
 // ── the emitted worker ──────────────────────────────────────────────────────
-function emitWorker(name) {
+function emitWorker(name, provider = 'stripe') {
 	const out = join(tmpdir(), `recurring-plans-${name}-${process.pid}.mjs`);
 	execFileSync('node', [
 		join(here, 'emit-shop-function.mjs'),
 		'--guild', 'g1', '--name', 'NORTHWIND',
 		'--shops', JSON.stringify([{ shopPath: '/shop', labels: {} }]),
-		'--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'stripe' }]),
+		'--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider }]),
 		'--api', 'https://api.example',
 		'--out', out
 	], { stdio: 'inherit' });
@@ -171,7 +170,7 @@ const shellWith = (coralAttrs) => '<!doctype html><html><head><title>Shop</title
 	`<div data-dynamic-coral="square-shop" data-guild-id="g1" data-cart="1" data-detail-base="/shop"${coralAttrs}></div>` +
 	'</main></body></html>';
 
-async function drive(file, path, shell) {
+async function drive(file, path, shell, { plans = true } = {}) {
 	const asked = [];
 	const real = globalThis.fetch;
 	globalThis.fetch = async (url) => {
@@ -180,7 +179,7 @@ async function drive(file, path, shell) {
 		const parsed = new URL(u);
 		if (parsed.pathname === '/api/v2/shop/catalog') {
 			const recurring = parsed.searchParams.get('include') === 'recurring';
-			return new Response(JSON.stringify({ connected: true, processor: 'stripe', items: [ITEM], ...(recurring ? { recurring_plans: PLANS } : {}) }), { headers: { 'content-type': 'application/json' } });
+			return new Response(JSON.stringify({ connected: true, processor: 'stripe', items: [ITEM], ...(recurring && plans ? { recurring_plans: plans === 'empty' ? [] : PLANS } : {}) }), { headers: { 'content-type': 'application/json' } });
 		}
 		if (parsed.pathname === '/api/v2/shop/catalog/item') return new Response(JSON.stringify({ item: ITEM }), { headers: { 'content-type': 'application/json' } });
 		throw new Error(`unexpected fetch: ${u}`);
@@ -197,9 +196,9 @@ async function drive(file, path, shell) {
 	} finally { globalThis.fetch = real; }
 }
 
-test('the emitted worker: a shop that opted in asks for plans and server-renders them into /shop', async () => {
+test('the emitted worker: a Stripe shop asks for plans and server-renders them into /shop', async () => {
 	const file = emitWorker('grid-on');
-	const { html, asked } = await drive(file, '/shop/', shellWith(' data-recurring="1"'));
+	const { html, asked } = await drive(file, '/shop/', shellWith(''));
 	assert.deepEqual(asked, ['https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe&include=recurring']);
 	assert.ok(html.includes('data-ssr="1"'));
 	assert.ok(html.includes('data-plans-ssr='));
@@ -207,18 +206,29 @@ test('the emitted worker: a shop that opted in asks for plans and server-renders
 	assert.equal((html.match(/dc-square-shop-subscribe">Subscribe</g) || []).length, 3);
 });
 
-test('the emitted worker: a shop that did not opt in reads and renders exactly what it did', async () => {
-	const file = emitWorker('grid-off');
+test('the emitted worker: a Stripe catalogue with no plans renders the grid it always did, however the answer says so', async () => {
+	const file = emitWorker('grid-none');
+	for (const plans of [false, 'empty']) {
+		const { html, asked } = await drive(file, '/shop/', shellWith(''), { plans });
+		assert.deepEqual(asked, ['https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe&include=recurring']);
+		assert.ok(html.includes('data-ssr="1"'));
+		for (const marker of ['dc-square-shop-plan', 'data-plans-ssr', 'Subscribe']) assert.ok(!html.includes(marker), marker);
+		const none = renderShopGrid([ITEM], { cart: true, detailBase: '/shop' }).gridHtml;
+		assert.ok(html.includes(none), 'the grid is exactly what the core draws for these items');
+	}
+});
+
+test('the emitted worker: a shop on another provider asks and renders exactly what it did', async () => {
+	const file = emitWorker('grid-square', 'square');
 	const { html, asked } = await drive(file, '/shop/', shellWith(''));
-	assert.deepEqual(asked, ['https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe']);
-	assert.ok(html.includes('data-ssr="1"'));
-	assert.ok(!html.includes('dc-square-shop-plan'));
-	assert.ok(!html.includes('Subscribe'));
+	assert.ok(asked.length > 0);
+	assert.ok(asked.every((u) => !u.includes('include=recurring')));
+	assert.ok(!html.includes('dc-square-shop-plan') && !html.includes('Subscribe'));
 });
 
 test('the emitted worker: the product page of a product with plans shows only its own plans', async () => {
 	const file = emitWorker('product-on');
-	const { html, asked } = await drive(file, '/shop/tee', shellWith(' data-recurring="1"'));
+	const { html, asked } = await drive(file, '/shop/tee', shellWith(''));
 	assert.ok(asked.includes('https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe&include=recurring'));
 	assert.ok(html.includes('Friends — USD\u00a05.00 / month'));
 	assert.ok(html.includes('Friends — USD\u00a013.00 / 3 months'));
@@ -227,12 +237,12 @@ test('the emitted worker: the product page of a product with plans shows only it
 	assert.ok(html.includes('/api/v2/shop/subscribe'));
 });
 
-test('the emitted worker: the product page of a shop that did not opt in asks for nothing extra and shows no plan', async () => {
-	const file = emitWorker('product-off');
-	const { html, asked } = await drive(file, '/shop/tee', shellWith(''));
-	assert.ok(asked.every((u) => !u.includes('include=recurring')));
-	assert.ok(!html.includes('data-dc-subscribe'));
-	assert.ok(!html.includes('/api/v2/shop/subscribe'));
+test('the emitted worker: a product page with no plan, or on another provider, is the page it always was', async () => {
+	const stripe = await drive(emitWorker('product-none'), '/shop/tee', shellWith(''), { plans: 'empty' });
+	assert.ok(!stripe.html.includes('data-dc-subscribe') && !stripe.html.includes('/api/v2/shop/subscribe'));
+	const square = await drive(emitWorker('product-square', 'square'), '/shop/tee', shellWith(''));
+	assert.ok(square.asked.every((u) => !u.includes('include=recurring')));
+	assert.ok(!square.html.includes('data-dc-subscribe') && !square.html.includes('/api/v2/shop/subscribe'));
 });
 
 test('the emitted worker carries the plan code', () => {

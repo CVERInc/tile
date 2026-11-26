@@ -200,14 +200,13 @@ async function renderProduct(request, env, ctx, cfg, match) {
 		if (!product) return Response.redirect(shopUrl + '/', 302); // unknown product → back to shop
 
 		const canonical = `${shopUrl}/${match.slug}`;
-		// The shop page's own coral div says whether this shop sells recurring plans
-		// (data-recurring="1"); only then is the catalogue asked for them, and only this product's
-		// plans reach the page.
+		// A Stripe shop's catalogue also lists its recurring plans; only this product's plans reach
+		// the page. A shop on another provider is never asked, and a page with no plan is the page
+		// it always was.
 		const donorShell = shellRes.ok ? await shellRes.text() : '';
-		const donorCoral = donorShell ? parseCoralDiv(donorShell) : null;
 		let recurringPlans;
-		if (donorCoral && donorCoral.recurring) {
-			const listed = await fetchCatalogList(origin, cfg.apiBase, shopLocatorParam(cfg), match.shop.provider, true);
+		if (match.shop.provider === 'stripe') {
+			const listed = await fetchCatalogList(origin, cfg.apiBase, shopLocatorParam(cfg), match.shop.provider);
 			const all = listed && Array.isArray(listed.recurring_plans) ? listed.recurring_plans : [];
 			const own = all.filter((plan) => plan && product.product_id && plan.product_id === product.product_id);
 			if (own.length) recurringPlans = own;
@@ -1194,10 +1193,7 @@ function parseCoralDiv(html) {
 		noSidebar: attr('cart') === 'header',
 		detailBase: attr('detail-base'),
 		labels: { add: attr('add-label'), buy: attr('buy-label'), subscribe: attr('subscribe-label') }, completionLabels,
-		locale: attr('locale') || attr('shop-locale') || 'en-US',
-		// A shop opts in to recurring plans on its own coral div (data-recurring="1"). Only then does
-		// this worker ask the catalogue for them; every other shop's reads are unchanged.
-		recurring: attr('recurring') === '1'
+		locale: attr('locale') || attr('shop-locale') || 'en-US'
 	};
 }
 // Put the server-rendered grid INSIDE the (empty) coral div, so square-shop.js hydrates it.
@@ -2123,11 +2119,11 @@ async function renderNativeProduct(request, env, cfg, match, ctx) {
 
 // Resolve the selected provider's catalog list — same same-origin-first,
 // apiBase-fallback strategy as fetchProductJson, and the same HTML guard.
-async function fetchCatalogList(origin, apiBase, locator, rail, includeRecurring) {
+async function fetchCatalogList(origin, apiBase, locator, rail) {
 	// The rail is explicit: a selected provider's empty or failed catalog must
-	// not consult another provider. `include=recurring` is added only for a shop that opted in,
-	// so every other shop's request is exactly what it was.
-	const path = `/api/v2/shop/catalog?${locator}&payment_rail=${encodeURIComponent(rail)}${includeRecurring ? '&include=recurring' : ''}`;
+	// not consult another provider. A Stripe catalogue is asked for its recurring plans too; another
+	// provider's request is exactly what it was.
+	const path = `/api/v2/shop/catalog?${locator}&payment_rail=${encodeURIComponent(rail)}${rail === 'stripe' ? '&include=recurring' : ''}`;
 	try {
 		const r = await fetch(origin + path, { headers: { Accept: 'application/json' } });
 		const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
@@ -2171,7 +2167,7 @@ async function renderGridPage(request, env, ctx, cfg, shop) {
 			shell = replaceMain(donorShell, providerMount(cfg, shop));
 		}
 		const coral = parseCoralDiv(shell);
-		const data = await fetchCatalogList(origin, cfg.apiBase, shopLocatorParam(cfg), shop.provider, !!(coral && coral.recurring));
+		const data = await fetchCatalogList(origin, cfg.apiBase, shopLocatorParam(cfg), shop.provider);
 		const items = data && (Array.isArray(data) ? data : (data.items || data.catalog));
 		// An unavailable selected provider keeps its own mounted, rail-scoped state.
 		// It never resurrects the donor's raw/v0 coral and never asks another rail.
@@ -2180,8 +2176,8 @@ async function renderGridPage(request, env, ctx, cfg, shop) {
 		const { gridHtml, gridCss } = renderShopGrid(items, {
 			cart: coral.cart, noSidebar: coral.noSidebar, detailBase: coral.detailBase, labels: coral.labels, locale: coral.locale,
 			dynamicCoralCss: cfg.dynamicCoralCss,
-			// Only a shop that opted in carries plans; absent, renderShopGrid draws exactly what it did.
-			...(coral.recurring && data && Array.isArray(data.recurring_plans) ? { recurringPlans: data.recurring_plans } : {})
+			// A catalogue answer with no plans leaves renderShopGrid drawing exactly what it did.
+			...(data && Array.isArray(data.recurring_plans) ? { recurringPlans: data.recurring_plans } : {})
 		});
 		let body = injectHead(shell, `<style>${gridCss}</style>`);
 		body = injectCoralGrid(body, coral.tag, gridHtml);

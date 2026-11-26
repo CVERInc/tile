@@ -390,7 +390,7 @@ export function renderProductPage(product, config) {
 	// same bytes it always did. Which one the client USES is the guild-preferred rule in
 	// shop-function-template.js#shopLocatorParam, applied below and in square-shop.js.
 	const siteIdAttr = config.siteId ? `\n\tdata-site-id="${escAttr(config.siteId)}"` : '';
-	// Recurring plans of THIS product (opt-in: only a shop that declared data-recurring passes them).
+	// Recurring plans of THIS product (the caller passes only this product's plans, when it has any).
 	// With none, every byte below is what it always was.
 	const plansBlock = renderPlansBlock(config.recurringPlans, config, locale);
 	const apiBaseAttr = plansBlock.html ? `\n\tdata-api-base="${escAttr(config.apiBase || '')}"` : '';
@@ -597,7 +597,7 @@ export function renderShopGrid(items, config) {
 	const gridHtml = cartMode
 		? `<div class="dc-square-shop-layout${noSidebar ? ' dc-square-shop-layout--hosted-cart' : ''}">${grid}<div class="dc-square-shop-cart"></div></div>`
 		: grid;
-	// Plans (opt-in: the caller passes `recurringPlans` only for a shop that declared data-recurring)
+	// Plans (the caller passes `recurringPlans` only when the catalogue listed some)
 	// sit AFTER the grid and the cart panel as their own block, so nothing the cart reads sees them.
 	const plansHtml = renderPlansHtml(config.recurringPlans, { locale, labels: L });
 	return { gridHtml: gridHtml + plansHtml, gridCss: layerDynamicCoralCss(SHOP_GRID_CSS, config.dynamicCoralCss) };

@@ -15,20 +15,23 @@ there to find. Every other copy is downstream of this one:
 
 ## 0.11.22 — recurring plans show with their interval and a Subscribe button
 
-`square-shop.js`, `product-page-core.js`, `shop-function-template.js`. Opt-in: a shop whose coral div
-carries `data-recurring="1"`. Any other shop sends the catalog request it always sent and gets the
-bytes it always got.
+`square-shop.js`, `product-page-core.js`, `shop-function-template.js`. No new attribute is needed to
+turn it on; `data-subscribe-label` renames the button like the other per-label overrides.
 
-- The catalog read adds `include=recurring`. Each recurring plan price renders as `<amount> / month`
-  (or `/ 3 months`, `/ year`, in the shopper's language) with a Subscribe button (label
-  `data-subscribe-label`).
+- The catalog read always adds `include=recurring`. A catalogue with no plans (a Square shop, an
+  empty list, or an older backend that does not know the parameter) is drawn exactly as before.
+- Each recurring plan price renders as `<amount> / month` (or `/ 3 months`, `/ year`, in the
+  shopper's language) with a Subscribe button.
 - Subscribe posts `{guild_id|site_id, price_id, client_request_ref, redirect_url}` to
   `/api/v2/shop/subscribe` and follows the returned `url`. No amount, currency or quantity is sent.
   A refusal shows the existing checkout messages.
 - A plan is never an item: it has no variation id, never enters the cart or the stored basket, and a
   paid return takes nothing off the basket.
-- The generated site's worker server-renders the plans into the shop grid (`data-plans-ssr`) and the
-  matching product page; the page adds a small separate script for Subscribe.
+- The generated site's worker asks a Stripe catalogue for its plans and server-renders them into the
+  shop grid (`data-plans-ssr`) and the matching product page; the page adds a small separate script
+  for Subscribe. A shop on another provider is not asked.
+- A grid the edge drew without a plans block is left as it is: plans come from the edge or from the
+  coral's own catalog read, never from an extra request.
 
 ---
 
