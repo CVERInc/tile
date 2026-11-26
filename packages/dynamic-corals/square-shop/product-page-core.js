@@ -154,6 +154,155 @@ function soldOutLabel(locale) {
 	return 'Sold out';
 }
 
+// ── recurring plans ──────────────────────────────────────────────────────
+// The worker half of square-shop.js's plan rendering: the SAME interval words, the SAME Subscribe
+// word and the SAME refusal sentences, per language, because the page this draws and the page the
+// coral hydrates it into must say one thing. They are copies, and recurring-plan-parity.test.mjs
+// holds them against the coral's own dictionaries so a drift fails a test.
+//
+// A plan is bought alone (POST /api/v2/shop/subscribe with a price id) and is never in the cart.
+const PLAN_INTERVALS = ['day', 'week', 'month', 'year'];
+const PLAN_INTERVAL_TEXT = {
+	en: { one: { day: 'day', week: 'week', month: 'month', year: 'year' }, many: { day: 'days', week: 'weeks', month: 'months', year: 'years' }, join: ' ' },
+	ja: { one: { day: '日', week: '週', month: '月', year: '年' }, many: { day: '日', week: '週間', month: 'か月', year: '年' }, join: '' },
+	'zh-TW': { one: { day: '天', week: '週', month: '月', year: '年' }, many: { day: '天', week: '週', month: '個月', year: '年' }, join: ' ' },
+	'zh-CN': { one: { day: '天', week: '周', month: '月', year: '年' }, many: { day: '天', week: '周', month: '个月', year: '年' }, join: ' ' }
+};
+const PLAN_COPY = {
+	en: { subscribe: 'Subscribe', pending: 'Taking you to payment…', error: "Couldn't start checkout — try again.", busy: 'Too many tries just now — wait a moment and try again.', closed: "This shop isn't taking orders right now.", again: 'That order was already started — please try again.', unavailable: "The shop isn't responding — please try again shortly." },
+	ja: { subscribe: '定期購入', pending: 'お支払い画面へ移動しています…', error: 'お会計を開始できませんでした。もう一度お試しください。', busy: 'アクセスが集中しています。少し待ってからお試しください。', closed: '現在このショップでは注文を受け付けていません。', again: 'この注文はすでに開始されています。もう一度お試しください。', unavailable: 'ショップが応答していません。しばらくしてからお試しください。' },
+	'zh-TW': { subscribe: '訂閱', pending: '正在前往付款頁面…', error: '無法開始結帳，請再試一次。', busy: '目前嘗試次數過多，請稍候再試。', closed: '此商店目前不接受訂單。', again: '此訂單已開始，請再試一次。', unavailable: '商店目前沒有回應，請稍後再試。' },
+	'zh-CN': { subscribe: '订阅', pending: '正在前往支付页面…', error: '无法开始结算，请再试一次。', busy: '目前尝试次数过多，请稍候再试。', closed: '此商店目前不接受订单。', again: '此订单已开始，请再试一次。', unavailable: '商店目前没有响应，请稍后再试。' }
+};
+function planLocaleKey(locale) {
+	const n = String(locale || '').toLowerCase();
+	if (n.startsWith('ja')) return 'ja';
+	if (n.startsWith('zh')) return (n.includes('hans') || /-(cn|sg)(-|$)/.test(n)) ? 'zh-CN' : 'zh-TW';
+	return 'en';
+}
+export function planIntervalText(interval, count, locale) {
+	const row = PLAN_INTERVAL_TEXT[planLocaleKey(locale)];
+	if (!row.one[interval]) return '';
+	const n = Math.floor(Number(count)) || 1;
+	return n === 1 ? `/ ${row.one[interval]}` : `/ ${n}${row.join}${row.many[interval]}`;
+}
+export function planCopy(locale) {
+	return PLAN_COPY[planLocaleKey(locale)];
+}
+// Only a plan this page can sell is kept: a name, and at least one price with an id, an amount and
+// an interval it knows how to say. Same rule as square-shop.js#normalizePlans.
+export function normalizeRecurringPlans(raw) {
+	const out = [];
+	for (const plan of Array.isArray(raw) ? raw : []) {
+		if (!plan || typeof plan !== 'object') continue;
+		const prices = [];
+		for (const price of Array.isArray(plan.prices) ? plan.prices : []) {
+			if (!price || typeof price !== 'object' || !price.id || PLAN_INTERVALS.indexOf(price.interval) < 0) continue;
+			const minor = Number(price.amount_minor);
+			if (price.display_price == null && !Number.isFinite(minor)) continue;
+			const count = Math.floor(Number(price.interval_count));
+			prices.push({
+				id: String(price.id),
+				amount_minor: Number.isFinite(minor) ? minor : null,
+				currency: String(price.currency || ''),
+				display_price: price.display_price == null ? null : Number(price.display_price),
+				interval: price.interval,
+				interval_count: count > 0 ? count : 1
+			});
+		}
+		if (prices.length) out.push({ product_id: String(plan.product_id || ''), name: String(plan.name || ''), prices });
+	}
+	return out;
+}
+function recurringPlanPriceText(price, locale) {
+	const amount = price.display_price != null && !isNaN(price.display_price)
+		? fmtPrice(price.display_price, price.currency, locale)
+		: formatMoney({ minor: price.amount_minor, currency: price.currency, locale });
+	return `${amount} ${planIntervalText(price.interval, price.interval_count, locale)}`.trim();
+}
+// The plans block the edge draws into the /shop grid: the markup square-shop.js builds client-side,
+// plus the plans themselves as JSON on the block so the coral can hydrate it with no second request.
+export function renderPlansHtml(plans, config) {
+	config = config || {};
+	const list = normalizeRecurringPlans(plans);
+	if (list.length === 0) return '';
+	const locale = config.locale || 'en-US';
+	const label = (config.labels && config.labels.subscribe) || planCopy(locale).subscribe;
+	const cards = list.map((plan) => `<div class="dc-square-shop-card dc-square-shop-plan" data-product-id="${escAttr(plan.product_id)}">`
+		+ `<div class="dc-square-shop-body"><p class="dc-square-shop-name">${escHtml(plan.name)}</p>`
+		+ plan.prices.map((price) => `<div class="dc-square-shop-plan-price" data-price-id="${escAttr(price.id)}">`
+			+ `<p class="dc-square-shop-price">${escHtml(recurringPlanPriceText(price, locale))}</p>`
+			+ `<button type="button" class="dc-square-shop-buy dc-square-shop-subscribe">${escHtml(label)}</button></div>`).join('')
+		+ `</div></div>`).join('');
+	return `<div class="dc-square-shop-grid dc-square-shop-plans" data-plans-ssr="${escAttr(JSON.stringify(list))}" style="margin-top:24px">${cards}</div>`;
+}
+// The product page's own plans block, plus the one script that posts a Subscribe. It is SEPARATE
+// from the page's cart script (renderClientScript) and absent when there are no plans, so a page
+// without plans is byte for byte the page it was. No cart code is touched: a plan is never added to
+// the basket, and its sold record is written EMPTY so the paid return clears nothing of the basket.
+function renderPlansBlock(plans, config, locale) {
+	const list = normalizeRecurringPlans(plans);
+	if (list.length === 0) return { html: '', script: '' };
+	const copy = planCopy(locale);
+	const label = (config.labels && config.labels.subscribe) || copy.subscribe;
+	const html = `<div class="dc-pp-plans" data-dc-plans>` + list.map((plan) => plan.prices.map((price) => `<div class="dc-pp-plan" data-price-id="${escAttr(price.id)}">`
+		+ `<p class="dc-pp-price">${escHtml(plan.prices.length > 1 || list.length > 1 ? plan.name + ' — ' : '')}${escHtml(recurringPlanPriceText(price, locale))}</p>`
+		+ `<button type="button" class="dc-pp-add dc-pp-subscribe" data-dc-subscribe>${escHtml(label)}</button>`
+		+ `<p class="dc-pp-msg" role="alert" data-dc-msg hidden></p></div>`).join('')).join('') + `</div>`;
+	const script = `<script type="module">
+const C = ${JSON.stringify(copy)};
+const root = document.querySelector('[data-dc-product]');
+if (root) {
+	const guildId = root.getAttribute('data-guild-id') || '';
+	const siteId = root.getAttribute('data-site-id') || '';
+	const shopPath = root.getAttribute('data-shop-path') || '/shop';
+	const apiBase = root.getAttribute('data-api-base') || '';
+	const refs = {};
+	function newRef() { if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); const b = new Uint8Array(16); crypto.getRandomValues(b); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128; const h = []; for (let i = 0; i < 16; i++) h.push(b[i].toString(16).padStart(2, '0')); return h.slice(0, 4).join('') + '-' + h.slice(4, 6).join('') + '-' + h.slice(6, 8).join('') + '-' + h.slice(8, 10).join('') + '-' + h.slice(10).join(''); }
+	function errorText(status, payload) {
+		if (status === 409 && payload && payload.reason === 'unavailable') return C.unavailable;
+		if (status === 429) return C.busy;
+		if (status === 409) return C.again;
+		if (status === 404) return C.closed;
+		if (status >= 500) return C.unavailable;
+		return C.error;
+	}
+	root.querySelectorAll('[data-dc-subscribe]').forEach(function (btn) {
+		const row = btn.closest('[data-price-id]');
+		const msg = row ? row.querySelector('[data-dc-msg]') : null;
+		const priceId = row ? row.getAttribute('data-price-id') : '';
+		btn.addEventListener('click', async function () {
+			if (!priceId || btn.disabled) return;
+			if (msg) { msg.textContent = ''; msg.hidden = true; }
+			const original = btn.textContent;
+			btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.textContent = C.pending;
+			const ref = refs[priceId] || (refs[priceId] = newRef());
+			const loc = guildId ? { guild_id: guildId } : { site_id: siteId };
+			let status = 0, payload = null;
+			try {
+				const res = await fetch(apiBase + '/api/v2/shop/subscribe', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+					body: JSON.stringify(Object.assign({}, loc, { price_id: priceId, client_request_ref: ref, redirect_url: window.location.origin + shopPath.replace(/\\/$/, '') + '/complete?ref=' + encodeURIComponent(ref) }))
+				});
+				status = res.status;
+				payload = await res.json().catch(function () { return null; });
+				if (res.ok && payload && payload.url) {
+					try { localStorage.setItem('dc-square-shop-sold:' + ref, JSON.stringify({ t: Date.now(), ids: [], lines: [] })); } catch (e) {}
+					window.location.href = payload.url;
+					return;
+				}
+			} catch (e) {}
+			if (status === 409) delete refs[priceId];
+			btn.disabled = false; btn.removeAttribute('aria-busy'); btn.textContent = original;
+			if (msg) { msg.textContent = errorText(status, payload); msg.hidden = false; }
+		});
+	});
+}
+</script>`;
+	return { html, script };
+}
+
 function defaultLabels(l, locale) {
 	l = l || {};
 	return {
@@ -241,12 +390,16 @@ export function renderProductPage(product, config) {
 	// same bytes it always did. Which one the client USES is the guild-preferred rule in
 	// shop-function-template.js#shopLocatorParam, applied below and in square-shop.js.
 	const siteIdAttr = config.siteId ? `\n\tdata-site-id="${escAttr(config.siteId)}"` : '';
+	// Recurring plans of THIS product (opt-in: only a shop that declared data-recurring passes them).
+	// With none, every byte below is what it always was.
+	const plansBlock = renderPlansBlock(config.recurringPlans, config, locale);
+	const apiBaseAttr = plansBlock.html ? `\n\tdata-api-base="${escAttr(config.apiBase || '')}"` : '';
 	const bodyHtml = `
 <div class="dc-pp-wrap">
 <nav class="dc-pp-crumb" aria-label="Breadcrumb"><a href="${escAttr(shopPath)}">${escHtml(labels.shop)}</a> <span>/</span> <span>${escHtml(p.title || '')}</span></nav>
 <div class="dc-pp" data-dc-product
 	data-guild-id="${escAttr(config.guildId || '')}"${siteIdAttr}
-	data-shop-path="${escAttr(shopPath)}"
+	data-shop-path="${escAttr(shopPath)}"${apiBaseAttr}
 	data-variants="${escAttr(JSON.stringify(variants.map((v) => ({ id: v.id, price_minor: v.price_minor, currency: v.currency, available: !!v.available, image: v.image_url || '' }))))}">
 	<div class="dc-pp-media">${gallery}</div>
 	<div class="dc-pp-info">
@@ -254,13 +407,13 @@ export function renderProductPage(product, config) {
 		<p class="dc-pp-price" data-dc-price>${escHtml(fmtPrice(first.display_price, currency, locale))}${taxInclusiveSuffix(currency, locale)}</p>
 		${variantControl}
 		<button type="button" class="dc-pp-add" data-dc-add ${buyDisabled ? 'disabled' : ''}>${escHtml(buyDisabled ? labels.soldOut : labels.add)}</button>
-		<a class="dc-pp-cart" href="${escAttr(shopPath)}" data-dc-cartlink hidden></a>
+		<a class="dc-pp-cart" href="${escAttr(shopPath)}" data-dc-cartlink hidden></a>${plansBlock.html ? '\n\t\t' + plansBlock.html : ''}
 		${desc ? `<div class="dc-pp-desc">${paragraphs(desc)}</div>` : ''}
 	</div>
 </div>
 </div>
 ${renderStyles(config.dynamicCoralCss)}
-${renderClientScript(labels, locale)}`.trim();
+${renderClientScript(labels, locale)}${plansBlock.script}`.trim();
 
 	return { title, headMeta, bodyHtml };
 }
@@ -444,7 +597,10 @@ export function renderShopGrid(items, config) {
 	const gridHtml = cartMode
 		? `<div class="dc-square-shop-layout${noSidebar ? ' dc-square-shop-layout--hosted-cart' : ''}">${grid}<div class="dc-square-shop-cart"></div></div>`
 		: grid;
-	return { gridHtml, gridCss: layerDynamicCoralCss(SHOP_GRID_CSS, config.dynamicCoralCss) };
+	// Plans (opt-in: the caller passes `recurringPlans` only for a shop that declared data-recurring)
+	// sit AFTER the grid and the cart panel as their own block, so nothing the cart reads sees them.
+	const plansHtml = renderPlansHtml(config.recurringPlans, { locale, labels: L });
+	return { gridHtml: gridHtml + plansHtml, gridCss: layerDynamicCoralCss(SHOP_GRID_CSS, config.dynamicCoralCss) };
 }
 
 function centsToDecimalString(minor, currency) {

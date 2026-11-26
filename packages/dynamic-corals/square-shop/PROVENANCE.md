@@ -13,6 +13,25 @@ there to find. Every other copy is downstream of this one:
 
 ---
 
+## 0.11.22 — recurring plans show with their interval and a Subscribe button
+
+`square-shop.js`, `product-page-core.js`, `shop-function-template.js`. Opt-in: a shop whose coral div
+carries `data-recurring="1"`. Any other shop sends the catalog request it always sent and gets the
+bytes it always got.
+
+- The catalog read adds `include=recurring`. Each recurring plan price renders as `<amount> / month`
+  (or `/ 3 months`, `/ year`, in the shopper's language) with a Subscribe button (label
+  `data-subscribe-label`).
+- Subscribe posts `{guild_id|site_id, price_id, client_request_ref, redirect_url}` to
+  `/api/v2/shop/subscribe` and follows the returned `url`. No amount, currency or quantity is sent.
+  A refusal shows the existing checkout messages.
+- A plan is never an item: it has no variation id, never enters the cart or the stored basket, and a
+  paid return takes nothing off the basket.
+- The generated site's worker server-renders the plans into the shop grid (`data-plans-ssr`) and the
+  matching product page; the page adds a small separate script for Subscribe.
+
+---
+
 ## 0.11.21 — a shop tab that loaded the basket before an order no longer writes the paid lines back (tile#328)
 
 `square-shop.js` only. The completion page, the checkout request, prices and currency do not change.

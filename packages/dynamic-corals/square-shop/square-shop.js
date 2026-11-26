@@ -945,8 +945,10 @@ function shopLocatorParam(guildId, siteId) {
 	return `${key}=${encodeURIComponent(value)}`;
 }
 
-async function fetchCatalog(apiBase, locator) {
-	const res = await fetch(`${apiBase}/api/v2/shop/catalog?${locator}`, {
+// `includeRecurring` adds `&include=recurring` and nothing else, so a host that does not opt in
+// (data-recurring="1") sends the exact request it always has.
+async function fetchCatalog(apiBase, locator, includeRecurring) {
+	const res = await fetch(`${apiBase}/api/v2/shop/catalog?${locator}${includeRecurring ? '&include=recurring' : ''}`, {
 		headers: { Accept: 'application/json' }
 	});
 	if (!res.ok) throw new Error(`catalog ${res.status}`);
@@ -1282,18 +1284,187 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 	showCheckoutMessage(surface, checkoutErrorMessage(status, payload, labels));
 }
 
+// ── recurring plans ──────────────────────────────────────────────────────
+// A recurring plan is bought ALONE, never from the cart: the cart's checkout opens a one-time
+// payment session, and a subscription is a different sale with its own route. So a plan is not an
+// item — it has no variation id, it is never in `items`, the basket Map or the stored basket, and
+// its button posts straight to `/api/v2/shop/subscribe` with a price id and nothing else. The body
+// carries NO amount, currency or quantity: the backend prices the plan from the seller's own
+// account and refuses a body that names money.
+//
+// Opt-in per host (data-recurring="1"), because the catalog read then carries `include=recurring`
+// and every host that does not opt in must keep sending the exact request it always has.
+const PLAN_INTERVALS = ['day', 'week', 'month', 'year'];
+
+// One key per language row of the dictionaries above, resolved the way localeDictionary resolves it.
+function planLocaleKey(locale) {
+	const normalized = String(locale || '').toLowerCase();
+	if (normalized.startsWith('ja')) return 'ja-JP';
+	if (normalized.startsWith('zh')) {
+		return (normalized.includes('hans') || /-(cn|sg)(-|$)/.test(normalized)) ? 'zh-CN' : 'zh-TW';
+	}
+	return 'en-US';
+}
+
+// "/ month", "/ 3 months" — the unit follows the shopper's language, the count is the plan's own.
+const PLAN_INTERVAL_TEXT = {
+	'en-US': { one: { day: 'day', week: 'week', month: 'month', year: 'year' }, many: { day: 'days', week: 'weeks', month: 'months', year: 'years' }, join: ' ' },
+	'ja-JP': { one: { day: '日', week: '週', month: '月', year: '年' }, many: { day: '日', week: '週間', month: 'か月', year: '年' }, join: '' },
+	'zh-TW': { one: { day: '天', week: '週', month: '月', year: '年' }, many: { day: '天', week: '週', month: '個月', year: '年' }, join: ' ' },
+	'zh-CN': { one: { day: '天', week: '周', month: '月', year: '年' }, many: { day: '天', week: '周', month: '个月', year: '年' }, join: ' ' }
+};
+
+function planIntervalText(interval, count, locale) {
+	const row = PLAN_INTERVAL_TEXT[planLocaleKey(locale)];
+	if (!row.one[interval]) return '';
+	const n = Math.floor(Number(count)) || 1;
+	return n === 1 ? `/ ${row.one[interval]}` : `/ ${n}${row.join}${row.many[interval]}`;
+}
+
+// What the catalog read gave, kept only where it is a plan this widget can sell: a name, and at
+// least one price that has an id, an amount and an interval it knows how to say. Anything else is
+// dropped rather than guessed at.
+function normalizePlans(raw) {
+	const out = [];
+	for (const plan of Array.isArray(raw) ? raw : []) {
+		if (!plan || typeof plan !== 'object') continue;
+		const prices = [];
+		for (const price of Array.isArray(plan.prices) ? plan.prices : []) {
+			if (!price || typeof price !== 'object' || !price.id || PLAN_INTERVALS.indexOf(price.interval) < 0) continue;
+			const minor = Number(price.amount_minor);
+			if (price.display_price == null && !Number.isFinite(minor)) continue;
+			const count = Math.floor(Number(price.interval_count));
+			prices.push({
+				id: String(price.id),
+				amount_minor: Number.isFinite(minor) ? minor : null,
+				currency: String(price.currency || ''),
+				display_price: price.display_price == null ? null : Number(price.display_price),
+				interval: price.interval,
+				interval_count: count > 0 ? count : 1
+			});
+		}
+		if (prices.length) out.push({ product_id: String(plan.product_id || ''), name: String(plan.name || ''), prices });
+	}
+	return out;
+}
+
+function planPriceText(price, locale) {
+	const amount = price.display_price != null && !isNaN(price.display_price)
+		? formatPrice(price.display_price, price.currency, locale)
+		: formatMoney({ minor: price.amount_minor, currency: price.currency, locale });
+	return `${amount} ${planIntervalText(price.interval, price.interval_count, locale)}`.trim();
+}
+
+// POST /api/v2/shop/subscribe. Same shape as startCheckout above on purpose: the same pending
+// button, the same message node, the same refusal labels, the same idempotency rule.
+//   • `client_request_ref` is stable per price, so a re-click or a lost response replays the SAME
+//     session; a 409 means the ref is bound to something else, so it is dropped and the next click
+//     mints a fresh one.
+//   • the completion URL is the cart's (`<shop>/complete?ref=`).
+//   • the sold record is written EMPTY: the completion page that receives a paid ref with no record
+//     clears the whole basket, and nothing in a basket was part of this sale.
+async function startSubscribe(apiBase, guildId, priceId, btn, refs, labels, siteId, shopPath) {
+	const surface = btn.parentElement;
+	clearCheckoutMessage(surface);
+	const settle = beginPending(btn, labels && labels.checkoutPending);
+	const refKey = `subscribe:${priceId}`;
+	const clientRequestRef = checkoutRefFor(refs, refKey);
+	const redirect_url = checkoutCompletionUrl(clientRequestRef, shopPath);
+	let status = 0;
+	let payload = null;
+	try {
+		const res = await fetch(`${apiBase}/api/v2/shop/subscribe`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+			body: JSON.stringify({
+				...shopLocator(guildId, siteId),
+				price_id: priceId,
+				client_request_ref: clientRequestRef,
+				redirect_url
+			})
+		});
+		status = res.status;
+		payload = await res.json().catch(() => null);
+		if (res.ok && payload && payload.url) {
+			recordSoldLines(clientRequestRef, []);
+			window.location.href = payload.url;
+			return;
+		}
+	} catch {
+		// fall through to honest failure below
+	}
+	if (status === 409) refs.delete(refKey);
+	settle();
+	showCheckoutMessage(surface, checkoutErrorMessage(status, payload, labels));
+}
+
+function planCard(plan, apiBase, guildId, siteId, labels, detailBase, checkoutRefs) {
+	const card = document.createElement('div');
+	card.className = `${PREFIX}-card ${PREFIX}-plan`;
+	card.setAttribute('data-product-id', plan.product_id);
+	const body = document.createElement('div');
+	body.className = `${PREFIX}-body`;
+	const name = document.createElement('p');
+	name.className = `${PREFIX}-name`;
+	name.textContent = plan.name;
+	body.appendChild(name);
+	for (const price of plan.prices) {
+		const row = document.createElement('div');
+		row.className = `${PREFIX}-plan-price`;
+		row.setAttribute('data-price-id', price.id);
+		const text = document.createElement('p');
+		text.className = `${PREFIX}-price`;
+		text.textContent = planPriceText(price, labels.locale);
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = `${PREFIX}-buy ${PREFIX}-subscribe`;
+		button.textContent = labels.subscribe;
+		button.addEventListener('click', () =>
+			startSubscribe(apiBase, guildId, price.id, button, checkoutRefs, labels, siteId, detailBase)
+		);
+		row.append(text, button);
+		body.appendChild(row);
+	}
+	card.appendChild(body);
+	return card;
+}
+
+// Appended AFTER the item grid (and the cart panel in cart mode), as its own grid: the item render
+// paths start with `root.innerHTML = ''` and know nothing of plans, which keeps a plan out of every
+// basket code path by construction.
+function renderPlans(root, plans, apiBase, guildId, labels, detailBase, checkoutRefs) {
+	const old = root.querySelector(`.${PREFIX}-plans`);
+	if (old) old.remove();
+	if (!plans.length) return;
+	const siteId = root.getAttribute('data-site-id') || '';
+	const grid = document.createElement('div');
+	grid.className = `${PREFIX}-grid ${PREFIX}-plans`;
+	grid.style.marginTop = '24px';
+	for (const plan of plans) grid.appendChild(planCard(plan, apiBase, guildId, siteId, labels, detailBase, checkoutRefs));
+	root.appendChild(grid);
+}
+
+// The plans the edge already drew (product-page-core.js#renderShopGrid) carry themselves as JSON
+// on the block, the way itemsFromSsr reads the cards, so a hydrated page needs no second request.
+// null means "no block": the edge that rendered this page predates plans.
+function plansFromSsr(root) {
+	const block = root.querySelector('[data-plans-ssr]');
+	if (!block) return null;
+	try { return normalizePlans(JSON.parse(block.getAttribute('data-plans-ssr'))); } catch { return null; }
+}
+
 // Locale-aware labels — read from data-* attributes so a zh-TW page can pass
 // native strings (data-buy-label="購買" etc.). English defaults keep the widget
 // self-contained for en pages. Per-item `buy_label` from the API (if any) still
 // wins over the page-level default.
 const LABEL_DICTIONARIES = {
-	'en-US': { buy:'Buy', add:'Add to cart', soldOut:'Sold out', viewCart:'View cart', inCart:'In cart', cart:'Your cart', shop:'Shop', chooseOptions:'Choose options', checkout:'Checkout', confirmPrice:'Confirm new price', subtotal:'Total', taxIncluded:'incl. tax', remove:'Remove', quantity:'Quantity', decreaseQuantity:'Decrease quantity', increaseQuantity:'Increase quantity', emptyCart:'Add something on the left to get started.', unavailable:'Currently unavailable', unavailableNote:'Kept in your cart, but the shop is not listing these right now — they are not part of the checkout below.', cartUnavailable:"The cart can't be reached right now — you can still browse, and nothing in your cart has changed.", soldOutMessage:'Remove the sold-out item(s): {items}.', priceChangedMessage:'The price changed for {items}; review the new price and confirm checkout.', storageNotice:'Your cart will not be kept when you leave this page.', cartTooManyLines:'Your cart has {lines} different items — checkout takes at most {max} at a time. Please remove {over} before checking out.', checkoutError:"Couldn't start checkout — try again.", checkoutBusy:'Too many tries just now — wait a moment and try again.', checkoutClosed:"This shop isn't taking orders right now.", checkoutAgain:'That order was already started — please try again.', checkoutUnavailable:"The shop isn't responding — please try again shortly.", checkoutPending:'Taking you to payment…', checkoutNote:'Payment page is provided by Square (Japanese interface)', empty:'Nothing in the shop right now — check back soon.', unconnected:'No shop connected yet.', error:"Couldn't load the shop right now." },
-	'ja-JP': { buy:'購入', add:'カートに追加', soldOut:'売り切れ', viewCart:'カートを見る', inCart:'カート内', cart:'カート', shop:'ショップ', chooseOptions:'オプションを選択', checkout:'お会計へ', confirmPrice:'新価格を確認して進む', subtotal:'合計', taxIncluded:'税込', remove:'削除', quantity:'数量', decreaseQuantity:'数量を減らす', increaseQuantity:'数量を増やす', emptyCart:'左の商品をカートに追加してください。', unavailable:'現在お取り扱いがありません', unavailableNote:'カートに残していますが、現在ショップに掲載されていないため、下のお会計には含まれません。', cartUnavailable:'現在カートに接続できません。商品の閲覧は可能で、カートの内容は変わっていません。', soldOutMessage:'売り切れの商品を削除してください：{items}。', priceChangedMessage:'{items}の価格が変更されました。新価格を確認してからお会計へ進んでください。', storageNotice:'このページを離れるとカートの内容は保存されません。', cartTooManyLines:'カート内の商品が{lines}種類あります。一度にお会計できるのは{max}種類までです。{over}種類を削除してからお進みください。', checkoutError:'お会計を開始できませんでした。もう一度お試しください。', checkoutBusy:'アクセスが集中しています。少し待ってからお試しください。', checkoutClosed:'現在このショップでは注文を受け付けていません。', checkoutAgain:'この注文はすでに開始されています。もう一度お試しください。', checkoutUnavailable:'ショップが応答していません。しばらくしてからお試しください。', checkoutPending:'お支払い画面へ移動しています…', checkoutNote:'お支払いページは Square が提供します', empty:'現在商品はありません。', unconnected:'ショップはまだ接続されていません。', error:'ショップを読み込めませんでした。' },
-	'zh-TW': { buy:'購買', add:'加入購物車', soldOut:'已售完', viewCart:'查看購物車', inCart:'購物車內', cart:'購物車', shop:'商店', chooseOptions:'選擇規格', checkout:'前往結帳', confirmPrice:'確認新價格並結帳', subtotal:'總計', taxIncluded:'含稅', remove:'移除', quantity:'數量', decreaseQuantity:'減少數量', increaseQuantity:'增加數量', emptyCart:'請從左側加入商品。', unavailable:'目前沒有販售', unavailableNote:'已為您留在購物車，但商店目前沒有上架，不會列入下方結帳。', cartUnavailable:'目前無法連上購物車，仍可瀏覽商品；購物車內容沒有任何變動。', soldOutMessage:'請移除已售完的商品：{items}。', priceChangedMessage:'{items}的價格已變更；請確認新價格後再結帳。', storageNotice:'離開此頁面後，購物車內容將不會保留。', cartTooManyLines:'購物車裡有 {lines} 種商品，一次最多只能結帳 {max} 種。請先移除 {over} 種再結帳。', checkoutError:'無法開始結帳，請再試一次。', checkoutBusy:'目前嘗試次數過多，請稍候再試。', checkoutClosed:'此商店目前不接受訂單。', checkoutAgain:'此訂單已開始，請再試一次。', checkoutUnavailable:'商店目前沒有回應，請稍後再試。', checkoutPending:'正在前往付款頁面…', checkoutNote:'付款頁由 Square 提供（日文介面）', empty:'商店目前沒有商品，請稍後再來。', unconnected:'尚未連接商店。', error:'目前無法載入商店。' },
+	'en-US': { buy:'Buy', subscribe:'Subscribe', add:'Add to cart', soldOut:'Sold out', viewCart:'View cart', inCart:'In cart', cart:'Your cart', shop:'Shop', chooseOptions:'Choose options', checkout:'Checkout', confirmPrice:'Confirm new price', subtotal:'Total', taxIncluded:'incl. tax', remove:'Remove', quantity:'Quantity', decreaseQuantity:'Decrease quantity', increaseQuantity:'Increase quantity', emptyCart:'Add something on the left to get started.', unavailable:'Currently unavailable', unavailableNote:'Kept in your cart, but the shop is not listing these right now — they are not part of the checkout below.', cartUnavailable:"The cart can't be reached right now — you can still browse, and nothing in your cart has changed.", soldOutMessage:'Remove the sold-out item(s): {items}.', priceChangedMessage:'The price changed for {items}; review the new price and confirm checkout.', storageNotice:'Your cart will not be kept when you leave this page.', cartTooManyLines:'Your cart has {lines} different items — checkout takes at most {max} at a time. Please remove {over} before checking out.', checkoutError:"Couldn't start checkout — try again.", checkoutBusy:'Too many tries just now — wait a moment and try again.', checkoutClosed:"This shop isn't taking orders right now.", checkoutAgain:'That order was already started — please try again.', checkoutUnavailable:"The shop isn't responding — please try again shortly.", checkoutPending:'Taking you to payment…', checkoutNote:'Payment page is provided by Square (Japanese interface)', empty:'Nothing in the shop right now — check back soon.', unconnected:'No shop connected yet.', error:"Couldn't load the shop right now." },
+	'ja-JP': { buy:'購入', subscribe:'定期購入', add:'カートに追加', soldOut:'売り切れ', viewCart:'カートを見る', inCart:'カート内', cart:'カート', shop:'ショップ', chooseOptions:'オプションを選択', checkout:'お会計へ', confirmPrice:'新価格を確認して進む', subtotal:'合計', taxIncluded:'税込', remove:'削除', quantity:'数量', decreaseQuantity:'数量を減らす', increaseQuantity:'数量を増やす', emptyCart:'左の商品をカートに追加してください。', unavailable:'現在お取り扱いがありません', unavailableNote:'カートに残していますが、現在ショップに掲載されていないため、下のお会計には含まれません。', cartUnavailable:'現在カートに接続できません。商品の閲覧は可能で、カートの内容は変わっていません。', soldOutMessage:'売り切れの商品を削除してください：{items}。', priceChangedMessage:'{items}の価格が変更されました。新価格を確認してからお会計へ進んでください。', storageNotice:'このページを離れるとカートの内容は保存されません。', cartTooManyLines:'カート内の商品が{lines}種類あります。一度にお会計できるのは{max}種類までです。{over}種類を削除してからお進みください。', checkoutError:'お会計を開始できませんでした。もう一度お試しください。', checkoutBusy:'アクセスが集中しています。少し待ってからお試しください。', checkoutClosed:'現在このショップでは注文を受け付けていません。', checkoutAgain:'この注文はすでに開始されています。もう一度お試しください。', checkoutUnavailable:'ショップが応答していません。しばらくしてからお試しください。', checkoutPending:'お支払い画面へ移動しています…', checkoutNote:'お支払いページは Square が提供します', empty:'現在商品はありません。', unconnected:'ショップはまだ接続されていません。', error:'ショップを読み込めませんでした。' },
+	'zh-TW': { buy:'購買', subscribe:'訂閱', add:'加入購物車', soldOut:'已售完', viewCart:'查看購物車', inCart:'購物車內', cart:'購物車', shop:'商店', chooseOptions:'選擇規格', checkout:'前往結帳', confirmPrice:'確認新價格並結帳', subtotal:'總計', taxIncluded:'含稅', remove:'移除', quantity:'數量', decreaseQuantity:'減少數量', increaseQuantity:'增加數量', emptyCart:'請從左側加入商品。', unavailable:'目前沒有販售', unavailableNote:'已為您留在購物車，但商店目前沒有上架，不會列入下方結帳。', cartUnavailable:'目前無法連上購物車，仍可瀏覽商品；購物車內容沒有任何變動。', soldOutMessage:'請移除已售完的商品：{items}。', priceChangedMessage:'{items}的價格已變更；請確認新價格後再結帳。', storageNotice:'離開此頁面後，購物車內容將不會保留。', cartTooManyLines:'購物車裡有 {lines} 種商品，一次最多只能結帳 {max} 種。請先移除 {over} 種再結帳。', checkoutError:'無法開始結帳，請再試一次。', checkoutBusy:'目前嘗試次數過多，請稍候再試。', checkoutClosed:'此商店目前不接受訂單。', checkoutAgain:'此訂單已開始，請再試一次。', checkoutUnavailable:'商店目前沒有回應，請稍後再試。', checkoutPending:'正在前往付款頁面…', checkoutNote:'付款頁由 Square 提供（日文介面）', empty:'商店目前沒有商品，請稍後再來。', unconnected:'尚未連接商店。', error:'目前無法載入商店。' },
 	// 0.11.10 (finding #15, 2026-09-03 cold-read): Simplified, added alongside zh-TW rather than
 	// derived from it at runtime — the two diverge in wording, not just glyphs (結帳→结算, not a
 	// character-for-character conversion of 結帳's simplified glyphs).
-	'zh-CN': { buy:'购买', add:'加入购物车', soldOut:'已售罄', viewCart:'查看购物车', inCart:'购物车内', cart:'购物车', shop:'商店', chooseOptions:'选择规格', checkout:'去结算', confirmPrice:'确认新价格并结算', subtotal:'总计', taxIncluded:'含税', remove:'移除', quantity:'数量', decreaseQuantity:'减少数量', increaseQuantity:'增加数量', emptyCart:'请从左侧加入商品。', unavailable:'目前没有销售', unavailableNote:'已为您留在购物车，但商店目前没有上架，不会列入下方结算。', cartUnavailable:'目前无法连上购物车，仍可浏览商品；购物车内容没有任何变动。', soldOutMessage:'请移除已售罄的商品：{items}。', priceChangedMessage:'{items}的价格已变更；请确认新价格后再结算。', storageNotice:'离开此页面后，购物车内容将不会保留。', cartTooManyLines:'购物车里有 {lines} 种商品，一次最多只能结算 {max} 种。请先移除 {over} 种再结算。', checkoutError:'无法开始结算，请再试一次。', checkoutBusy:'目前尝试次数过多，请稍候再试。', checkoutClosed:'此商店目前不接受订单。', checkoutAgain:'此订单已开始，请再试一次。', checkoutUnavailable:'商店目前没有响应，请稍后再试。', checkoutPending:'正在前往支付页面…', checkoutNote:'付款页由 Square 提供（日文界面）', empty:'商店目前没有商品，请稍后再来。', unconnected:'尚未连接商店。', error:'目前无法加载商店。' }
+	'zh-CN': { buy:'购买', subscribe:'订阅', add:'加入购物车', soldOut:'已售罄', viewCart:'查看购物车', inCart:'购物车内', cart:'购物车', shop:'商店', chooseOptions:'选择规格', checkout:'去结算', confirmPrice:'确认新价格并结算', subtotal:'总计', taxIncluded:'含税', remove:'移除', quantity:'数量', decreaseQuantity:'减少数量', increaseQuantity:'增加数量', emptyCart:'请从左侧加入商品。', unavailable:'目前没有销售', unavailableNote:'已为您留在购物车，但商店目前没有上架，不会列入下方结算。', cartUnavailable:'目前无法连上购物车，仍可浏览商品；购物车内容没有任何变动。', soldOutMessage:'请移除已售罄的商品：{items}。', priceChangedMessage:'{items}的价格已变更；请确认新价格后再结算。', storageNotice:'离开此页面后，购物车内容将不会保留。', cartTooManyLines:'购物车里有 {lines} 种商品，一次最多只能结算 {max} 种。请先移除 {over} 种再结算。', checkoutError:'无法开始结算，请再试一次。', checkoutBusy:'目前尝试次数过多，请稍候再试。', checkoutClosed:'此商店目前不接受订单。', checkoutAgain:'此订单已开始，请再试一次。', checkoutUnavailable:'商店目前没有响应，请稍后再试。', checkoutPending:'正在前往支付页面…', checkoutNote:'付款页由 Square 提供（日文界面）', empty:'商店目前没有商品，请稍后再来。', unconnected:'尚未连接商店。', error:'目前无法加载商店。' }
 };
 
 // 🩸 0.11.10: only recognised `zh-tw`/`zh-hant(-*)` — every OTHER zh tag (a genuine `zh-Hans`/
@@ -1319,6 +1490,7 @@ function readLabels(el) {
 		locale,
 		buy: el.getAttribute('data-buy-label') || defaults.buy,
 		add: el.getAttribute('data-add-label') || defaults.add,
+		subscribe: el.getAttribute('data-subscribe-label') || defaults.subscribe,
 		chooseOptions: el.getAttribute('data-choose-options-label') || defaults.chooseOptions,
 		checkout: el.getAttribute('data-checkout-label') || defaults.checkout,
 		subtotal: el.getAttribute('data-subtotal-label') || defaults.subtotal,
@@ -1970,6 +2142,9 @@ async function mount(el) {
 	const collectShipping = el.getAttribute('data-collect-shipping') === '1';
 	const detailBase = el.getAttribute('data-detail-base') || '';
 	const labels = readLabels(el);
+	// Recurring plans are opt-in per host: without it the catalog read and everything below are
+	// exactly what they were.
+	const wantsPlans = el.getAttribute('data-recurring') === '1';
 	// One ref map per mount — see newClientRequestRef above for why its lifetime
 	// (this page load) is exactly the lifetime of a buy-intent.
 	const checkoutRefs = new Map();
@@ -1995,8 +2170,19 @@ async function mount(el) {
 		// ssrCatalogMissesSiblings above: falling through here is what makes a coral-only deploy
 		// correct instead of silently short.
 		if (ssrItems.length && !(cartMode && ssrCatalogMissesSiblings(ssrItems))) {
+			// Read BEFORE the render below wipes the root. null = the edge predates plans.
+			const ssrPlans = wantsPlans ? plansFromSsr(el) : [];
 			if (cartMode) renderCart(el, ssrItems, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs);
 			else renderInstant(el, ssrItems, apiBase, guildId, labels, detailBase, checkoutRefs);
+			if (!wantsPlans) { /* nothing below concerns a host that did not opt in */ }
+			else if (ssrPlans) renderPlans(el, ssrPlans, apiBase, guildId, labels, detailBase, checkoutRefs);
+			else {
+				// The grid is the edge's and needs no catalog, but only a catalog can name the plans.
+				// A failed read costs the plans and nothing else.
+				fetchCatalog(apiBase, shopLocatorParam(guildId, siteId), true)
+					.then((data) => renderPlans(el, normalizePlans(data && data.recurring_plans), apiBase, guildId, labels, detailBase, checkoutRefs))
+					.catch(() => {});
+			}
 			return;
 		}
 	}
@@ -2004,8 +2190,9 @@ async function mount(el) {
 	// No SSR: reserve the grid's shape with a skeleton (no layout shift), then fetch + render.
 	el.innerHTML = skeletonHtml(cartMode);
 	try {
-		const data = await fetchCatalog(apiBase, shopLocatorParam(guildId, siteId));
+		const data = await fetchCatalog(apiBase, shopLocatorParam(guildId, siteId), wantsPlans);
 		const items = (Array.isArray(data && data.items) ? data.items : []).map(withVariantSummary);
+		const plans = wantsPlans ? normalizePlans(data && data.recurring_plans) : [];
 		if (!data || data.connected !== true) {
 			// Same rule as the empty-catalog arm below, and for a stronger reason: the edge worker
 			// rendered THIS seller's products into THIS root a moment ago, so "no shop connected yet"
@@ -2014,6 +2201,12 @@ async function mount(el) {
 			// was not was honest to the seller.
 			if (ssrItems.length) { renderBrowseOnly(el, ssrItems, labels, detailBase); return; }
 			el.innerHTML = `<p class="${PREFIX}-empty">${escHtml(labels.unconnected)}</p>`;
+			return;
+		}
+		if (items.length === 0 && plans.length > 0 && !ssrItems.length) {
+			// A shop that sells only plans: no grid, no cart, just the plans.
+			el.innerHTML = '';
+			renderPlans(el, plans, apiBase, guildId, labels, detailBase, checkoutRefs);
 			return;
 		}
 		if (items.length === 0) {
@@ -2026,6 +2219,7 @@ async function mount(el) {
 		}
 		if (cartMode) renderCart(el, items, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs);
 		else renderInstant(el, items, apiBase, guildId, labels, detailBase, checkoutRefs);
+		if (wantsPlans) renderPlans(el, plans, apiBase, guildId, labels, detailBase, checkoutRefs);
 	} catch {
 		// Honest failure — never fabricate products on a network/API error. The SSR cards are not
 		// fabricated: the edge rendered them from the seller's own catalog, into this very root,
@@ -2091,6 +2285,11 @@ export {
 	// renderPanel quietly keeps assigning textContent is a green light over an unchanged bug. The
 	// parity test drives this function and reads the nodes it actually built.
 	renderCart,
+	// Recurring plans (data-recurring="1"): the pure pieces, so the tests read what is actually built.
+	planIntervalText,
+	normalizePlans,
+	renderPlans,
+	startSubscribe,
 	formatMoney,
 	formatPrice,
 	formatPriceRange,
