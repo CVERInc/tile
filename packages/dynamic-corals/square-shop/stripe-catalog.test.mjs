@@ -272,7 +272,7 @@ test('the emitted worker server-renders a Stripe seller\'s grid into /shop', asy
 	globalThis.fetch = async (url) => {
 		const u = String(url);
 		asked.push(u);
-		if (u === 'https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe&include=recurring') {
+		if (u === 'https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe') {
 			return { ok: true, json: async () => CATALOG };
 		}
 		throw new Error(`unexpected fetch: ${u}`);
@@ -294,7 +294,7 @@ test('the emitted worker server-renders a Stripe seller\'s grid into /shop', asy
 
 		assert.deepEqual(
 			asked,
-			['https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe&include=recurring'],
+			['https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe'],
 			'the SSR catalog read must stay on the selected provider rail'
 		);
 		assert.ok(html.includes('data-ssr="1"'), 'the grid must actually be server-rendered, not fall back to the static page');
