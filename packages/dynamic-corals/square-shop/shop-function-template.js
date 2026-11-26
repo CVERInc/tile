@@ -165,7 +165,7 @@ function edgeCachePut(cache, key, res) {
 // per visitor, because a server-side hop does not carry the visitor's address. Under a
 // platform namespace the own-host GET reaches the dispatch Worker, which forwards it to RSP.
 async function fetchProductJson(origin, apiBase, locator, slug, rail) {
-	const path = `/api/v2/shop/catalog/item?${locator}&slug=${encodeURIComponent(slug)}&payment_rail=${encodeURIComponent(rail)}`;
+	const path = `/api/v2/shop/catalog/item?${locator}&slug=${encodeURIComponent(slug)}&payment_rail=${encodeURIComponent(rail)}${rail === 'stripe' ? '&include=recurring' : ''}`;
 	try {
 		const r = await fetch(origin + path, { headers: { Accept: 'application/json' } });
 		const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
@@ -200,14 +200,13 @@ async function renderProduct(request, env, ctx, cfg, match) {
 		if (!product) return Response.redirect(shopUrl + '/', 302); // unknown product → back to shop
 
 		const canonical = `${shopUrl}/${match.slug}`;
-		// A Stripe shop's catalogue also lists its recurring plans; only this product's plans reach
-		// the page. A shop on another provider is never asked, and a page with no plan is the page
-		// it always was.
+		// A Stripe shop's item answer carries this product's recurring plans (zero or one entry);
+		// they are drawn from that same response, with no second catalogue read. A shop on another
+		// provider is never asked, and a page with no plan is the page it always was.
 		const donorShell = shellRes.ok ? await shellRes.text() : '';
 		let recurringPlans;
 		if (match.shop.provider === 'stripe') {
-			const listed = await fetchCatalogList(origin, cfg.apiBase, shopLocatorParam(cfg), match.shop.provider);
-			const all = listed && Array.isArray(listed.recurring_plans) ? listed.recurring_plans : [];
+			const all = Array.isArray(data.recurring_plans) ? data.recurring_plans : [];
 			const own = all.filter((plan) => plan && product.product_id && plan.product_id === product.product_id);
 			if (own.length) recurringPlans = own;
 		}

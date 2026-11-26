@@ -182,7 +182,7 @@ for (const [name, url, init, opts] of [...CASES.map(([n, u, i]) => [n, u, i, {}]
 			assert.equal(headless(after.body), headless(before.body), 'body outside <head>');
 			assert.ok(html(after.body).includes(`<link rel="canonical" href="${SITE}/shop/tee">`), 'the product names its own canonical');
 		} else assert.equal(withoutNotOpen(after.body), before.body, 'body');
-		assert.deepEqual(after.globalCalls, before.globalCalls, 'the same global fetches, catalog reads included');
+		assert.deepEqual(after.globalCalls, before.globalCalls.map((u) => (/\/api\/v2\/shop\/catalog(\/item)?\?.*payment_rail=stripe/.test(u) ? u + '&include=recurring' : u)), 'the same global fetches, catalog reads included');
 		assert.deepEqual(after.bindingCalls, before.bindingCalls, 'the same binding calls');
 	});
 }

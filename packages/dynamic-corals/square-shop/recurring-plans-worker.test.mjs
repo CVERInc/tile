@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -181,7 +181,12 @@ async function drive(file, path, shell, { plans = true } = {}) {
 			const recurring = parsed.searchParams.get('include') === 'recurring';
 			return new Response(JSON.stringify({ connected: true, processor: 'stripe', items: [ITEM], ...(recurring && plans ? { recurring_plans: plans === 'empty' ? [] : PLANS } : {}) }), { headers: { 'content-type': 'application/json' } });
 		}
-		if (parsed.pathname === '/api/v2/shop/catalog/item') return new Response(JSON.stringify({ item: ITEM }), { headers: { 'content-type': 'application/json' } });
+		if (parsed.pathname === '/api/v2/shop/catalog/item') {
+			// The item read answers this product's plan only (zero or one entry), as the list read shapes it.
+			const recurring = parsed.searchParams.get('include') === 'recurring';
+			const own = PLANS.filter((p) => p.product_id === ITEM.product_id);
+			return new Response(JSON.stringify({ connected: true, item: ITEM, ...(recurring && plans ? { recurring_plans: plans === 'empty' ? [] : own } : {}) }), { headers: { 'content-type': 'application/json' } });
+		}
 		throw new Error(`unexpected fetch: ${u}`);
 	};
 	const env = { ASSETS: { fetch: async (req) => {
@@ -226,15 +231,50 @@ test('the emitted worker: a shop on another provider asks and renders exactly wh
 	assert.ok(!html.includes('dc-square-shop-plan') && !html.includes('Subscribe'));
 });
 
-test('the emitted worker: the product page of a product with plans shows only its own plans', async () => {
+const ITEM_URL = 'https://example.com/api/v2/shop/catalog/item?guild_id=g1&slug=tee&payment_rail=stripe&include=recurring';
+
+test('the emitted worker: the product page of a product with plans draws them from its one item read', async () => {
 	const file = emitWorker('product-on');
 	const { html, asked } = await drive(file, '/shop/tee', shellWith(''));
-	assert.ok(asked.includes('https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe&include=recurring'));
+	assert.deepEqual(asked, [ITEM_URL], 'one catalogue read: the item, asked for its plans, and no list read');
 	assert.ok(html.includes('Friends — USD\u00a05.00 / month'));
 	assert.ok(html.includes('Friends — USD\u00a013.00 / 3 months'));
 	assert.ok(!html.includes('Patrons'), 'another product\'s plan does not appear on this page');
 	assert.equal((html.match(/data-dc-subscribe>Subscribe</g) || []).length, 2);
 	assert.ok(html.includes('/api/v2/shop/subscribe'));
+});
+
+// The frozen 178d9be template and core, emitted by the current emitter in a scratch tree: the
+// worker a Stripe Site had before plans existed, for the same fixture.
+function emitBaseWorker(name) {
+	const root = join(tmpdir(), `recurring-plans-base-${name}-${process.pid}`);
+	const dir = join(root, 'packages', 'dynamic-corals', 'square-shop');
+	mkdirSync(dir, { recursive: true });
+	mkdirSync(join(root, 'packages', 'sitetile'), { recursive: true });
+	writeFileSync(join(root, 'package.json'), '{"private":true,"type":"module"}');
+	cpSync(join(here, '..', '..', 'sitetile', 'query-redirects.mjs'), join(root, 'packages', 'sitetile', 'query-redirects.mjs'));
+	for (const f of readdirSync(here)) if (/\.(mjs|js)$/.test(f) && !/\.test\.mjs$/.test(f) && !/\.fixture\.js$/.test(f)) cpSync(join(here, f), join(dir, f));
+	cpSync(join(here, 'package.json'), join(dir, 'package.json'));
+	for (const f of ['shop-function-template.js', 'product-page-core.js']) cpSync(join(here, 'fixtures', 'recurring-plans-base-178d9be', f), join(dir, f));
+	const out = join(root, 'worker.mjs');
+	execFileSync('node', [
+		join(dir, 'emit-shop-function.mjs'),
+		'--guild', 'g1', '--name', 'NORTHWIND',
+		'--shops', JSON.stringify([{ shopPath: '/shop', labels: {} }]),
+		'--storefronts', JSON.stringify([{ path: '/shop', source: 'provider', provider: 'stripe' }]),
+		'--api', 'https://api.example',
+		'--out', out
+	], { stdio: 'inherit' });
+	return out;
+}
+
+test('the emitted worker: against an RSP whose item answer has no plans, the product page is the page the 178d9be worker drew', async () => {
+	const base = await drive(emitBaseWorker('skew'), '/shop/tee', shellWith(''), { plans: false });
+	for (const plans of [false, 'empty']) {
+		const now = await drive(emitWorker('product-skew-' + plans), '/shop/tee', shellWith(''), { plans });
+		assert.equal(now.html, base.html, 'the full page, byte for byte');
+		assert.deepEqual(now.asked, base.asked.map((u) => u + '&include=recurring'), 'the same one read, asked for plans');
+	}
 });
 
 test('the emitted worker: a product page with no plan, or on another provider, is the page it always was', async () => {
