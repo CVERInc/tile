@@ -429,6 +429,18 @@ for (const locale of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN']) {
 }
 
 for (const locale of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN']) {
+	test(`a paid outcome that sends no confirmation mail omits the mail sentence in ${locale}`, async () => {
+		const r = await runCompletion(locale, { ...OUTCOME_SHAPES.legacyPaid, confirmation_mail: 'none' });
+		assert.equal(r.heading, COMPLETE_COPY[locale].paid);
+		assert.match(r.body, /Reef Tee × 2/);
+		assert.match(r.body, /dc-shop-total/);
+		assert.match(r.body, /ord-ref-1/);
+		assert.equal(r.body.includes(COMPLETE_COPY[locale].receipt), false, r.body);
+		assert.equal('dc-square-shop-cart:site-key' in r.store, false);
+	});
+}
+
+for (const locale of ['en-US', 'ja-JP', 'zh-TW', 'zh-CN']) {
 	test(`unknown does not claim the order is missing and offers safe next steps in ${locale}`, async () => {
 		for (const answer of [OUTCOME_SHAPES.unknown, new Error('network')]) {
 			const r = await runCompletion(locale, answer);
