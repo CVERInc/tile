@@ -1,7 +1,6 @@
 // square-shop.js — recurring plans: shown with their interval, bought alone, never in the cart.
 //
-// A shop opts in with data-recurring="1" on its coral div. Then the catalog read carries
-// `include=recurring`, each plan's price renders as "<amount> / month" with a Subscribe button, and
+// The catalog read always carries `include=recurring`; each plan's price renders as "<amount> / month" with a Subscribe button, and
 // that button posts a price id (and nothing about money) to POST /api/v2/shop/subscribe and follows
 // the redirect. A plan is not an item: it is not in the cart, the stored basket or the cart request.
 //
@@ -14,6 +13,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const stripExports = (src) => src.replace(/\nexport \{[\s\S]*?\n\};?\s*$/, '\n');
+// The coral as it was before plans (0.11.21), kept beside the tests as the yardstick for "renders exactly as before".
+const BASE_SOURCE = stripExports(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'recurring-plans-base.fixture.js'), 'utf8'));
 const SOURCE = readFileSync(join(here, 'square-shop.js'), 'utf8').replace(/\nexport \{[\s\S]*?\n\};?\s*$/, '\n');
 
 const PREFIX = 'dc-square-shop';
@@ -95,7 +97,7 @@ function text(el) { return [el.textContent, ...el.children.map(text)].join(''); 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 function click(el) { for (const fn of el._listeners.click || []) fn(); }
 
-function load({ catalog, post, store = {}, lang } = {}) {
+function load({ catalog, post, store = {}, lang, source = SOURCE } = {}) {
 	const calls = [];
 	const writes = [];
 	const state = { store: { ...store } };
@@ -126,7 +128,7 @@ function load({ catalog, post, store = {}, lang } = {}) {
 		throw new Error(`unexpected fetch: ${u}`);
 	};
 	const api = new Function('document', 'window', 'crypto', 'fetch', 'CustomEvent',
-		SOURCE + '\nreturn { mount, planIntervalText, normalizePlans, readLabels };')(document, window, globalThis.crypto, fetchImpl, globalThis.CustomEvent);
+		source + '\nreturn { mount, readLabels, ...(typeof planIntervalText === "function" ? { planIntervalText, normalizePlans } : {}) };')(document, window, globalThis.crypto, fetchImpl, globalThis.CustomEvent);
 	return { ...api, calls, writes, window, state };
 }
 
@@ -145,9 +147,9 @@ const planTexts = (root) => byClass(root, `${PREFIX}-plan-price`).map((r) => tex
 const withPlans = { connected: true, items: ITEMS, recurring_plans: PLANS };
 
 // ── render with and without plans ───────────────────────────────────────────
-test('an opted-in shop asks the catalogue for plans and draws each price with its interval and a Subscribe button', async () => {
+test('a shop asks the catalogue for plans and draws each price with its interval and a Subscribe button', async () => {
 	const sb = load({ catalog: withPlans });
-	const root = await mountShop(sb, { 'data-recurring': '1' });
+	const root = await mountShop(sb, {});
 
 	assert.equal(sb.calls[0].url, `${API}/api/v2/shop/catalog?guild_id=g1&include=recurring`);
 	assert.deepEqual(planTexts(root), ['USD\u00a05.00 / month', 'USD\u00a013.00 / 3 months', 'USD\u00a090.00 / year']);
@@ -156,21 +158,13 @@ test('an opted-in shop asks the catalogue for plans and draws each price with it
 	assert.equal(byClass(root, `${PREFIX}-card`).filter((c) => !c.classList.contains(`${PREFIX}-plan`)).length, 1, 'the item grid is still there');
 });
 
-test('a shop that did not opt in sends the exact catalogue request it always has and draws no plan', async () => {
-	const sb = load({ catalog: withPlans });
-	const root = await mountShop(sb);
-	assert.equal(sb.calls[0].url, `${API}/api/v2/shop/catalog?guild_id=g1`);
-	assert.equal(subscribeButtons(root).length, 0);
-	assert.equal(byClass(root, `${PREFIX}-plans`).length, 0);
-});
-
-test('an opted-in shop with no usable plans draws exactly its items: no plans block', async () => {
+test('a shop whose catalogue has no usable plans draws exactly its items: no plans block', async () => {
 	for (const catalog of [
 		{ connected: true, items: ITEMS, recurring_plans: [] },
 		{ connected: true, items: ITEMS },
 		{ connected: true, items: ITEMS, recurring_plans: [{ name: 'Broken', prices: [{ id: 'p', interval: 'fortnight', amount_minor: 1 }] }] }
 	]) {
-		const root = await mountShop(load({ catalog }), { 'data-recurring': '1' });
+		const root = await mountShop(load({ catalog }), {});
 		assert.equal(byClass(root, `${PREFIX}-plans`).length, 0);
 		assert.equal(subscribeButtons(root).length, 0);
 		assert.equal(byClass(root, `${PREFIX}-buy`).length, 1, 'the item Buy is untouched');
@@ -178,7 +172,7 @@ test('an opted-in shop with no usable plans draws exactly its items: no plans bl
 });
 
 test('a shop that sells only plans shows the plans and not the empty-shop line', async () => {
-	const root = await mountShop(load({ catalog: { connected: true, items: [], recurring_plans: PLANS } }), { 'data-recurring': '1' });
+	const root = await mountShop(load({ catalog: { connected: true, items: [], recurring_plans: PLANS } }), {});
 	assert.equal(subscribeButtons(root).length, 3);
 	assert.equal(byClass(root, `${PREFIX}-empty`).length, 0);
 });
@@ -187,16 +181,16 @@ test('the Subscribe label and the interval words follow the shopper\'s language,
 	const jpPlans = [{ product_id: 'p', name: 'X', prices: [
 		{ id: 'a', amount_minor: 500, currency: 'JPY', display_price: 500, interval: 'month', interval_count: 1 },
 		{ id: 'b', amount_minor: 1300, currency: 'JPY', display_price: 1300, interval: 'month', interval_count: 3 }] }];
-	const ja = await mountShop(load({ catalog: { connected: true, items: ITEMS, recurring_plans: jpPlans } }), { 'data-recurring': '1', 'data-locale': 'ja-JP' });
+	const ja = await mountShop(load({ catalog: { connected: true, items: ITEMS, recurring_plans: jpPlans } }), { 'data-locale': 'ja-JP' });
 	assert.equal(subscribeButtons(ja)[0].textContent, '定期購入');
 	assert.deepEqual(planTexts(ja), ['¥500 / 月', '¥1,300 / 3か月']);
-	const tw = await mountShop(load({ catalog: withPlans }), { 'data-recurring': '1', 'data-locale': 'zh-TW' });
+	const tw = await mountShop(load({ catalog: withPlans }), { 'data-locale': 'zh-TW' });
 	assert.equal(subscribeButtons(tw)[0].textContent, '訂閱');
 	assert.deepEqual(planTexts(tw).slice(0, 2), ['USD\u00a05.00 / 月', 'USD\u00a013.00 / 3 個月']);
-	const cn = await mountShop(load({ catalog: withPlans }), { 'data-recurring': '1', 'data-locale': 'zh-CN' });
+	const cn = await mountShop(load({ catalog: withPlans }), { 'data-locale': 'zh-CN' });
 	assert.equal(subscribeButtons(cn)[0].textContent, '订阅');
 	assert.deepEqual(planTexts(cn).slice(0, 2), ['USD\u00a05.00 / 月', 'USD\u00a013.00 / 3 个月']);
-	const renamed = await mountShop(load({ catalog: withPlans }), { 'data-recurring': '1', 'data-subscribe-label': 'Join' });
+	const renamed = await mountShop(load({ catalog: withPlans }), { 'data-subscribe-label': 'Join' });
 	assert.equal(subscribeButtons(renamed)[0].textContent, 'Join');
 });
 
@@ -214,7 +208,7 @@ test('the interval is said for every unit and count in every language', () => {
 // ── Subscribe posts the exact body and follows the redirect ─────────────────
 test('Subscribe posts exactly {guild_id, price_id, client_request_ref, redirect_url} and follows the redirect', async () => {
 	const sb = load({ catalog: withPlans });
-	const root = await mountShop(sb, { 'data-recurring': '1' });
+	const root = await mountShop(sb, {});
 	click(subscribeButtons(root)[1]);
 	await flush();
 
@@ -234,7 +228,6 @@ test('a site-keyed shop sends site_id and never an empty guild_id', async () => 
 	const root = makeEl('div');
 	root.setAttribute('data-site-id', 's1');
 	root.setAttribute('data-api-base', API);
-	root.setAttribute('data-recurring', '1');
 	await sb.mount(root); await flush();
 	assert.equal(sb.calls[0].url, `${API}/api/v2/shop/catalog?site_id=s1&include=recurring`);
 	click(subscribeButtons(root)[0]); await flush();
@@ -245,7 +238,7 @@ test('a site-keyed shop sends site_id and never an empty guild_id', async () => 
 
 test('the body carries no money: no amount, currency, quantity, lines or items', async () => {
 	const sb = load({ catalog: withPlans });
-	const root = await mountShop(sb, { 'data-recurring': '1' });
+	const root = await mountShop(sb, {});
 	for (const b of subscribeButtons(root)) { click(b); await flush(); }
 	const posts = sb.calls.filter((x) => x.method === 'POST');
 	assert.ok(posts.length >= 1);
@@ -258,7 +251,7 @@ test('the body carries no money: no amount, currency, quantity, lines or items',
 
 test('a retried Subscribe replays the same client_request_ref; a different price gets its own', async () => {
 	const sb = load({ catalog: withPlans, post: () => ({ status: 502, body: { error: 'x' } }) });
-	const root = await mountShop(sb, { 'data-recurring': '1' });
+	const root = await mountShop(sb, {});
 	const [month, quarter] = subscribeButtons(root);
 	click(month); await flush(); click(month); await flush(); click(quarter); await flush();
 	const posts = sb.calls.filter((c) => c.method === 'POST').map((c) => c.body);
@@ -269,7 +262,7 @@ test('a retried Subscribe replays the same client_request_ref; a different price
 
 test('a 409 drops the ref, so the next click mints a fresh one', async () => {
 	const sb = load({ catalog: withPlans, post: () => ({ status: 409, body: { error: 'client_request_ref already in use' } }) });
-	const root = await mountShop(sb, { 'data-recurring': '1' });
+	const root = await mountShop(sb, {});
 	const [month] = subscribeButtons(root);
 	click(month); await flush(); click(month); await flush();
 	const posts = sb.calls.filter((c) => c.method === 'POST').map((c) => c.body);
@@ -285,7 +278,7 @@ test('a refused Subscribe says what a refused checkout says, and the button is u
 	];
 	for (const [status, expected] of cases) {
 		const sb = load({ catalog: withPlans, post: () => ({ status, body: { error: 'machine words' } }) });
-		const root = await mountShop(sb, { 'data-recurring': '1' });
+		const root = await mountShop(sb, {});
 		const button = subscribeButtons(root)[0];
 		click(button); await flush();
 		const msg = byClass(button.parentElement, `${PREFIX}-msg`)[0];
@@ -299,7 +292,7 @@ test('a refused Subscribe says what a refused checkout says, and the button is u
 
 test('a site that renamed a checkout label gets its own words on a refused Subscribe', async () => {
 	const sb = load({ catalog: withPlans, post: () => ({ status: 429, body: {} }) });
-	const root = await mountShop(sb, { 'data-recurring': '1', 'data-checkout-busy-label': 'Slow down' });
+	const root = await mountShop(sb, { 'data-checkout-busy-label': 'Slow down' });
 	click(subscribeButtons(root)[0]); await flush();
 	assert.equal(byClass(root, `${PREFIX}-msg`)[0].textContent, 'Slow down');
 });
@@ -308,7 +301,7 @@ test('a site that renamed a checkout label gets its own words on a refused Subsc
 test('a plan is not an item: no variation id, no cart row, no cart request, and a paid return clears nothing', async () => {
 	const stored = JSON.stringify([['V1', 2]]);
 	const sb = load({ catalog: withPlans, store: { 'dc-square-shop-cart:g1': stored } });
-	const root = await mountShop(sb, { 'data-recurring': '1', 'data-cart': '1' });
+	const root = await mountShop(sb, { 'data-cart': '1' });
 
 	for (const card of byClass(root, `${PREFIX}-plan`)) assert.equal(card.getAttribute('data-variation-id'), null);
 	sb.writes.length = 0;
@@ -325,7 +318,7 @@ test('a plan is not an item: no variation id, no cart row, no cart request, and 
 
 test('in cart mode the plans sit outside the cart layout', async () => {
 	const sb = load({ catalog: withPlans });
-	const root = await mountShop(sb, { 'data-recurring': '1', 'data-cart': '1' });
+	const root = await mountShop(sb, { 'data-cart': '1' });
 	const layout = byClass(root, `${PREFIX}-layout`)[0];
 	assert.ok(layout, 'the cart layout is there');
 	assert.equal(byClass(layout, `${PREFIX}-plan`).length, 0, 'no plan inside the layout the cart reads');
@@ -356,28 +349,73 @@ function ssrSetup(withPlanBlock) {
 
 test('plans the edge already drew hydrate with no catalogue request', async () => {
 	const sb = load({ catalog: { connected: true, items: ITEMS, recurring_plans: [] } });
-	const root = await mountShop(sb, { 'data-recurring': '1' }, ssrSetup(true));
+	const root = await mountShop(sb, {}, ssrSetup(true));
 	assert.equal(sb.calls.length, 0);
 	assert.deepEqual(planTexts(root), ['USD\u00a05.00 / month', 'USD\u00a013.00 / 3 months', 'USD\u00a090.00 / year']);
 	click(subscribeButtons(root)[0]); await flush();
 	assert.equal(sb.calls[0].body.price_id, 'price_month');
 });
 
-test('an edge that predates plans: one catalogue read brings the plans, and a failed read costs only the plans', async () => {
+test('an edge grid with no plans block makes no request and draws no plan', async () => {
 	const sb = load({ catalog: withPlans });
-	const root = await mountShop(sb, { 'data-recurring': '1' }, ssrSetup(false));
-	assert.equal(sb.calls.length, 1);
-	assert.equal(sb.calls[0].url, `${API}/api/v2/shop/catalog?guild_id=g1&include=recurring`);
-	assert.equal(subscribeButtons(root).length, 3);
-
-	const root2 = await mountShop(load({ catalog: null }), { 'data-recurring': '1' }, ssrSetup(false));
-	assert.equal(subscribeButtons(root2).length, 0);
-	assert.equal(byClass(root2, `${PREFIX}-card`).length, 1, 'the edge grid stays');
-});
-
-test('without the opt-in, an edge-rendered grid makes no request at all', async () => {
-	const sb = load({ catalog: withPlans });
-	const root = await mountShop(sb, {}, ssrSetup(true));
+	const root = await mountShop(sb, {}, ssrSetup(false));
 	assert.equal(sb.calls.length, 0);
 	assert.equal(subscribeButtons(root).length, 0);
+	assert.equal(byClass(root, `${PREFIX}-card`).length, 1);
+});
+
+// ── a catalogue with no plans is drawn exactly as the coral before plans drew it ─────────────────
+// The same fixture is mounted in the base coral and in this one; what the shopper would see (the whole
+// tree, text, classes and attributes) and every request except the `include=recurring` the new
+// coral appends to the catalogue read must be identical.
+function serialize(el) {
+	const attrs = Object.keys(el._attrs).sort().map((k) => `${k}=${el._attrs[k]}`).join(' ');
+	return `<${el.tagName} class="${el.className}" ${attrs}>${el._html}${el.textContent}${el.children.map(serialize).join('')}</${el.tagName}>`;
+}
+const withoutInclude = (calls) => calls.map((c) => ({ ...c, url: c.url.replace('&include=recurring', '') }));
+
+async function bothRender(catalog, attrs = {}, setup) {
+	const base = load({ catalog, source: BASE_SOURCE });
+	const next = load({ catalog });
+	const a = await mountShop(base, attrs, setup);
+	const b = await mountShop(next, attrs, setup);
+	return { a, b, base, next };
+}
+
+const NO_PLAN_CATALOGS = {
+	'a catalogue answer without recurring_plans (an older backend)': { connected: true, processor: 'stripe', items: ITEMS },
+	'a Square shop': { connected: true, processor: 'square', items: ITEMS, recurring_plans: [] },
+	'a Stripe shop with recurring_plans: []': { connected: true, processor: 'stripe', items: ITEMS, recurring_plans: [] }
+};
+
+for (const [name, catalog] of Object.entries(NO_PLAN_CATALOGS)) {
+	for (const [mode, attrs] of [['instant buy', {}], ['cart', { 'data-cart': '1' }], ['cart with header', { 'data-cart': 'header' }]]) {
+		test(`${name}: the new coral draws exactly what the coral before plans drew (${mode})`, async () => {
+			const { a, b, base, next } = await bothRender(catalog, attrs);
+			assert.ok(byClass(a, `${PREFIX}-card`).length > 0, 'the fixture really draws a shop');
+			assert.equal(serialize(b), serialize(a));
+			assert.deepEqual(withoutInclude(next.calls), withoutInclude(base.calls));
+			assert.equal(subscribeButtons(b).length, 0);
+			assert.equal(byClass(b, `${PREFIX}-plans`).length, 0);
+			assert.equal(byClass(b, `${PREFIX}-error`).length, 0);
+		});
+	}
+	test(`${name}: an edge-drawn grid is left exactly as the coral before plans left it`, async () => {
+		const { a, b, next } = await bothRender(catalog, { 'data-cart': '1' }, ssrSetup(false));
+		assert.equal(serialize(b), serialize(a));
+		assert.equal(next.calls.length, 0);
+	});
+}
+
+test('an empty or unconnected catalogue is also drawn exactly as before', async () => {
+	for (const catalog of [{ connected: true, items: [], recurring_plans: [] }, { connected: false, items: [] }, { connected: true, items: [] }]) {
+		const { a, b } = await bothRender(catalog);
+		assert.equal(serialize(b), serialize(a));
+	}
+});
+
+test('the request differs from the coral before plans in one thing only: include=recurring', async () => {
+	const { base, next } = await bothRender({ connected: true, items: ITEMS });
+	assert.equal(base.calls[0].url, `${API}/api/v2/shop/catalog?guild_id=g1`);
+	assert.equal(next.calls[0].url, `${API}/api/v2/shop/catalog?guild_id=g1&include=recurring`);
 });

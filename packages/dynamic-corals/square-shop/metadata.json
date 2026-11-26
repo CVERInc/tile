@@ -75,13 +75,6 @@
       "description": "Fallback locale for shop copy when data-locale is absent; then page lang or en-US."
     },
     {
-      "name": "data-recurring",
-      "type": "boolean",
-      "required": false,
-      "default": null,
-      "description": "Set to 1 to also list the seller's recurring plans, each with its interval and a Subscribe button. A plan is bought on its own and never enters the cart. Stripe sellers only."
-    },
-    {
       "name": "data-subscribe-label",
       "type": "string",
       "required": false,

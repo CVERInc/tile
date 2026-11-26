@@ -126,7 +126,7 @@ const GUARD = 'data-dynamic-coral-mounted';
 
 	ok('mountAll() mounts a host that is on the page', catalogFetches.length === 1,
 		`fetches=${catalogFetches.length}`);
-	ok('…and it is the catalog for that host', catalogFetches[0] === 'https://rsp.test/api/v2/shop/catalog?guild_id=g-1',
+	ok('…and it is the catalog for that host', catalogFetches[0] === 'https://rsp.test/api/v2/shop/catalog?guild_id=g-1&include=recurring',
 		catalogFetches[0]);
 	ok('…and mount() ran on it (the widget class is on the host)', hosts[0].classList.contains('dc-square-shop'));
 	ok(`…and the host is stamped ${GUARD}="1"`, hosts[0].getAttribute(GUARD) === '1',
@@ -162,7 +162,7 @@ const GUARD = 'data-dynamic-coral-mounted';
 	ok('a host added since the last scan IS mounted', catalogFetches.length === 1,
 		`fetches=${catalogFetches.length}`);
 	ok('…and it is the NEW host, not the old one',
-		catalogFetches[0] === 'https://rsp.test/api/v2/shop/catalog?guild_id=g-2', catalogFetches[0]);
+		catalogFetches[0] === 'https://rsp.test/api/v2/shop/catalog?guild_id=g-2&include=recurring', catalogFetches[0]);
 	ok('…and the already-mounted host was still skipped in that same pass',
 		catalogFetches.length === 1 && !catalogFetches.some((u) => u.includes('g-1')));
 	ok('…and the new host is stamped too', second.getAttribute(GUARD) === '1');

@@ -264,9 +264,9 @@ const NAME_MARKUP = (n) => `<p class="dc-square-shop-name">${n}</p>`;
 	// does not index an empty container: a crash here would abort the controls further down.
 	const asked = sb.fetched[0] || '(nothing was asked)';
 	eq('a site-keyed host asks the catalog by site_id', asked,
-		`${API}/api/v2/shop/catalog?site_id=${SITE_ID}`);
+		`${API}/api/v2/shop/catalog?site_id=${SITE_ID}&include=recurring`);
 	eq('…the query string, isolated from the origin',
-		sb.fetched[0] ? new URL(sb.fetched[0]).search : asked, `?site_id=${SITE_ID}`);
+		sb.fetched[0] ? new URL(sb.fetched[0]).search : asked, `?site_id=${SITE_ID}&include=recurring`);
 	ok('…and sends no empty guild_id alongside it', !asked.includes('guild_id'), asked);
 	ok('…and the products it answered with are on screen',
 		rendered(el).includes(NAME_MARKUP('Riso poster')), rendered(el).slice(0, 200));
@@ -277,13 +277,13 @@ const NAME_MARKUP = (n) => `<p class="dc-square-shop-name">${n}</p>`;
 	const sb = loadSquareShop({ catalog: CATALOG });
 	await sb.mount(host({ guildId: GUILD_ID }));
 	eq('a guild-only host asks by guild_id, exactly as before', sb.fetched[0],
-		`${API}/api/v2/shop/catalog?guild_id=${GUILD_ID}`);
+		`${API}/api/v2/shop/catalog?guild_id=${GUILD_ID}&include=recurring`);
 
 	// The shape the reef build script actually produces for a site that HAS a guild: both flags.
 	const both = loadSquareShop({ catalog: CATALOG });
 	await both.mount(host({ guildId: GUILD_ID, siteId: SITE_ID }));
 	eq('both locators present → the guild still wins on the wire', both.fetched[0],
-		`${API}/api/v2/shop/catalog?guild_id=${GUILD_ID}`);
+		`${API}/api/v2/shop/catalog?guild_id=${GUILD_ID}&include=recurring`);
 	ok('…and exactly one locator goes on the wire', !both.fetched[0].includes('site_id'), both.fetched[0]);
 }
 

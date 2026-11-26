@@ -77,7 +77,6 @@ Requires one of: `data-site-id` or `data-guild-id`.
 | `data-collect-shipping` | boolean | no | `false` | Set to 1 to request shipping details in cart mode only. |
 | `data-detail-base` | url | no | — | Base URL for product detail links. |
 | `data-shop-locale` | string | no | — | Fallback locale for shop copy when data-locale is absent; then page lang or en-US. |
-| `data-recurring` | boolean | no | — | Set to 1 to also list the seller's recurring plans, each with its interval and a Subscribe button. A plan is bought on its own and never enters the cart. Stripe sellers only. |
 | `data-subscribe-label` | string | no | — | Subscribe button text override. Localized label (default per locale). |
 | `data-buy-label` | string | no | — | Buy button override. Localized label (default per locale). |
 | `data-add-label` | string | no | — | Add-to-cart button override. Localized label (default per locale). |

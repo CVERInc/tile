@@ -945,10 +945,10 @@ function shopLocatorParam(guildId, siteId) {
 	return `${key}=${encodeURIComponent(value)}`;
 }
 
-// `includeRecurring` adds `&include=recurring` and nothing else, so a host that does not opt in
-// (data-recurring="1") sends the exact request it always has.
-async function fetchCatalog(apiBase, locator, includeRecurring) {
-	const res = await fetch(`${apiBase}/api/v2/shop/catalog?${locator}${includeRecurring ? '&include=recurring' : ''}`, {
+// Always asks for `include=recurring`: a catalogue that has no recurring plans answers with no
+// `recurring_plans` (or an empty list) and the widget draws exactly what it always drew.
+async function fetchCatalog(apiBase, locator) {
+	const res = await fetch(`${apiBase}/api/v2/shop/catalog?${locator}&include=recurring`, {
 		headers: { Accept: 'application/json' }
 	});
 	if (!res.ok) throw new Error(`catalog ${res.status}`);
@@ -1292,8 +1292,8 @@ async function startCartCheckout(apiBase, guildId, cart, collectShipping, btn, l
 // carries NO amount, currency or quantity: the backend prices the plan from the seller's own
 // account and refuses a body that names money.
 //
-// Opt-in per host (data-recurring="1"), because the catalog read then carries `include=recurring`
-// and every host that does not opt in must keep sending the exact request it always has.
+// Default-on: the catalog read always carries `include=recurring`, and a shop with no plans is drawn
+// exactly as it was.
 const PLAN_INTERVALS = ['day', 'week', 'month', 'year'];
 
 // One key per language row of the dictionaries above, resolved the way localeDictionary resolves it.
@@ -2142,9 +2142,6 @@ async function mount(el) {
 	const collectShipping = el.getAttribute('data-collect-shipping') === '1';
 	const detailBase = el.getAttribute('data-detail-base') || '';
 	const labels = readLabels(el);
-	// Recurring plans are opt-in per host: without it the catalog read and everything below are
-	// exactly what they were.
-	const wantsPlans = el.getAttribute('data-recurring') === '1';
 	// One ref map per mount — see newClientRequestRef above for why its lifetime
 	// (this page load) is exactly the lifetime of a buy-intent.
 	const checkoutRefs = new Map();
@@ -2170,19 +2167,12 @@ async function mount(el) {
 		// ssrCatalogMissesSiblings above: falling through here is what makes a coral-only deploy
 		// correct instead of silently short.
 		if (ssrItems.length && !(cartMode && ssrCatalogMissesSiblings(ssrItems))) {
-			// Read BEFORE the render below wipes the root. null = the edge predates plans.
-			const ssrPlans = wantsPlans ? plansFromSsr(el) : [];
+			// Read BEFORE the render below wipes the root. A grid drawn by an edge that carries no plans
+			// block is left exactly as it is: the plans come from the edge, never from a second read.
+			const ssrPlans = plansFromSsr(el) || [];
 			if (cartMode) renderCart(el, ssrItems, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs);
 			else renderInstant(el, ssrItems, apiBase, guildId, labels, detailBase, checkoutRefs);
-			if (!wantsPlans) { /* nothing below concerns a host that did not opt in */ }
-			else if (ssrPlans) renderPlans(el, ssrPlans, apiBase, guildId, labels, detailBase, checkoutRefs);
-			else {
-				// The grid is the edge's and needs no catalog, but only a catalog can name the plans.
-				// A failed read costs the plans and nothing else.
-				fetchCatalog(apiBase, shopLocatorParam(guildId, siteId), true)
-					.then((data) => renderPlans(el, normalizePlans(data && data.recurring_plans), apiBase, guildId, labels, detailBase, checkoutRefs))
-					.catch(() => {});
-			}
+			if (ssrPlans.length) renderPlans(el, ssrPlans, apiBase, guildId, labels, detailBase, checkoutRefs);
 			return;
 		}
 	}
@@ -2190,9 +2180,9 @@ async function mount(el) {
 	// No SSR: reserve the grid's shape with a skeleton (no layout shift), then fetch + render.
 	el.innerHTML = skeletonHtml(cartMode);
 	try {
-		const data = await fetchCatalog(apiBase, shopLocatorParam(guildId, siteId), wantsPlans);
+		const data = await fetchCatalog(apiBase, shopLocatorParam(guildId, siteId));
 		const items = (Array.isArray(data && data.items) ? data.items : []).map(withVariantSummary);
-		const plans = wantsPlans ? normalizePlans(data && data.recurring_plans) : [];
+		const plans = normalizePlans(data && data.recurring_plans);
 		if (!data || data.connected !== true) {
 			// Same rule as the empty-catalog arm below, and for a stronger reason: the edge worker
 			// rendered THIS seller's products into THIS root a moment ago, so "no shop connected yet"
@@ -2219,7 +2209,7 @@ async function mount(el) {
 		}
 		if (cartMode) renderCart(el, items, apiBase, guildId, labels, collectShipping, detailBase, checkoutRefs);
 		else renderInstant(el, items, apiBase, guildId, labels, detailBase, checkoutRefs);
-		if (wantsPlans) renderPlans(el, plans, apiBase, guildId, labels, detailBase, checkoutRefs);
+		if (plans.length) renderPlans(el, plans, apiBase, guildId, labels, detailBase, checkoutRefs);
 	} catch {
 		// Honest failure — never fabricate products on a network/API error. The SSR cards are not
 		// fabricated: the edge rendered them from the seller's own catalog, into this very root,
@@ -2285,7 +2275,7 @@ export {
 	// renderPanel quietly keeps assigning textContent is a green light over an unchanged bug. The
 	// parity test drives this function and reads the nodes it actually built.
 	renderCart,
-	// Recurring plans (data-recurring="1"): the pure pieces, so the tests read what is actually built.
+	// Recurring plans: the pure pieces, so the tests read what is actually built.
 	planIntervalText,
 	normalizePlans,
 	renderPlans,

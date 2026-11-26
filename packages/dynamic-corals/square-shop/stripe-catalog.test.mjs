@@ -38,7 +38,7 @@ const SOURCE = readFileSync(join(here, 'square-shop.js'), 'utf8').replace(
 
 const PREFIX = 'dc-square-shop';
 const API_BASE = 'https://api.test';
-const CATALOG_URL = `${API_BASE}/api/v2/shop/catalog?guild_id=g1`;
+const CATALOG_URL = `${API_BASE}/api/v2/shop/catalog?guild_id=g1&include=recurring`;
 const CART_URL = `${API_BASE}/api/v2/shop/cart`;
 const PAY_URL = 'https://checkout.stripe.test/pay/cs_test_1';
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -272,7 +272,7 @@ test('the emitted worker server-renders a Stripe seller\'s grid into /shop', asy
 	globalThis.fetch = async (url) => {
 		const u = String(url);
 		asked.push(u);
-		if (u === 'https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe') {
+		if (u === 'https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe&include=recurring') {
 			return { ok: true, json: async () => CATALOG };
 		}
 		throw new Error(`unexpected fetch: ${u}`);
@@ -294,7 +294,7 @@ test('the emitted worker server-renders a Stripe seller\'s grid into /shop', asy
 
 		assert.deepEqual(
 			asked,
-			['https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe'],
+			['https://example.com/api/v2/shop/catalog?guild_id=g1&payment_rail=stripe&include=recurring'],
 			'the SSR catalog read must stay on the selected provider rail'
 		);
 		assert.ok(html.includes('data-ssr="1"'), 'the grid must actually be server-rendered, not fall back to the static page');
