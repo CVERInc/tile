@@ -47,6 +47,7 @@ export const INTERNAL = {
     'data-variants': 'Variants on server-rendered shop cards.',
     'data-currency': 'Currency on server-rendered shop cards.',
     'data-slug': 'Slug on server-rendered shop cards.',
+    'data-plans-ssr': 'Recurring plans on the server-rendered plans block.',
   },
   'inbox-bubble': {
     'data-dynamic-coral-mounted': 'Runtime mount guard written by the coral.',
