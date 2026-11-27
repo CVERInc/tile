@@ -189,7 +189,12 @@ html.deck-glide::view-transition-old(deck-up),html.deck-glide::view-transition-n
 html.deck-glide::view-transition-old(root),html.deck-glide::view-transition-new(root){animation-duration:.5s}
 html.deck-glide::view-transition-group(deck-seg),html.deck-glide::view-transition-new(deck-seg){animation:none}
 html.deck-glide::view-transition-old(deck-seg){display:none}
-@media (prefers-reduced-motion:reduce){html.deck :is(.deck-card,.deck-card.flipping-open,.deck-card.flipping-close,.deck-stack.dealt .deck-card,.deck-stack.dealing .deck-card,.deck-veil,.deck-shade,.deck-gshadow,.deck-seg){transition:none!important;animation:none!important}}
+@media (prefers-reduced-motion:reduce){html.deck :is(.deck-card,.deck-card.flipping-open,.deck-card.flipping-close,.deck-stack.dealt .deck-card,.deck-stack.dealing .deck-card,.deck-veil,.deck-shade,.deck-seg){transition:none!important;animation:none!important}
+  /* the ground shadow does what the cards do. Opening a fan they are simply there, and so it is simply gone. Folding, they
+     still fly home (a script animation, which neither the rule above nor the page's own `*{transition-duration:.01ms}`
+     reaches), so it keeps the fold's timing (fan-folding, below): it waits for them and grows as they land. A fade, no travel. */
+  html.deck .deck-gshadow{transition:none!important}
+  html.deck.fan-folding .deck-gshadow{transition:opacity .2s linear .3s!important}}
 
 /* deal-in: the pile lands on the table once; the top card settles last */
 html.deck .deck-stack.dealing .deck-card{transition:none;transform:translateY(60vh);opacity:0}
@@ -241,8 +246,10 @@ html.deck .deck-face{box-shadow:var(--deck-sh-flat);transition:visibility 0s lin
 html.deck .deck-card:is(.fan-hot,.flipped,.flipping-open,.flipping-close) .deck-face{box-shadow:var(--deck-sh-lift)}
 /* a fan folding home (fan-folding): the cards the pile will not show stay drawn until they are in, and each brought its own
    edge shadow under the pile, where the resting pile has three; they overlap as they close in and the shadows add up. They put
-   theirs down on the way (the .22s above, over well before they meet). */
-html.deck.fan-folding .deck-card.is-deep .deck-face{box-shadow:0 1px 2px rgba(0,0,0,0)}
+   theirs down on the way (the .22s above, over well before they meet).
+   The stack's only: in the list every card is drawn and keeps its edge. And :where() keeps this at (0,3,1), over the flat shadow
+   (0,2,1) and under the lifted one (0,4,1) whatever order the rules are in: a card that is hot or turned keeps its lift. */
+html.deck:where(.fan-folding:not(.list)) .deck-card:where(.is-deep) .deck-face{box-shadow:0 1px 2px rgba(0,0,0,0)}
 html.deck .deck-card.to-back-1 .deck-face{animation:deck-sh-up .3s cubic-bezier(.3,0,.6,1) both}
 html.deck .deck-card.to-back-2 .deck-face{animation:deck-sh-down .36s cubic-bezier(.4,0,.7,1) both}
 html.deck .deck-card.from-back-1 .deck-face{animation:deck-sh-up .36s cubic-bezier(.3,0,.6,1) both}

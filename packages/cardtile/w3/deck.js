@@ -537,7 +537,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   let homing=0, wasAt=0; window.__deckListHome=()=>{ if(!ON||!LIST)return; const ph=pageH(); if(scrollY<=ph/2&&wasAt>0){ homing=Date.now(); scrollTo({top:wasAt*ph,behavior:'smooth'}); wasAt=0; return; } wasAt=cur; document.documentElement.classList.remove('list-away'); homing=Date.now(); scrollTo({top:0,behavior:'smooth'}); };
   window.__deckFanToggle=()=>{ if(!ON||LIST)return; settleWrap(); if(fanned)fanIn(); else fanOut(); };
   // stack ⇄ list without a reload: the same cards glide from one arrangement to the other (FLIP), then the other arrangement's scrolling takes over
-  window.__deckLayout=(m)=>{ const toList=m==='list'; if(!ON||toList===LIST)return; settleWrap(); if(fanned)fanIn(); close(); if(!toList)document.documentElement.classList.remove('list-away');     const before=new Map(cards.map(c=>[c,c.getBoundingClientRect()]));   // cards that join the window during the switch have no before: they just appear
+  window.__deckLayout=(m)=>{ const toList=m==='list'; if(!ON||toList===LIST)return; settleWrap(); if(fanned)fanIn(); foldEnd(); /* a fold is the stack's: in the list it is over, at once */ close(); if(!toList)document.documentElement.classList.remove('list-away');     const before=new Map(cards.map(c=>[c,c.getBoundingClientRect()]));   // cards that join the window during the switch have no before: they just appear
     cards.forEach(c=>{ c.style.transition='none'; c.style.opacity='1'; c.style.visibility='visible'; c.style.transform=''; });
     LIST=toList; document.documentElement.classList.toggle('list',LIST); paint();
     fit(); goTo(cur); listTx();
@@ -600,9 +600,17 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const fanXform=(slot,lift)=>{ const n=cards.length; const a=(slot-(n-1)/2)*fanStep;
     return 'translateY('+fanT.toFixed(1)+'px) translateY('+fanP.toFixed(1)+'px) rotate('+a.toFixed(2)+'deg) translateY('+(lift?(-0.52*fanP/1.4).toFixed(1):0)+'px) scale('+fanScale+') translateY('+(-fanP).toFixed(1)+'px)'; };
   window.__deckFan=()=>fanOut();
-  let fanIdx=[], foldT=0;   // foldT: the end of a fold still under way (fanIn)
+  // fold: the fold still under way (fanIn), null when none is. foldEnd is the one way a fold is over, landed or given up: the
+  // class comes off and its cards stop being held drawn. Everything that ends or abandons a fold calls it (the fold's own
+  // landing, fanOut, the next fanIn, a switch to the list, leave), so nothing of a fold is ever still to come: no timer.
+  // The faces too are told not to glide: a card that put its edge shadow down for the fold (deck.css) and is still drawn when
+  // the fold is given up (the list, a fan opened again) has it back at once, not a fifth of a second later.
+  let fanIdx=[], fold=null;
+  const foldEnd=()=>{ const f=fold; if(!f)return; fold=null; document.documentElement.classList.remove('fan-folding');
+    const still=f.concat(...f.map(c=>[...c.querySelectorAll('.deck-face')]));
+    still.forEach(e=>{ e.style.transition='none'; }); f.forEach(c=>{ c.style.opacity=''; c.style.visibility=''; }); void stack.offsetWidth; still.forEach(e=>{ e.style.transition=''; }); };
   const fanOut=()=>{ if(!ON||LIST||fanned||openCard||running||stack.classList.contains('busy'))return; fanned=true; fanHot=-1;
-    clearTimeout(foldT); document.documentElement.classList.remove('fan-folding');   // opened again before a fold was over: that fold's ending must not hide this fan's cards
+    foldEnd();   // opened again before a fold was over: that fold is over now, its ending cannot come later and hide this fan's cards
     fanIdx=N<=FANMAX?[...Array(N).keys()]:Array.from({length:FANMAX},(_,k)=>Math.round(k*(N-1)/(FANMAX-1)));
     { const fc=fanIdx.map(card); for(const c of cards) if(!fc.includes(c)) away(c); cards.length=0; fc.forEach(c=>cards.push(c)); }   // during the fan, the window IS the fan
     const n=cards.length; fanStep=Math.min(3.2,26/Math.max(1,n-1)); fanScale=0.56; { const r=stack.getBoundingClientRect(), H=r.height, s=fanScale; fanP=1.4*H; const centreNow=r.top+H/2; const centreWant=innerHeight-(H*s)/2+(H*s)*0.4; fanT=(centreWant-centreNow)-fanP*(1-s); }
@@ -619,12 +627,20 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     // Fold as a keyframe animation (WAAPI), not a transition: with both end poses known up front WebKit rasterises the card at the
     // larger scale from frame 0, so the content stays crisp all the way home instead of snapping sharp when the transition ends.
     const from=new Map(cards.map(c=>[c,getComputedStyle(c).transform]));
-    // fan-folding, for as long as the cards travel: the pile's ground shadow waits for them (deck.css) instead of fading in under nothing
-    document.documentElement.classList.remove('fan'); document.documentElement.classList.add('fan-folding'); paint();
-    cards.forEach(c=>{ c.style.transition='none'; c.style.transform=''; c.style.pointerEvents=''; c.classList.remove('fan-hot'); });   // solid while travelling home (opacity/visibility inline stay)
-    void stack.offsetWidth;
-    cards.forEach(c=>{ const f=from.get(c); if(!f)return; const to=getComputedStyle(c).transform; c.animate([{transform:f},{transform:to}],{duration:500,easing:'cubic-bezier(.45,0,.55,1)'}); });
-    clearTimeout(foldT); foldT=setTimeout(()=>{ document.documentElement.classList.remove('fan-folding'); cards.forEach(c=>{ c.style.transition='none'; c.style.opacity=''; c.style.visibility=''; }); void stack.offsetWidth; cards.forEach(c=>{ c.style.transition=''; }); }, 520); };
+    // fan-folding, for as long as the cards travel: the pile's ground shadow waits for them (deck.css) instead of fading in under nothing.
+    // "As long as the cards travel" is the animations' own ending, not a clock beside them: a timer set for their length fires
+    // early on a page that hangs as the fold starts (the cards were hidden in mid-air) and late in a tab that is not shown.
+    // finally: whatever is thrown in here, the fold still ends, when the animations that did start are over (at once if none
+    // did). Only the fold that is still the one under way may end it (`fold===mine`): a fold given up for a newer fan has ended.
+    foldEnd(); const mine=fold=cards.slice(), flights=[];
+    try{
+      document.documentElement.classList.remove('fan'); document.documentElement.classList.add('fan-folding'); paint();
+      cards.forEach(c=>{ c.style.transition='none'; c.style.transform=''; c.style.pointerEvents=''; c.classList.remove('fan-hot'); });   // solid while travelling home (opacity/visibility inline stay)
+      void stack.offsetWidth;
+      cards.forEach(c=>{ const f=from.get(c); if(!f||!c.animate)return; const to=getComputedStyle(c).transform; flights.push(c.animate([{transform:f},{transform:to}],{duration:500,easing:'cubic-bezier(.45,0,.55,1)'})); });
+    } finally {
+      Promise.allSettled(flights.map(a=>a.finished)).then(()=>{ if(fold===mine) foldEnd(); });
+    } };
   const fanNearest=(x,y)=>{ const g=fanGeom(); const dx=x-g.px, dy=g.py-y; if(dy<=0)return -1; const a=Math.atan2(dx,dy)*180/Math.PI; const n=cards.length; const i=Math.max(0,Math.min(n-1,Math.round(a/fanStep+(n-1)/2))); if(y<g.top-g.H*0.3)return -1; return i; };
   const slotCard=s=>cards[s];
   const fanHover=s=>{ if(s===fanHot)return; if(fanHot>=0){const o=slotCard(fanHot);o.style.transform=fanXform(fanHot,false);o.classList.remove('fan-hot');} fanHot=s; if(s>=0){const c=slotCard(s);c.style.transform=fanXform(s,true);c.classList.add('fan-hot');} };
@@ -787,7 +803,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const seatOf=c=>typeof c==='number'?Math.max(0,Math.min(N-1,P+c)):Math.max(0,cells.indexOf(c));   // a tile's card has the tile's own place in the dealt order as its number; a number is an item of the card file (the file wall's vb.at)
   // leave: put a held card back, fold the fan, stop answering, and send every tile home. Returns the tile of the card that was up
   // (over a card file: the number of the item that was up).
-  const leave=()=>{ settleWrap(); if(fanned)fanIn(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
+  const leave=()=>{ settleWrap(); if(fanned)fanIn(); foldEnd(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
     queue=0; drag=null; LD=null; hx=-1; ON=false; stack.classList.remove('hov'); root.classList.remove('list-away','fan','fan-folding','fan-closing','moving','open');
     cards.forEach(c=>c.style.removeProperty('--peek')); rehome(true); for(const k in API) delete window[k]; return up; };
   // enter: the tiles take their seats again and the pile is dealt, open on the card whose tile was in the middle of the wall

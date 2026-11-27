@@ -19,11 +19,29 @@
 //           of it is at most what is left of the cards' way out, with a little slack), and it is gone when they arrive.
 //   live    THE SAME, UNSTOPPED: Escape folds a fan, and a click on a fan card picks it (deck.js fanPick, which folds
 //           too); every animation frame is read as it plays and held to the fold rule.
-//   still   UNDER prefers-reduced-motion the shadow does not animate: it is simply there from the fold's first moment.
+//   still   UNDER prefers-reduced-motion THE SHADOW DOES WHAT THE CARDS DO. Opening, the cards are in the fan at once and
+//           the shadow is gone at once. Folding, the cards still fly home for 500 ms (a script animation, which the
+//           reduced-motion rule in deck.css does not reach), so the shadow keeps the fold rule: it waits for them.
+//   ends    fan-folding IS ON FOR AS LONG AS A FOLD TRAVELS AND NOT A MOMENT MORE, whatever ends the fold:
+//             timer    no timer decides it: with every timer the fold starts held back, the class is gone when the
+//                      cards have landed, and the cards the pile hides are hidden;
+//             stall    a page that hangs for 600 ms as the fold starts does not lose the class (or its cards) before
+//                      the cards have flown;
+//             throw    an animation that cannot start, or a style that cannot be read, in the middle of a fold does
+//                      not leave the class on, and the next fold is a whole one;
+//             list     switching to the list from an open fan, or 150 ms into a fold: in no frame of the list does a
+//                      card go without its edge shadow, and the class is never on in the list;
+//             reopen   opening the fan again 200 ms into a fold: the class is off from that moment, the open fan keeps
+//                      every card, and the fold after it is a whole one;
+//             wall     to the wall 150 ms into a fold and back to the pile 200 ms later: nothing of the fold is left
+//                      on the cards when the wall is entered, and the pile that is dealt again is the resting pile;
+//             rank     the rule that puts a hidden card's edge shadow down is the stack's only, and never outranks a
+//                      lifted, hot or turned card's shadow (read with the class put on by hand).
 //
 //   PLAYWRIGHT=/path/to/playwright/index.js node packages/cardtile/w3/deck-fold-shadow.smoke.mjs [<base URL>]
 //   … --engine chromium|webkit   (default chromium)
-//   … --only fold|pile|open|live|still
+//   … --only fold|pile|open|live|still|ends
+//   … --sub timer|stall|throw|list|reopen|wall|rank   (one part of `ends`)
 //   … --table                    print every stop: time, the cards' way, the shadow
 //   … --frames <dir>             also write the picture of every stop of the fold to <dir>
 //
@@ -79,8 +97,19 @@ async function open({ reduced = false } = {}) {
   await page.mouse.move(2, 2);       // nothing is hovered
   // what every reading below is made of: the ground shadow's opacity, and where each card of the table is
   await page.evaluate(() => {
+    const drawn = (c) => { const s = getComputedStyle(c); return s.visibility === 'visible' && parseFloat(s.opacity) >= 0.01; };
+    const edge = (c) => { const m = /rgba?\(([^)]+)\)/.exec(getComputedStyle(c.querySelector('.deck-face')).boxShadow); if (!m) return 0; const p = m[1].split(',').map(parseFloat); return p.length < 4 ? 1 : p[3]; };
     window.__read = () => ({ g: parseFloat(getComputedStyle(document.querySelector('.deck-gshadow')).opacity),
       fan: document.documentElement.classList.contains('fan'),
+      folding: document.documentElement.classList.contains('fan-folding'), list: document.documentElement.classList.contains('list'), view: document.documentElement.dataset.view,
+      // the fold's own animations (script animations on cards) that have not ended
+      flying: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation) && a.effect && a.effect.target && a.effect.target.classList.contains('deck-card') && a.playState !== 'finished').length,
+      drawn: [...document.querySelectorAll('.deck-card')].filter(drawn).length,
+      deepDrawn: [...document.querySelectorAll('.deck-card.is-deep')].filter(drawn).length,
+      // the faintest edge shadow among the cards that are drawn (1: none is drawn)
+      minEdge: Math.min(1, ...[...document.querySelectorAll('.deck-card')].filter(drawn).map(edge)),
+      // cards still carrying what a fan puts on them to keep them drawn
+      inline: [...document.querySelectorAll('.deck-card')].filter((c) => c.style.opacity === '1' || c.style.visibility === 'visible').length,
       // the cards that are drawn and carry an edge shadow of their own
       edged: [...document.querySelectorAll('.deck-stack > .deck-card')].filter((c) => { const s = getComputedStyle(c); if (s.visibility !== 'visible' || parseFloat(s.opacity) < 0.01) return false; const b = getComputedStyle(c.querySelector('.deck-face')).boxShadow; const m = /rgba?\(([^)]+)\)/.exec(b); if (!m) return false; const p = m[1].split(',').map(parseFloat); return (p.length < 4 ? 1 : p[3]) > 0.01; }).length,
       at: [...document.querySelectorAll('.deck-stack > .deck-card')].map((c) => { const r = c.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }) });
@@ -102,9 +131,10 @@ async function stopped(page, stops, shot) {
   await page.evaluate(() => { const real = window.setTimeout; window.__held = []; window.setTimeout = (f) => { window.__held.push(f); return 0; }; try { window.__deckFanToggle(); } finally { window.setTimeout = real; } });
   const rows = [];
   for (const t of stops) { rows.push({ t, ...(await page.evaluate((t) => { for (const a of document.getAnimations()) { a.pause(); a.currentTime = t; } return window.__read(); }, t)) }); if (FRAMES && shot) writeFileSync(join(FRAMES, `${shot}-${String(t).padStart(3, '0')}.png`), await page.screenshot()); }
-  const end = await page.evaluate(() => { for (const a of document.getAnimations()) a.finish(); return window.__read(); });
+  // the motion's last moment, still held there (an animation stopped at its end has not ended: whatever its ending does has not run)
+  const end = await page.evaluate(() => { for (const a of document.getAnimations()) { a.pause(); a.currentTime = 5000; } return window.__read(); });
   const picture = shot ? await bare(page) : null;
-  await page.evaluate(() => { for (const f of window.__held) f(); window.__held = []; });
+  await page.evaluate(() => { for (const a of document.getAnimations()) a.finish(); for (const f of window.__held) f(); window.__held = []; });
   await page.waitForTimeout(300);
   return { rows, end, picture };
 }
@@ -198,16 +228,156 @@ if (want('live')) {
 }
 
 if (want('still')) {
-  console.log('\nstill — prefers-reduced-motion: the shadow is simply there');
+  console.log('\nstill — prefers-reduced-motion: the shadow does what the cards do');
   const { ctx, page } = await open({ reduced: true });
   const g0 = await rest(page);
-  await fanOpen(page);
+  const home = (await page.evaluate(() => window.__read())).at;
+  const o = await stopped(page, [0, 50, 100]);
+  const orows = o.rows.map((r) => ({ ...r, way: way(home, o.end.at, r.at) }));
+  print('reduced motion, opening the fan', orows, g0);
+  check('still, open: the cards are in the fan at once (they do not fly)', orows[0].way > 0.98, `${r2(orows[0].way)} of the way out at 0 ms`);
+  for (const r of orows) check(`still, open: at ${r.t} ms the shadow is not left behind`, r.g / g0 <= 1 - r.way + 0.02, `shadow ${r2(r.g / g0)} of its rest, cards ${r2(r.way)} of the way out`);
+  await page.waitForTimeout(500);
   const from = (await page.evaluate(() => window.__read())).at;
-  const f = await stopped(page, [0, 100, 300]);
-  if (TABLE) console.log('   ' + f.rows.map((r) => `${r.t} ms: shadow ${r.g.toFixed(3)}, cards ${way(from, f.end.at, r.at).toFixed(2)} of the way home`).join('; ') + `; at rest ${g0}`);
-  for (const r of f.rows) check(`still: at ${r.t} ms of the fold the shadow is whole`, Math.abs(r.g - g0) < 0.005, `opacity ${r.g}, at rest ${g0}`);
+  const f = await stopped(page, STOPS);
+  const rows = f.rows.map((r) => ({ ...r, way: way(from, f.end.at, r.at) }));
+  print('reduced motion, folding the fan', rows, g0);
+  check('still, fold: the cards do fly home (what the shadow has to keep to)', rows[0].way < 0.02 && rows[5].way > 0.2 && rows[5].way < 0.8, `way at 0 ms ${r2(rows[0].way)}, at 250 ms ${r2(rows[5].way)}`);
+  for (const r of rows) foldRule('still, fold', r, g0);
+  check('still, fold: the shadow is whole when the cards have landed', Math.abs(f.end.g - g0) < 0.005, `opacity ${f.end.g}, at rest ${g0}`);
   await ctx.close();
 }
+
+// ---- ends ----
+// every animation frame from now on, read whole (without the cards' places)
+const record = (page) => page.evaluate(() => { const s = window.__frames = []; window.__sampling = true; const f = () => { if (!window.__sampling) return; const r = window.__read(); delete r.at; s.push({ t: performance.now(), ...r }); requestAnimationFrame(f); }; f(); });
+const recorded = (page) => page.evaluate(() => { window.__sampling = false; return window.__frames; });
+const now = (page) => page.evaluate(() => { const r = window.__read(); delete r.at; return r; });
+const isPile = (name, r, p) => { check(`${name}: fan-folding is off`, !r.folding); check(`${name}: nothing still flies`, r.flying === 0, `${r.flying} animations`);
+  check(`${name}: the pile draws the cards it draws at rest`, r.drawn === p.drawn && r.deepDrawn === 0, `${r.drawn} drawn (${r.deepDrawn} of them the pile hides), at rest ${p.drawn}`);
+  check(`${name}: the ground shadow is whole`, Math.abs(r.g - p.g) < 0.005, `opacity ${r.g}, at rest ${p.g}`);
+  check(`${name}: no card keeps what the fan put on it`, r.inline === 0, `${r.inline} cards`); };
+const SUB = opt('--sub'), wantSub = (x) => want('ends') && (!SUB || SUB === x);
+if (want('ends')) console.log('\nends — fan-folding lasts as long as the fold, whatever ends it');
+
+if (wantSub('timer')) { console.log('  timer');
+  const { ctx, page } = await open(); const p = await now(page); await fanOpen(page);
+  const mid = await page.evaluate(() => new Promise((done) => { const real = window.setTimeout; window.__held = []; window.setTimeout = (f) => { window.__held.push(f); return 0; }; try { window.__deckFanToggle(); } finally { window.setTimeout = real; }
+    real(() => done(window.__read()), 150); }));
+  check('timer: CONTROL the fold is under way, with the class on', mid.folding && mid.flying > 0, `folding ${mid.folding}, ${mid.flying} animations`);
+  await page.waitForFunction(() => window.__read().flying === 0, null, { timeout: 5000 }); await page.waitForTimeout(150);
+  isPile('timer: the cards landed, no timer has run', await now(page), p);
+  await page.evaluate(() => { for (const f of window.__held) f(); window.__held = []; }); await page.waitForTimeout(100);
+  isPile('timer: and after the held timers ran', await now(page), p);
+  await ctx.close(); }
+
+if (wantSub('stall')) { console.log('  stall');
+  const { ctx, page } = await open(); const p = await now(page); await fanOpen(page); const fanDrawn = (await now(page)).drawn;
+  await record(page);
+  await page.evaluate(() => { window.__deckFanToggle(); const t = performance.now(); while (performance.now() - t < 600); });
+  await page.waitForFunction(() => { const r = window.__read(); return !r.fan && r.flying === 0; }, null, { timeout: 5000 }); await page.waitForTimeout(200);
+  const fr = await recorded(page); const air = fr.filter((x) => !x.fan && x.flying > 0);
+  check('stall: CONTROL frames were read with the cards still in the air after the hang', air.length >= 3, `${air.length} frames`);
+  const lost = air.filter((x) => !x.folding), gone = air.filter((x) => x.drawn < fanDrawn);
+  check('stall: in no frame of the flight is the class already off', lost.length === 0, `${lost.length} of ${air.length} frames`);
+  check('stall: in no frame of the flight has a flying card been hidden', gone.length === 0, `${gone.length} of ${air.length} frames; ${gone[0] && gone[0].drawn} drawn of ${fanDrawn}`);
+  isPile('stall: afterwards', fr[fr.length - 1], p);
+  await ctx.close(); }
+
+if (wantSub('throw')) { console.log('  throw');
+  for (const what of ['an animation that cannot start', 'a style that cannot be read']) {
+    const { ctx, page } = await open(); const p = await now(page); await fanOpen(page);
+    const threw = await page.evaluate((anim) => { let n = 0, out = '';
+      const A = Element.prototype.animate, G = window.getComputedStyle;
+      if (anim) Element.prototype.animate = function (...a) { if (++n === 3) throw new Error('forced: animate'); return A.apply(this, a); };
+      else window.getComputedStyle = function (...a) { if (document.documentElement.classList.contains('fan-folding') && a[0] && a[0].classList && a[0].classList.contains('deck-card') && ++n === 3) throw new Error('forced: getComputedStyle'); return G.apply(this, a); };
+      try { window.__deckFanToggle(); } catch (e) { out = String(e && e.message); } finally { Element.prototype.animate = A; window.getComputedStyle = G; }
+      return { out, n }; }, what.startsWith('an animation'));
+    check(`throw, ${what}: CONTROL the fold was broken in the middle`, threw.n >= 3, `the forced failure was reached ${threw.n} times; thrown out of the fold: ${threw.out || 'nothing'}`);
+    if (TABLE) console.log(`   throw, ${what}: thrown out of the fold: ${threw.out || 'nothing'}`);
+    await page.waitForTimeout(900);
+    const r = await now(page);
+    check(`throw, ${what}: fan-folding is not left on`, !r.folding);
+    check(`throw, ${what}: the ground shadow is whole`, Math.abs(r.g - p.g) < 0.005, `opacity ${r.g}, at rest ${p.g}`);
+    check(`throw, ${what}: the pile draws the cards it draws at rest`, r.drawn === p.drawn && r.deepDrawn === 0, `${r.drawn} drawn (${r.deepDrawn} of them the pile hides), at rest ${p.drawn}`);
+    // …and the deck still answers: the next fan and fold are whole
+    await page.evaluate(() => window.__deckFan()); await page.waitForTimeout(700);
+    if (check(`throw, ${what}: the fan opens again`, (await now(page)).fan)) { await page.evaluate(() => window.__deckFanToggle()); await page.waitForTimeout(150);
+      const m = await now(page); check(`throw, ${what}: the next fold has the class on while it travels`, m.folding && m.flying > 0, `folding ${m.folding}, ${m.flying} animations`);
+      await page.waitForTimeout(800); isPile(`throw, ${what}: the next fold ends as a pile`, await now(page), p); }
+    await ctx.close(); } }
+
+if (wantSub('list')) { console.log('  list');
+  for (const [how, wait] of [['from the open fan', -1], ['150 ms into a fold', 150]]) {
+    const { ctx, page } = await open(); await fanOpen(page);
+    await record(page);
+    const at = await page.evaluate((wait) => new Promise((done) => { const go = () => { const before = window.__read(); window.__deckView('list'); done({ flying: before.flying, folding: before.folding, fan: before.fan, t: performance.now() }); };
+      if (wait < 0) go(); else { window.__deckFanToggle(); setTimeout(go, wait); } }), wait);
+    await page.waitForTimeout(1100);
+    const fr = (await recorded(page)).filter((x) => x.t >= at.t);
+    if (wait < 0) check(`list, ${how}: CONTROL the fan was open`, at.fan); else check(`list, ${how}: CONTROL the fold was under way`, at.folding && at.flying > 0, `folding ${at.folding}, ${at.flying} animations`);
+    check(`list, ${how}: CONTROL the page became the list and frames were read`, fr.length >= 4 && fr.every((x) => x.list && x.view === 'list'), `${fr.length} frames`);
+    const on = fr.filter((x) => x.folding), bald = fr.filter((x) => x.minEdge < 0.13), worst = fr.reduce((m, x) => Math.min(m, x.minEdge), 1);
+    if (TABLE) console.log(`   list, ${how}: ${fr.length} frames; fan-folding on in ${on.length}; faintest edge shadow of a drawn card ${worst.toFixed(3)} (flat is .14)`);
+    check(`list, ${how}: in no frame of the list is fan-folding on`, on.length === 0, `${on.length} of ${fr.length} frames, the last ${on.length && Math.round(on[on.length - 1].t - at.t)} ms after the switch`);
+    check(`list, ${how}: in no frame does a list card go without its edge shadow`, bald.length === 0, `${bald.length} of ${fr.length} frames; the faintest ${worst.toFixed(3)} (flat is .14)`);
+    const last = fr[fr.length - 1] || {}; check(`list, ${how}: afterwards every card is drawn, with its shadow`, last.drawn >= 14 && last.minEdge >= 0.13 && last.inline === 0, `${last.drawn} drawn, faintest ${last.minEdge}, ${last.inline} cards still carry the fan's inline styles`);
+    await ctx.close(); } }
+
+if (wantSub('reopen')) { console.log('  reopen');
+  const { ctx, page } = await open(); const p = await now(page); await fanOpen(page); const fanDrawn = (await now(page)).drawn;
+  await record(page);
+  const at = await page.evaluate(() => new Promise((done) => { window.__deckFanToggle(); setTimeout(() => { const before = window.__read(); window.__deckFan(); done({ flying: before.flying, folding: before.folding, t: performance.now() }); }, 200); }));
+  await page.waitForTimeout(1000);
+  const fr = (await recorded(page)).filter((x) => x.t >= at.t);
+  check('reopen: CONTROL the fold was under way', at.folding && at.flying > 0, `folding ${at.folding}, ${at.flying} animations`);
+  check('reopen: CONTROL the fan is open again and frames were read', fr.length >= 4 && fr.every((x) => x.fan), `${fr.length} frames`);
+  check('reopen: in no frame of the open fan is fan-folding on', fr.every((x) => !x.folding), `${fr.filter((x) => x.folding).length} of ${fr.length} frames`);
+  check('reopen: in no frame does the open fan lose a card', fr.every((x) => x.drawn === fanDrawn), `fewest drawn ${Math.min(...fr.map((x) => x.drawn))} of ${fanDrawn}`);
+  const last = fr[fr.length - 1] || {}; check('reopen: the open fan has no ground shadow', last.g <= 0.001, `opacity ${last.g}`);
+  await page.evaluate(() => window.__deckFanToggle()); await page.waitForTimeout(150);
+  const m = await now(page); check('reopen: the fold after it has the class on while it travels', m.folding && m.flying > 0, `folding ${m.folding}, ${m.flying} animations`);
+  await page.waitForTimeout(800); isPile('reopen: the fold after it ends as a pile', await now(page), p);
+  await ctx.close(); }
+
+if (wantSub('wall')) { console.log('  wall');
+  const { ctx, page } = await open(); const p = await now(page); await fanOpen(page);
+  await record(page);
+  const at = await page.evaluate(() => new Promise((done) => { const t0 = performance.now(); window.__deckFanToggle(); setTimeout(() => { const before = window.__read(); window.__deckView('wall'); const wall = window.__read();
+    setTimeout(() => { window.__deckView('stack'); done({ flying: before.flying, folding: before.folding, wall: { view: wall.view, folding: wall.folding, inline: wall.inline }, t0, t2: performance.now() }); }, 200); }, 150); }));
+  await page.waitForTimeout(2600);
+  const back = (await recorded(page)).filter((x) => x.t >= at.t2);
+  check('wall: CONTROL the fold was under way when the wall was asked for', at.folding && at.flying > 0, `folding ${at.folding}, ${at.flying} animations`);
+  check('wall: CONTROL the page was the wall, and the pile again before the fold\'s 520 ms were over', at.wall.view === 'wall' && at.t2 - at.t0 < 520 && back.length >= 4 && back[back.length - 1].view === 'stack', `wall view ${at.wall.view}; back ${Math.round(at.t2 - at.t0)} ms after the fold began; ${back.length} frames`);
+  check('wall: on the wall, fan-folding is off', !at.wall.folding);
+  check('wall: on the wall, no card keeps what the fan put on it (nothing of the fold is still to come)', at.wall.inline === 0, `${at.wall.inline} cards`);
+  check('wall: back on the pile, in no frame is fan-folding on', back.every((x) => !x.folding), `${back.filter((x) => x.folding).length} of ${back.length} frames`);
+  check('wall: back on the pile, in no frame is a card the pile hides drawn', back.every((x) => x.deepDrawn === 0), `${back.filter((x) => x.deepDrawn > 0).length} of ${back.length} frames`);
+  isPile('wall: the pile dealt again', back[back.length - 1] || {}, p);
+  await ctx.close(); }
+
+if (wantSub('rank')) { console.log('  rank');
+  const { ctx, page } = await open();
+  const r = await page.evaluate(async () => { const root = document.documentElement, wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+    const alpha = (c) => { const m = /rgba?\(([^)]+)\)/.exec(getComputedStyle(c.querySelector('.deck-face')).boxShadow); if (!m) return 0; const p = m[1].split(',').map(parseFloat); return p.length < 4 ? 1 : p[3]; };
+    const out = {}; const deep = () => [...document.querySelectorAll('.deck-card.is-deep')];
+    // the stack, the class put on by hand: a hidden card puts its shadow down; one that is also lifted keeps the lifted shadow
+    const d = deep(); out.deep = d.length;
+    root.classList.add('fan-folding'); await wait(400); out.stackDeep = alpha(d[0]);
+    for (const k of ['fan-hot', 'flipped', 'flipping-open', 'flipping-close']) { d[1].classList.add(k); await wait(400); out['stack ' + k] = alpha(d[1]); d[1].classList.remove(k); }
+    root.classList.remove('fan-folding'); await wait(400); out.stackOff = alpha(d[0]);
+    // the list: with the class put on by hand nothing changes
+    window.__deckView('list'); await wait(900); const l = deep(); out.listDeep = l.length; out.listBefore = Math.min(...l.map(alpha));
+    root.classList.add('fan-folding'); await wait(400); out.listOn = Math.min(...l.map(alpha));
+    l[0].classList.add('flipped'); await wait(400); out.listFlipped = alpha(l[0]); l[0].classList.remove('flipped');
+    root.classList.remove('fan-folding'); return out; });
+  if (TABLE) console.log('   ' + JSON.stringify(r));
+  check('rank: CONTROL the stack has cards the pile hides, and the class by hand puts their edge shadow down', r.deep >= 2 && r.stackDeep < 0.01 && r.stackOff > 0.13, `${r.deep} hidden cards; alpha ${r.stackDeep} with the class, ${r.stackOff} without`);
+  for (const k of ['fan-hot', 'flipped', 'flipping-open', 'flipping-close']) check(`rank: in the stack a hidden card that is ${k} keeps the lifted shadow while the class is on`, r['stack ' + k] > 0.17, `alpha ${r['stack ' + k]} (lifted is .18)`);
+  check('rank: CONTROL the list has cards the pile would hide', r.listDeep >= 2 && r.listBefore > 0.13, `${r.listDeep} cards, alpha ${r.listBefore}`);
+  check('rank: in the list the class changes no card\'s edge shadow', r.listOn > 0.13, `faintest alpha ${r.listOn} (flat is .14)`);
+  check('rank: in the list a turned card keeps the lifted shadow while the class is on', r.listFlipped > 0.17, `alpha ${r.listFlipped} (lifted is .18)`);
+  await ctx.close(); }
 
 await browser.close();
 if (failures.length) { console.log('\n' + failures.map((f) => '🔴 ' + f).join('\n')); process.exit(1); }
