@@ -21,6 +21,9 @@
 //   - transform:"yyyymm"  — 201307 → "2013/07", 2013 → "2013" (skip otherwise)
 //   - neither:  the param value is used verbatim (already a slug)
 //   template:   "/category/{v}/" — {v} replaced with the resolved value, each path segment encoded.
+// Same origin only: a resolved value with an empty segment or a backslash is refused, and a target
+// (template included) that resolves to another origin is not followed. Tested by
+// packages/sitetile/canonical-redirect.test.mjs, which runs this file's text in a vm.
 (async function () {
   try {
     const params = (typeof window !== 'undefined' && window.__canonicalRedirect) || [];
@@ -45,9 +48,22 @@
       } else {
         v = raw;                                        // already a slug
       }
-      const enc = String(v).split('/').map(encodeURIComponent).join('/');
-      const target = r.template.replace('{v}', enc);
-      if (target && target !== location.pathname) { location.replace(target); return; }
+      // A value is path segments joined by `/`: every segment must be non-empty and none may hold a
+      // backslash. Anything else is refused here, before a target is built, and the rule falls
+      // through like an unknown id.
+      const s = String(v);
+      if (s.includes('\\')) continue;
+      const segs = s.split('/');
+      if (segs.some((seg) => seg === '')) continue;
+      const target = r.template.replace('{v}', segs.map(encodeURIComponent).join('/'));
+      if (!target) continue;
+      // The canonical redirect only follows same-origin targets. The target is resolved against
+      // this page's origin, and only its path, query and fragment are navigated to — never the raw
+      // string — so a template naming another origin is not followed either.
+      const u = new URL(target, location.origin);
+      if (u.origin !== location.origin) continue;
+      const dest = u.pathname + u.search + u.hash;
+      if (dest !== location.pathname) { location.replace(dest); return; }
     }
   } catch (e) { /* best-effort; a redirect must never break the page */ }
 })();
