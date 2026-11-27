@@ -198,6 +198,7 @@ function exercise() {
     host: HOST,
     post: (msg, origin) => sent.push({ msg, origin }),
     onLoad: (x) => loads.push(x),
+    onPropose: () => 'unsaved',                                   // the editor holds unsaved work of the person's own
     setTimer: (fn, ms) => { const id = ++n; timers.set(id, { fn, ms }); return id; },
     clearTimer: (id) => timers.delete(id),
   });
@@ -216,7 +217,7 @@ function exercise() {
   b.changed(CARD); b.save();
   from({ type: 'card:save-failed', message: 'no' });
   from({ type: 'card:get-draft' });
-  from({ type: 'card:propose', md: CARD });
+  from({ type: 'card:propose', md: CARD });                       // card:propose-failed, reason 'unsaved'
   const unknown = from({ type: 'card:nope' });
   const foreign = b.receive({ origin: 'https://evil.example', data: { v: HOST_V, type: 'card:get-draft' } });
   return { sent, loads, handled, unknown, foreign };
@@ -241,7 +242,7 @@ test('🔴 EDITOR_PROTOCOL: every message type and its fields, in each direction
     (out[type] ||= new Set()); for (const f of Object.keys(fields)) out[type].add(f);
   }
   assert.deepEqual(Object.keys(out).sort(), Object.keys(EDITOR_PROTOCOL.toParent).sort(), 'editor → parent types');
-  for (const [t, def] of Object.entries(EDITOR_PROTOCOL.toParent)) assert.deepEqual([...out[t]].sort(), [...def.fields].sort(), `${t} fields`);
+  for (const [t, def] of Object.entries(EDITOR_PROTOCOL.toParent)) assert.deepEqual([...out[t]].sort(), def.fields.map((f) => f.replace('?', '')).sort(), `${t} fields`);
   // parent → editor: the types receive() takes, and nothing else
   assert.deepEqual([...handled].sort(), Object.keys(EDITOR_PROTOCOL.toEditor).sort(), 'parent → editor types');
   assert.equal(unknown, false, 'an unknown type was taken');

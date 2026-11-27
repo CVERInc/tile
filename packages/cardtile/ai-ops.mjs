@@ -578,7 +578,7 @@ export const EDITOR_PROTOCOL = {
     'card:change': { fields: ['md', 'dirty'], when: 'After every edit, debounced 150 ms. `dirty` = differs from what the parent last loaded or confirmed saved.' },
     'card:save': { fields: ['md'], when: 'The person pressed Save (or Cmd/Ctrl+S). Answer with card:saved or card:save-failed.' },
     'card:draft': { fields: ['md', 'dirty'], when: 'The answer to card:get-draft. `md` is null and `dirty` false before card:load.' },
-    'card:propose-failed': { fields: ['message'], when: 'card:propose before card:load, or its `md` does not read as a card.' },
+    'card:propose-failed': { fields: ['message', 'reason?'], when: "card:propose before card:load, or its `md` does not read as a card. `reason: 'unsaved'`: the editor holds unsaved changes of the person's own; the proposal was not applied and they stay as they were." },
   },
   /** parent → editor */
   toEditor: {
@@ -586,7 +586,7 @@ export const EDITOR_PROTOCOL = {
     'card:saved': { fields: ['version'], when: 'The card:save was stored. Ignored unless a save is out.' },
     'card:save-failed': { fields: ['message'], when: 'The card:save was refused; `message` is shown to the person as written. Ignored unless a save is out.' },
     'card:get-draft': { fields: [], when: 'Asks for the current draft; answered with card:draft.' },
-    'card:propose': { fields: ['md'], when: 'Puts `md` in the editor as an unsaved draft. It is never saved by itself: the person presses Save. Announced as card:change.' },
+    'card:propose': { fields: ['md'], when: 'Puts `md` in the editor as an unsaved draft. It is never saved by itself: the person presses Save. Announced as card:change. Not kept in the browser until the person changes it; refused over unsaved changes of their own.' },
   },
   md: 'Every `md` is the whole card file, `## assets` lane included. A parent that saves through save_cards (which keeps only the stored assets lane) uploads new assets with put_asset first; host-bridge.mjs exports splitCard() for that split.',
 };

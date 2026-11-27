@@ -15,13 +15,13 @@ const FAT = serializeCard({ ...parseCard(THIN), assets: {
 } });
 
 /** a bridge wired to recorders and a hand-cranked clock */
-function rig() {
+function rig({ propose } = {}) {
   const sent = []; const loads = []; const proposals = []; const statuses = []; const timers = new Map(); let n = 0;
   const bridge = createHostBridge({
     host: HOST,
     post: (msg, origin) => sent.push({ msg, origin }),
     onLoad: (x) => loads.push(x),
-    onPropose: (x) => proposals.push(x),
+    onPropose: (x) => { proposals.push(x); return propose ? propose(x) : undefined; },
     onStatus: (s, m) => statuses.push(m ? `${s}:${m}` : s),
     setTimer: (fn, ms) => { const id = ++n; timers.set(id, { fn, ms }); return id; },
     clearTimer: (id) => timers.delete(id),
@@ -242,6 +242,19 @@ test('🔴 card:propose hands the editor a DRAFT — it is never saved by itself
   // the person presses Save: THAT is when it goes to the parent
   r.bridge.save();
   assert.deepEqual(r.sent.at(-1).msg, { v: 1, type: 'card:save', md: proposal });
+});
+
+test('🔴 card:propose the editor refuses over unsaved work of the person\'s own is answered with its reason', () => {
+  const r = rig({ propose: () => 'unsaved' });
+  r.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  r.from({ type: 'card:propose', md: THIN.replace('a bio', 'a proposed bio') });
+  assert.deepEqual(r.sent.at(-1), { msg: { v: 1, type: 'card:propose-failed', reason: 'unsaved', message: 'There are unsaved changes here, so the proposal was not applied.' }, origin: HOST });
+  assert.ok(!r.sent.some((s) => s.msg.type === 'card:save' || s.msg.type === 'card:change'));
+  // CONTROL: a proposal the editor takes is answered with nothing but its card:change
+  const ok = rig();
+  ok.from({ type: 'card:load', md: THIN, handle: 'mei' });
+  ok.from({ type: 'card:propose', md: THIN.replace('a bio', 'a proposed bio') });
+  assert.ok(!ok.sent.some((s) => s.msg.type === 'card:propose-failed'));
 });
 
 test('card:propose before a load, or with something that is not a card, is refused out loud', () => {

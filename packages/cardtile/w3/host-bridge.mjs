@@ -24,6 +24,10 @@
 //                    → the editor takes `md` as its DRAFT: shown, dirty, and never saved by itself —
 //                      the person presses Save. It is announced like any edit (card:change).
 //   iframe → parent  { type:'card:propose-failed', v, message }   before card:load, or not a card
+//   iframe → parent  { type:'card:propose-failed', v, message, reason:'unsaved' }
+//                    → the editor holds unsaved work of the person's own (a draft this browser kept): the
+//                      proposal is NOT applied, and that draft stays as it was. A proposal shown unchanged
+//                      is never written to the browser's draft; the person's first change makes it theirs.
 //
 // 🔴 `md` IS THE FAT CARD — exactly the editor's draft, `## assets` lane included, byte-for-byte what
 // the sandbox parks. A picture chosen in a sheet is staged by cell-form-dom's picker and written into
@@ -160,8 +164,10 @@ export function createHostBridge({
           send({ type: 'card:propose-failed', message: typeof d.md === 'string' ? 'That does not read as a card.' : 'card:propose needs `md` as a string.' });
           return true;
         }
-        // the editor shows it and calls changed() — which is what tells the parent, like any edit
-        onPropose({ md: d.md });
+        // the editor shows it and calls changed() — which is what tells the parent, like any edit —
+        // or refuses it over unsaved work of the person's own
+        if (onPropose({ md: d.md }) === 'unsaved')
+          send({ type: 'card:propose-failed', reason: 'unsaved', message: 'There are unsaved changes here, so the proposal was not applied.' });
         return true;
       }
       if (d.type === 'card:saved' || d.type === 'card:save-failed') {

@@ -124,9 +124,16 @@ let bridge = null, hostWaiting = !SANDBOX;
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* best-effort */ } }
 // Nothing goes live until Save; the draft lives in this browser; leaving with it unsaved asks first.
+// 🔴 A proposal (card:propose) is not the owner's work: while it is shown unchanged (`proposed`) it is never
+// written to this browser's draft, so closing the tab or Discard leaves no trace of it and a later visit opens
+// the stored Cards. The owner's first change makes it theirs, kept like any other draft.
+let proposed = null;
 function keep(text) {
   if (SANDBOX) lsSet(DKEY, text === savedMd ? null : text);
-  else if (!hostWaiting) lsSet(hostDraftKey(), text === savedMd ? null : JSON.stringify({ base: savedMd, md: text }));
+  else if (!hostWaiting && !(proposed !== null && text === proposed)) {
+    proposed = null;
+    lsSet(hostDraftKey(), text === savedMd ? null : JSON.stringify({ base: savedMd, md: text }));
+  }
   if (bridge) bridge.changed(text);
 }
 // a save that lands while the page is hidden must not take back what parkOpenSheet put in the draft: a
@@ -1468,16 +1475,20 @@ function bootHost() {
       hostWaiting = false; delete document.body.dataset.hostWaiting;
       for (const n of INERT()) n.inert = false;
       notices.clear('top');
-      m = read(md); cache.clear(); undoTo = null; editing = false;
+      m = read(md); cache.clear(); undoTo = null; editing = false; proposed = null;
       { const fm = fmRead(m.pre); if (VIEW_IDS.includes(fm.view)) view = fm.view; }
       persist(); draw(); show();
     },
     onPropose: ({ md: next }) => {
-      // a suggestion becomes the draft — shown, dirty, never saved by itself
+      // 🔴 never over unsaved work of the owner's own (a kept draft, or a sheet parked in it): refused, and the
+      // parent is told why (the bridge answers card:propose-failed, reason 'unsaved'); nothing here moves
+      if (parked || (dirty() && md !== proposed)) return 'unsaved';
+      // a suggestion becomes the draft — shown, dirty, never saved by itself, and not kept in this browser
       if (!el('modal').hidden) closeSheet(true);
       el('picker').hidden = true; zoom.hidden = true;
-      md = next.endsWith('\n') ? next : next + '\n'; m = read(md);
+      md = next.endsWith('\n') ? next : next + '\n'; m = read(md); proposed = md;
       cache.clear(); undoTo = null;
+      if (view !== 'wall') editing = true;   // opened to review it: Save is the main button at once
       persist(); draw(); show(); setPaint();
       confirmNote('proposed', L.proposed);
     },

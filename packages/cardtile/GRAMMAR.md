@@ -163,8 +163,8 @@ Every message is an object with `v: 1` and a `type`; anything else is ignored.
 | host → editor | `card:save-failed` | `message` | the save was refused; `message` is shown as written |
 | host → editor | `card:get-draft` | | ask for the current draft |
 | editor → host | `card:draft` | `md`, `dirty` | the answer; `md` is `null` before `card:load` |
-| host → editor | `card:propose` | `md` | put `md` in the editor as an unsaved draft; only the person saves it |
-| editor → host | `card:propose-failed` | `message` | before `card:load`, or `md` is not a card |
+| host → editor | `card:propose` | `md` | put `md` in the editor as an unsaved draft; only the person saves it. Not kept in the browser's draft until the person changes it |
+| editor → host | `card:propose-failed` | `message`, `reason?` | before `card:load`, or `md` is not a card; `reason: 'unsaved'`: the editor holds unsaved changes of the person's own, which stay as they were |
 
 `dirty` is true when the draft differs from what the host last loaded or confirmed saved.
 `card:saved` and `card:save-failed` are ignored unless a save is out. A proposal is announced
