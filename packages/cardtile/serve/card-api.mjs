@@ -27,6 +27,9 @@ import { destControlCharacter } from '../../sitetile/site-core.js';
 import { checkUrls, tooManyLinks } from './url-risk.mjs';
 import { assembleSave, thinCard, assetManifest, cardVersion, checkBaseVersion, referencedAssets } from '../card-save.mjs';
 import { handleVanity } from './card-vanity.mjs';
+// the cutover's one reader, for the address a preview is handed out at (called per request: the two
+// modules import each other, as card-destinations.mjs already makes them)
+import { cardsHostStage, CARDS_HOST } from './card-worker.mjs';
 
 const API_PREFIX = '/_api/';
 
@@ -1792,6 +1795,8 @@ export function resourceOf(afterPrefix) {
  *          If-Version: <version> (required) delete_asset with expected_version (tile#209): 409 unless the
  *                                           card is still at <version>; every answer carries `fence`
  *   POST   /_api/preview                     preview_cards  { handle, markdown } → a URL
+ *   GET    /_api/preview/<id>                —             a parked preview, for the owner's editor:
+ *          { handle, gen, base_version, markdown }, or 404 `preview_expired`
  *   GET    /_api/try/<id>                    —             a parked sandbox draft, as markdown
  *   GET    /_api/vanity/<handle>             —             the card's own domain: { host|null, redirect, … }
  *   PUT    /_api/vanity/<handle>             —             { host, redirect?, expect? } → bind it (card-vanity.mjs)
@@ -1874,7 +1879,7 @@ async function routeApi(request, env, url) {
     if (typeof body.markdown !== 'string' || !body.markdown.length) return json({ error: 'preview needs `markdown`.' }, 400);
     // the object's card when it holds one: a preview asked for right after put_asset must carry that
     // picture, and this location's KV may still answer the card from before it
-    const { md: currentMd, gen, settled } = await currentCard(env, store, handle);
+    const { md: currentMd, gen, settled, version: heldVersion } = await currentCard(env, store, handle);
     // tile#399 r2: a DELETE that failed halfway — the stamp would be a lifetime no page reads yet
     if (!settled) return json(unfinishedDelete(handle), 409);
     const { md, advice } = assembleSave(body.markdown, currentMd);
@@ -1884,7 +1889,11 @@ async function routeApi(request, env, url) {
     // generation rides with it (r3, see genKey): a preview whose put lands after the delete's sweep
     // carries a dead generation, so the renderer never shows it, and its TTL removes it. The stamp is
     // the protection; the re-read after the put only tells the caller.
-    await store.put(previewKey(id), md, { expirationTtl: PREVIEW_TTL, metadata: { handle, gen } });
+    // `version` is the card's version as get_cards would have answered it at this moment (readCard's
+    // rule): the base the draft was made against, read back by GET /_api/preview/<id> so the editor can
+    // tell a draft that newer work has overtaken. null when there was no card yet.
+    const version = currentMd == null ? null : (heldVersion || await cardVersion(currentMd));
+    await store.put(previewKey(id), md, { expirationTtl: PREVIEW_TTL, metadata: { handle, gen, version } });
     // 🔴 tile#399: re-read from the object, like the stamp (currentGen). KV's `gen:` beside the object's
     // stamp answered 409 for a handle deleted and created again (the stamp new, `gen:` still the old
     // one) and left that draft parked; and it passed a draft a delete had overtaken. An object that
@@ -1900,12 +1909,42 @@ async function routeApi(request, env, url) {
       return json(staleWrite(handle), 409);
     }
     return json({
-      url: `https://${url.host}/_preview/${id}`,
+      // After the cutover (cardsHostStage 'canonical') a preview is rendered on the people's host and the
+      // address handed out names it, rather than leaning on the old host's redirect. Before it, the host the
+      // API was asked on, as always.
+      url: `https://${cardsHostStage(env) === 'canonical' ? CARDS_HOST : url.host}/_preview/${id}`,
       expires_in_seconds: PREVIEW_TTL,
       note: 'Not indexed, not linked, and gone within the hour. It is not the card.',
       // the same report a save gives (cardAdvice): a preview is where a missing picture is cheapest to hear about
       advice,
     });
+  }
+
+  // ── a parked preview draft, read back for the owner's editor ──────────────────────────────────
+  //
+  // 🔴 READ ONLY, and bearer-gated like everything else under `/_api/`. The caller is the platform's
+  // server, after its own sign-in and its own seat check — on the handle THIS answer names, which is the
+  // one the draft was parked for. `base_version` is the card's version when the draft was parked (null
+  // for a draft parked before that rode along), so the editor can refuse to start from a draft that newer
+  // work has overtaken. Unknown, malformed, expired and a draft of an ended lifetime are one answer: the
+  // renderer calls all four "expired", and so does this.
+  const parkedPreview = /^preview\/([^/]+)$/.exec(rest);
+  if (parkedPreview) {
+    if (method !== 'GET') return json({ error: 'A parked preview is read-only.' }, 405);
+    const expired = () => json({ error: 'preview_expired' }, 404);
+    const id = parkedPreview[1];
+    if (!/^[0-9a-f]{32}$/.test(id)) return expired();
+    const row = await store.getWithMetadata(previewKey(id));
+    const meta = (row && row.metadata) || {};
+    if (!row || row.value == null || !VALID_HANDLE.test(String(meta.handle ?? ''))) return expired();
+    // the renderer's rule (card-worker.mjs previewRecord): a stamp that is not the handle's current lifetime
+    if (!isCurrentGen(meta, await generationOf(store, meta.handle))) return expired();
+    return new Response(JSON.stringify({
+      handle: meta.handle,
+      gen: meta.gen ?? GEN0,
+      base_version: typeof meta.version === 'string' && meta.version ? meta.version : null,
+      markdown: row.value,
+    }), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
   }
 
   // ── the parked sandbox draft, read back ────────────────────────────────────────────────────────

@@ -145,6 +145,7 @@ import { handleReport, REPORT_PATH } from './card-report.mjs';
 import { standIn, hostName } from './host-standins.mjs';
 import { pageCspHeaders, pageCspStage } from './cardtile-page-csp.mjs';
 import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, embedMissResponse, framesAsDocuments, hasSrcdocFrame, isFrameRequest, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
+import { cardsPreviewBarHtml, wantsPreviewBar, withPreviewBar } from '../preview-bar.mjs';
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -1390,13 +1391,14 @@ const router = {
     // A preview stamped with a generation that is no longer its handle's (the card was deleted while
     // it was being parked, reef#2618) is expired. One stamped with no handle (parked before r1)
     // keeps its hour; a handle without a generation is generation 0, as everywhere (r3).
-    const previewDraft = async (id) => {
+    const previewRecord = async (id) => {
       const row = env && env.CARDS ? await env.CARDS.getWithMetadata(previewKey(id)) : null;
       const meta = row && row.metadata;
       const stale = row && row.value != null && meta && meta.handle
         && !isCurrentGen(meta, await generationOf(env.CARDS, meta.handle));
-      return row && !stale ? row.value : null;
+      return row && row.value != null && !stale ? { md: row.value, handle: meta && VALID_HANDLE.test(String(meta.handle ?? '')) ? meta.handle : null } : null;
     };
+    const previewDraft = async (id) => (await previewRecord(id))?.md ?? null;
     // tile#372 — one embed of a preview, as its own document (cardtile-embed-document.mjs). Previews write it
     // only under "enforce", and it answers in EVERY stage (a preview loaded before the setting moved still asks
     // it); a hash the draft does not hold, a draft that is gone, or a request that is not a frame's (a top-level
@@ -1413,7 +1415,8 @@ const router = {
     }
     const pv = /^\/_preview\/([0-9a-f]{32})$/.exec(url.pathname);
     if (pv) {
-      const draft = await previewDraft(pv[1]);
+      const record = await previewRecord(pv[1]);
+      const draft = record?.md ?? null;
       if (!draft) {
         const expired = '<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>';
         return new Response(expired, {
@@ -1424,9 +1427,17 @@ const router = {
       const videos = await resolveChannels(draft, ytFetch, channelShare);
       const rendered = withServiceTry(renderCardHTML(draft, { handle: '', cardUrl: '', videos }), env);
       // tile#372: with the page's policy enforced, each embed is its own document (cardtile-embed-document.mjs)
-      const preview = pageCspStage(env) === 'enforce' && hasSrcdocFrame(rendered)
+      const framed = pageCspStage(env) === 'enforce' && hasSrcdocFrame(rendered)
         ? framesAsDocuments(rendered, await embedDocuments(parseCard(draft), (k) => frontmatter(draft, k)), `/_preview/${pv[1]}/`)
         : rendered;
+      // The "this is a preview" bar (../preview-bar.mjs, the one source the Site preview draws too): for a
+      // person, never for a tool or a frame (wantsPreviewBar), and only when the draft names its handle — its
+      // two links open that handle's editor with this draft. The handle is the stored record's, never the URL's.
+      // It holds no script and one inline <style>, which the page's policy already allows (style-src
+      // 'unsafe-inline'), so the policy below is the same with or without it.
+      const preview = record.handle && wantsPreviewBar(request.headers)
+        ? withPreviewBar(framed, (pageLang) => cardsPreviewBarHtml(record.handle, pv[1], pageLang))
+        : framed;
       return new Response(preview, {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',

@@ -695,6 +695,81 @@ test('preview_cards parks a draft with a TTL and hands back a URL', async () => 
   assert.equal(await bodyOf(env), CARD);
 });
 
+// ── the parked draft, read back for the owner's editor ──────────────────────────────────────────────
+//
+// The preview bar's buttons open the platform's Cards editor with `?preview=<id>`; the editor starts
+// from this draft instead of the saved card. The read is bearer-gated like every route here (the
+// platform's server is the only caller, after its own sign-in and seat check on the handle this answer
+// names), and it says which version of the card the draft was made against, so the editor can refuse
+// to start from a draft that newer work has overtaken.
+test('GET /_api/preview/<id> answers the draft, its handle, its lifetime and the version it was made against', async () => {
+  const env = envWith({ t: CARD });
+  const before = await (await call(env, 'GET', '/_api/card/t')).json();
+  const parked = await (await call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD).replace('hello', 'hello again') })).json();
+  const id = /\/_preview\/([0-9a-f]{32})$/.exec(parked.url)[1];
+  const res = await call(env, 'GET', `/_api/preview/${id}`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  const draft = await res.json();
+  assert.deepEqual(Object.keys(draft).sort(), ['base_version', 'gen', 'handle', 'markdown']);
+  assert.equal(draft.handle, 't');
+  assert.equal(draft.gen, (await env.CARDS.getWithMetadata(previewKey(id))).metadata.gen, 'the lifetime the draft is stamped with');
+  assert.equal(draft.base_version, before.version, 'the version get_cards answered when the draft was parked');
+  assert.equal(draft.markdown, await env.CARDS.get(previewKey(id)), 'the parked bytes, pictures included');
+  assert.ok(draft.markdown.includes('hello again') && draft.markdown.includes(GIF));
+  // after a save the card moves on and the draft does not: the caller can see the two differ
+  const saved = await (await call(env, 'PUT', '/_api/card/t', { markdown: thinCard(CARD).replace('hello', 'newer work') })).json();
+  assert.notEqual(saved.version, draft.base_version, 'control: the save really moved the version');
+  assert.equal((await (await call(env, 'GET', `/_api/preview/${id}`)).json()).base_version, before.version);
+});
+
+test('GET /_api/preview/<id>: unknown, malformed or expired is one answer, 404 preview_expired; no bearer is 401', async () => {
+  const env = envWith({ t: CARD });
+  for (const id of ['f'.repeat(32), 'nope', 'F'.repeat(32)]) {
+    const res = await call(env, 'GET', `/_api/preview/${id}`);
+    assert.equal(res.status, 404, id);
+    assert.deepEqual(await res.json(), { error: 'preview_expired' });
+  }
+  const parked = await (await call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) })).json();
+  const id = /\/_preview\/([0-9a-f]{32})$/.exec(parked.url)[1];
+  assert.equal((await call(env, 'GET', `/_api/preview/${id}`, null, null)).status, 401, 'the bearer guards it like every other read');
+  assert.equal((await call(env, 'GET', `/_api/preview/${id}`, null, 'wrong')).status, 401);
+  assert.equal((await call(env, 'DELETE', `/_api/preview/${id}`)).status, 405, 'read only');
+  // the card deleted: its draft is the deleted lifetime's, so it is expired, as the renderer says
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  const gone = await call(env, 'GET', `/_api/preview/${id}`);
+  assert.equal(gone.status, 404);
+  assert.deepEqual(await gone.json(), { error: 'preview_expired' });
+});
+
+test('a draft parked before the version rode along answers base_version null (the caller cannot vouch for it)', async () => {
+  const env = envWith({ t: CARD });
+  const id = 'e'.repeat(32);
+  await env.CARDS.put(previewKey(id), CARD, { metadata: { handle: 't', gen: 0 } });
+  const draft = await (await call(env, 'GET', `/_api/preview/${id}`)).json();
+  assert.equal(draft.base_version, null);
+  assert.equal(draft.handle, 't');
+});
+
+test('the preview address: the host the API was asked on until the cutover, the people\'s host after it', async (t) => {
+  const ask = async (host, extra) => {
+    const env = { ...envWith({ t: CARD }), ...extra };
+    const url = new URL(`https://${host}/_api/preview`);
+    const res = await handleApiAsWritten(new Request(url, {
+      method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ handle: 't', markdown: thinCard(CARD) }),
+    }), env, url);
+    return new URL((await res.json()).url).host;
+  };
+  await t.test('dark', async () => assert.equal(await ask('card.feelreef.com', {}), 'card.feelreef.com'));
+  await t.test('open', async () => assert.equal(await ask('card.feelreef.com', { CARDS_HOST_OPEN: 'reef.cards' }), 'card.feelreef.com'));
+  await t.test('canonical', async () => assert.equal(await ask('card.feelreef.com', { CARD_CANONICAL_HOST: 'reef.cards' }), 'reef.cards'));
+  await t.test('split, asked on the service host', async () =>
+    assert.equal(await ask('cards.feelreef.com', { CARD_CANONICAL_HOST: 'reef.cards', CARDS_SERVICE_HOST: 'cards.feelreef.com' }), 'reef.cards'));
+  await t.test('service host open, before the cutover', async () =>
+    assert.equal(await ask('cards.feelreef.com', { CARDS_SERVICE_HOST: 'cards.feelreef.com' }), 'cards.feelreef.com'));
+});
+
 test('an unknown endpoint under /_api/ is a 404 WITH a token — not a silent pass to the renderer', async () => {
   assert.equal((await call(envWith({}), 'GET', '/_api/whatever')).status, 404);
   assert.equal((await call(envWith({ t: CARD }), 'POST', '/_api/card/t')).status, 405);
@@ -3334,7 +3409,11 @@ test('🔴 tile#399 delete → create again → write, while KV still names the 
   const preview = await call(env, 'POST', '/_api/preview', { handle: 't', markdown: OTHER_CARD });
   const previewBody = await preview.json();
   const id = previewBody.url ? previewBody.url.split('/').pop() : null;
-  got.preview = [preview.status, id ? env.CARDS._meta.get(previewKey(id)) : previewBody];
+  // the stamp's lifetime is what this test is about; the base version beside it (the editor's read-back)
+  // only has to be one
+  const { version: parkedVersion, ...parkedStamp } = (id && env.CARDS._meta.get(previewKey(id))) || {};
+  got.preview = [preview.status, id ? parkedStamp : previewBody];
+  got.previewVersion = /^v1:[0-9a-f]{16}$/.test(String(parkedVersion));
   got.stop = await answered(await call(env, 'PUT', '/_api/card/t/stop', { reason: 'review' }));
   got.stopKeys = keysOf(env, 'stop:t');
   got.pool = await answered(await call(env, 'PUT', '/_api/card/t/pool', { in: true }));
@@ -3365,6 +3444,7 @@ test('🔴 tile#399 delete → create again → write, while KV still names the 
     save: [200, false],
     asset: 200,
     preview: [200, { handle: 't', gen }],
+    previewVersion: true,
     stop: [200, { handle: 't', stopped: true }],
     stopKeys: [stopKey('t', gen)],
     pool: [200, { handle: 't', gen, in: true }],
