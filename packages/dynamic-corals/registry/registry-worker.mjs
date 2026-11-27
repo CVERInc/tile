@@ -69,11 +69,12 @@ export default {
     if (parts.length !== 3) return new Response('not found', { status: 404, headers: CORS });
 
     const [coral, ref, file] = parts;
-    const channels = manifest[coral];
+    // Own keys only: `constructor`, `__proto__` and `toString` are keys of every object, not corals or channels.
+    const channels = Object.hasOwn(manifest, coral) ? manifest[coral] : undefined;
     if (!channels) return new Response(`unknown coral: ${coral}`, { status: 404, headers: CORS });
 
     const exact = EXACT.test(ref);
-    const version = exact ? ref : channels[ref];
+    const version = exact ? ref : (Object.hasOwn(channels, ref) ? channels[ref] : undefined);
     if (!version) return new Response(`unknown channel: ${coral}@${ref}`, { status: 404, headers: CORS });
 
     const asset = await env.ASSETS.fetch(new URL(`/${coral}/${version}/${file}`, url.origin));

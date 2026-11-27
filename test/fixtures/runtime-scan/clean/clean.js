@@ -36,3 +36,8 @@ navigator.serviceWorker.controller; navigator.serviceWorker.ready.then(noop);
 // The words as identifiers of other things.
 const cookie = 1, domain = 2, src = 3, evaluate = 4, Functions = 5, workers = 6, cachesList = 7;
 x = a?.5:1;
+// A timer handed a parenthesised function is still handed a function.
+setTimeout((tick), 10); setTimeout((() => tick("a")), 10); setInterval(((fn)), 1);
+// Methods and accessors that happen to share a forbidden global's name are definitions, not references.
+class Host { eval(x) { return x } static Function(a) {} async caches() {} *Worker() {} importScripts() {} }
+const api = { eval(x) { return x }, get SharedWorker() { return 1 }, set cookieStore(v) {}, setTimeout(f) {} };

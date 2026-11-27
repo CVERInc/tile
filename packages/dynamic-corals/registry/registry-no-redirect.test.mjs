@@ -1,5 +1,6 @@
 // The registry worker never answers a redirect, and it refuses a path segment that could not have
-// named a published file before it asks the asset store anything.
+// named a published file, or a coral / channel that is not in its table, before it asks the asset
+// store anything.
 //
 // Why a redirect matters here, of all places: a coral is loaded as `<script type="module" src=…>`
 // and a module's base URL (`import.meta.url`, and so every relative import it makes) is the URL the
@@ -12,7 +13,8 @@
 // parser's own normalisation (dot segments, `%2e`, backslashes) is part of the measurement, crossed
 // with odd spellings of it — trailing slash, dot segments, percent-encoded slash and dots,
 // uppercase, empty segments. Two hostile stand-ins sit behind it:
-//   · an asset store that answers 308 + Location for every key it does not hold, and that DECODES
+//   · an asset store that answers a redirect + Location (each of 301, 302, 307 and 308 in turn) for
+//     every key it does not hold, and that DECODES
 //     percent-escapes and resolves dot segments in the key before looking it up (what a lenient
 //     static server may do, and the reason the segment rule below has to run before the store);
 //   · an origin that answers 308 + Location for everything. The page routes (reef#2165) are handed to
@@ -45,8 +47,10 @@ test.after(() => rmSync(dir, { recursive: true, force: true }));
 const ORIGIN = 'https://feelreef.com';
 const STORED = new Set(['/sample/1.0.0/sample.js', '/sample/0.9.0/sample.js', '/sample/1.0.0/manifest.json']);
 
-// The lenient store: decodes, resolves dot segments, then looks up; anything else is a redirect.
-function lenientStore(asked) {
+// The lenient store: decodes, resolves dot segments, then looks up; anything else is a redirect, with
+// whichever of the four redirect statuses the test asks for.
+const REDIRECTS = [301, 302, 307, 308];
+function lenientStore(asked, status = 308) {
   return {
     async fetch(url) {
       const raw = new URL(url).pathname;
@@ -54,7 +58,7 @@ function lenientStore(asked) {
       let key;
       try { key = posix.normalize(decodeURIComponent(raw)); } catch { key = raw; }
       if (STORED.has(key)) return new Response(`bytes of ${key}`);
-      return new Response(null, { status: 308, headers: { location: `${ORIGIN}/elsewhere${raw}/` } });
+      return new Response(null, { status, headers: { location: `${ORIGIN}/elsewhere${raw}/` } });
     },
   };
 }
@@ -65,17 +69,18 @@ globalThis.fetch = async (request) => {
   return new Response(null, { status: 308, headers: { location: `${ORIGIN}/somewhere-else` } });
 };
 
-async function ask(path) {
+async function ask(path, storeStatus) {
   const asked = [];
   originCalls.length = 0;
   const request = new Request(ORIGIN + path);
-  const response = await worker.fetch(request, { ASSETS: lenientStore(asked) });
+  const response = await worker.fetch(request, { ASSETS: lenientStore(asked, storeStatus) });
   return {
     path,
     pathname: new URL(request.url).pathname,
     status: response.status,
     location: response.headers.get('location'),
     acao: response.headers.get('access-control-allow-origin'),
+    body: await response.text(),
     asked,
     origin: originCalls.length,
   };
@@ -135,6 +140,10 @@ const SPELLINGS = {
   'semicolon parameter': (p) => (p.split('/').length === 5 ? `${p};x=1` : null),
   'tilde in the file': (p) => (p.split('/').length === 5 ? p.replace(/[^/]+$/, (f) => `~${f}`) : null),
   'non-ASCII in the file': (p) => (p.split('/').length === 5 ? p.replace(/[^/]+$/, (f) => `é${f}`) : null),
+  // characters a URL parser leaves as they are in a path, so they reach the worker unescaped
+  ...Object.fromEntries(['@', '+', ':', '!', '(', ')', '$'].map((c) => [`${c} in the file`,
+    (p) => (p.split('/').length === 5 ? p.replace(/[^/]+$/, (f) => f.replace('.', () => `${c}.`)) : null)])),
+  '+ in the channel': (p) => (p.split('/').length === 5 ? p.replace(/^(\/corals\/[^/]+\/)([^/]+)/, '$1$2+') : null),
 };
 
 const MATRIX = [...new Set(SHAPES.flatMap((shape) => [shape, ...Object.values(SPELLINGS).map((s) => s(shape))])
@@ -160,15 +169,24 @@ test('the matrix is the size it claims, and reaches every branch it is about', a
     'no three-segment path with an impossible segment: the segment rule would be checked on nothing');
 });
 
-test('no path the worker answers itself is a 3xx, even when the store answers one', async () => {
-  const redirects = [];
-  for (const path of MATRIX) {
-    const s = await ask(path);
-    if (s.origin) continue;
-    if ((s.status >= 300 && s.status < 400) || s.location) redirects.push(`${path} → ${s.status} ${s.location}`);
+test('the odd characters are in the matrix, each reaching the worker unescaped', () => {
+  for (const c of ['@', '+', ':', '!', '(', ')', '$']) {
+    const hits = MATRIX.filter((p) => new URL(ORIGIN + p).pathname.split('/').pop().includes(`${c}.`));
+    assert.ok(hits.length >= 5, `${c}: only ${hits.length} paths`);
   }
-  assert.deepEqual(redirects, []);
 });
+
+for (const status of REDIRECTS) {
+  test(`no path the worker answers itself is a 3xx, even when the store answers ${status}`, async () => {
+    const redirects = [];
+    for (const path of MATRIX) {
+      const s = await ask(path, status);
+      if (s.origin) continue;
+      if ((s.status >= 300 && s.status < 400) || s.location) redirects.push(`${path} → ${s.status} ${s.location}`);
+    }
+    assert.deepEqual(redirects, []);
+  });
+}
 
 test('only the page shapes reach the origin, so the only 3xx that can come out is the origin\'s own, on a page', async () => {
   const wrong = [];
@@ -206,10 +224,37 @@ test('the spellings that still name a published file are served unchanged by the
   }
 });
 
-test('a store redirect for a key the worker resolved is not relayed', async () => {
-  const response = await worker.fetch(new Request(`${ORIGIN}/corals/sample/latest/sample.js`), {
-    ASSETS: { async fetch() { return new Response(null, { status: 307, headers: { location: 'https://elsewhere.example/x.js' } }); } },
+for (const status of REDIRECTS) {
+  test(`a store ${status} for a key the worker resolved is not relayed`, async () => {
+    for (const path of ['/corals/sample/latest/sample.js', '/corals/sample/1.0.0/sample.js', '/corals/sample/1.0.0/manifest.json']) {
+      const response = await worker.fetch(new Request(`${ORIGIN}${path}`), {
+        ASSETS: { async fetch() { return new Response(null, { status, headers: { location: 'https://elsewhere.example/x.js' } }); } },
+      });
+      assert.equal(response.status, 404, path);
+      assert.equal(response.headers.get('location'), null, path);
+      assert.equal(response.headers.get('access-control-allow-origin'), '*', path);
+    }
   });
-  assert.equal(response.status, 404);
-  assert.equal(response.headers.get('location'), null);
+}
+
+test('a coral or channel named after an Object.prototype key is unknown: a 404 before the store is asked', async () => {
+  // The channel table is a plain object: `table.constructor` and `table.__proto__` are not channels.
+  const cases = [
+    ['/corals/sample/constructor/sample.js', 'unknown channel'],
+    ['/corals/sample/__proto__/sample.js', 'unknown channel'],
+    ['/corals/sample/toString/sample.js', 'unknown channel'],
+    ['/corals/sample/hasOwnProperty/manifest.json', 'unknown channel'],
+    ['/corals/constructor/1.0.0/constructor.js', 'unknown coral'],
+    ['/corals/__proto__/1.0.0/sample.js', 'unknown coral'],
+    ['/corals/__proto__/latest/sample.js', 'unknown coral'],
+    ['/corals/valueOf/latest/valueOf.js', 'unknown coral'],
+  ];
+  const wrong = [];
+  for (const [path, want] of cases) {
+    const s = await ask(path);
+    if (s.status !== 404 || s.asked.length || s.origin || s.acao !== '*' || !s.body.startsWith(want)) {
+      wrong.push(`${path} → ${s.status} "${s.body}", store asked for ${JSON.stringify(s.asked)}`);
+    }
+  }
+  assert.deepEqual(wrong, []);
 });

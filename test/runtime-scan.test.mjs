@@ -229,6 +229,32 @@ test('an exception must be narrow: a literal file name, a known rule, a construc
   assert.match(bad({ ...EXC, files: 'x' }), /unknown key/);
 });
 
+test('RED: the CLI refuses an invalid exception file, a missing one and a missing target with one line, not a stack trace', () => {
+  const dir = scratch();
+  const write = (name, text) => { const f = path.join(dir, name); fs.writeFileSync(f, text); return f; };
+  const cases = [
+    [write('wildcard.json', JSON.stringify({ exceptions: [{ ...EXC, file: '**' }] })), /literal file name/],
+    [write('two.json', JSON.stringify({ exceptions: [{ ...EXC, rule: 'nope' }, { ...EXC, reason: '' }] })), /exception #1: unknown rule.*exception #2: the reason/],
+    [write('broken.json', '{ "exceptions": [ '), /not valid JSON/],
+    [write('null.json', 'null'), /not an array/],
+    [path.join(dir, 'absent.json'), /cannot read/],
+  ];
+  for (const [file, why] of cases) {
+    const r = spawnSync(process.execPath, [SCAN, '--exceptions', file, CLEAN], { encoding: 'utf8' });
+    assert.equal(r.status, 2, `${file}: ${r.stdout}${r.stderr}`);
+    assert.equal(r.stdout, '', file);
+    const lines = r.stderr.split('\n').filter(Boolean);
+    assert.equal(lines.length, 1, `${file}: not one line:\n${r.stderr}`);
+    assert.match(lines[0], /^runtime-scan: /, file);
+    assert.match(lines[0], why, file);
+    assert.ok(lines[0].includes(file), `${file}: the line does not name the file`);
+  }
+  const missing = spawnSync(process.execPath, [SCAN, '--exceptions', 'none', path.join(dir, 'no-such-dir')], { encoding: 'utf8' });
+  assert.equal(missing.status, 2, missing.stderr);
+  assert.deepEqual(missing.stderr.split('\n').filter(Boolean).length, 1, missing.stderr);
+  assert.match(missing.stderr, /^runtime-scan: .*no-such-dir/);
+});
+
 test('the real exception list is valid', () => {
   assert.ok(Array.isArray(loadExceptions(DEFAULT_EXCEPTIONS)));
 });
@@ -249,7 +275,8 @@ test('file patterns: `**` crosses directories, `*` does not', () => {
 const KNOWN_FALSE_NEGATIVES = [
   ['a cookie written through an aliased setter', 'Object.getOwnPropertyDescriptor(Document.prototype, "cookie").set.call(document, "a=1")'],
   ['a cookie written through Reflect / defineProperty', 'Reflect.set(document, "cookie", "a=1")'],
-  ['a computed property name built from pieces', 'document["coo" + "kie"] = "a=1"'],
+  ['a computed property name built from pieces', 'document["coo" + "kie"] = "a=1"; window["ev" + "al"](code)'],
+  ['a script element made from a tag name built from pieces', 'document.createElement("scr" + "ipt")'],
   ['a property name held in a variable', 'document[k] = "a=1"; globalThis[n](code)'],
   ['a destructuring assignment target', '[document.cookie] = ["a=1"]'],
   ['document.domain through an alias of document', 'const d = document; d.domain = "example.com"'],
@@ -275,9 +302,53 @@ test('the known false negatives are still not seen (this list is documentation t
   for (const [what, src] of KNOWN_FALSE_NEGATIVES) assert.deepEqual(scanSource(src), [], `${what} — the scan sees it now: move it to a fixture`);
 });
 
-test('the tokenizer limits that are known: a regex after `)` and a division after `}`', () => {
-  // `if (x) /re/` — a regex where a division usually is; a quote in it opens a "string" that hides code.
-  assert.deepEqual(scanSource("if (x) /'/.test(s); eval(code); a = '"), []);
-  // the same code with a statement boundary the tokenizer can see is found
-  assert.deepEqual(scanSource("if (x) { /'/.test(s) } eval(code);").map((f) => f.rule), ['eval']);
+// ── Regex or division ────────────────────────────────────────────────────────────────────────────
+// A `/` read the wrong way hides code: a regex taken for a division lets the quote inside it open a
+// "string", and a division taken for a regex swallows everything up to the next `/` on the line. On a
+// one-line minified bundle either span can be long, so each case below hides an `eval` behind it.
+
+test('RED: a `/` after a postfix `++` / `--` divides; after a prefix one it starts a regex', () => {
+  const evals = (src) => assert.deepEqual(scanSource(src).map((f) => f.rule), ['eval'], src);
+  evals('a++/2;eval(s);b/1');
+  evals('a--/2;eval(s);b/1');
+  evals('x[i]++/2;eval(s);b/1');
+  evals('f(a)--/2;eval(s);b/1');
+  // prefix: the operand is still to come, so the `/` opens a regex and its quote is not a string
+  evals("++/'/.lastIndex;eval(s);'x'");
+  evals("x=--/'/.lastIndex;eval(s);'x'");
+  // a line break before `++` makes it prefix (no line break is allowed before a postfix one)
+  evals("a\n++/'/.lastIndex;eval(s);'x'");
+});
+
+test('RED: a `/` after the `)` of `if` / `for` / `while` / `with` starts a regex; after any other `)` it divides', () => {
+  const evals = (src) => assert.deepEqual(scanSource(src).map((f) => f.rule), ['eval'], src);
+  evals("if(x)/'/.test(s);eval(s);var q='x'");
+  evals("if (f(x)) /'/.test(s); eval(s); var q = 'x'");
+  evals("for(;;)/'/.test(s);eval(s);'x'");
+  evals("for await(const a of b)/'/.test(s);eval(s);'x'");
+  evals("while(a[0])/'/.test(s);eval(s);'x'");
+  evals("with(o)/'/.test(s);eval(s);'x'");
+  evals("do x();while(y)/'/.test(s);eval(s);'x'"); // after do-while a semicolon is inserted: a regex
+  evals("if(a)if(b)/'/.test(s);eval(s);'x'");
+  // a division after the `)` of a call, a group, or a method that is merely NAMED like a keyword
+  evals('f(a)/2;eval(s);b/1');
+  evals('var a=(b)/2;eval("x/y")');
+  evals('o.if(a)/2;eval(s);b/1');
+  evals('o?.while(a)/2;eval(s);b/1');
+  evals('if((a)/2)eval(s);b/1');
+});
+
+test('the tokenizer limit that is known: a `/` after `}` is read as a regex start', () => {
+  // A block ends at `}` far more often than an object literal that is then divided; telling them apart
+  // needs a parser. The division case hides what follows up to the next `/` on the line.
+  assert.deepEqual(scanSource('var x={a:1}/2;eval(s);var y=4/2'), []);
+  // the block case, the common one, is read right
+  assert.deepEqual(scanSource("if(a){b()}/'/.test(c);eval(s);'x'").map((f) => f.rule), ['eval']);
+});
+
+test('the false positive that is known: a method named like a forbidden global, defined over a line break', () => {
+  // `name(…) {` on ONE line can only be a definition; across a line break it can also be a call
+  // followed by a block, so it is reported. Formatters and minifiers keep the `{` on the line.
+  assert.deepEqual(scanSource('class A { eval(x)\n{ return x } }').map((f) => f.rule), ['eval']);
+  assert.deepEqual(scanSource('class A { eval(x) { return x } }'), []);
 });

@@ -46,18 +46,12 @@ Resolving to the wrong data is not loud at all.
 The channel table is imported rather than fetched so a deploy stays **atomic**: pointers, artifacts
 and logic ship together, and provenance is the git log of the repo that owns the pointers.
 
-## No redirects, and no names nobody published
+## The path guard
 
-The worker never answers a 3xx: a module's `import.meta.url` is the URL the browser ended on, so a
-redirect would let whoever chose its `Location` choose where a coral thinks it lives. A store answer
-that is not a 2xx (a static asset platform's trailing-slash or `.html` redirect included) becomes a 404.
-The page routes are handed to the origin and relayed as they come back; only the page shapes get there.
-
-A path segment outside `[A-Za-z0-9._-]`, or one made only of dots, is a 404 before the asset store
-is asked — every coral id, version, channel and published file name is made of those characters, so
-such a segment (`sample%2ejs`, `..%2F..%2Fx.js`, `...`) could not have named a published file, and a
-store that decoded it first might find one anyway. Empty segments (`//`) are collapsed, as before.
-`registry-no-redirect.test.mjs` crosses every route shape with odd spellings of it to hold both.
+Before the asset store is asked, a 404 answers any path segment outside `[A-Za-z0-9._-]` or made only
+of dots (no published name has one), and any coral or channel that is not an own key of the channel
+table (`constructor`, `__proto__`). A store answer that is not a 2xx, a redirect included, is a 404:
+the worker never answers a 3xx. `registry-no-redirect.test.mjs` holds all three.
 
 ## Running the tests
 

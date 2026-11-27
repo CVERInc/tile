@@ -14,7 +14,8 @@
 //   eval                  `eval` referenced at all (`eval(`, `(0,eval)(`, `window.eval`, `const e=eval`)
 //   function-constructor  `Function` constructed or aliased (`new Function`, `Function(`, `F=Function`,
 //                         `Function.call/apply/bind`); `Function.prototype…` and `instanceof Function` pass
-//   string-timer          `setTimeout` / `setInterval` whose first argument starts with a string or template
+//   string-timer          `setTimeout` / `setInterval` whose first argument starts with a string or template,
+//                         parentheses around it included (`setTimeout(("code"), 1)`)
 //   script-element        `createElement('script')` in any quote style or case; `createElementNS(ns, 'script')`
 //   script-src            `.src =` / `['src'] =` on ANY element, `setAttribute('src', …)`,
 //                         `setAttributeNS(ns, 'src', …)` — the scan cannot tell a script element from an image
@@ -30,7 +31,11 @@
 // matter, so a minified bundle reads the same as a pretty one. `x['name']` with one string literal is
 // read as `x.name`, and a unicode escape in an identifier (backslash-u-0065 for `e`) is decoded, so an
 // escaped `eval` is still `eval`. Rules match global names and
-// property names, never minifier-chosen local names.
+// property names, never minifier-chosen local names; a method DEFINED under a global's name
+// (`class A{eval(x){…}}`) is not a reference to it. A `/` is a regex after `(`, an operator, a
+// keyword, `}`, a prefix `++`/`--`, or the `)` of `if`/`for`/`while`/`with`; after a name, a number,
+// `]`, a postfix `++`/`--` or any other `)` it divides. The one known misreading is a `/` dividing an
+// object literal (`{a:1}/2`), read as a regex start: telling it from a block needs a parser.
 //
 // 🔴 A TRIPWIRE, NOT A PROOF. It reports what the tokens SAY; it does not follow values. The known
 // false negatives (constructs that load code or write cookies and pass this scan) are listed in
@@ -89,6 +94,14 @@ const ASSIGN = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '<<=', '>>=', 
 // After these names a `/` starts a regular expression; after any other name it divides.
 const REGEX_AFTER_NAME = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
   'throw', 'case', 'do', 'else', 'yield', 'await', 'extends']);
+// A `(` opened right after one of these keywords closes on a `)` after which a statement starts.
+const CONTROL = new Set(['if', 'for', 'while', 'with']);
+const controlParen = (tokens) => {
+  let k = tokens.length - 1;
+  if (tokens[k]?.type === 'name' && tokens[k].value === 'await' && tokens[k - 1]?.type === 'name' && tokens[k - 1].value === 'for') k--; // for await (
+  const t = tokens[k], before = tokens[k - 1];
+  return t?.type === 'name' && CONTROL.has(t.value) && !(before?.type === 'punct' && (before.value === '.' || before.value === '?.'));
+};
 const ID_START = /[\p{ID_Start}$_]/u;
 const ID_CONTINUE = /[\p{ID_Continue}$\u200c\u200d]/u;
 const NUMBER = /(?:0[xX][\da-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)n?/y;
@@ -122,16 +135,33 @@ export function tokenize(src) {
   const push = (type, value, start, end, sl, sc) => {
     tokens.push({ type, value, raw: src.slice(start, end), start, end, line: sl, col: sc });
   };
-  const prevAllowsRegex = () => {
-    const t = tokens[tokens.length - 1];
+  const parens = []; // for each open `(`: does it belong to `if`/`for`/`while`/`with`?
+  // Would a `/` right after token k start a regex (rather than divide)?
+  const regexAfter = (k) => {
+    const t = tokens[k];
     if (!t) return true;
     if (t.type === 'name') return REGEX_AFTER_NAME.has(t.value);
-    // After `)` and `]` a slash divides. After `}` it is taken as a regex: a block ends there far more
-    // often than an object literal that is then divided by something.
-    if (t.type === 'punct') return !(t.value === ')' || t.value === ']');
+    if (t.type === 'punct') {
+      // After the `)` of `if (…)` / `for (…)` / `while (…)` / `with (…)` a statement starts; after any
+      // other `)`, and after `]`, a slash divides.
+      if (t.value === ')') return t.control === true;
+      if (t.value === ']') return false;
+      // `a++ / 2` divides; `++/re/.x` is a prefix `++` on a regex. `++` is postfix when a slash in its
+      // place would have divided, and no line break comes before it (one may not come before a postfix).
+      if (t.value === '++' || t.value === '--') {
+        const before = tokens[k - 1];
+        if (!before || before.line !== t.line) return true;
+        if (before.type === 'punct' && (before.value === '++' || before.value === '--')) return true; // no recursion on `++++…`
+        return regexAfter(k - 1);
+      }
+      // After `}` it is taken as a regex: a block ends there far more often than an object literal
+      // that is then divided by something.
+      return true;
+    }
     if (t.type === 'template-head' || t.type === 'template-middle') return true;
     return false;
   };
+  const prevAllowsRegex = () => regexAfter(tokens.length - 1);
   // Reads template characters from i (just past ` or }) to the closing ` or ${.
   const readTemplate = (start, sl, sc, opening) => {
     let k = i;
@@ -259,8 +289,10 @@ export function tokenize(src) {
     if (!p) p = c; // anything unknown is one character
     if (p === '{') braces.push('brace');
     else if (p === '}') braces.pop();
+    else if (p === '(') parens.push(controlParen(tokens));
     i += p.length;
     push('punct', p, start, i, sl, sc);
+    if (p === ')' && parens.length && parens.pop()) tokens[tokens.length - 1].control = true;
   }
   return tokens;
 }
@@ -298,15 +330,27 @@ const isStringish = (t) => t && (t.type === 'string' || t.type === 'template');
 
 // An object-literal key (`{eval:1}`, `,eval:`). Not a reference to anything.
 const isKey = (T, k) => isP(T[k + 1], ':') && (isP(T[k - 1], '{') || isP(T[k - 1], ','));
+// A method or accessor DEFINED under this name (`class A{eval(x){…}}`, `{get caches(){…}}`): after a
+// member boundary or a modifier, `name(…) {` with the `{` on the `)`'s line. A call cannot be followed
+// by `{` without a line break between them; `extends eval(x) {` is a call and is not after a boundary.
+const METHOD_BEFORE = new Set(['{', '}', ';', ',', '*']);
+const METHOD_MODIFIERS = new Set(['static', 'async', 'get', 'set']);
+function methodDefinition(T, k) {
+  const prev = T[k - 1];
+  if (!isP(T[k + 1], '(')) return false;
+  if (!(prev && (prev.type === 'punct' ? METHOD_BEFORE.has(prev.value) : isName(prev) && METHOD_MODIFIERS.has(prev.value)))) return false;
+  const close = closeParen(T, k + 1), body = T[close + 1];
+  return isP(T[close], ')') && isP(body, '{') && body.line === T[close].line;
+}
 // The token AT k is a reference to the global binding of its name: not a property of something
-// other than the global object, and not an object-literal key.
+// other than the global object, not an object-literal key, and not a method defined under that name.
 function globalRef(T, k) {
   const prev = T[k - 1];
   if (isDot(prev)) {
     const recv = T[k - 2];
     return isName(recv) && GLOBALS.has(recv.value) && !isDot(T[k - 3]);
   }
-  return !isKey(T, k);
+  return !isKey(T, k) && !methodDefinition(T, k);
 }
 const isProperty = (T, k) => isDot(T[k - 1]);
 
@@ -398,7 +442,7 @@ export function scanSource(src) {
         break;
       }
       case 'cookieStore':
-        if (!isKey(T, k)) add('cookie-store', k, chainStart(T, k), k);
+        if (!isKey(T, k) && !methodDefinition(T, k)) add('cookie-store', k, chainStart(T, k), k);
         break;
       case 'domain':
         if (isProperty(T, k) && isName(T[k - 2], 'document') && !isDot(T[k - 3])) add('document-domain', k, k - 2, k);
@@ -417,7 +461,9 @@ export function scanSource(src) {
       }
       case 'setTimeout': case 'setInterval':
         if (globalRef(T, k) && callOpen(k) >= 0) {
-          const a = T[callOpen(k) + 1];
+          let j = callOpen(k) + 1;
+          while (isP(T[j], '(')) j++; // `setTimeout(("code"), 1)`: parentheses do not make it a function
+          const a = T[j];
           if (a && (a.type === 'string' || a.type === 'template' || a.type === 'template-head')) {
             add('string-timer', k, refStart(T, k), closeParen(T, callOpen(k)));
           }
@@ -530,12 +576,18 @@ export function validateExceptions(list) {
   return problems;
 }
 
+// A problem with what the scan was ASKED to do (an unreadable or invalid exception list, a target
+// that is not there), as opposed to a finding. The CLI prints its one-line message and exits 2.
+export class UsageError extends Error {}
+
 export function loadExceptions(file) {
   if (!file || file === 'none') return [];
-  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const list = data.exceptions;
+  let text, data;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { throw new UsageError(`cannot read the exception list ${file} (${e.code || e.message})`); }
+  try { data = JSON.parse(text); } catch (e) { throw new UsageError(`the exception list ${file} is not valid JSON (${e.message.split('\n')[0]})`); }
+  const list = data && typeof data === 'object' ? data.exceptions : undefined;
   const problems = validateExceptions(list);
-  if (problems.length) throw new Error(`${file}:\n  ${problems.join('\n  ')}`);
+  if (problems.length) throw new UsageError(`invalid exception list ${file}: ${problems.join('; ')}`);
   return list;
 }
 
@@ -566,6 +618,7 @@ export function scanFiles(files, { root = REPO, exceptions = [] } = {}) {
 }
 
 export async function scan({ targets = [], root = REPO, exceptionsFile = DEFAULT_EXCEPTIONS } = {}) {
+  for (const t of targets) if (!fs.existsSync(t)) throw new UsageError(`no such file or directory: ${t}`);
   const files = targets.length ? targets.flatMap((t) => listFiles(path.resolve(t))) : await coralBundles();
   return scanFiles(files, { root, exceptions: loadExceptions(exceptionsFile) });
 }
@@ -594,7 +647,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const json = flag('--json');
   const unknown = argv.filter((a) => a.startsWith('--'));
   if (unknown.length) { console.error(`runtime-scan: unknown option ${unknown.join(' ')}`); process.exit(2); }
-  const result = await scan({ targets: argv, root, exceptionsFile });
+  let result;
+  try {
+    result = await scan({ targets: argv, root, exceptionsFile });
+  } catch (e) {
+    if (!(e instanceof UsageError)) throw e; // a bug in the scan itself keeps its stack trace
+    console.error(`runtime-scan: ${e.message.replace(/[\r\n\u2028\u2029]+/g, ' ')}`);
+    process.exit(2);
+  }
   if (result.files === 0) { console.error('✗ runtime scan: no JavaScript files under the given target(s) — nothing was checked'); process.exit(1); }
   const { ok, text } = report(result, { deadCheck });
   if (json) console.log(JSON.stringify({ ok, ...result }, null, 2));
