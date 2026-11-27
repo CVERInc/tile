@@ -52,7 +52,7 @@
   // window.__deckBoot is the word the page's head script waits for (deck-page.mjs): 'pending' | 'ready' | 'failed'.
   const fail=e=>{ ON=false; window.__deckBoot='failed';
     try{ twoHomes.forEach((h,n)=>{ const p=h.mark.parentNode; if(p&&(n.parentNode!==p||n.previousSibling!==h.mark)) p.insertBefore(n,h.mark.nextSibling); }); }catch(_){}
-    root.classList.remove('deck','list','open','fan','fan-closing','moving','list-away','swipe'); root.dataset.view='wall'; root.setAttribute('data-deck-off','');
+    root.classList.remove('deck','list','open','fan','fan-folding','fan-closing','moving','list-away','swipe'); root.dataset.view='wall'; root.setAttribute('data-deck-off','');
     try{history.scrollRestoration='auto';}catch(_){}
     for(const k of ['__deckSetMode','__deckView','__deckLayout','__deckListHome','__deckFanToggle','__deckFan','__deckJump','__deckRiffle','__deckCount','__deckCur']) delete window[k];
     try{console.error('deck: did not come up, the page is the wall',e);}catch(_){} };
@@ -600,8 +600,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const fanXform=(slot,lift)=>{ const n=cards.length; const a=(slot-(n-1)/2)*fanStep;
     return 'translateY('+fanT.toFixed(1)+'px) translateY('+fanP.toFixed(1)+'px) rotate('+a.toFixed(2)+'deg) translateY('+(lift?(-0.52*fanP/1.4).toFixed(1):0)+'px) scale('+fanScale+') translateY('+(-fanP).toFixed(1)+'px)'; };
   window.__deckFan=()=>fanOut();
-  let fanIdx=[];
+  let fanIdx=[], foldT=0;   // foldT: the end of a fold still under way (fanIn)
   const fanOut=()=>{ if(!ON||LIST||fanned||openCard||running||stack.classList.contains('busy'))return; fanned=true; fanHot=-1;
+    clearTimeout(foldT); document.documentElement.classList.remove('fan-folding');   // opened again before a fold was over: that fold's ending must not hide this fan's cards
     fanIdx=N<=FANMAX?[...Array(N).keys()]:Array.from({length:FANMAX},(_,k)=>Math.round(k*(N-1)/(FANMAX-1)));
     { const fc=fanIdx.map(card); for(const c of cards) if(!fc.includes(c)) away(c); cards.length=0; fc.forEach(c=>cards.push(c)); }   // during the fan, the window IS the fan
     const n=cards.length; fanStep=Math.min(3.2,26/Math.max(1,n-1)); fanScale=0.56; { const r=stack.getBoundingClientRect(), H=r.height, s=fanScale; fanP=1.4*H; const centreNow=r.top+H/2; const centreWant=innerHeight-(H*s)/2+(H*s)*0.4; fanT=(centreWant-centreNow)-fanP*(1-s); }
@@ -618,11 +619,12 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     // Fold as a keyframe animation (WAAPI), not a transition: with both end poses known up front WebKit rasterises the card at the
     // larger scale from frame 0, so the content stays crisp all the way home instead of snapping sharp when the transition ends.
     const from=new Map(cards.map(c=>[c,getComputedStyle(c).transform]));
-    document.documentElement.classList.remove('fan'); paint();
+    // fan-folding, for as long as the cards travel: the pile's ground shadow waits for them (deck.css) instead of fading in under nothing
+    document.documentElement.classList.remove('fan'); document.documentElement.classList.add('fan-folding'); paint();
     cards.forEach(c=>{ c.style.transition='none'; c.style.transform=''; c.style.pointerEvents=''; c.classList.remove('fan-hot'); });   // solid while travelling home (opacity/visibility inline stay)
     void stack.offsetWidth;
     cards.forEach(c=>{ const f=from.get(c); if(!f)return; const to=getComputedStyle(c).transform; c.animate([{transform:f},{transform:to}],{duration:500,easing:'cubic-bezier(.45,0,.55,1)'}); });
-    setTimeout(()=>{ cards.forEach(c=>{ c.style.transition='none'; c.style.opacity=''; c.style.visibility=''; }); void stack.offsetWidth; cards.forEach(c=>{ c.style.transition=''; }); }, 520); };
+    clearTimeout(foldT); foldT=setTimeout(()=>{ document.documentElement.classList.remove('fan-folding'); cards.forEach(c=>{ c.style.transition='none'; c.style.opacity=''; c.style.visibility=''; }); void stack.offsetWidth; cards.forEach(c=>{ c.style.transition=''; }); }, 520); };
   const fanNearest=(x,y)=>{ const g=fanGeom(); const dx=x-g.px, dy=g.py-y; if(dy<=0)return -1; const a=Math.atan2(dx,dy)*180/Math.PI; const n=cards.length; const i=Math.max(0,Math.min(n-1,Math.round(a/fanStep+(n-1)/2))); if(y<g.top-g.H*0.3)return -1; return i; };
   const slotCard=s=>cards[s];
   const fanHover=s=>{ if(s===fanHot)return; if(fanHot>=0){const o=slotCard(fanHot);o.style.transform=fanXform(fanHot,false);o.classList.remove('fan-hot');} fanHot=s; if(s>=0){const c=slotCard(s);c.style.transform=fanXform(s,true);c.classList.add('fan-hot');} };
@@ -786,7 +788,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // leave: put a held card back, fold the fan, stop answering, and send every tile home. Returns the tile of the card that was up
   // (over a card file: the number of the item that was up).
   const leave=()=>{ settleWrap(); if(fanned)fanIn(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
-    queue=0; drag=null; LD=null; hx=-1; ON=false; stack.classList.remove('hov'); root.classList.remove('list-away','fan','fan-closing','moving','open');
+    queue=0; drag=null; LD=null; hx=-1; ON=false; stack.classList.remove('hov'); root.classList.remove('list-away','fan','fan-folding','fan-closing','moving','open');
     cards.forEach(c=>c.style.removeProperty('--peek')); rehome(true); for(const k in API) delete window[k]; return up; };
   // enter: the tiles take their seats again and the pile is dealt, open on the card whose tile was in the middle of the wall
   const enter=(c,up)=>{ ON=true; LIST=mode==='list'; rehome(false); Object.assign(window,API); try{history.scrollRestoration='manual';}catch(_){}

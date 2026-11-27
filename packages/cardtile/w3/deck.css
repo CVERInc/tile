@@ -189,7 +189,7 @@ html.deck-glide::view-transition-old(deck-up),html.deck-glide::view-transition-n
 html.deck-glide::view-transition-old(root),html.deck-glide::view-transition-new(root){animation-duration:.5s}
 html.deck-glide::view-transition-group(deck-seg),html.deck-glide::view-transition-new(deck-seg){animation:none}
 html.deck-glide::view-transition-old(deck-seg){display:none}
-@media (prefers-reduced-motion:reduce){html.deck :is(.deck-card,.deck-card.flipping-open,.deck-card.flipping-close,.deck-stack.dealt .deck-card,.deck-stack.dealing .deck-card,.deck-veil,.deck-shade,.deck-seg){transition:none!important;animation:none!important}}
+@media (prefers-reduced-motion:reduce){html.deck :is(.deck-card,.deck-card.flipping-open,.deck-card.flipping-close,.deck-stack.dealt .deck-card,.deck-stack.dealing .deck-card,.deck-veil,.deck-shade,.deck-gshadow,.deck-seg){transition:none!important;animation:none!important}}
 
 /* deal-in: the pile lands on the table once; the top card settles last */
 html.deck .deck-stack.dealing .deck-card{transition:none;transform:translateY(60vh);opacity:0}
@@ -220,6 +220,10 @@ html.deck.fan .deck-card{transition:transform .32s cubic-bezier(.2,.8,.3,1),opac
 html.deck.fan .deck-card.fan-hot{transition-duration:.14s}
 html.deck.fan .deck-gshadow{opacity:0;transition:opacity .2s 0s}
 html.deck .deck-gshadow{transition:opacity .5s 0s}   /* arrives with the cards, not after them */
+/* …and not before them. A fan folds home in .5s, slow at first (deck.js fanIn; fan-folding is on for that long): started with
+   the fold, the fade above was half there with the cards a fifth of the way home, a shadow on the table with nothing over it.
+   It waits until they are two thirds of the way, then grows as they land (w3/deck-fold-shadow.smoke.mjs measures both). */
+html.deck.fan-folding .deck-gshadow{transition:opacity .2s linear .3s}
 html.deck .deck-card.travel{transition:none!important;visibility:visible!important;opacity:1!important;pointer-events:none}
 html.deck .deck-card.to-back-1{animation:deck-to-back-1 .3s cubic-bezier(.3,0,.6,1) both}
 html.deck .deck-card.to-back-2{animation:deck-to-back-2 .36s cubic-bezier(.4,0,.7,1) both}
@@ -235,6 +239,10 @@ html.deck.fan .deck-card.fan-hot{transition-duration:.22s}
 html.deck{--deck-sh-flat:0 1px 2px rgba(0,0,0,.14);--deck-sh-lift:0 6px 16px rgba(0,0,0,.18);--deck-sh-fly:0 14px 28px rgba(0,0,0,.2)}
 html.deck .deck-face{box-shadow:var(--deck-sh-flat);transition:visibility 0s linear .25s,box-shadow .22s}
 html.deck .deck-card:is(.fan-hot,.flipped,.flipping-open,.flipping-close) .deck-face{box-shadow:var(--deck-sh-lift)}
+/* a fan folding home (fan-folding): the cards the pile will not show stay drawn until they are in, and each brought its own
+   edge shadow under the pile, where the resting pile has three; they overlap as they close in and the shadows add up. They put
+   theirs down on the way (the .22s above, over well before they meet). */
+html.deck.fan-folding .deck-card.is-deep .deck-face{box-shadow:0 1px 2px rgba(0,0,0,0)}
 html.deck .deck-card.to-back-1 .deck-face{animation:deck-sh-up .3s cubic-bezier(.3,0,.6,1) both}
 html.deck .deck-card.to-back-2 .deck-face{animation:deck-sh-down .36s cubic-bezier(.4,0,.7,1) both}
 html.deck .deck-card.from-back-1 .deck-face{animation:deck-sh-up .36s cubic-bezier(.3,0,.6,1) both}
