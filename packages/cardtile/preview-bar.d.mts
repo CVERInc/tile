@@ -3,6 +3,7 @@ export const PREVIEW_BAR_ID: 'feelreef-preview-bar';
 export const PREVIEW_BAR_PLATFORM: 'https://feelreef.com';
 export type PreviewBarLocale = 'zh-TW' | 'ja' | 'en';
 export const PREVIEW_BAR_LOCALES: readonly PreviewBarLocale[];
+export const PREVIEW_FRAME_ANCESTORS: "frame-ancestors 'self' https://feelreef.com";
 export type PreviewBarWords = { readonly label: string; readonly message: string; readonly edit: string; readonly publish: string };
 export const PREVIEW_BAR_COPY: Readonly<Record<PreviewBarLocale, PreviewBarWords>>;
 export function previewBarLocale(pageLang: string | null | undefined): PreviewBarLocale;

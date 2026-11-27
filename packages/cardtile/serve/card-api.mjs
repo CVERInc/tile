@@ -1937,8 +1937,11 @@ async function routeApi(request, env, url) {
     const row = await store.getWithMetadata(previewKey(id));
     const meta = (row && row.metadata) || {};
     if (!row || row.value == null || !VALID_HANDLE.test(String(meta.handle ?? ''))) return expired();
-    // the renderer's rule (card-worker.mjs previewRecord): a stamp that is not the handle's current lifetime
-    if (!isCurrentGen(meta, await generationOf(store, meta.handle))) return expired();
+    // the renderer's rule (card-worker.mjs previewRecord): a stamp that is not the handle's current lifetime.
+    // The lifetime is the handle's object's word (currentGen), as the POST above checks it — never this
+    // location's `gen:` copy, which right after a DELETE can still name the ended lifetime. An object that
+    // does not answer is the 503 every other read gives (ReadUnanswered), not a draft.
+    if (!isCurrentGen(meta, await currentGen(env, store, meta.handle))) return expired();
     return new Response(JSON.stringify({
       handle: meta.handle,
       gen: meta.gen ?? GEN0,

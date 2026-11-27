@@ -41,6 +41,7 @@ import { ON_DEMAND_TILES } from './size-tier.mjs';
 import { PNG, EVERY_TILE, PLAIN, WITH_EMBED, HOSTILE_FRONT, long, proseNamingEmbed, wordsNamingEmbed, EMBED_ON_BACK, OTHER_EMBED, RELATIVE_EMBED } from './cardtile-page-csp-fixtures.mjs';
 
 import { BLANKS } from '../ai-ops.mjs';
+import { PREVIEW_FRAME_ANCESTORS } from '../preview-bar.mjs';
 import { isTemplateOnly } from '../card-blank.mjs';
 
 // a file that is still only the blank template (the starter card-blank-noindex.test.mjs builds)
@@ -50,6 +51,16 @@ const BLANK_TEMPLATE = ['---', 'card-page: blank', 'title: Blank', 'theme: light
   ...BLANKS.social.body.split('\n').map((l) => `\t${l.trim()}`), ''].join('\n');
 const ENFORCED = 'content-security-policy';
 const REPORTED = 'content-security-policy-report-only';
+// A preview's answers carry one policy more, of their own and enforced in every stage of the page's policy: who
+// may frame a preview (PREVIEW_FRAME_ANCESTORS, card-worker.mjs previewFramers). It is not the page's policy these
+// tests are about. Policies sent in one header are joined by ", " (no policy here holds one), so:
+//   pageEnforced(value)  the enforcing header's value without that policy (null when it was the only one)
+//   framersIn(value)     that policy, as many times as it was sent
+const FRAMERS = PREVIEW_FRAME_ANCESTORS;
+const pageEnforced = (v) => { if (v == null) return null; const left = String(v).split(', ').filter((p) => p !== FRAMERS); return left.length ? left.join(', ') : null; };
+const framersIn = (v) => (v == null ? [] : String(v).split(', ').filter((p) => p === FRAMERS));
+const enforcedOf = (r) => pageEnforced(r.headers.get(ENFORCED));
+const isPreviewPath = (u) => /\/_preview\/[0-9a-f]{32}$/.test(new URL(String(u), 'http://localhost').pathname);
 
 const CARDS = { every: EVERY_TILE, plain: PLAIN, embedded: WITH_EMBED, hostile: HOSTILE_FRONT,
   long: long(ON_DEMAND_TILES + 40), longembedded: long(ON_DEMAND_TILES + 40, '- [ ] %% card: embed w=6 %% <script>1</script>\n'),
@@ -131,8 +142,10 @@ test('"off": a person\'s page, a preview, the "no card" pages and the .md exits 
   for (const path of ['/every', '/plain', `/_preview/${'c'.repeat(32)}`, '/every.md', '/nope', `/_preview/${'9'.repeat(32)}`]) {
     const r = await ask(path, OFF);
     assert.equal(r.status, /nope|9{32}/.test(path) ? 404 : 200, path);
-    assert.equal(r.headers.get(ENFORCED), null, path);
+    assert.equal(enforcedOf(r), null, path);
     assert.equal(r.headers.get(REPORTED), null, path);
+    // a preview (expired too) keeps who may frame it, "off" included: that policy is not the page's
+    assert.deepEqual(framersIn(r.headers.get(ENFORCED)), isPreviewPath(path) ? [FRAMERS] : [], path);
   }
 });
 
@@ -165,7 +178,8 @@ test('unset: every page the Worker serves for a person carries the report-only p
     assert.match(r.headers.get('content-type') || '', /^text\/html/, what);
     const policy = r.headers.get(REPORTED);
     assert.ok(policy, `${what}: no report-only policy`);
-    assert.equal(r.headers.get(ENFORCED), null, `${what}: an enforcing policy`);
+    assert.equal(enforcedOf(r), null, `${what}: an enforcing policy`);
+    assert.deepEqual(framersIn(r.headers.get(ENFORCED)), isPreviewPath(u) ? [FRAMERS] : [], `${what}: who may frame it`);
     const d = directives(policy);
     for (const [k, v] of [['object-src', ["'none'"]], ['base-uri', ["'none'"]], ['default-src', ["'none'"]], ['frame-src', ["'self'", 'https://www.youtube-nocookie.com']]]) {
       assert.deepEqual(d[k], v, `${what}: ${k}`);
@@ -201,10 +215,11 @@ test('report-only sends the policy in the report-only header alone; enforce in t
   for (const path of ['/every', '/plain', `/_preview/${'c'.repeat(32)}`]) {
     const reported = await ask(path, { CARDS_PAGE_CSP: 'report-only' });
     const enforced = await ask(path, ON);
-    assert.equal(reported.headers.get(ENFORCED), null, path);
+    assert.equal(enforcedOf(reported), null, path);
     assert.equal(enforced.headers.get(REPORTED), null, path);
     assert.ok(reported.headers.get(REPORTED), `${path}: no report-only header`);
-    assert.equal(enforced.headers.get(ENFORCED), reported.headers.get(REPORTED), path);
+    assert.equal(enforcedOf(enforced), reported.headers.get(REPORTED), path);
+    for (const r of [reported, enforced]) assert.deepEqual(framersIn(r.headers.get(ENFORCED)), isPreviewPath(path) ? [FRAMERS] : [], `${path}: who may frame it`);
     // …and the page itself is the page served with the setting unset
     const [a, b, c] = await Promise.all([reported.text(), enforced.text(), (await ask(path)).text()]);
     assert.equal(a, c, `${path}: report-only changed the body`);
@@ -241,7 +256,7 @@ test('STATIC CHECK: every inline script, inline handler and address class of a p
     const host = settings.CARD_CANONICAL_HOST ? 'https://reef.cards' : 'http://localhost';
     const r = await worker.fetch(new Request(`${host}${path}`, { redirect: 'manual' }), { CARDS: store(), ...settings });
     assert.equal(r.status, 200, path);
-    const policy = r.headers.get(ENFORCED);
+    const policy = enforcedOf(r);
     assert.ok(policy, `${path}: no policy`);
     const page = await r.text();
     assert.deepEqual(refusals(page, policy), [], path);
@@ -396,7 +411,7 @@ test('the policy is on EVERY person\'s page and preview, whatever it holds (r1: 
     for (const stage of ['report-only', 'enforce']) {
       const r = await ask(path, { CARDS_PAGE_CSP: stage });
       assert.equal(r.status, 200, path);
-      const policy = r.headers.get(pageCspHeaderName(stage));
+      const policy = stage === 'enforce' ? enforcedOf(r) : r.headers.get(pageCspHeaderName(stage));
       assert.ok(policy, `${path} ${stage}: no policy`);
       // the same policy as any page, but for the page's own boot line
       const strip = (p) => p.replace(/'sha256-[^']*'/g, 'H');
@@ -569,15 +584,17 @@ test('r2 finding 1: an embed\'s relative addresses resolve as they did in its sr
 
 test('r2 finding 2: a Cards page framed by another site still shows its embeds — the embed document restricts its ancestors no more than the page does', async () => {
   const ancestors = (r) => [r.headers.get(ENFORCED), r.headers.get(REPORTED)].filter(Boolean)
-    .flatMap((p) => p.split(';').map((d) => d.trim()).filter((d) => /^frame-ancestors\b/i.test(d)));
+    .flatMap((v) => v.split(', ')).flatMap((p) => p.split(';').map((d) => d.trim()).filter((d) => /^frame-ancestors\b/i.test(d)));
   for (const path of ['/embedded', `/_preview/${'d'.repeat(32)}`]) {
     for (const stage of ['enforce']) {
       const page = await ask(path, { CARDS_PAGE_CSP: stage });
       const src = framesOf(await page.text())[0].src;
       const doc = await ask(src, { CARDS_PAGE_CSP: stage });
       assert.equal(doc.status, 200);
-      // the page may be framed by any site (cardtile-page-csp.mjs): no frame-ancestors, no X-Frame-Options…
-      assert.deepEqual(ancestors(page), [], `${path} ${stage}: the page itself`);
+      // a person's page may be framed by any site (cardtile-page-csp.mjs): no frame-ancestors, no X-Frame-Options…
+      // a preview only by itself and the platform (PREVIEW_FRAME_ANCESTORS) — its embed's document stays unrestricted,
+      // and is shown there because the preview is framed by nobody else
+      assert.deepEqual(ancestors(page), isPreviewPath(path) ? [FRAMERS] : [], `${path} ${stage}: the page itself`);
       assert.equal(page.headers.get('x-frame-options'), null);
       // …and so may its embed's document, or a page framed elsewhere would lose its embeds (ancestors are ALL checked)
       assert.deepEqual(ancestors(doc), [], `${path} ${stage}: the embed document restricts its ancestors`);
@@ -1017,7 +1034,10 @@ const FIXTURE = readFixture();
 const CASES = gridCases();
 const sorted = (headers) => [...headers].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 // main sends no page policy: an answer of main that carries one has a policy of its own (the report page, host mode)
-const ownPolicy = (a) => a.headers.some(([k]) => k === ENFORCED || k === REPORTED);
+// (who may frame a preview, alone, is not a page policy: main's answer at a preview's address carries it too)
+const ownPolicy = (a) => a.headers.some(([k, v]) => (k === ENFORCED && pageEnforced(v) !== null) || k === REPORTED);
+/** an answer's headers with the page's enforcing policy taken out of its header (who may frame a preview stays) */
+const withoutPageEnforced = (headers) => headers.flatMap(([k, v]) => (k !== ENFORCED ? [[k, v]] : framersIn(v).length ? [[k, framersIn(v).join(', ')]] : []));
 // a person's page or a preview (200, at these requests), or a "no card" page (404, at whatever path was missed)
 const PAGE_REQUEST = /^(GET|HEAD) \/(\?lang=ja|\?ref=aster|aster|aster\?utm=qr|feelreef|_preview\/b{32})?$/;
 const requestOf = (key) => key.split(' ').slice(2).join(' ');
@@ -1159,8 +1179,8 @@ test('"enforce": of main\'s 903, the same answers carry the policy as the enforc
       if (embedRowOf(c)) continue;
       const got = await answerOf(worker, c, ON, { text: true });
       const want = FIXTURE.answers[c.key];
-      const ours = !ownPolicy(want) && got.headers.some(([k]) => k === ENFORCED);
-      const headers = ours ? got.headers.filter(([k]) => k !== ENFORCED) : got.headers;
+      const ours = !ownPolicy(want) && got.headers.some(([k, v]) => k === ENFORCED && pageEnforced(v) !== null);
+      const headers = ours ? withoutPageEnforced(got.headers) : got.headers;
       if (got.sha !== want.sha) {
         // the one body that may move: an embed's frame, `srcdoc="…"` → `src="<base>_embed/<hash>"` (main's own body is this tree's "off")
         const off = await answerOf(worker, c, OFF, { text: true });

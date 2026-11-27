@@ -38,6 +38,10 @@
 //     (the r1 review's escaping-failure model): refused under the policy, and runs with the setting off;
 //   · a Cards page framed by another site (r2): its embed runs — and does NOT once the embed's document is
 //     given `frame-ancestors 'self'` again (an ancestor restriction is checked against every ancestor).
+// And a preview: every answer at its address carries one policy more, of its own and enforced in every stage, who
+// may frame it (PREVIEW_FRAME_ANCESTORS: itself and the platform). It is not the page's policy: the stage and the
+// policy a page is said to be served with are read without it. A preview framed by another site is refused, in
+// every stage; a person's page framed by another site is not (the control above).
 // And (r2) an embed's relative addresses: a picture `aster/favicon.ico` loads, and `document.baseURI`, the
 // picture's and a `#x` link's addresses, a `#x` click, a `target=_blank` and a `target=_top` click all
 // come out as they do in the srcdoc with the setting off. And (r3) an author's own `<base href>`: the review's
@@ -54,6 +58,7 @@ import { pageCspHeaders, pagePolicy, hashSource, bootScriptOf, videoScript, PAGE
 import { DECK_HEAD_JS } from '../w3/deck-page.mjs';
 import { ON_DEMAND_TILES, WINDOW_TILES } from '../serve/size-tier.mjs';
 import { PNG, EVERY_TILE, PLAIN, WITH_EMBED, HOSTILE_FRONT, long, proseNamingEmbed, EMBED_ON_BACK } from '../serve/cardtile-page-csp-fixtures.mjs';
+import { PREVIEW_FRAME_ANCESTORS } from '../preview-bar.mjs';
 
 const pw = (await import(PLAYWRIGHT)).default;
 const ENGINES = (process.env.PAGE_CSP_ENGINES || 'chromium').split(',').filter(Boolean);
@@ -150,7 +155,9 @@ const server = http.createServer(async (req, res) => {
     const r = await ask(arm === 'srcdoc' ? 'off' : stage);
     const headers = Object.fromEntries(r.headers);
     // whether the Worker sent a policy at all is the Worker's decision, and an arm keeps it (it re-makes the hashes only)
-    const sent = !!(headers['content-security-policy'] || headers['content-security-policy-report-only']);
+    const sent = !!(pageEnforced(headers['content-security-policy']) || headers['content-security-policy-report-only']);
+    // who may frame a preview is not the page's policy: an arm re-makes the page's, and keeps that one as sent
+    const framers = framersIn(headers['content-security-policy']);
     let body = Buffer.from(await r.arrayBuffer());
     if (arm) {
       let page = body.toString('utf8');
@@ -168,6 +175,7 @@ const server = http.createServer(async (req, res) => {
         const scripts = [await hashSource(DECK_HEAD_JS), await hashSource(videoScript()), await hashSource(bootScriptOf(page))];
         headers['content-security-policy'] = pagePolicy({ scripts, handlers: [] });
       } else throw new Error(`unknown arm ${arm}`);
+      if (framers.length) headers['content-security-policy'] = [headers['content-security-policy'], ...framers].filter(Boolean).join(', ');
       body = Buffer.from(page, 'utf8');
     }
     res.writeHead(r.status, headers);
@@ -202,13 +210,18 @@ const accepted = { configuration: 0, baseline: 0, where: new Map() };   // where
 const baselines = new Map();   // path → the error texts its off twin printed
 
 /** a page with its ears on: violations (every frame), console errors, page errors; `policy` is the header it was served with */
+// the enforcing header holds the page's policy and, at a preview's address, who may frame it: policies sent in one
+// header arrive joined by ", " (or, repeated, by a line end); no policy here holds either
+function policiesIn(v) { return v ? String(v).split(/\n|, /).map((x) => x.trim()).filter(Boolean) : []; }
+function framersIn(v) { return policiesIn(v).filter((x) => x === PREVIEW_FRAME_ANCESTORS); }
+function pageEnforced(v) { return policiesIn(v).filter((x) => x !== PREVIEW_FRAME_ANCESTORS).join(', ') || null; }
 async function open(context, path, { expect404 = [] } = {}) {
   const page = await step(context.newPage(), `new page for ${path}`);
   const heard = { console: [], consoleAt: [], errors: [], requests: [] };
   page.on('console', (m) => { if (m.type() === 'error' && !expect404.some((u) => m.location().url.includes(u))) { heard.console.push(m.text()); heard.consoleAt.push(m.location().url); } });
   page.on('pageerror', (e) => heard.errors.push(String(e).slice(0, 200)));
   page.on('request', (q) => heard.requests.push(q.url()));
-  const p = { page, heard, path, policy: null, stage: null };
+  const p = { page, heard, path, policy: null, stage: null, framers: [] };
   await visit(p, path);
   return p;
 }
@@ -217,8 +230,10 @@ async function visit(p, path) {
   const resp = await step(p.page.goto(base + path, { waitUntil: 'load', timeout: STEP_MS }), `load ${path}`);
   const h = resp ? resp.headers() : {};
   p.path = path;
-  p.stage = h['content-security-policy'] ? 'enforce' : h['content-security-policy-report-only'] ? 'report-only' : 'off';
-  p.policy = h['content-security-policy'] || h['content-security-policy-report-only'] || null;
+  const enforced = pageEnforced(h['content-security-policy']);
+  p.stage = enforced ? 'enforce' : h['content-security-policy-report-only'] ? 'report-only' : 'off';
+  p.policy = enforced || h['content-security-policy-report-only'] || null;
+  p.framers = framersIn(h['content-security-policy']);
 }
 const close = (p) => step(p.page.close(), `close ${p.path}`).catch((e) => check(false, String(e.message)));
 const violations = async (page) => {
@@ -387,6 +402,9 @@ try {
         const at = `${path}${path.includes('?') ? '&' : '?'}stage=default`;
         const p = await open(context, at, { expect404: [path.split('?')[0]] });
         check(p.stage === 'report-only' && !!p.policy, `default, ${label}: served with the report-only policy`);
+        const preview = path.startsWith('/_preview/');
+        check(JSON.stringify(p.framers) === JSON.stringify(preview ? [PREVIEW_FRAME_ANCESTORS] : []),
+          `default, ${label}: ${preview ? 'may be framed only by itself and the platform' : 'names no framers'} (${JSON.stringify(p.framers)})`);
         if (kind !== 'static') {
           await p.page.waitForFunction(() => window.__deckBoot === 'ready', null, { timeout: 10000 }).catch(() => {});
           const state = await step(p.page.evaluate(() => ({ boot: window.__deckBoot, off: document.documentElement.hasAttribute('data-deck-off'), strings: !!window.__deckStrings })), 'read state');
@@ -475,6 +493,7 @@ try {
         ['the second window of a long file', '/long?w=2'], ['a long file whose title says "embed" (r1)', '/prose'], ['its second window', '/prose?w=2']]) {
         const p = await open(context, path);
         check(p.stage === 'enforce', `${label}: served with the policy`);
+        if (path.startsWith('/_preview/')) check(JSON.stringify(p.framers) === JSON.stringify([PREVIEW_FRAME_ANCESTORS]), `${label}: beside it, who may frame it (${JSON.stringify(p.framers)})`);
         await p.page.waitForFunction(() => window.__deckBoot === 'ready', null, { timeout: 10000 }).catch(() => {});
         check(await step(p.page.evaluate(() => window.__deckBoot === 'ready'), 'read boot'), `${label}: the deck came up`);
         await p.page.waitForTimeout(300);
@@ -581,6 +600,12 @@ try {
         const n = await framed(`${base}/embedded-wall?stage=${stage}`);
         check(n.page && n.embed && n.embed.text === 'ran' && n.embed.origin === 'null' && (stage !== 'enforce' ? n.embed.url === 'about:srcdoc' : /\/embedded-wall\/_embed\/[0-9a-f]{64}$/.test(n.embed.url)),
           `a Cards page framed by another site, ${stage}: its embed runs, in an opaque origin (${JSON.stringify(n)})`);
+      }
+      // a PREVIEW framed by another site is refused, in every stage of the page's policy: who may frame it is a policy
+      // of its own, enforced whatever the page's is (the Cards page above, framed the same way, is the control)
+      for (const stage of ['enforce', 'report-only', 'off', 'default']) {
+        const n = await framed(`${base}/_preview/${'c'.repeat(32)}?stage=${stage}`);
+        check(!n.page && !n.embed, `a preview framed by another site, ${stage}: refused (${JSON.stringify(n)})`);
       }
       // 🔴 CONTROL: the same, with the embed's document given back the r1 header `frame-ancestors 'self'`: refused,
       // because the ancestor check reaches the other site above the Cards page — what this check is there to catch

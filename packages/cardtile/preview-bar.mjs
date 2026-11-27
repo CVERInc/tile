@@ -36,6 +36,13 @@ export const PREVIEW_BAR_PLATFORM = 'https://feelreef.com';
 export const PREVIEW_BAR_LOCALES = Object.freeze(['zh-TW', 'ja', 'en']);
 
 /**
+ * Who may frame a preview: the preview itself and the platform (the dashboard). The policy the Site
+ * preview's Worker sends (with its default platform origin), sent by the Cards preview as a policy of
+ * its own, so a framing page cannot aim a click at the bar's buttons.
+ */
+export const PREVIEW_FRAME_ANCESTORS = `frame-ancestors 'self' ${PREVIEW_BAR_PLATFORM}`;
+
+/**
  * Written for the person looking at her own link: what visitors can see (nothing yet) and the two next
  * steps. The right-hand button is the platform console's own word for going live, in each locale.
  */
@@ -126,14 +133,17 @@ export const PREVIEW_NO_BAR_VALUE = '1';
  *   `Sec-Fetch-Dest: iframe` / `frame`      no — a preview shown in a frame beside the dashboard's own
  *                                           controls; a link pressed inside a sandboxed frame would
  *                                           open the dashboard inside it
+ *   `Sec-Fetch-Dest: object` / `embed`      no — the same, drawn by <object> / <embed>: a page inside
+ *                                           another one is never where the bar's buttons belong
  *   anything else                           yes — a browser that sends no fetch metadata gets the bar,
  *                                           the safe side
  */
+const FRAMED_DESTS = new Set(['iframe', 'frame', 'object', 'embed']);
 export function wantsPreviewBar(headers) {
   const get = (name) => (headers && typeof headers.get === 'function' ? headers.get(name) : null);
   if (get(PREVIEW_NO_BAR_HEADER) === PREVIEW_NO_BAR_VALUE) return false;
   const dest = String(get('sec-fetch-dest') ?? '').toLowerCase();
-  return dest !== 'iframe' && dest !== 'frame';
+  return !FRAMED_DESTS.has(dest);
 }
 
 /**

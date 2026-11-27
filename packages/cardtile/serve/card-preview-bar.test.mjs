@@ -17,7 +17,7 @@ import { previewKey, genKey } from './card-api.mjs';
 import { pageCspHeaderName } from './cardtile-page-csp.mjs';
 import {
   PREVIEW_BAR_ID, PREVIEW_BAR_COPY, PREVIEW_NO_BAR_HEADER, PREVIEW_NO_BAR_VALUE,
-  cardsPreviewBarHtml, sitePreviewBarHtml, wantsPreviewBar, withPreviewBar, previewBarHtml,
+  cardsPreviewBarHtml, sitePreviewBarHtml, wantsPreviewBar, withPreviewBar, previewBarHtml, PREVIEW_FRAME_ANCESTORS,
 } from '../preview-bar.mjs';
 
 const ID = 'a'.repeat(32);
@@ -128,7 +128,8 @@ test('only the exact value suppresses it; a frame gets no bar; a top-level navig
   for (const value of ['0', '', 'true', '11']) await t.test(`header ${JSON.stringify(value)}`, async () => {
     assert.equal(countBars(await (await ask(`/_preview/${ID}`, { headers: { [PREVIEW_NO_BAR_HEADER]: value } })).text()), 1);
   });
-  for (const dest of ['iframe', 'frame']) await t.test(dest, async () => {
+  // `object` and `embed` are frames too: <object type="text/html"> / <embed> draw the page inside another one
+  for (const dest of ['iframe', 'frame', 'object', 'embed']) await t.test(dest, async () => {
     assert.equal(countBars(await (await ask(`/_preview/${ID}`, { headers: { 'sec-fetch-dest': dest } })).text()), 0);
   });
   await t.test('document', async () => {
@@ -142,6 +143,34 @@ test('every variant stays unindexed and unstored', async () => {
     assert.equal(res.headers.get('x-robots-tag'), 'noindex, nofollow');
     assert.equal(res.headers.get('cache-control'), 'no-store');
   }
+});
+
+// Nobody else may frame a preview (its bar's buttons are what a framing page would aim a click at): the
+// policy the Site preview's Worker sends (with its default platform origin), sent as
+// a policy of its own, ENFORCED whatever stage the page's own policy is in, so the page's policy stays whole
+// and both apply. The same on every answer at a preview's address: a person's, a tool's, a frame's, expired.
+test('a preview may be framed only by itself and the platform, in every stage of the page policy', async (t) => {
+  assert.equal(PREVIEW_FRAME_ANCESTORS, "frame-ancestors 'self' https://feelreef.com");
+  const framers = (res) => (res.headers.get('content-security-policy') || '').split(',').map((p) => p.trim()).filter((p) => /^frame-ancestors\s/.test(p));
+  for (const stage of [undefined, 'off', 'report-only', 'enforce']) {
+    const env = envFor('ja', stage === undefined ? {} : { CARDS_PAGE_CSP: stage });
+    for (const [what, path, headers] of [['a person', `/_preview/${ID}`, {}], ['a tool', `/_preview/${ID}`, TOOL],
+      ['a frame', `/_preview/${ID}`, { 'sec-fetch-dest': 'iframe' }], ['an object', `/_preview/${ID}`, { 'sec-fetch-dest': 'object' }],
+      ['no recorded handle', `/_preview/${NO_HANDLE}`, {}], ['expired', `/_preview/${'9'.repeat(32)}`, {}]]) {
+      await t.test(`${stage ?? 'unset'}: ${what}`, async () => {
+        const res = await ask(path, { env, headers });
+        assert.deepEqual(framers(res), [PREVIEW_FRAME_ANCESTORS]);
+        assert.equal(res.headers.get('x-frame-options'), null, 'the Site preview sends none either');
+      });
+    }
+  }
+  // the page's own policy is untouched: under enforce it is still there, whole, beside the framers'
+  const enforced = (await ask(`/_preview/${ID}`, { env: envFor('ja', { CARDS_PAGE_CSP: 'enforce' }) })).headers.get('content-security-policy');
+  assert.match(enforced, /default-src 'none'/);
+  // CONTROL: a person's page is not a preview, and keeps being framable by anyone (an embed of one's Cards)
+  const page = await ask('/pickme', { env: { ...envFor('ja'), CARDS: kv({ pickme: CARD('ja') }) } });
+  assert.equal(page.status, 200);
+  assert.equal(framers(page).length, 0);
 });
 
 test('no bar where there is nothing to act on: expired, stale, no recorded handle', async (t) => {
@@ -215,6 +244,8 @@ test('wantsPreviewBar keys on the tools\' header and the frame destination, noth
   assert.equal(wantsPreviewBar(h(TOOL)), false);
   assert.equal(wantsPreviewBar(h({ 'sec-fetch-dest': 'IFrame' })), false);
   assert.equal(wantsPreviewBar(h({ 'sec-fetch-dest': 'frame' })), false);
+  assert.equal(wantsPreviewBar(h({ 'sec-fetch-dest': 'object' })), false);
+  assert.equal(wantsPreviewBar(h({ 'sec-fetch-dest': 'Embed' })), false);
   assert.equal(wantsPreviewBar(h({ 'sec-fetch-dest': 'document', 'user-agent': 'SomeBot/1.0' })), true);
 });
 

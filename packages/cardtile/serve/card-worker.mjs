@@ -145,7 +145,20 @@ import { handleReport, REPORT_PATH } from './card-report.mjs';
 import { standIn, hostName } from './host-standins.mjs';
 import { pageCspHeaders, pageCspStage } from './cardtile-page-csp.mjs';
 import { embedDocuments, embedDocumentOf, embedDocumentBody, embedDocumentHeaders, embedMissResponse, framesAsDocuments, hasSrcdocFrame, isFrameRequest, EMBED_TAIL_RE } from './cardtile-embed-document.mjs';
-import { cardsPreviewBarHtml, wantsPreviewBar, withPreviewBar } from '../preview-bar.mjs';
+import { cardsPreviewBarHtml, wantsPreviewBar, withPreviewBar, PREVIEW_FRAME_ANCESTORS } from '../preview-bar.mjs';
+
+/**
+ * A preview's headers, plus who may frame it (PREVIEW_FRAME_ANCESTORS: itself and the platform, the policy
+ * the Site preview sends). Appended as a policy of its own and ENFORCED in every stage of the page's policy
+ * (report-only and "off" included), so a page that frames a preview cannot aim a click at its bar, and the
+ * page's own policy stays whole beside it: both apply. A person's page is not a preview and keeps no such
+ * policy (anyone may frame one's Cards).
+ */
+function previewFramers(init) {
+  const headers = new Headers(init);
+  headers.append('Content-Security-Policy', PREVIEW_FRAME_ANCESTORS);
+  return headers;
+}
 
 // The coral's URL carries its version, and the response is immutable for a year. Both halves are
 // required: without `immutable` every visit re-validates 100KB; without the version in the path a
@@ -1421,7 +1434,7 @@ const router = {
         const expired = '<!doctype html><meta charset=utf-8><title>Expired</title><p>This preview has expired.</p>';
         return new Response(expired, {
           status: 404,
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow', ...(await pageCspHeaders(env, expired)) },
+          headers: previewFramers({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow', ...(await pageCspHeaders(env, expired)) }),
         });
       }
       const videos = await resolveChannels(draft, ytFetch, channelShare);
@@ -1439,13 +1452,13 @@ const router = {
         ? withPreviewBar(framed, (pageLang) => cardsPreviewBarHtml(record.handle, pv[1], pageLang))
         : framed;
       return new Response(preview, {
-        headers: {
+        headers: previewFramers({
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
           'X-Robots-Tag': 'noindex, nofollow',
           // what a person wrote, rendered on the people's origin: the page's policy (cardtile-page-csp.mjs; report-only unless CARDS_PAGE_CSP says otherwise)
           ...(await pageCspHeaders(env, preview)),
-        },
+        }),
       });
     }
 

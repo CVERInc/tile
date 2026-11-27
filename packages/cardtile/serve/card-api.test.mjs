@@ -751,6 +751,29 @@ test('a draft parked before the version rode along answers base_version null (th
   assert.equal(draft.handle, 't');
 });
 
+// The read decides whether a draft is the handle's current lifetime by the handle's object, as the
+// POST does (currentGen), never by this location's `gen:` copy: right after a DELETE that copy can still
+// name the ended lifetime, and a draft of that lifetime that outlived the delete's sweep would be
+// answered as the new lifetime's.
+test('GET /_api/preview/<id>: a draft of an ended lifetime is expired even where KV still names that lifetime', async () => {
+  const env = envWith({ t: CARD });
+  const parked = await (await call(env, 'POST', '/_api/preview', { handle: 't', markdown: thinCard(CARD) })).json();
+  const id = /\/_preview\/([0-9a-f]{32})$/.exec(parked.url)[1];
+  const row = await env.CARDS.getWithMetadata(previewKey(id));
+  const oldGen = env.CARDS._m.get(genKey('t')) ?? null;
+  assert.equal((await call(env, 'DELETE', '/_api/card/t')).status, 200);
+  assert.notEqual(env.CARDS._m.get(genKey('t')) ?? null, oldGen, 'control: the delete moved the generation');
+  // the draft outlived the sweep (it was parked while the delete ran), and this location's KV has not seen
+  // the new generation yet
+  await env.CARDS.put(previewKey(id), row.value, { metadata: row.metadata });
+  if (oldGen == null) env.CARDS._m.delete(genKey('t')); else env.CARDS._m.set(genKey('t'), oldGen);
+  const res = await call(env, 'GET', `/_api/preview/${id}`);
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: 'preview_expired' });
+  // CONTROL: with no object bound, KV is the only word there is, and the same draft reads as current
+  assert.equal((await call(kvOnly(env), 'GET', `/_api/preview/${id}`)).status, 200);
+});
+
 test('the preview address: the host the API was asked on until the cutover, the people\'s host after it', async (t) => {
   const ask = async (host, extra) => {
     const env = { ...envWith({ t: CARD }), ...extra };
