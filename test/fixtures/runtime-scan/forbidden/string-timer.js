@@ -10,3 +10,5 @@ setTimeout?.("tick()"); // expect string-timer
 setTimeout("a"),setInterval("b",1),globalThis.setTimeout('c') // expect string-timer x3
 setTimeout(("tick()"), 1); // expect string-timer
 setInterval((("tick(" + n + ")")), 1); // expect string-timer
+(0, setTimeout)('a()', 0); // expect string-timer
+setTimeout(f ? 'a()' : 'b()', 0); // expect string-timer

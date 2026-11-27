@@ -8,16 +8,19 @@
 // exactly those two things, over the files that are actually shipped — not their sources.
 //
 // What it refuses (rule id — construct):
-//   cookie-write          `<x>.cookie` / `<x>['cookie']` as an assignment or ++/-- target, on ANY receiver
+//   cookie-write          `<x>.cookie` / `<x>['cookie']` as an assignment, ++/-- or for-in/of target, on ANY receiver
 //   cookie-store          any `cookieStore`
-//   document-domain       `document.domain` / `document['domain']`, read or write
-//   eval                  `eval` referenced at all (`eval(`, `(0,eval)(`, `window.eval`, `const e=eval`)
-//   function-constructor  `Function` constructed or aliased (`new Function`, `Function(`, `F=Function`,
-//                         `Function.call/apply/bind`); `Function.prototype…` and `instanceof Function` pass
-//   string-timer          `setTimeout` / `setInterval` whose first argument starts with a string or template,
-//                         parentheses around it included (`setTimeout(("code"), 1)`)
-//   script-element        `createElement('script')` in any quote style or case; `createElementNS(ns, 'script')`
-//   script-src            `.src =` / `['src'] =` on ANY element, `setAttribute('src', …)`,
+//   document-domain       `.domain` / `['domain']` of `document`, `ownerDocument` or `contentDocument`, read or write
+//   eval                  `eval` referenced at all (`eval(`, `(0,eval)(`, `window.eval`, `x.self.eval`, `const e=eval`)
+//   function-constructor  `Function` constructed or aliased (`new Function`, `Function(`, `Function?.(`, `F=Function`,
+//                         `Function.call/apply/bind/constructor`, `Function.prototype.constructor`); the rest of
+//                         `Function.prototype…` and `instanceof Function` pass
+//   string-timer          `setTimeout` / `setInterval` (also called as `(0,setTimeout)(…)`) whose first argument
+//                         can evaluate to a string literal as a whole: `"code"`, `("code")`, `f?"a()":"b()"`,
+//                         `"a("+n+")"` — not one inside a call or a function (`()=>f("a")`)
+//   script-element        `createElement('script')` in any quote style or case; `createElementNS(ns, 'script')`;
+//                         a conditional with a `'script'` arm (`createElement(f?'script':'div')`)
+//   script-src            `.src =` / `['src'] =` on ANY element, `setAttribute('src', …)` (or a `'src'` arm),
 //                         `setAttributeNS(ns, 'src', …)` — the scan cannot tell a script element from an image
 //                         in minified code, so every one is reported (false positives by design)
 //   worker                any `Worker` / `SharedWorker` reference (`new Worker(`, `new window.SharedWorker(`)
@@ -25,6 +28,14 @@
 //   service-worker        `serviceWorker.register`, or `serviceWorker` held as a value (`s=navigator.serviceWorker`)
 //   cache-storage         any `caches` reference (`caches.open`, `self.caches`)
 //   dynamic-import        `import(…)` whose argument is anything but ONE string literal
+//   unscannable           what the scan cannot read: an unterminated comment, string, template or regex, or
+//                         an HTML-like comment (`<!--`, or `-->` first on a line), which a classic script
+//                         reads as a comment and a module as operators. FAIL CLOSED: never a silent stop.
+//
+// `eval`, `Function`, `Worker`, `SharedWorker`, `importScripts`, `caches` and `cookieStore` are also
+// reported as the KEY of a destructuring pattern (`const{eval:e}=globalThis`, `({Worker:W})=>…`), and
+// as a property of a global object wherever that object came from (`el.ownerDocument.defaultView.eval`).
+// This scan prefers a false positive to a false negative.
 //
 // HOW: a JavaScript TOKENIZER, not a regex over text. Comments, string contents, template text and
 // regex literals are skipped, so a token inside them is not code; whitespace and line breaks do not
@@ -33,8 +44,9 @@
 // escaped `eval` is still `eval`. Rules match global names and
 // property names, never minifier-chosen local names; a method DEFINED under a global's name
 // (`class A{eval(x){…}}`) is not a reference to it. A `/` is a regex after `(`, an operator, a
-// keyword, `}`, a prefix `++`/`--`, or the `)` of `if`/`for`/`while`/`with`; after a name, a number,
-// `]`, a postfix `++`/`--` or any other `)` it divides. The one known misreading is a `/` dividing an
+// keyword (not a property NAMED like one: `o.in/2`; `of` only in a for head), `}`, a prefix `++`/`--`,
+// or the `)` of `if`/`for`/`while`/`with`; after a name, a number, `]`, a postfix `++`/`--` or any
+// other `)` it divides. The one known misreading is a `/` dividing an
 // object literal (`{a:1}/2`), read as a regex start: telling it from a block needs a parser.
 //
 // 🔴 A TRIPWIRE, NOT A PROOF. It reports what the tokens SAY; it does not follow values. The known
@@ -42,8 +54,9 @@
 // test/runtime-scan.test.mjs, each one as a passing assertion, so the list cannot silently go stale.
 //
 // Exceptions live in ONE file (scripts/runtime-scan.exceptions.json): file pattern, rule, the exact
-// construct as this scan prints it, how many times it may occur, and a one-line reason. An exception
-// that matches nothing is itself a failure — a dead exception is a hole waiting for a new construct.
+// construct as this scan prints it (whole: an assignment includes its value), how many times it may
+// occur IN EACH FILE the pattern matches, and a one-line reason. An exception that matches nothing is
+// itself a failure — a dead exception is a hole waiting for a new construct.
 //
 // Usage:
 //   node scripts/runtime-scan.mjs                       the repo's built coral bundles (corals.mjs)
@@ -76,6 +89,7 @@ export const RULES = {
   'service-worker': 'a service worker registration',
   'cache-storage': 'the Cache Storage API',
   'dynamic-import': '`import()` of anything but one string literal',
+  'unscannable': 'source the scan cannot read (an unterminated comment, string, template or regex, or an HTML-like comment)',
 };
 
 // ── Tokenizer ────────────────────────────────────────────────────────────────────────────────────
@@ -92,16 +106,20 @@ const PUNCTUATORS = [
 ];
 const ASSIGN = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '<<=', '>>=', '>>>=', '&=', '|=', '^=', '&&=', '||=', '??=']);
 // After these names a `/` starts a regular expression; after any other name it divides.
+// `of` is a keyword only in a for head (`var of = 4; of / 2` divides), and none of these is one when it
+// is a property name (`o.in / 2`, `e.default / 2`).
 const REGEX_AFTER_NAME = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
-  'throw', 'case', 'do', 'else', 'yield', 'await', 'extends']);
+  'throw', 'case', 'do', 'else', 'yield', 'await', 'extends', 'default']);
 // A `(` opened right after one of these keywords closes on a `)` after which a statement starts.
 const CONTROL = new Set(['if', 'for', 'while', 'with']);
 const controlParen = (tokens) => {
   let k = tokens.length - 1;
   if (tokens[k]?.type === 'name' && tokens[k].value === 'await' && tokens[k - 1]?.type === 'name' && tokens[k - 1].value === 'for') k--; // for await (
   const t = tokens[k], before = tokens[k - 1];
-  return t?.type === 'name' && CONTROL.has(t.value) && !(before?.type === 'punct' && (before.value === '.' || before.value === '?.'));
+  return t?.type === 'name' && CONTROL.has(t.value) && !(before?.type === 'punct' && (before.value === '.' || before.value === '?.'))
+    ? t.value : null;
 };
+const IDENT_ESCAPE = /\\u(?:\{([\da-fA-F]+)\}|([\da-fA-F]{4}))/y;
 const ID_START = /[\p{ID_Start}$_]/u;
 const ID_CONTINUE = /[\p{ID_Continue}$\u200c\u200d]/u;
 const NUMBER = /(?:0[xX][\da-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)n?/y;
@@ -135,16 +153,27 @@ export function tokenize(src) {
   const push = (type, value, start, end, sl, sc) => {
     tokens.push({ type, value, raw: src.slice(start, end), start, end, line: sl, col: sc });
   };
-  const parens = []; // for each open `(`: does it belong to `if`/`for`/`while`/`with`?
+  const lineEnd = (k) => { while (k < n && !isNewline(src[k])) k++; return k; };
+  // FAIL CLOSED: what the scan cannot read is itself a finding (rule `unscannable`), never a silent
+  // stop. The token covers the rest of its line; reading resumes on the next one.
+  const unscannable = (what, start, sl, sc) => { const end = lineEnd(start); push('unscannable', what, start, end, sl, sc); return end; };
+  const parens = []; // for each open `(`: the `if`/`for`/`while`/`with` it belongs to, or null
   // Would a `/` right after token k start a regex (rather than divide)?
   const regexAfter = (k) => {
     const t = tokens[k];
     if (!t) return true;
-    if (t.type === 'name') return REGEX_AFTER_NAME.has(t.value);
+    if (t.type === 'name') {
+      const before = tokens[k - 1];
+      if (before?.type === 'punct' && (before.value === '.' || before.value === '?.')) return false; // a property
+      if (t.value === 'of') { // the keyword only after the binding of a for head: `for (x of /re/…)`
+        return parens[parens.length - 1] === 'for' && !!before && (before.type === 'name' || (before.type === 'punct' && (before.value === ']' || before.value === '}')));
+      }
+      return REGEX_AFTER_NAME.has(t.value);
+    }
     if (t.type === 'punct') {
       // After the `)` of `if (…)` / `for (…)` / `while (…)` / `with (…)` a statement starts; after any
       // other `)`, and after `]`, a slash divides.
-      if (t.value === ')') return t.control === true;
+      if (t.value === ')') return !!t.control;
       if (t.value === ']') return false;
       // `a++ / 2` divides; `++/re/.x` is a prefix `++` on a regex. `++` is postfix when a slash in its
       // place would have divided, and no line break comes before it (one may not come before a postfix).
@@ -184,8 +213,9 @@ export function tokenize(src) {
       if (isNewline(c)) { k += newlineAt(k); continue; }
       k++;
     }
-    i = n; // unterminated: the rest of the file is template text
-    push(opening ? 'template' : 'template-tail', cook(src.slice(start + 1)), start, n, sl, sc);
+    // unterminated: the rest of the file would be template text
+    unscannable('an unterminated template literal', start, sl, sc);
+    i = n;
   };
 
   if (src.startsWith('#!')) { while (i < n && !isNewline(src[i])) i++; }
@@ -195,13 +225,21 @@ export function tokenize(src) {
     if (isSpace(c)) { i++; continue; }
     const start = i, sl = line, sc = i - lineStart + 1;
     // comments
-    if (c === '/' && src[i + 1] === '/') { while (i < n && !isNewline(src[i])) i++; continue; }
+    if (c === '/' && src[i + 1] === '/') { i = lineEnd(i); continue; }
     if (c === '/' && src[i + 1] === '*') {
       const close = src.indexOf('*/', i + 2);
-      const stop = close < 0 ? n : close + 2;
-      for (let k = i + 2; k < stop; k++) if (isNewline(src[k])) { const w = newlineAt(k); k += w - 1; }
-      i = stop;
+      if (close < 0) { i = unscannable('an unterminated block comment', start, sl, sc); i = n; continue; }
+      for (let k = i + 2; k < close + 2; k++) if (isNewline(src[k])) { const w = newlineAt(k); k += w - 1; }
+      i = close + 2;
       continue;
+    }
+    // Annex B HTML-like comments: `<!--` anywhere, `-->` first on its line. A line comment in a classic
+    // script, operators in a module (`a<!--b`, `a\n-->b`): which one runs is not in the file, so it is
+    // reported, and read as the comment a browser running it as a classic script would see.
+    if (c === '<' && src.startsWith('<!--', i)) { i = unscannable('an HTML-like comment `<!--`', start, sl, sc); continue; }
+    if (c === '-' && src.startsWith('-->', i)) {
+      const last = tokens[tokens.length - 1];
+      if (!last || /[\n\r\u2028\u2029]/.test(src.slice(last.end, i))) { i = unscannable('an HTML-like comment `-->`', start, sl, sc); continue; }
     }
     // strings
     if (c === '"' || c === "'") {
@@ -220,9 +258,8 @@ export function tokenize(src) {
       if (ok) {
         i = k + 1;
         push('string', cook(src.slice(start + 1, k)), start, i, sl, sc);
-      } else { // not a string after all (or a broken one): treat the quote as a lone character
-        i = start + 1;
-        push('punct', c, start, i, sl, sc);
+      } else { // a quote that never closes: a broken file, or a `/` read the wrong way before it
+        i = unscannable('an unterminated string literal', start, sl, sc);
       }
       continue;
     }
@@ -248,7 +285,10 @@ export function tokenize(src) {
         i = k;
         push('regex', src.slice(start, k), start, k, sl, sc);
         continue;
-      } // no closing slash on this line: it was a division after all
+      }
+      // no closing slash on this line: a broken regex, or a division read as one
+      i = unscannable('an unterminated regular expression literal', start, sl, sc);
+      continue;
     }
     // numbers
     if ((c >= '0' && c <= '9') || (c === '.' && src[i + 1] >= '0' && src[i + 1] <= '9')) {
@@ -265,8 +305,9 @@ export function tokenize(src) {
       let k = first, name = '';
       while (k < n) {
         if (src[k] === '\\' && src[k + 1] === 'u') {
-          const m = /^\\u(?:\{([\da-fA-F]+)\}|([\da-fA-F]{4}))/.exec(src.slice(k, k + 12));
-          if (!m) break;
+          IDENT_ESCAPE.lastIndex = k; // `\u{0000000065}`: any number of leading zeros is legal
+          const m = IDENT_ESCAPE.exec(src);
+          if (!m || parseInt(m[1] || m[2], 16) > 0x10ffff) break;
           name += String.fromCodePoint(parseInt(m[1] || m[2], 16));
           k += m[0].length;
           continue;
@@ -304,14 +345,16 @@ function normalizeMembers(tokens) {
   for (let k = 0; k < tokens.length; k++) {
     const t = tokens[k], s = tokens[k + 1], e = tokens[k + 2];
     const prev = out[out.length - 1];
-    const endsExpr = prev && (prev.type === 'name' && !REGEX_AFTER_NAME.has(prev.value)
+    const before = out[out.length - 2];
+    const endsExpr = prev && (prev.type === 'name' && (!REGEX_AFTER_NAME.has(prev.value) || prev.value === 'of'
+        || (before?.type === 'punct' && (before.value === '.' || before.value === '?.')))
       || prev.type === 'string' || prev.type === 'template' || prev.type === 'template-tail' || prev.type === 'num'
       || prev.type === 'private' || (prev.type === 'punct' && (prev.value === ')' || prev.value === ']')));
     const optional = prev && prev.type === 'punct' && prev.value === '?.';
     if (t.type === 'punct' && t.value === '[' && s && (s.type === 'string' || s.type === 'template')
       && e && e.type === 'punct' && e.value === ']' && (endsExpr || optional)) {
       if (!optional) out.push({ ...t, type: 'punct', value: '.', raw: '.', synthetic: true });
-      out.push({ ...s, type: 'name', value: s.value, synthetic: true });
+      out.push({ ...s, type: 'name', value: s.value, end: e.end, synthetic: true });
       k += 2;
       continue;
     }
@@ -323,13 +366,47 @@ function normalizeMembers(tokens) {
 // ── Rules ────────────────────────────────────────────────────────────────────────────────────────
 
 const GLOBALS = new Set(['window', 'self', 'globalThis', 'top', 'parent', 'frames']);
+// A property of one of these is a property of a global object, whatever comes before it
+// (`window.self.eval`, `el.ownerDocument.defaultView.eval`, `frame.contentWindow.Function`).
+const GLOBAL_RECEIVERS = new Set([...GLOBALS, 'defaultView', 'contentWindow']);
+const DOCUMENTS = new Set(['document', 'ownerDocument', 'contentDocument']);
 const isP = (t, v) => t && t.type === 'punct' && t.value === v;
 const isDot = (t) => t && t.type === 'punct' && (t.value === '.' || t.value === '?.');
 const isName = (t, v) => t && t.type === 'name' && (v === undefined || t.value === v);
 const isStringish = (t) => t && (t.type === 'string' || t.type === 'template');
+const OPEN = new Set(['(', '[', '{']), CLOSE = new Set([')', ']', '}']);
 
-// An object-literal key (`{eval:1}`, `,eval:`). Not a reference to anything.
+// An object-literal key (`{eval:1}`, `,eval:`), or the key of a destructuring pattern.
 const isKey = (T, k) => isP(T[k + 1], ':') && (isP(T[k - 1], '{') || isP(T[k - 1], ','));
+// The index of the bracket that encloses token k, or -1.
+function enclosingOpen(T, k) {
+  let depth = 0;
+  for (let j = k - 1; j >= 0; j--) {
+    const t = T[j];
+    if (t.type === 'punct' && CLOSE.has(t.value)) depth++;
+    else if (t.type === 'punct' && OPEN.has(t.value)) { if (depth === 0) return j; depth--; }
+  }
+  return -1;
+}
+const DECLARE = new Set(['var', 'let', 'const']);
+const NOT_PARAMS = new Set(['if', 'for', 'while', 'with', 'switch', 'return', 'typeof', 'void', 'delete', 'new', 'in', 'of', 'instanceof', 'await', 'yield']);
+// Is the key at k inside a destructuring pattern — `const{eval:e}=…`, `({eval:e}=…)`,
+// `for(const{eval:e}of…)`, `function f({eval:e}){`, `({Worker:W})=>` — rather than an object
+// literal? Some enclosing `{`/`[` is declared or assigned to, or some enclosing `(` is a parameter list.
+// It errs towards "pattern": a literal used as a default inside a pattern is reported too.
+function inPattern(T, k) {
+  for (let o = enclosingOpen(T, k); o >= 0; o = enclosingOpen(T, o)) {
+    const c = closeParen(T, o), before = T[o - 1], after = T[c + 1];
+    if (T[o].value === '(') {
+      const params = isP(after, '=>') || (isP(after, '{') && after.line === T[c].line
+        && !(isName(before) && NOT_PARAMS.has(before.value)) && (isName(before) || isP(before, '*')));
+      if (params) return true;
+    } else if ((isName(before) && DECLARE.has(before.value)) || isP(after, '=') || isName(after, 'of') || isName(after, 'in')) {
+      return true;
+    }
+  }
+  return false;
+}
 // A method or accessor DEFINED under this name (`class A{eval(x){…}}`, `{get caches(){…}}`): after a
 // member boundary or a modifier, `name(…) {` with the `{` on the `)`'s line. A call cannot be followed
 // by `{` without a line break between them; `extends eval(x) {` is a call and is not after a boundary.
@@ -342,15 +419,17 @@ function methodDefinition(T, k) {
   const close = closeParen(T, k + 1), body = T[close + 1];
   return isP(T[close], ')') && isP(body, '{') && body.line === T[close].line;
 }
-// The token AT k is a reference to the global binding of its name: not a property of something
-// other than the global object, not an object-literal key, and not a method defined under that name.
+// The token AT k is a reference to the global binding of its name — or names it as the key of a
+// destructuring pattern (`const{eval:e}=globalThis`): not a property of something other than a
+// global object, not an object-literal key, and not a method defined under that name.
 function globalRef(T, k) {
   const prev = T[k - 1];
   if (isDot(prev)) {
     const recv = T[k - 2];
-    return isName(recv) && GLOBALS.has(recv.value) && !isDot(T[k - 3]);
+    return isName(recv) && GLOBAL_RECEIVERS.has(recv.value);
   }
-  return !isKey(T, k) && !methodDefinition(T, k);
+  if (isKey(T, k)) return inPattern(T, k);
+  return !methodDefinition(T, k);
 }
 const isProperty = (T, k) => isDot(T[k - 1]);
 
@@ -365,6 +444,16 @@ function closeParen(T, k) {
     else if (t.type === 'template-tail') depth--;
   }
   return T.length - 1;
+}
+// Index of the `(` opening the `)` at k, or -1.
+function openParen(T, k) {
+  let depth = 0;
+  for (let j = k; j >= 0; j--) {
+    const t = T[j];
+    if (t.type === 'punct' && CLOSE.has(t.value)) depth++;
+    else if (t.type === 'punct' && OPEN.has(t.value)) { depth--; if (depth === 0) return j; }
+  }
+  return -1;
 }
 // The token index where argument `index` (0-based) of the call whose `(` is at k begins, or -1.
 function argStart(T, k, index) {
@@ -382,6 +471,51 @@ function argStart(T, k, index) {
 }
 // A whole argument that is ONE string literal: the literal, then `,` or `)`.
 const literalArg = (T, j) => j >= 0 && isStringish(T[j]) && (isP(T[j + 1], ',') || isP(T[j + 1], ')'));
+// The string literals the argument starting at j can EVALUATE to as a whole: those not inside a call,
+// an array, an object, a function or a template substitution — only inside grouping parentheses and
+// operators. `"a"`, `("a")`, `f ? "a" : "b"`, `"a(" + n + ")"`, `` `a${n}` `` all have some;
+// `f("a")`, `() => g("a")`, `function(){ h("a") }` have none.
+function wholeArgStrings(T, j) {
+  const out = [], stack = [];
+  for (let m = j; m < T.length; m++) {
+    const t = T[m];
+    if (t.type === 'punct' && OPEN.has(t.value)) {
+      const p = T[m - 1];
+      const call = t.value === '(' && p && (isName(p) && !NOT_PARAMS.has(p.value) || isP(p, ')') || isP(p, ']') || p.type === 'template' || p.type === 'template-tail');
+      stack.push(t.value === '(' && !call ? 'group' : 'other');
+    } else if (t.type === 'punct' && CLOSE.has(t.value)) {
+      if (!stack.length) break;
+      stack.pop();
+    } else if (t.type === 'template-head') {
+      if (stack.every((x) => x === 'group')) out.push(t);
+      stack.push('other');
+    } else if (t.type === 'template-tail') {
+      stack.pop();
+    } else if (!stack.length && isP(t, ',')) break;
+    else if ((t.type === 'string' || t.type === 'template') && stack.every((x) => x === 'group')) out.push(t);
+  }
+  return out;
+}
+// Index of the last token of the expression that starts at j: up to a `,` / `;` / closing bracket at
+// its own depth, a `:` that closes no `?`, or a line break where a statement plainly ends.
+const ENDS_VALUE = (t) => t && (t.type === 'num' || t.type === 'string' || t.type === 'template' || t.type === 'template-tail'
+  || t.type === 'regex' || t.type === 'private' || (isName(t) && !NOT_PARAMS.has(t.value)) || isP(t, ')') || isP(t, ']') || isP(t, '}'));
+const STARTS_STATEMENT = (t) => t && (t.type === 'num' || t.type === 'string' || t.type === 'template' || t.type === 'template-head'
+  || t.type === 'private' || (isName(t) && !['in', 'of', 'instanceof'].includes(t.value)));
+function exprEnd(T, j) {
+  let depth = 0, conditional = 0, m = j;
+  for (; m < T.length; m++) {
+    const t = T[m];
+    if (t.type === 'punct' && OPEN.has(t.value) || t.type === 'template-head') depth++;
+    else if (t.type === 'punct' && CLOSE.has(t.value) || t.type === 'template-tail') { if (depth === 0) return m - 1; depth--; }
+    else if (depth === 0 && (isP(t, ',') || isP(t, ';') || t.type === 'template-middle')) return m - 1;
+    else if (depth === 0 && isP(t, '?')) conditional++;
+    else if (depth === 0 && isP(t, ':')) { if (conditional === 0) return m - 1; conditional--; }
+    const next = T[m + 1];
+    if (depth === 0 && next && next.line > t.line && ENDS_VALUE(t) && STARTS_STATEMENT(next)) return m;
+  }
+  return T.length - 1;
+}
 
 // The start of the receiver chain ending just before the dot at k-1: `a.b.c` → index of `a`.
 function chainStart(T, k) {
@@ -400,7 +534,7 @@ function chainStart(T, k) {
 // The construct's text as this scan prints it and as an exception names it: the tokens from `a` to
 // `b` inclusive, with a space only where two words would otherwise run together, and every string
 // spelled with double quotes. The same construct reads the same minified or not, whatever quotes the
-// build chose.
+// build chose. It is never shortened: an exception must name all of it (the report shortens).
 function constructText(T, a, b) {
   let out = '';
   for (let j = a; j <= b && j < T.length; j++) {
@@ -409,92 +543,110 @@ function constructText(T, a, b) {
     const prev = T[j - 1];
     if (j > a && word && prev && (prev.type === 'name' || prev.type === 'num' || prev.type === 'private') && !prev.synthetic) out += ' ';
     if (t.type === 'string') out += JSON.stringify(t.value);
+    else if (t.type === 'unscannable') out += t.raw.trim();
     else if (t.synthetic && t.type === 'name') out += t.value;
     else out += t.type === 'private' ? '#' + t.value : t.type === 'name' ? t.value : t.raw;
-    if (out.length > 240) return out.slice(0, 240) + '…';
   }
   return out;
 }
+// A piece of source as the scan spells a construct (what a finding's span reads as).
+export const spell = (src) => { const T = normalizeMembers(tokenize(src)); return constructText(T, 0, T.length - 1); };
 
 export function scanSource(src) {
   const T = normalizeMembers(tokenize(src));
   const found = [];
-  const add = (rule, at, a, b) => found.push({ rule, line: T[at].line, col: T[at].col, construct: constructText(T, a, b) });
-  // the `(` of a call of the name at k — `f(` or the optional `f?.(` — or -1
-  const callOpen = (k) => (isP(T[k + 1], '(') ? k + 1 : (isP(T[k + 1], '?.') && isP(T[k + 2], '(') ? k + 2 : -1));
-  // the end of a reference: through the call's `)` when it is called, else the name itself
-  const refEnd = (k) => (callOpen(k) >= 0 ? closeParen(T, callOpen(k)) : k);
-  const refStart = (k) => (isDot(T[k - 1]) ? k - 2 : (isName(T[k - 1], 'new') ? k - 1 : k));
+  const add = (rule, at, a, b) => found.push({
+    rule, line: T[at].line, col: T[at].col, construct: constructText(T, a, b), start: T[a].start, end: T[Math.min(b, T.length - 1)].end,
+  });
+  // the `(` of a call of the name at k — `f(`, the optional `f?.(`, or the grouped `(0,f)(` — or -1
+  const grouped = (k) => isP(T[k + 1], ')') && isP(T[k + 2], '(');
+  const callOpen = (k) => (isP(T[k + 1], '(') ? k + 1 : (isP(T[k + 1], '?.') && isP(T[k + 2], '(') ? k + 2 : (grouped(k) ? k + 2 : -1)));
+  // the end of a reference: through the call's `)` when it is called, through the bound name of a
+  // pattern key (`eval:e`), else the name itself
+  const refEnd = (k) => (callOpen(k) >= 0 ? closeParen(T, callOpen(k)) : (isKey(T, k) ? k + 2 : k));
+  // the start of a reference: its receiver chain, a `new` before it, the group it is called through
+  const refStart = (k) => {
+    let s = isDot(T[k - 1]) ? chainStart(T, k) : k;
+    if (grouped(k)) { const o = openParen(T, k + 1); if (o >= 0 && o < s) s = o; }
+    return isName(T[s - 1], 'new') ? s - 1 : s;
+  };
 
   for (let k = 0; k < T.length; k++) {
     const t = T[k];
+    if (t.type === 'unscannable') { add('unscannable', k, k, k); continue; }
     if (t.type !== 'name') continue;
     const v = t.value, next = T[k + 1];
     switch (v) {
       case 'cookie': {
         if (!isProperty(T, k)) break;
-        const after = T[k + 1], before = T[chainStart(T, k) - 1];
-        if (after && after.type === 'punct' && (ASSIGN.has(after.value) || after.value === '++' || after.value === '--')) {
-          add('cookie-write', k, chainStart(T, k), k + 1);
+        const cs = chainStart(T, k), after = T[k + 1], before = T[cs - 1];
+        if (after && after.type === 'punct' && ASSIGN.has(after.value)) {
+          add('cookie-write', k, cs, exprEnd(T, k + 2));
+        } else if (isP(after, '++') || isP(after, '--')) {
+          add('cookie-write', k, cs, k + 1);
         } else if (isP(before, '++') || isP(before, '--')) {
-          add('cookie-write', k, chainStart(T, k) - 1, k);
+          add('cookie-write', k, cs - 1, k);
+        } else if ((isName(after, 'of') || isName(after, 'in')) && isP(before, '(') && (isName(T[cs - 2], 'for') || isName(T[cs - 2], 'await'))) {
+          add('cookie-write', k, cs, k + 1); // `for (document.cookie of values)`
         }
         break;
       }
       case 'cookieStore':
-        if (!isKey(T, k) && !methodDefinition(T, k)) add('cookie-store', k, chainStart(T, k), k);
+        if (isKey(T, k) ? inPattern(T, k) : !methodDefinition(T, k)) add('cookie-store', k, chainStart(T, k), isKey(T, k) ? k + 2 : k);
         break;
       case 'domain':
-        if (isProperty(T, k) && isName(T[k - 2], 'document') && !isDot(T[k - 3])) add('document-domain', k, k - 2, k);
-        else if (isProperty(T, k) && isName(T[k - 2], 'document') && isDot(T[k - 3]) && isName(T[k - 4]) && GLOBALS.has(T[k - 4].value)) {
-          add('document-domain', k, k - 4, k);
+        if (isProperty(T, k) && isName(T[k - 2]) && DOCUMENTS.has(T[k - 2].value)) {
+          const assigned = next && next.type === 'punct' && ASSIGN.has(next.value);
+          add('document-domain', k, chainStart(T, k), assigned ? exprEnd(T, k + 2) : k);
         }
         break;
       case 'eval':
-        if (globalRef(T, k)) add('eval', k, refStart(T, k), refEnd(k));
+        if (globalRef(T, k)) add('eval', k, refStart(k), refEnd(k));
         break;
       case 'Function': {
         if (!globalRef(T, k) || isName(T[k - 1], 'instanceof')) break;
-        if (isDot(next) && !['call', 'apply', 'bind'].includes(T[k + 2]?.value)) break; // Function.prototype…
-        add('function-constructor', k, refStart(T, k), refEnd(k));
+        let end = refEnd(k);
+        if (isP(next, '.') || (isP(next, '?.') && isName(T[k + 2]))) { // a member of Function
+          let m = k + 2;
+          if (isName(T[m], 'prototype') && isDot(T[m + 1]) && isName(T[m + 2], 'constructor')) m += 2; // Function.prototype.constructor
+          else if (!['call', 'apply', 'bind', 'constructor'].includes(T[m]?.value)) break; // Function.prototype…, Function.name
+          end = refEnd(m);
+        }
+        add('function-constructor', k, refStart(k), end);
         break;
       }
       case 'setTimeout': case 'setInterval':
-        if (globalRef(T, k) && callOpen(k) >= 0) {
-          let j = callOpen(k) + 1;
-          while (isP(T[j], '(')) j++; // `setTimeout(("code"), 1)`: parentheses do not make it a function
-          const a = T[j];
-          if (a && (a.type === 'string' || a.type === 'template' || a.type === 'template-head')) {
-            add('string-timer', k, refStart(T, k), closeParen(T, callOpen(k)));
-          }
+        // whatever the first argument can evaluate to as a whole: a string literal there is code
+        if (globalRef(T, k) && callOpen(k) >= 0 && argStart(T, callOpen(k), 0) >= 0 && wholeArgStrings(T, callOpen(k) + 1).length) {
+          add('string-timer', k, refStart(k), closeParen(T, callOpen(k)));
         }
         break;
       case 'createElement': case 'createElementNS':
         if (callOpen(k) >= 0) {
           const j = argStart(T, callOpen(k), v === 'createElement' ? 0 : 1);
-          if (j >= 0 && isStringish(T[j]) && T[j].value.toLowerCase() === 'script') {
+          if (j >= 0 && wholeArgStrings(T, j).some((s) => s.type !== 'template-head' && s.value.toLowerCase() === 'script')) {
             add('script-element', k, chainStart(T, k), closeParen(T, callOpen(k)));
           }
         }
         break;
       case 'src':
         if (isProperty(T, k) && next && next.type === 'punct' && ASSIGN.has(next.value)) {
-          add('script-src', k, chainStart(T, k), k + 1);
+          add('script-src', k, chainStart(T, k), exprEnd(T, k + 2));
         }
         break;
       case 'setAttribute': case 'setAttributeNS':
         if (callOpen(k) >= 0) {
           const j = argStart(T, callOpen(k), v === 'setAttribute' ? 0 : 1);
-          if (j >= 0 && isStringish(T[j]) && T[j].value.toLowerCase() === 'src') {
+          if (j >= 0 && wholeArgStrings(T, j).some((s) => s.type !== 'template-head' && s.value.toLowerCase() === 'src')) {
             add('script-src', k, chainStart(T, k), closeParen(T, callOpen(k)));
           }
         }
         break;
       case 'Worker': case 'SharedWorker':
-        if (globalRef(T, k)) add('worker', k, isName(T[refStart(T, k) - 1], 'new') ? refStart(T, k) - 1 : refStart(T, k), refEnd(k));
+        if (globalRef(T, k)) add('worker', k, refStart(k), refEnd(k));
         break;
       case 'importScripts':
-        if (globalRef(T, k)) add('import-scripts', k, refStart(T, k), refEnd(k));
+        if (globalRef(T, k)) add('import-scripts', k, refStart(k), refEnd(k));
         break;
       case 'serviceWorker': {
         // Reported unless it is plainly used for something other than registering: `.serviceWorker.<x>`
@@ -506,7 +658,7 @@ export function scanSource(src) {
         break;
       }
       case 'caches':
-        if (globalRef(T, k)) add('cache-storage', k, refStart(T, k), isDot(next) && isName(T[k + 2]) ? k + 2 : k);
+        if (globalRef(T, k)) add('cache-storage', k, refStart(k), isDot(next) && isName(T[k + 2]) ? k + 2 : (isKey(T, k) ? k + 2 : k));
         break;
       case 'import':
         if (!isDot(T[k - 1]) && isP(next, '(') && !literalArg(T, k + 2)) {
@@ -565,7 +717,7 @@ export function validateExceptions(list) {
     const keys = Object.keys(x).filter((key) => !['file', 'rule', 'construct', 'count', 'reason'].includes(key));
     if (keys.length) problems.push(`${at}: unknown key(s) ${keys.join(', ')}`);
     if (typeof x.file !== 'string' || !x.file) problems.push(`${at}: no file pattern`);
-    else if (/[*?]/.test(x.file.split('/').pop())) problems.push(`${at}: the file pattern's last segment must be a literal file name, not ${JSON.stringify(x.file.split('/').pop())}`);
+    else if (!x.file.split('/').pop() || /[*?]/.test(x.file.split('/').pop())) problems.push(`${at}: the file pattern's last segment must be a literal file name, not ${JSON.stringify(x.file.split('/').pop())}`);
     if (!Object.hasOwn(RULES, x.rule)) problems.push(`${at}: unknown rule ${JSON.stringify(x.rule)}`);
     if (typeof x.construct !== 'string' || !x.construct.trim()) problems.push(`${at}: no construct`);
     if (x.count !== undefined && !(Number.isInteger(x.count) && x.count >= 1)) problems.push(`${at}: count must be a whole number ≥ 1`);
@@ -592,19 +744,21 @@ export function loadExceptions(file) {
 }
 
 // findings: [{ file, rule, line, col, construct }] → which are excepted, which fail, which
-// exceptions matched nothing, and which matched more often than their count allows.
+// exceptions matched nothing, and in which file an exception matched fewer times than its count.
+// The count is PER MATCHED FILE: a `**/loader.js` pattern may match several files, and each of them
+// gets its own count — one file's allowance is never spent, or inherited, by another.
 export function applyExceptions(findings, exceptions) {
-  const used = exceptions.map(() => 0);
+  const used = exceptions.map(() => new Map()); // file → occurrences excused there
   const matchers = exceptions.map((x) => globToRegExp(x.file));
   const failures = [], excepted = [];
   for (const f of findings) {
     const k = exceptions.findIndex((x, j) => x.rule === f.rule && x.construct === f.construct
-      && matchers[j].test(f.file) && used[j] < (x.count ?? 1));
-    if (k >= 0) { used[k]++; excepted.push({ ...f, exception: k }); } else failures.push(f);
+      && matchers[j].test(f.file) && (used[j].get(f.file) ?? 0) < (x.count ?? 1));
+    if (k >= 0) { used[k].set(f.file, (used[k].get(f.file) ?? 0) + 1); excepted.push({ ...f, exception: k }); } else failures.push(f);
   }
-  const dead = exceptions.map((x, k) => ({ ...x, index: k, matched: used[k] })).filter((x) => x.matched === 0);
-  const short = exceptions.map((x, k) => ({ ...x, index: k, matched: used[k] }))
-    .filter((x) => x.matched > 0 && x.matched < (x.count ?? 1));
+  const dead = exceptions.map((x, k) => ({ ...x, index: k, matched: 0 })).filter((x) => used[x.index].size === 0);
+  const short = exceptions.flatMap((x, k) => [...used[k]].filter(([, n]) => n < (x.count ?? 1))
+    .map(([file, matched]) => ({ ...x, pattern: x.file, file, index: k, matched })));
   return { failures, excepted, dead, short };
 }
 
@@ -626,10 +780,12 @@ export async function scan({ targets = [], root = REPO, exceptionsFile = DEFAULT
 const where = (f) => `${f.file}:${f.line}:${f.col}`;
 export function report(result, { deadCheck = true } = {}) {
   const lines = [];
-  for (const f of result.failures) lines.push(`✗ ${where(f)}  ${f.rule} — ${RULES[f.rule]}\n    ${f.construct}`);
+  // a long construct is shortened on screen only; it is matched, and printed by --json, whole
+  const shown = (c) => (c.length > 240 ? `${c.slice(0, 240)}… (${c.length} characters)` : c);
+  for (const f of result.failures) lines.push(`✗ ${where(f)}  ${f.rule} — ${RULES[f.rule]}\n    ${shown(f.construct)}`);
   if (deadCheck) {
-    for (const x of result.dead) lines.push(`✗ dead exception #${x.index + 1} (${x.file}, ${x.rule}) matches nothing — remove it\n    ${x.construct}`);
-    for (const x of result.short) lines.push(`✗ exception #${x.index + 1} (${x.file}, ${x.rule}) allows ${x.count} but matched ${x.matched} — lower its count\n    ${x.construct}`);
+    for (const x of result.dead) lines.push(`✗ dead exception #${x.index + 1} (${x.file}, ${x.rule}) matches nothing — remove it\n    ${shown(x.construct)}`);
+    for (const x of result.short) lines.push(`✗ exception #${x.index + 1} (${x.pattern}, ${x.rule}) allows ${x.count} per file but matched ${x.matched} in ${x.file} — lower its count\n    ${shown(x.construct)}`);
   }
   const ok = lines.length === 0;
   lines.push(`${ok ? '✓' : '✗'} runtime scan: ${result.files} file(s), ${result.findings.length} construct(s) found, `
@@ -639,7 +795,14 @@ export function report(result, { deadCheck = true } = {}) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2);
-  const opt = (name) => { const k = argv.indexOf(name); if (k < 0) return undefined; const v = argv[k + 1]; argv.splice(k, 2); return v; };
+  const opt = (name) => {
+    const k = argv.indexOf(name);
+    if (k < 0) return undefined;
+    const v = argv[k + 1];
+    if (v === undefined || v.startsWith('--')) { console.error(`runtime-scan: ${name} needs a value`); process.exit(2); }
+    argv.splice(k, 2);
+    return v;
+  };
   const flag = (name) => { const k = argv.indexOf(name); if (k < 0) return false; argv.splice(k, 1); return true; };
   const root = path.resolve(opt('--root') ?? REPO);
   const exceptionsFile = opt('--exceptions') ?? DEFAULT_EXCEPTIONS;

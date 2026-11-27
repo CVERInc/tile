@@ -220,7 +220,19 @@ echo "→ site renderer tests"
 shopt -s nullglob
 for t in "${SUITE_GLOBS[@]}"; do
   echo "  · $t"
-  node "$t"
+  if [ "$t" = test/runtime-scan.test.mjs ]; then
+    # Without esbuild the runtime scan's minified half skips by name inside the TAP stream, where
+    # nobody reads it; this says it on one line of its own (and does not fail the run).
+    _rs_log=$(mktemp "${TMPDIR:-/tmp}/runtime-scan-test.XXXXXX")
+    node "$t" | tee "$_rs_log"
+    _rs_skipped=$(sed -nE 's/^# skipped ([0-9]+)$/\1/p' "$_rs_log" | tail -n 1)
+    rm -f "$_rs_log"
+    if [ "${_rs_skipped:-0}" -gt 0 ]; then
+      echo "  · runtime-scan: ${_rs_skipped} test(s) SKIPPED — no esbuild (set ESBUILD, or npm ci in packages/sitetile/astro): the minified spellings were NOT checked"
+    fi
+  else
+    node "$t"
+  fi
 done
 shopt -u nullglob
 

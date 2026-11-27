@@ -8,3 +8,6 @@ Function.call(null, "return 4"); // expect function-constructor
 Function.apply(null, ["return 5"]); // expect function-constructor
 Reflect.construct(Function, ["return 6"]); // expect function-constructor
 new Function("a"),Function("b")() // expect function-constructor x2
+Function?.('return 7')(); // expect function-constructor
+Function.prototype.constructor('return 8')(); // expect function-constructor
+Function.constructor('return 9')(); // expect function-constructor

@@ -8,3 +8,4 @@ s.setAttribute('SRC', url); // expect script-src
 s.setAttributeNS(null, "src", url); // expect script-src
 document.currentScript.src = url; // expect script-src
 a.src=b,c.setAttribute("src",d),e["src"]=f // expect script-src x3
+el.setAttribute(f ? 'src' : 'href', u); // expect script-src

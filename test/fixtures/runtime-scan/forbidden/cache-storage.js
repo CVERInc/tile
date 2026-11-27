@@ -4,3 +4,4 @@ self.caches.match(request); // expect cache-storage
 window["caches"].keys(); // expect cache-storage
 var c = caches; // expect cache-storage
 caches.open("a").then(b),caches.delete("c") // expect cache-storage x2
+const { caches: cs1 } = window; cs1.open('v1'); // expect cache-storage

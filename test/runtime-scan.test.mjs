@@ -18,7 +18,7 @@ const REPO = path.join(HERE, '..');
 const SCAN = path.join(REPO, 'scripts', 'runtime-scan.mjs');
 const {
   RULES, scanSource, scanFiles, scan, report, coralBundles, loadExceptions, validateExceptions, globToRegExp,
-  DEFAULT_EXCEPTIONS,
+  DEFAULT_EXCEPTIONS, spell,
 } = await import(SCAN);
 const FIXTURES = path.join(HERE, 'fixtures', 'runtime-scan');
 const FORBIDDEN = path.join(FIXTURES, 'forbidden');
@@ -30,10 +30,11 @@ const scratch = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime
 
 // esbuild, found the way packages/dynamic-corals/build.mjs finds it. Without it the minified half of
 // each check below SKIPS BY NAME: "I could not look" must not print the same thing as "I looked".
-const ESBUILD = [process.env.ESBUILD, path.join(REPO, 'packages/sitetile/astro/node_modules/.bin/esbuild'),
+// ESBUILD=none runs it as a machine without esbuild would (scripts/test.sh then names the skips).
+const ESBUILD = process.env.ESBUILD === 'none' ? undefined : [process.env.ESBUILD, path.join(REPO, 'packages/sitetile/astro/node_modules/.bin/esbuild'),
   path.join(REPO, 'node_modules/.bin/esbuild')].filter(Boolean).find((p) => fs.existsSync(p));
 const minify = (src) => execFileSync(ESBUILD, ['--minify', '--format=esm', '--log-level=error', '--loader=js'],
-  { input: src, encoding: 'utf8' });
+  { input: src, encoding: 'utf8', stdio: 'pipe' });
 
 function expectations(src) {
   const want = new Map(); // line → Map(rule → count)
@@ -79,6 +80,13 @@ for (const rule of fixtureRules) {
     for (const line of want.keys()) assert.match(text, new RegExp(`test/fixtures/runtime-scan/forbidden/${rule}\\.js:${line}:\\d+  ${rule}`));
   });
 
+  if (rule === 'unscannable') {
+    // what this rule finds is not JavaScript, so no build emits it: esbuild must refuse the fixture
+    test('unscannable — its fixture is not JavaScript: esbuild refuses it', { skip: !ESBUILD && 'SKIPPED — no esbuild (set ESBUILD, or npm ci in packages/sitetile/astro)' }, () => {
+      assert.throws(() => minify(src));
+    });
+    continue;
+  }
   test(`RED: ${rule} — the same fixture minified by esbuild is still found, as often`, { skip: !ESBUILD && 'SKIPPED — no esbuild (set ESBUILD, or npm ci in packages/sitetile/astro)' }, () => {
     const min = minify(src);
     assert.ok(min.split('\n').filter(Boolean).length <= 2, 'esbuild did not minify onto one line');
@@ -201,7 +209,7 @@ test('RED: a dead exception — one that matches nothing — fails the scan', ()
   // and an exception allowing more occurrences than there are
   const s = scanFiles([path.join(root, 'a', 'loader.js')], { root, exceptions: [{ ...EXC, count: 3 }] });
   assert.equal(report(s).ok, false);
-  assert.match(report(s).text, /allows 3 but matched 1/);
+  assert.match(report(s).text, /allows 3 per file but matched 1 in a\/loader\.js/);
 });
 
 test('RED: a dead exception through the CLI, against the same files', () => {
@@ -295,6 +303,10 @@ const KNOWN_FALSE_NEGATIVES = [
   ['a worklet module', 'CSS.paintWorklet.addModule(url); ctx.audioWorklet.addModule(url)'],
   ['a service worker registered through an alias created elsewhere', 'const c = navigator; c["service" + "Worker"].register(u)'],
   ['WebAssembly compiled from fetched bytes', 'WebAssembly.instantiateStreaming(fetch(url))'],
+  ['a timer taken out of the global object by destructuring', 'const { setTimeout: t } = window; t("tick()", 1)'],
+  ['a timer reached through an array or a property bag', '[setTimeout][0]("tick()", 1); ({ t: setInterval }).t("tick()", 1)'],
+  ['a conditional tag name or attribute name with a variable arm', 'document.createElement(f ? t : "div"); el.setAttribute(f ? n : "href", u)'],
+  ['a destructuring key that is computed', 'const { ["ev" + "al"]: e } = globalThis; e(code)'],
   ['an import map or module preload added to the page', 'document.head.append(Object.assign(document.createElement("link"), { rel: "modulepreload", href: url }))'],
 ];
 
@@ -351,4 +363,190 @@ test('the false positive that is known: a method named like a forbidden global, 
   // followed by a block, so it is reported. Formatters and minifiers keep the `{` on the line.
   assert.deepEqual(scanSource('class A { eval(x)\n{ return x } }').map((f) => f.rule), ['eval']);
   assert.deepEqual(scanSource('class A { eval(x) { return x } }'), []);
+});
+
+// ── Security review, round 1 ─────────────────────────────────────────────────────────────────────
+// One test per claim of the review, written before the fix and run against the code it reviewed:
+// red where the claim held, kept as a passing pin where it did not. The inputs are the review's own.
+const rulesOf = (src) => scanSource(src).map((f) => f.rule);
+const evalsOnly = (src) => assert.deepEqual(rulesOf(src), ['eval'], src);
+
+test('RED (review a, P1): an HTML-like comment is a comment in a classic script, and is itself reported', () => {
+  // `<!--` and a `-->` that starts a line are line comments in a classic script (Annex B) and
+  // operators in a module: the scan cannot know which one runs, so it says so, and reads on.
+  assert.deepEqual(rulesOf('<!-- /*\neval(s);'), ['unscannable', 'eval']);
+  assert.deepEqual(rulesOf('<!-- `\neval(s);'), ['unscannable', 'eval']);
+  assert.deepEqual(rulesOf('x = 1\n--> /*\neval(s);'), ['unscannable', 'eval']);
+  // not at the start of a line, `-->` is `--` and `>`
+  assert.deepEqual(rulesOf('x-->0;eval(s)'), ['eval']);
+});
+
+test('RED (review a, P1): unterminated input fails closed — a comment, template, string or regex that never ends is a finding', () => {
+  assert.deepEqual(rulesOf('/* eval(s);'), ['unscannable']);
+  assert.deepEqual(rulesOf('`abc eval(s)'), ['unscannable']);
+  assert.deepEqual(rulesOf('var a = `${b}\neval(s);'), ['unscannable']);
+  assert.deepEqual(rulesOf("var a = 'abc;\neval(s);"), ['unscannable', 'eval']);
+  assert.deepEqual(rulesOf('var a = "abc;\neval(s);'), ['unscannable', 'eval']);
+  assert.deepEqual(rulesOf('x = /abc;\neval(s)'), ['unscannable', 'eval']);
+  // terminated ones are not findings
+  assert.deepEqual(rulesOf('/* a */ `b${c}d` + "e" + /f/.source'), []);
+});
+
+test('RED (review a, P1): a `/` after a keyword-named property, after `of` as a name, and after `export default`', () => {
+  evalsOnly('o.in/2;eval(s);b/1');
+  evalsOnly('o?.in/2;eval(s);b/1');
+  evalsOnly('e.default/2;eval(s);b/1');
+  evalsOnly('o.return/2;eval(s);b/1');
+  evalsOnly('var of=4;of/2;eval(s);b/1');
+  evalsOnly("export default /'/.test(s);eval(s);'x'");
+  // pins: `of` in a for head is the keyword, and a regex may follow it
+  evalsOnly("for(const a of /'/.exec(s))eval(s);'x'");
+  evalsOnly("for(const a in /'/)eval(s);'x'");
+});
+
+test('RED (review a, P2): an identifier unicode escape with leading zeros is decoded', () => {
+  const bs = String.fromCharCode(92);
+  evalsOnly(`${bs}u{0000000065}val(s)`);
+  evalsOnly(`${bs}u{000000000000000000065}val(s)`);
+});
+
+test('RED (review b, P1): the six rules that print a reference print the construct, not an empty string', () => {
+  const constructs = (src) => scanSource(src).map((f) => `${f.rule} ${f.construct}`);
+  assert.deepEqual(constructs('eval(x)'), ['eval eval(x)']);
+  assert.deepEqual(constructs('window.eval(x)'), ['eval window.eval(x)']);
+  assert.deepEqual(constructs('new Function("a")'), ['function-constructor new Function("a")']);
+  assert.deepEqual(constructs("setTimeout('a()',1)"), ['string-timer setTimeout("a()",1)']);
+  assert.deepEqual(constructs('new window.Worker(u)'), ['worker new window.Worker(u)']);
+  assert.deepEqual(constructs('importScripts(u)'), ['import-scripts importScripts(u)']);
+  assert.deepEqual(constructs('self.caches.open("v1")'), ['cache-storage self.caches.open']);
+});
+
+test('RED (review b, P1): `Function?.(…)`, `Function.prototype.constructor(…)` and `Function.constructor(…)`', () => {
+  assert.deepEqual(rulesOf("Function?.('return 1')()"), ['function-constructor']);
+  assert.deepEqual(rulesOf("Function.prototype.constructor('return 1')()"), ['function-constructor']);
+  assert.deepEqual(rulesOf("Function.constructor('return 1')()"), ['function-constructor']);
+  // pins: what is not the constructor still passes
+  assert.deepEqual(rulesOf('Function.prototype.toString.call(f)'), []);
+  assert.deepEqual(rulesOf('f instanceof Function'), []);
+});
+
+test('RED (review b, P2): destructuring renames, chained globals, for-of targets, grouped and conditional timer and element arguments', () => {
+  const cases = [
+    ['const{eval:e}=globalThis;e(x)', 'eval'],
+    ['const{Worker:W}=window;new W(u)', 'worker'],
+    ["const{caches:c}=window;c.open('v1')", 'cache-storage'],
+    ["const{cookieStore:c}=window;c.set('a','1')", 'cookie-store'],
+    ['const{importScripts:f}=self;f(u)', 'import-scripts'],
+    ['let a, {b, c: {eval: e}} = globalThis', 'eval'],
+    ['({eval:e}=globalThis)', 'eval'],
+    ['function f({eval:e}){return e}', 'eval'],
+    ['const f=({Worker:W})=>new W(u)', 'worker'],
+    ['window.self.eval(x)', 'eval'],
+    ['document.defaultView.eval(x)', 'eval'],
+    ["el.ownerDocument.domain='x'", 'document-domain'],
+    ['frame.contentDocument.domain', 'document-domain'],
+    ['for(document.cookie of x);', 'cookie-write'],
+    ['for(document.cookie in x);', 'cookie-write'],
+    ["(0,setTimeout)('a()',0)", 'string-timer'],
+    ["(0,window.setInterval)('a()',0)", 'string-timer'],
+    ["setTimeout(f?'a()':'b()',0)", 'string-timer'],
+    ["setTimeout(f?g:'b()',0)", 'string-timer'],
+    ["document.createElement(f?'script':'div')", 'script-element'],
+    ["el.setAttribute(f?'src':'href',u)", 'script-src'],
+  ];
+  for (const [src, rule] of cases) assert.deepEqual(rulesOf(src), [rule], src);
+  // pins: an object literal that merely has such a key, and a timer handed a function, still pass
+  assert.deepEqual(rulesOf('const o={eval:1,Worker:2,caches:3};f({importScripts:4})'), []);
+  assert.deepEqual(rulesOf("setTimeout(()=>f('a'),0);setTimeout(function(){g('b')},0)"), []);
+  assert.deepEqual(rulesOf("document.createElement(f?'div':'span')"), []);
+});
+
+test('RED (review c, P1): an exception can name an eval / Function / timer / worker / importScripts / caches construct', () => {
+  const root = scratch();
+  const file = path.join(root, 'w.js');
+  fs.writeFileSync(file, 'eval(x);new Worker(u);caches.open("v")\n');
+  const exceptions = [
+    { file: 'w.js', rule: 'eval', construct: 'eval(x)', reason: 'r' },
+    { file: 'w.js', rule: 'worker', construct: 'new Worker(u)', reason: 'r' },
+    { file: 'w.js', rule: 'cache-storage', construct: 'caches.open', reason: 'r' },
+  ];
+  assert.deepEqual(validateExceptions(exceptions), []);
+  const r = scanFiles([file], { root, exceptions });
+  assert.deepEqual(r.failures, []);
+  assert.equal(r.excepted.length, 3);
+});
+
+test('RED (review c, P2): an exception names the WHOLE construct — no truncation, and the right-hand side of an assignment', () => {
+  const root = scratch();
+  const file = path.join(root, 'l.js');
+  const long = 'x'.repeat(300);
+  fs.writeFileSync(file, `import(a+"${long}"+b);import(a+"${long}"+evil);\n`);
+  const exc = { file: 'l.js', rule: 'dynamic-import', construct: `import(a+"${long}"+b)`, reason: 'r' };
+  const r = scanFiles([file], { root, exceptions: [exc] });
+  assert.equal(r.excepted.length, 1);
+  assert.deepEqual(r.failures.map((f) => f.construct), [`import(a+"${long}"+evil)`]);
+  // the assigned value is part of the construct, so an exception for one src does not cover another
+  fs.writeFileSync(file, 'e.src=u;e.src=evil;document.cookie="a=1";document.cookie=v\n');
+  assert.deepEqual(scanSource(fs.readFileSync(file, 'utf8')).map((f) => f.construct),
+    ['e.src=u', 'e.src=evil', 'document.cookie="a=1"', 'document.cookie=v']);
+  const s = scanFiles([file], { root, exceptions: [{ file: 'l.js', rule: 'script-src', construct: 'e.src=u', reason: 'r' }] });
+  assert.deepEqual(s.failures.map((f) => f.construct), ['e.src=evil', 'document.cookie="a=1"', 'document.cookie=v']);
+  // the value ends where the expression does, minified or pretty
+  assert.deepEqual(scanSource('a.src = b ? c : d, f()\ng.src = h + "/x.js"\nk()').map((f) => f.construct), ['a.src=b?c:d', 'g.src=h+"/x.js"']);
+  // a long construct is shortened in the report only
+  fs.writeFileSync(file, `import(a+"${long}"+b);\n`);
+  const text = report(scanFiles([file], { root })).text;
+  assert.ok(!text.includes(long), 'the report prints the whole 300-character construct');
+});
+
+test('RED (review c, P2): a `**` pattern can match several files, and its count is per matched file', () => {
+  const root = loaderTree();
+  const files = [path.join(root, 'a', 'loader.js'), path.join(root, 'b', 'loader.js')];
+  const exc = { ...EXC, file: '**/loader.js' };
+  assert.deepEqual(validateExceptions([exc]), []);
+  const r = scanFiles(files, { root, exceptions: [exc] });
+  assert.deepEqual(r.failures, []);
+  assert.equal(r.excepted.length, 2);
+  // one file over its count fails, whatever the other file has
+  fs.writeFileSync(files[0], LOADER + LOADER);
+  assert.deepEqual(scanFiles(files, { root, exceptions: [exc] }).failures.map((f) => f.file), ['a/loader.js']);
+  // a file under its count is reported short, by name
+  const s = scanFiles(files, { root, exceptions: [{ ...exc, count: 2 }] });
+  assert.deepEqual(s.failures, []);
+  assert.deepEqual(s.short.map((x) => [x.file, x.matched]), [['b/loader.js', 1]]);
+  assert.match(report(s).text, /b\/loader\.js/);
+});
+
+test('RED (review e): every finding of every rule names a non-empty construct that is the text of a span of the source', () => {
+  // `start`/`end` are source offsets; the construct is that span as the scan spells it (strings in
+  // double quotes, `x['y']` as `x.y`, no blank space), and a span of canonical source IS the construct.
+  const sources = fixtureRules.map((rule) => fs.readFileSync(path.join(FORBIDDEN, `${rule}.js`), 'utf8'));
+  if (ESBUILD) for (const rule of fixtureRules) if (rule !== 'unscannable') sources.push(minify(fs.readFileSync(path.join(FORBIDDEN, `${rule}.js`), 'utf8')));
+  const seen = new Set();
+  for (const src of sources) {
+    for (const f of scanSource(src)) {
+      seen.add(f.rule);
+      assert.ok(typeof f.construct === 'string' && f.construct.trim(), `${f.rule} at ${f.line}:${f.col}: empty construct`);
+      assert.ok(Number.isInteger(f.start) && f.end > f.start && f.end <= src.length, `${f.rule} at ${f.line}:${f.col}: no span`);
+      const span = src.slice(f.start, f.end);
+      assert.equal(spell(span), f.construct, `${f.rule} at ${f.line}:${f.col}: the span ${JSON.stringify(span)} does not read as the construct`);
+    }
+  }
+  assert.deepEqual([...seen].sort(), Object.keys(RULES).sort(), 'a rule produced no finding to check');
+  // in canonical source the construct is literally a substring
+  const canonical = 'eval(x);new Function("a");setTimeout("a()",1);new Worker(u);importScripts(u);caches.open("v");e.src=u;document.cookie="a=1"';
+  for (const f of scanSource(canonical)) assert.ok(canonical.includes(f.construct), `${f.rule}: ${JSON.stringify(f.construct)}`);
+  assert.equal(scanSource(canonical).length, 8);
+});
+
+test('RED (review c, P3): a file pattern ending in a slash is refused, and an option without its value is a usage error', () => {
+  const bad = (x) => validateExceptions([x]).join(' ');
+  assert.match(bad({ ...EXC, file: 'a/**/' }), /literal file name/);
+  assert.match(bad({ ...EXC, file: 'a/' }), /literal file name/);
+  const run = (...args) => spawnSync(process.execPath, [SCAN, ...args], { encoding: 'utf8' });
+  for (const args of [['--exceptions', '--json', CLEAN], [CLEAN, '--exceptions'], ['--root', '--json', CLEAN], [CLEAN, '--root']]) {
+    const r = run(...args);
+    assert.equal(r.status, 2, `${args.join(' ')}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /^runtime-scan: --(exceptions|root) needs a value/, args.join(' '));
+  }
 });

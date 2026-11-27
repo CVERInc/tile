@@ -13,3 +13,4 @@ document
   = "h=8";
 document.cookie="i=9",document["cookie"]="j=10";self.document.cookie=x+"k" // expect cookie-write x3
 console.log(document.cookie, document["cookie"] === "x", document.cookie == "y");
+for (document.cookie of values); // expect cookie-write
