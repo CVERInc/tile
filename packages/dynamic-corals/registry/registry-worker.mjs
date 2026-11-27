@@ -42,6 +42,14 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'X-Content-Type-Options': 'no
 // cannot match; neither can `%2F`, `..`, `//` or uppercase, so nothing that is not plainly one
 // id-shaped segment (plus, at most, the literal `__data.json`) leaves this worker.
 const PAGE = /^\/corals(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)?(?:\/|\/__data\.json)?$/;
+// Every coral id, version, channel and published file name (`<coral>.js`, `manifest.json`) is made
+// of these characters, so a segment outside them — a percent-escape, `;`, `~`, a space, non-ASCII —
+// or one made only of dots could not have named a published file. It is refused HERE, before the
+// asset store is asked: a store that decoded `sample%2ejs` or `..%2F..%2Fx.js` before its lookup would
+// otherwise serve, or go looking for, a file under a name nobody published. Empty segments (`//`) are
+// not segments: they are collapsed below, as they always were.
+const SEGMENT = /^[A-Za-z0-9._-]+$/;
+const ONLY_DOTS = /^\.+$/;
 
 export default {
   async fetch(request, env) {
@@ -49,6 +57,9 @@ export default {
     // A Worker's subrequest to its own route is not routed back into it: this reaches the origin.
     if (PAGE.test(url.pathname)) return fetch(request);
     const parts = url.pathname.replace(/^\/corals\/?/, '').split('/').filter(Boolean);
+    if (parts.some((part) => !SEGMENT.test(part) || ONLY_DOTS.test(part))) {
+      return new Response('not found', { status: 404, headers: CORS });
+    }
 
     if (parts.length === 1 && parts[0] === 'manifest.json') {
       return new Response(JSON.stringify(manifest, null, 2), {

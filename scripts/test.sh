@@ -81,6 +81,16 @@ done
 git diff --exit-code -- "${ARTIFACTS[@]}" \
   || { echo "✗ a committed build artifact is stale — run the builds and commit the result"; exit 1; }
 
+# Platform scripts may one day be the only scripts allowed to run on a host whose domain is shared with
+# other people's pages. A content-security policy can say where scripts come from; it cannot stop a
+# permitted one from writing a cookie for the whole domain, or from starting a worker / importing a
+# module whose URL arrived as data. This reads the BUILT coral bundles (every <coral>/<coral>.js in
+# packages/dynamic-corals/corals.mjs) for exactly those, with scripts/runtime-scan.exceptions.json as
+# the one list of what is allowed — and an entry there that matches nothing fails it too. Its own
+# fixtures and the list of what it cannot see are in test/runtime-scan.test.mjs (run below).
+echo "→ runtime scan (built coral bundles: no cookie writes, no code loaded from data)"
+node scripts/runtime-scan.mjs
+
 echo "→ tests"
 for t in test/*.cjs; do
   echo "  · $t"
