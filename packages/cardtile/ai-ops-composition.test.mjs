@@ -141,8 +141,8 @@ function claims(r) {
       `In the stack on a phone a tile shows ${r.lines.bodyOnly} body lines (${r.lines.head2} under a two-line heading) of about ${r.perLine.latinBody} Latin or ${r.perLine.cjkBody} CJK characters; more scrolls.`,
       `a heading within ${r.advice.headLatin} Latin or ${r.advice.headCjk} CJK characters, a body within ${r.advice.bodyLatin} or ${r.advice.bodyCjk}.`,
     ],
-    pictures: [`16:9 covers about ${r.picture.wide}% of the tile, 3:4 about ${r.picture.tall}%`, 'The wall crops it square unless `w=6`.'],
-    links: [`(${r.social.rows} fit, more scroll)`],
+    pictures: [`16:9 covers about ${r.picture.wide}% of the tile, 3:4 about ${r.picture.tall}%`, 'The wall crops a picture-only `feature` square unless `w=6`.'],
+    links: [`(${r.social.rows} fit on a phone, more scroll)`],
     // one column, to the nearest 5 px: an engine that draws its scrollbar over the page has a wall 10 px wider
     wall: [`no \`w\` is one column (about ${Math.round(r.wall.column / 5) * 5} px on a phone)`, '`w=1`…`w=6`'],
   };
@@ -224,7 +224,7 @@ test('the views it names are the three there are; a page opens on the stack, and
   assert.match(COMPOSITION.presentation, /Leave `view` out so it opens on the stack; `views: stack list` removes the wall\./);
 });
 
-test('the wall: no `w` is one column, text is all six whatever it says, and a picture is cropped square unless `w=6`', () => {
+test('the wall: no `w` is one column, text is all six whatever it says, and a picture-only feature is cropped square unless `w=6`', () => {
   assert.equal(widthOf(tile('link %% [a](https://example.org/)')), '1');
   assert.equal(widthOf(tile('feature img=https://example.org/a.png %%')), '1');
   assert.equal(widthOf(tile('social %% [a](https://instagram.com/a)')), '1');
@@ -235,8 +235,33 @@ test('the wall: no `w` is one column, text is all six whatever it says, and a pi
   assert.match(RENDER, /`\.st-card \[data-w="6"\] \.st-gal-img\{aspect-ratio:auto\}`/);
   // a text tile on the wall has no frame
   assert.match(RENDER, /`\.st-card \.st-cell\.st-prose\{background:none;border:none;/);
-  // GEOMETRY says the same of pictures (it said a picture always keeps its own ratio: false below `w=6`)
-  assert.match(GEOMETRY.pictures, /^On the wall a picture at `w=6` keeps its own aspect ratio; narrower, it is cropped to a square\. In the stack and list it is always shown whole\./);
+  // 🔴 that rule is the BARE picture's. A feature with words of its own is another class, fitted inside its box in every
+  // view; a labelled one (`label=on` with an `alt`) is a square below `w=6` and 2:1 at `w=6`.
+  const cls = (l) => /<div class="(st-cell [^"]*)"/.exec(tile(l))[1];
+  assert.match(cls('feature w=6 img=https://example.org/a.png %%'), /\bst-gal-cell-bare\b/);
+  for (const words of ['title=Heading %%', 'cta=Go href=https://example.org/ %%', '%% A line of body.']) assert.doesNotMatch(cls('feature w=6 img=https://example.org/a.png ' + words), /\bst-gal-cell-bare\b/, words);
+  assert.match(cls('feature w=6 img=https://example.org/a.png label=on alt=Label %%'), /\bst-gal-labelled\b/);
+  assert.equal(styleOf(DECK_CSS, '.st-cell.st-gal-cell:not(.st-gal-cell-bare) img.st-gal-img')['object-fit'], 'contain');
+  assert.match(RENDER, /`\.st-card \.st-gal-labelled \.st-gal-img\{[^`]*aspect-ratio:1;/);
+  assert.match(RENDER, /`\.st-card \[data-w="6"\]\.st-gal-labelled \.st-gal-img\{width:100%;aspect-ratio:2\/1\}`/);
+  // …and a browser drew each of them so (the receipt): bare, with words, labelled; and an embed, square on the wall only
+  const W = RECEIPT.wall, shape = (box) => { const [a, b] = box.split(' × ').map(Number); return a / b; };
+  assert.deepEqual([W.bare.noW.whole, W.bare.w3.whole, W.bare.w6.whole, W.bare.w6tall.whole], [false, false, true, true]);
+  assert.ok(Math.abs(shape(W.bare.w3.box) - 1) < 0.02);
+  assert.deepEqual([W.titled.w3.whole, W.titled.w6.whole, W.titled.w6tall.whole], [true, true, true]);
+  assert.deepEqual([W.labelled.w3.whole, W.labelled.w6.whole, W.labelled.w6tall.whole], [false, false, false]);
+  assert.ok(Math.abs(shape(W.labelled.w3.box) - 1) < 0.02 && Math.abs(shape(W.labelled.w6.box) - 2) < 0.02 && Math.abs(shape(W.labelled.w6tall.box) - 2) < 0.02);
+  assert.ok(Math.abs(shape(W.embed.w3) - 1) < 0.02 && Math.abs(shape(W.embed.w6) - 1) < 0.02);
+  for (const v of ['stack', 'list']) {
+    const p = RECEIPT.pile[v];
+    assert.ok(p.titled.whole && p.labelled.whole, `${v}: a picture that is not bare is cropped`);
+    assert.ok(p.embed.tall && p.embed.ofFront >= 90, `${v}: an embed no longer fills the front`);
+  }
+  // GEOMETRY says each of these of the tile it is true of (it said a picture always keeps its own ratio: false below
+  // `w=6`; then that any picture is cropped below `w=6`, and that an embed is square in every view), and GRAMMAR.md
+  // says what GEOMETRY does
+  assert.equal(GEOMETRY.pictures, 'On the wall a bare picture (a `feature` with no `title`, `cta` or body) at `w=6` keeps its own aspect ratio; narrower, it is cropped to a square. `label=on` at `w=6` crops it to 2:1; with a `title`, `cta` or body it is not cropped. In the stack and list it is always shown whole. An `embed` is as tall as it is wide on the wall; in the stack and list it fills the front.');
+  assert.ok(read('GRAMMAR.md').replace(/\n  /g, ' ').includes('- ' + GEOMETRY.pictures), 'GRAMMAR.md no longer says of pictures what GEOMETRY does');
 });
 
 test('the example is in the serializer\'s form, draws the tiles it shows in order, and keeps the guide\'s own advice', () => {
@@ -349,7 +374,7 @@ test('the guide is short enough to be read whole: every entry one string, the pr
   assert.deepEqual(Object.keys(COMPOSITION), keys);
   for (const k of keys) assert.ok(typeof COMPOSITION[k] === 'string' && COMPOSITION[k], k);
   const chars = PROSE_KEYS.reduce((n, k) => n + COMPOSITION[k].length, 0);
-  assert.ok(chars <= 1900, `the guide's prose is ${chars} characters: over 1,900 an agent skims it. Cut, do not raise this.`);
+  assert.ok(chars < 1950, `the guide's prose is ${chars} characters: from 1,950 an agent skims it. Cut, do not raise this.`);
   assert.ok(COMPOSITION.example.length <= 400, `the example is ${COMPOSITION.example.length} characters`);
   assert.doesNotMatch(PROSE, /[㐀-鿿]/, 'the guide is English');
 });

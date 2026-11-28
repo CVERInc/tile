@@ -153,8 +153,10 @@ title: Aster
 - **There is no height parameter.** Height comes from content: a row is at least one column-width
   square and grows to fit. `h=` is retired: ignored by the layout, never offered, never written.
 - `text` cells and cells with `bleed` always span all six columns, whatever their `w`.
-- On the wall a picture at `w=6` keeps its own aspect ratio; narrower, it is cropped to a square. In the
-  stack and list it is always shown whole. An `embed` is as tall as it is wide.
+- On the wall a bare picture (a `feature` with no `title`, `cta` or body) at `w=6` keeps its own aspect
+  ratio; narrower, it is cropped to a square. `label=on` at `w=6` crops it to 2:1; with a `title`, `cta`
+  or body it is not cropped. In the stack and list it is always shown whole. An `embed` is as tall as it
+  is wide on the wall; in the stack and list it fills the front.
 - Cells pack in file order, but a later narrow cell may fill a gap left earlier.
 - Width only matters on the wall view. Stack and list show each tile as a full-width card, which
   is why the editor sets width on the wall only.
