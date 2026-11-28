@@ -7,7 +7,8 @@
 //   2. the accepted values are exactly `https://<host>/corals` — each one comes back byte for byte,
 //      and the WHATWG URL parser agrees with every byte of it;
 //   3. every other value THROWS, naming the setting and the reason (a typo must stop the build, not
-//      ship a site whose scripts a policy then blocks);
+//      ship a site whose scripts a policy then blocks) — and never showing the value: what was
+//      pasted into the setting by mistake may be a secret, and a build log is not private;
 //   4. `new URL()` would have accepted most of those refused values, and quietly turned them into
 //      something else — that table is pinned here so nobody "simplifies" the reader into it;
 //   5. `runtimeSrc` cannot be made to name a URL outside the base;
@@ -23,6 +24,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspect } from 'node:util';
 import {
   SCRIPT_BASE_ENV, SCRIPT_BASE_GRAMMAR, RUNTIME_ID, ScriptBaseError,
   parseScriptBase, scriptBase, runtimeSrc, scriptBaseReader,
@@ -58,9 +60,42 @@ function refused(raw, reason, parse = parseScriptBase) {
   assert.equal(err.reason, reason, `${JSON.stringify(raw)} was refused as "${err.reason}": ${err.message}`);
   assert.ok(err.message.includes(SCRIPT_BASE_ENV), `the message does not name the setting: ${err.message}`);
   assert.ok(err.message.length > SCRIPT_BASE_ENV.length + 20, `the message gives no reason: ${err.message}`);
-  // What a build log shows must be printable: the refused value is quoted, never echoed raw.
+  // What a build log shows must be printable: no control character of a refused value can reach a
+  // terminal, because no character of it is in the message at all.
   assert.ok(/^[\x20-\x7e]+$/.test(err.message), `the message is not plain printable ASCII: ${JSON.stringify(err.message)}`);
+  // The value is described by its size, never shown. No ten consecutive characters of it are
+  // anywhere in what the error carries (ten: longer than anything the fixed wording shares with
+  // a value, such as `https://` or `/corals`).
+  if (typeof raw === 'string') {
+    assert.ok(err.message.includes(`${raw.length} character`), `the message does not give the value's length (${raw.length}): ${err.message}`);
+    const carried = everythingIn(err);
+    for (let i = 0; i + 10 <= raw.length; i++) {
+      assert.ok(!carried.includes(raw.slice(i, i + 10)), `the error shows part of the refused value (${JSON.stringify(raw.slice(i, i + 10))}): ${err.message}`);
+    }
+  }
   return err;
+}
+
+/** Every string an error could put in a log: message, stack, cause, own properties, its inspection. */
+function everythingIn(err) {
+  const seen = new Set();
+  const parts = [];
+  (function collect(v, depth) {
+    if (v === null || v === undefined || depth > 6) return;
+    if (typeof v !== 'object' && typeof v !== 'function') { parts.push(String(v)); return; }
+    if (seen.has(v)) return;
+    seen.add(v);
+    if (v instanceof Error) parts.push(String(v), String(v.stack), inspect(v, { depth: 8, showHidden: true }));
+    for (const key of Reflect.ownKeys(v)) {
+      parts.push(String(key));
+      let value;
+      try { value = v[key]; } catch { continue; }
+      collect(value, depth + 1);
+    }
+  })(err, 0);
+  let json = '';
+  try { json = JSON.stringify(err) ?? ''; } catch { json = ''; }
+  return parts.join('\n') + '\n' + json;
 }
 
 test('the setting is the environment variable SCRIPT_BASE', () => {
@@ -287,6 +322,85 @@ test('every other value throws, naming the setting and the reason', () => {
     'empty-host', 'trailing-dot', 'upper-case-host', 'host']) {
     assert.ok(reasons.has(r), `no invalid value exercises "${r}"`);
   }
+});
+
+// ── No echo ────────────────────────────────────────────────────────────────────────────────────
+// The setting is one paste away from a secret: a deploy token dropped into the wrong variable, a
+// URL with credentials in it. The error says which setting and why, gives the value's length and,
+// for a character that does not belong, its class and position — and none of the characters.
+const SECRET = 'Zq7Xv9Kp2Lm4Nw8Rt6Yb3Hd5Jc1Gf0Qs';
+
+test('🔴 a pasted secret is not in the error: not in its message, its stack, its cause or its properties', () => {
+  const pasted = [
+    [SECRET, 'scheme'],                                                             // a bare token
+    [SECRET.repeat(12), 'scheme'],                                                  // a long one (384 characters)
+    [`https://deploy:${SECRET}@scripts.example.net/corals`, 'userinfo'],            // credentials in a URL
+    [`https://${SECRET}@scripts.example.net/corals`, 'userinfo'],
+    [`https://scripts.example.net/corals?token=${SECRET}`, 'query'],
+    [`https://scripts.example.net/corals#${SECRET}`, 'fragment'],
+    [`https://scripts.example.net/corals/${SECRET}`, 'extra-path'],
+    [`https://scripts.example.net:8443/${SECRET}`, 'port'],
+    [`Bearer ${SECRET}`, 'whitespace'],
+    [`${SECRET}\n`, 'control-character'],                                           // a token with its newline
+    [`\x1b]0;${SECRET}\x07`, 'control-character'],                                  // …or inside a terminal escape
+    [`"${SECRET}"`, 'forbidden-character'],
+    [`${SECRET}%3D`, 'percent-escape'],
+    [`${SECRET}\u00e9`, 'non-ascii'],
+    [`https://${SECRET.toLowerCase()}.example.net/corals/`, 'trailing-slash'],      // a secret that is a valid host label
+  ];
+  const leaks = (err, raw) => {
+    const carried = everythingIn(err);
+    // Five consecutive characters of the secret, in either case, are enough to call it shown.
+    for (let i = 0; i + 5 <= SECRET.length; i++) {
+      const piece = SECRET.slice(i, i + 5);
+      if (carried.includes(piece) || carried.includes(piece.toLowerCase())) return `${JSON.stringify(piece)} of the secret`;
+    }
+    if (/deploy|Bearer/.test(carried)) return 'the text beside the secret';
+    if (carried.includes(raw)) return 'the whole value';
+    return '';
+  };
+  for (const [raw, reason] of pasted) {
+    const errors = [refused(raw, reason), refused(raw, reason, (v) => readEnv({ SCRIPT_BASE: v }))];
+    try { srcIn({ SCRIPT_BASE: raw }, 'head.js', '1.2.3'); } catch (e) { errors.push(e); }
+    assert.equal(errors.length, 3);
+    for (const err of errors) {
+      assert.equal(leaks(err, raw), '', `the error for a ${reason} value shows ${leaks(err, raw)}: ${err.message}`);
+      assert.equal(err.cause, undefined, 'the error has a cause, which a logger would print');
+      assert.deepEqual(Object.keys(err).sort(), ['name', 'reason'], 'the error carries a property beyond its name and reason');
+      assert.ok(err.message.includes(`${raw.length} characters`), err.message);
+    }
+  }
+  // A value that is not a string is described by its type, and its contents are not looked at.
+  const notAString = refused([`https://deploy:${SECRET}@scripts.example.net/corals`], 'not-a-string');
+  assert.equal(leaks(notAString, SECRET), '');
+  assert.match(notAString.message, /a value of type object/);
+  // An accepted base is not a secret, and a runtimeSrc error about its other arguments still does
+  // not repeat it.
+  const on = scriptBaseReader({ SCRIPT_BASE: GOOD });
+  for (const call of [() => on.runtimeSrc('../x.js', '1.2.3'), () => on.runtimeSrc('head.js', 'latest')]) {
+    assert.throws(call, (e) => e instanceof ScriptBaseError && !everythingIn(e).includes('scripts.example.net'));
+  }
+});
+
+test('🔴 the error says what kind of character does not belong and where, without showing it', () => {
+  const says = (raw, reason, pattern) => assert.match(refused(raw, reason).message, pattern);
+  says('https://scripts.exa\tmple.net/corals', 'control-character', /a control character at position 20 /);
+  says('\x1b[31mhttps://scripts.example.net/corals', 'control-character', /a control character at position 1 /);
+  says(GOOD + '\n', 'control-character', new RegExp(`a control character at position ${GOOD.length + 1} `));
+  says(' ' + GOOD, 'whitespace', /a space at position 1\. /);
+  says('https://scripts.example.net /corals', 'whitespace', /a space at position 28\. /);
+  says(GOOD + '"', 'forbidden-character', new RegExp(`a quote, an angle bracket or a backslash at position ${GOOD.length + 1}[ .]`));
+  says('https://scripts%2eexample.net/corals', 'percent-escape', /a percent sign at position 16 /);
+  says('https://b\u00fccher.example/corals', 'non-ascii', /a non-ASCII character at position 10 /);
+  // The length is of the value as given, however long, and is all that is said of its size.
+  assert.match(refused('x'.repeat(5000), 'scheme').message, /a value of 5000 characters/);
+  assert.match(refused('*', 'scheme').message, /a value of 1 character,/);
+  assert.match(refused(GOOD + '/', 'trailing-slash').message, new RegExp(`a value of ${GOOD.length + 1} characters`));
+  // Two different values of one length, refused for one reason, give the very same message: the
+  // message is a function of the reason, the length and a position, and of nothing else.
+  assert.equal('https://one.example.org/corals/'.length, 'https://two.example.net/corals/'.length);
+  assert.equal(refused('https://one.example.org/corals/', 'trailing-slash').message, refused('https://two.example.net/corals/', 'trailing-slash').message);
+  assert.equal(refused('https://one.example.org/cor\tals', 'control-character').message, refused('https://two.example.net/cor\x1bals', 'control-character').message);
 });
 
 test('the reason is only ever a diagnosis: nothing the grammar refuses is let through by it', () => {
@@ -592,7 +706,7 @@ test('🔴 there is no reset, and no way to hand the build\'s reader another env
 // dependencies and SAYS SO when they are absent — the same shape as the other build-backed tests.
 // The config's call is also the process's one read (above): whatever the build asks later comes
 // from it.
-test('🔴 a build with an invalid SCRIPT_BASE fails, naming the setting and the reason, and writes nothing', (t) => {
+test('🔴 a build with an invalid SCRIPT_BASE fails, naming the setting and the reason without showing the value, and writes nothing', (t) => {
   if (!existsSync(join(ASTRO, 'node_modules'))) {
     console.log('  · SKIPPED — no packages/sitetile/astro/node_modules (run npm install there): a real build was NOT shown to fail on a bad SCRIPT_BASE');
     t.skip('renderer dependencies absent');
@@ -602,12 +716,16 @@ test('🔴 a build with an invalid SCRIPT_BASE fails, naming the setting and the
   try {
     const r = spawnSync('npx', ['astro', 'build', '--outDir', out], {
       cwd: ASTRO, encoding: 'utf8',
-      env: { ...process.env, SITE_ID: 'smoke-site', SCRIPT_BASE: 'https://scripts.example.net/corals/' },
+      env: { ...process.env, SITE_ID: 'smoke-site', SCRIPT_BASE: `https://deploy:${SECRET}@scripts.example.net/corals` },
     });
     const said = `${r.stdout}\n${r.stderr}`;
     assert.notEqual(r.status, 0, 'the build succeeded with an invalid SCRIPT_BASE');
     assert.match(said, /SCRIPT_BASE/, said.slice(-2000));
-    assert.match(said, /trailing slash/, said.slice(-2000));
+    assert.match(said, /userinfo/, said.slice(-2000));
+    // What the build printed — the message, and whatever the build tool adds around it — does not
+    // show the value: not the credentials, and not the host they were pasted beside.
+    assert.ok(!said.includes(SECRET) && !said.includes(SECRET.slice(8, 16)), 'the build log shows the secret in the refused value');
+    assert.ok(!/deploy:|scripts\.example\.net/.test(said), 'the build log shows part of the refused value');
     assert.deepEqual(readdirSync(out), [], 'the refused build wrote files');
   } finally {
     rmSync(out, { recursive: true, force: true });

@@ -32,6 +32,12 @@
 // Any value that is neither off nor in the grammar THROWS. There is no fallback to off: a typo
 // must fail the build, not ship a site whose scripts a policy then blocks.
 //
+// THE ERROR NEVER SHOWS THE VALUE. A setting is one paste away from a secret — a token dropped into
+// the wrong variable, a URL with credentials in it — and a build log is read by more people than
+// the setting is. The error names the setting and the reason, gives the value's length and, where
+// one character does not belong, that character's class and position. No character of the value is
+// in the message, and the error carries no other property or cause that could hold one.
+//
 // ── The grammar, and the decisions in it ───────────────────────────────────────────────────────
 //   https://<host>/corals
 //   host   = label ("." label)* "." last-label     at most 253 characters, at least two labels
@@ -89,7 +95,17 @@ export class ScriptBaseError extends Error {
   }
 }
 
-/** A refused value as a build log may show it: quoted, plain printable ASCII, bounded in length. */
+/** How a refused SCRIPT_BASE is described: by its size (or its type), never by its characters. */
+function sized(raw) {
+  if (typeof raw !== 'string') return `a value of type ${raw === null ? 'null' : typeof raw}`;
+  return `a value of ${raw.length} character${raw.length === 1 ? '' : 's'}`;
+}
+
+/** Where the first character matching `re` is, counted from 1, as words for a message. */
+const position = (raw, re) => `at position ${raw.search(re) + 1}`;
+
+/** An ARGUMENT of runtimeSrc as a build log may show it: quoted, plain printable ASCII, bounded in
+ *  length. For names written in code only — never for the setting, which is not shown at all. */
 function shown(raw) {
   if (typeof raw !== 'string') return `a value of type ${raw === null ? 'null' : typeof raw}`;
   let out = '';
@@ -104,21 +120,22 @@ function shown(raw) {
 
 // Why a refused value was refused. This runs ONLY after the grammar has said no and only chooses
 // the words of the error: no path through it accepts anything. Checks are ordered from the whole
-// value inwards, so the first true statement is the one worth reading.
+// value inwards, so the first true statement is the one worth reading. Every sentence here is
+// fixed wording plus, at most, a position: none may quote the value or any part of it.
 const HOST_GRAMMAR = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 function diagnose(raw) {
   if (typeof raw !== 'string') return ['not-a-string', 'it is not a string'];
-  if (/[^\x00-\x7f]/.test(raw)) return ['non-ascii', 'it contains a non-ASCII character (internationalised host names are not accepted, in either spelling)'];
-  if (/[\x00-\x1f\x7f]/.test(raw)) return ['control-character', 'it contains a control character (a tab, a newline or similar)'];
-  if (raw.includes(' ')) return ['whitespace', 'it contains whitespace'];
-  if (/["'`<>\\]/.test(raw)) return ['forbidden-character', 'it contains a quote, an angle bracket or a backslash'];
-  if (raw.includes('%')) return ['percent-escape', 'it contains a percent sign (percent-escapes are not accepted)'];
+  if (/[^\x00-\x7f]/.test(raw)) return ['non-ascii', `it contains a non-ASCII character ${position(raw, /[^\x00-\x7f]/)} (internationalised host names are not accepted, in either spelling)`];
+  if (/[\x00-\x1f\x7f]/.test(raw)) return ['control-character', `it contains a control character ${position(raw, /[\x00-\x1f\x7f]/)} (a tab, a newline or similar)`];
+  if (raw.includes(' ')) return ['whitespace', `it contains a space ${position(raw, / /)}`];
+  if (/["'`<>\\]/.test(raw)) return ['forbidden-character', `it contains a quote, an angle bracket or a backslash ${position(raw, /["'`<>\\]/)}`];
+  if (raw.includes('%')) return ['percent-escape', `it contains a percent sign ${position(raw, /%/)} (percent-escapes are not accepted)`];
   if (!raw.startsWith('https://')) return ['scheme', 'it does not begin with exactly `https://` (lower case; no other scheme)'];
   const rest = raw.slice('https://'.length);
   const cut = rest.search(/[/?#]/);
   const authority = cut < 0 ? rest : rest.slice(0, cut);
   const tail = cut < 0 ? '' : rest.slice(cut);
-  if (authority.includes('@')) return ['userinfo', 'it carries userinfo (`user@host`)'];
+  if (authority.includes('@')) return ['userinfo', 'it carries userinfo (something before an `@` in front of the host; credentials never belong in this setting)'];
   if (/[[\]]/.test(authority)) return ['ip-literal', 'its host is an IP address literal; a host name is required'];
   if (authority.includes(':')) return ['port', 'it names a port (none is accepted, not even :443)'];
   if (authority === '') return ['empty-host', 'its host is empty'];
@@ -159,14 +176,15 @@ export function parseScriptBase(raw) {
     const host = raw.slice('https://'.length, -'/corals'.length);
     if (u && u.href === raw && u.origin === `https://${host}` && u.pathname === '/corals') return raw;
     throw new ScriptBaseError('grammar',
-      `${SCRIPT_BASE_ENV} is set to ${shown(raw)}, which is refused: a URL parser does not read it back unchanged. `
-      + `This is a defect in the reader's grammar, not in the value; the build stops rather than use it.`);
+      `${SCRIPT_BASE_ENV} is set to ${sized(raw)}, which is refused: a URL parser does not read it back unchanged. `
+      + `This is a defect in the reader's grammar, not in the value; the build stops rather than use it. (The value itself is not shown.)`);
   }
   const [reason, why] = diagnose(raw);
   throw new ScriptBaseError(reason,
-    `${SCRIPT_BASE_ENV} is set to ${shown(raw)}, which is refused: ${why}. `
+    `${SCRIPT_BASE_ENV} is set to ${sized(raw)}, which is refused: ${why}. `
     + `It must be exactly https://<host>/corals (lower case, no port, no trailing slash), or empty/unset to turn it off. `
-    + `The build stops here on purpose: a mistyped script base must not be treated as off.`);
+    + `The build stops here on purpose: a mistyped script base must not be treated as off. `
+    + `(The value itself is not shown, in case it holds a secret.)`);
 }
 
 // ── The one read ───────────────────────────────────────────────────────────────────────────────
