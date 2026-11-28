@@ -30,6 +30,8 @@ import {
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { checkScriptInventory, writeScriptGolden, scriptByteRanges, GOLDEN_PATH, REGENERATE } from './script-inventory.mjs';
 import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-headers.mjs';
 import { fileForPath } from './noindex-pass.mjs';
 import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
@@ -40,6 +42,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, 'dist-smoke');
 const LILAC_SOURCE = join(HERE, '../examples/lilac/theme.css');
 const LILAC_STAGED = join(HERE, 'src/themes/lilac.css');
+
+// Every build in this file is a build with SCRIPT_BASE UNSET (src/lib/script-base.mjs): the
+// renderer's scripts where they have always been. The builds below inherit this process's
+// environment, so a value left in the caller's shell would otherwise decide what this file
+// measures — and script-inventory.golden.json is, by definition, the unset build's inventory.
+delete process.env.SCRIPT_BASE;
+const SCRIPT_GOLDEN_BUILD = { SITE_ID: 'smoke-site', PLATFORM_ORIGIN: 'https://feelreef.com', SCRIPT_BASE: null };
 
 console.log('▸ astro build → dist-smoke/ (themeless + staged Lilac custom-theme fixtures)…');
 if (existsSync(LILAC_STAGED)) throw new Error(`refusing to shadow an existing staged theme: ${LILAC_STAGED}`);
@@ -337,6 +346,48 @@ function allCss() {
 
 const { pages, unaccounted, dataBlocks } = auditScripts();
 const badChunks = auditChunks();
+
+// ---- the script inventory golden (script-inventory.mjs; script-inventory.golden.json) ----
+// Every <script> on every page of the build above — inline ones by the hash of their exact bytes,
+// external ones by src, each with its attributes, in source order — and every .js file the build
+// wrote, compared with the committed golden. The allowlist audit above answers "is every script one
+// we know"; this answers "did any script on any page change at all", which is the question a change
+// that claims to leave the output alone has to answer. A red run prints the page and the script.
+// To accept a difference ON PURPOSE: `SITETILE_SCRIPT_GOLDEN=write node smoke-build.mjs` here, then
+// read the golden's diff line by line and commit it with the change that caused it.
+if (process.env.SITETILE_SCRIPT_GOLDEN === 'write') {
+  const wrote = writeScriptGolden(DIST, parseHtml, { build: SCRIPT_GOLDEN_BUILD });
+  console.log(`▸ SITETILE_SCRIPT_GOLDEN=write: wrote ${GOLDEN_PATH} (${JSON.stringify(wrote)}) — read its diff before committing it`);
+} else if (process.env.SITETILE_SCRIPT_GOLDEN) {
+  throw new Error(`SITETILE_SCRIPT_GOLDEN=${process.env.SITETILE_SCRIPT_GOLDEN}: the only value is "write" (${REGENERATE})`);
+}
+const scriptGolden = checkScriptInventory(DIST, parseHtml, { build: SCRIPT_GOLDEN_BUILD });
+
+// 🔴 The control: the same check, on a COPY of this build with one byte of one inline script
+// changed, must fail and must name that page and that script. Without it, a check that had stopped
+// reading the pages would look exactly like a check that passes. The copy lives outside this
+// checkout and is removed; neither the build output nor any source file is touched.
+function scriptGoldenControl() {
+  const copy = mkdtempSync(join(tmpdir(), 'sitetile-script-golden-control-'));
+  try {
+    cpSync(DIST, copy, { recursive: true });
+    const clean = checkScriptInventory(copy, parseHtml, { build: SCRIPT_GOLDEN_BUILD });
+    const page = 'index.html';
+    const bytes = readFileSync(join(copy, page));
+    const ranges = scriptByteRanges(bytes, parseHtml);
+    // the last inline script on the home page that the browser runs and that has bytes to change
+    const target = ranges.filter((r) => !r.external && r.end > r.start).at(-1);
+    if (!target) return { clean, flipped: null, target: null, total: ranges.length };
+    const at = target.start + Math.floor((target.end - target.start) / 2);
+    bytes[at] ^= 0x01;
+    writeFileSync(join(copy, page), bytes);
+    const flipped = checkScriptInventory(copy, parseHtml, { build: SCRIPT_GOLDEN_BUILD });
+    return { clean, flipped, target, total: ranges.length, page };
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
+}
+const scriptGoldenFlip = scriptGoldenControl();
 
 // ---- the icon set (see packages/sitetile/icon-core.mjs) ----
 // The model's own unit tests decode the bytes; what only THIS gate can prove is that a real
@@ -2142,6 +2193,21 @@ const checks = [
   // -- the JS accounting invariant (zero unaccounted JS) --
   ['zero framework hydration (no astro-island)', () => pages.every((p) => !readFileSync(p, 'utf8').includes('astro-island'))],
   ['every script accounted (PE allowlist)', () => unaccounted.length === 0],
+  // -- the script inventory golden (see the block that computes it, near the script audit) --
+  ['script inventory: every script on every page, and every .js file, equals the committed golden (SCRIPT_BASE unset)', () => {
+    assert.ok(scriptGolden.ok, `${scriptGolden.differences.length} difference(s) from script-inventory.golden.json — listed below`);
+    return scriptGolden.counts.pages === pages.length && scriptGolden.counts.inline > 0 && scriptGolden.counts.external > 0;
+  }],
+  ['🔴 script inventory CONTROL: an untouched copy of this build agrees with the build, and one flipped byte in one inline script of the copy fails the check, naming exactly that page and script', () => {
+    const { clean, flipped, target, total, page } = scriptGoldenFlip;
+    assert.deepEqual(clean.differences, scriptGolden.differences, 'the untouched copy does not read like the build it was copied from');
+    assert.ok(target && flipped, 'the home page has no inline script to change, so the control proved nothing');
+    assert.equal(flipped.ok, false, 'one byte of an inline script was changed and the check still passed');
+    const fresh = flipped.differences.filter((d) => !clean.differences.includes(d));
+    assert.equal(fresh.length, 1, `expected exactly one new difference, got ${fresh.length}: ${fresh.join(' | ')}`);
+    assert.ok(fresh[0].startsWith(`${page}: script #${target.index + 1} of ${total} changed (bytes)\n`), fresh[0]);
+    return true;
+  }],
   // 🩸 CONTROL for the exclusion above. Without this, "no unaccounted scripts" could go green
   // because executesAsScript() started returning false for everything — a gate that excuses more
   // than it means to looks exactly like a gate that passes.
@@ -2926,6 +2992,12 @@ for (const [name, fn] of checks) {
   if (!ok) fail++;
 }
 if (unaccounted.length) console.log('  ⚠ unaccounted scripts:\n    ' + unaccounted.join('\n    '));
+if (!scriptGolden.ok) {
+  console.log(`  ⚠ script inventory differs from the golden (${scriptGolden.differences.length}):\n    ` + scriptGolden.differences.join('\n    '));
+  console.log(`    If every line above is a change you meant: ${REGENERATE}\n    then read the golden's diff and commit it with the change that caused it.`);
+}
+// Printed even when green, like the data blocks below: what the golden covered in this run.
+console.log(`  · script inventory: ${scriptGolden.counts.pages} pages, ${scriptGolden.counts.scripts} scripts (${scriptGolden.counts.inline} inline, ${scriptGolden.counts.external} external), ${scriptGolden.counts.jsFiles} .js files`);
 // Printed even when green: what this gate declined to inspect is part of its result, not a detail.
 if (dataBlocks.length) console.log(`  · ${dataBlocks.length} non-executable data blocks skipped (${[...new Set(dataBlocks.map((a) => (/type\s*=\s*"([^"]*)"/i.exec(a) || [, '?'])[1]))].join(', ')})`);
 if (badChunks.length) console.log('  ⚠ unaccounted chunks: ' + badChunks.join(', '));
