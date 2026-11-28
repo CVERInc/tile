@@ -163,9 +163,10 @@
   // thing seen twice — the tile is the card's front — so they carry one name, data-deck-up, on whichever of the two is drawn: it
   // flies between the two places while the rest of the page cross-fades. The switcher has a name of its own and is not animated:
   // it is in one place in every view (deck.css, "one switcher, one place"), and it stays there.
-  // None of this where the browser has no view transitions (or no moveBefore: below), or the visitor asks for less motion: the switch is the instant one
-  // (to stack, the pile is still dealt). The state changes inside the transition's update — the browser takes its picture of the
-  // page as it was first, a frame later — so a press that arrives before that update has run waits for it.
+  // Where the browser has no view transitions (or no moveBefore: below) the same motion is made by hand (flip, below). Where the
+  // visitor asks for less motion there is none: the switch is the instant one (to stack, the pile is still dealt). In a
+  // transition the state changes inside its update — the browser takes its picture of the page as it was first, a frame
+  // later — so a press that arrives before that update has run waits for it.
   let gliding=null, glides=0;
   const vtName='data-deck-up', unname=()=>document.querySelectorAll('['+vtName+']').forEach(e=>e.removeAttribute(vtName));
   const vbTile=i=>{ if(typeof i!=='number')return null; for(const t of document.querySelectorAll('.vb-win .vb-tile')) if(!t.hidden&&t._i===i)return t; return null; };
@@ -175,9 +176,31 @@
   // the page at the wrong scroll offset when its update scrolls the document — no deck needed to see it, a long page and
   // scrollTo() in the update do it: the page as it was is drawn off screen at the start, the page as it is is drawn displaced
   // until the end, then jumps. A jump is what this is here to remove. Firefox was not looked at. Lift this for an engine when
-  // the smoke is green in it.
+  // the smoke is green in it (its `premise` step asks the bare engine, and says so when the answer changes).
+  // ---- …and everywhere else, by hand (FLIP; w3/deck-glide.smoke.mjs watches it travel in each engine) ----
+  // Until this, an engine left out above had the instant swap: every press to or from the wall, in every WebKit browser. The
+  // switch is made at once, as before; then what landed (the tile on the wall, the card in a pile) is drawn inside the box of
+  // what left, shrunk or grown to fit, in the middle — where the transition draws its picture of it — and let go, on the
+  // transition's own clock and curve. Everything else on the page fades in (the page as it was cannot fade out: there is no
+  // picture of it); the switcher is left alone. What lands is whole from the first frame: a card that comes up fades in by
+  // its own rule (.4 s), and that is ended here, or the one thing that travels would be the one thing not drawn. Only
+  // transform, opacity and z-index, on animations that take themselves away: nothing is left on any node, and a press in the
+  // middle of it is an ordinary press.
+  const flip=(m,up,from,land)=>{
+    const a=from&&from.isConnected?from.getBoundingClientRect():null;
+    if(!swap(m,null,up)) return false;
+    const to=a&&a.width&&a.height?land():null; if(!to||typeof to.animate!=='function') return true;
+    try{ to.getBoundingClientRect(); for(const x of to.getAnimations({subtree:true})) x.finish(); }catch(_){}   // (read first: its transitions start when its style is next worked out)
+    const b=to.getBoundingClientRect(); if(!b.width||!b.height) return true;
+    const own=getComputedStyle(to).transform, rest=[];
+    for(let n=to;n.parentNode&&n!==document.body;n=n.parentNode) for(const o of n.parentNode.children){ if(o===n||o.contains(seg))continue; const r=o.getBoundingClientRect(); if(r.width&&r.bottom>0&&r.top<innerHeight) rest.push(o); }
+    try{
+      to.animate([{transform:`translate(${a.left+a.width/2-b.left-b.width/2}px,${a.top+a.height/2-b.top-b.height/2}px) scale(${Math.min(a.width/b.width,a.height/b.height)})`+(own&&own!=='none'?' '+own:''),zIndex:9},{zIndex:9}],{duration:500,easing:'cubic-bezier(.3,.7,.3,1)'});
+      for(const o of rest) o.animate([{opacity:0},{}],{duration:500,easing:'ease'});   // (a lone keyframe would be where it ends)
+    }catch(_){}
+    return true; };
   const glide=m=>{
-    if(typeof document.startViewTransition!=='function'||typeof root.moveBefore!=='function'||matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+    if(matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
     const toWall=m==='spread';
     // the card or tile you are on, in the view you are leaving. Into a pile: the one under the middle of the wall (the pile opens
     // on it); null at the very top of the wall, where the pile opens on its first card.
@@ -185,10 +208,13 @@
     if(toWall) from=deck&&deck.up();
     else { const at=vb?vb.at():wallAt(); up={at,deal:false}; from=at==null?(deck?deck.tileFor(null):DRAW?null:tiles()[0]):vbTile(at)||(at.nodeType===1?at:null); }
     const face=toWall&&from&&from.querySelector('.deck-front > .st-cell');   // the tile on the card that is up (null: a card that is no tile)
+    // what it lands as, asked once the switch is made
+    const land=()=>toWall?(face&&face.isConnected&&face.closest('.deck-card')==null?face:vbTile(vb&&vb.at())):deck&&deck.up();
+    if(typeof document.startViewTransition!=='function'||typeof root.moveBefore!=='function') return flip(m,up,from,land);
     unname(); if(from) from.setAttribute(vtName,'');
     root.classList.add('deck-glide');
     let t; try{ t=document.startViewTransition(()=>{ unname(); swap(m,null,up);
-      const to=toWall?(face&&face.isConnected&&face.closest('.deck-card')==null?face:vbTile(vb&&vb.at())):deck&&deck.up();
+      const to=land();
       if(to) to.setAttribute(vtName,''); }); }
     catch(_){ unname(); root.classList.remove('deck-glide'); return false; }
     // a later glide skips this one (the browser ends a transition when another starts): only the latest one tidies up

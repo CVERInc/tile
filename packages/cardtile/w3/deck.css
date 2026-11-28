@@ -180,7 +180,9 @@ html.deck.open .deck-close{display:inline-flex}
    drawn): it flies from the one place to the other, position and size, in .5 s on the curve stack ⇄ list glide on, while
    the rest of the page cross-fades in the same .5 s. The switcher is held still — a name of its own, no animation, and its
    new state drawn at once: the pressed button changes, nothing moves. Taps go through to the page while it plays (the
-   switcher is where it was, and answers). Under prefers-reduced-motion deck.js starts no transition at all. */
+   switcher is where it was, and answers). Under prefers-reduced-motion deck.js starts no transition at all.
+   In any other browser the same flight is made by hand (deck.js flip: one transform animation on what lands, the same .5 s
+   and curve, the rest fading in) and none of the rules below is used. */
 [data-deck-up]{view-transition-name:deck-up}
 html.deck-glide .deck-seg{view-transition-name:deck-seg}
 html.deck-glide::view-transition{pointer-events:none}

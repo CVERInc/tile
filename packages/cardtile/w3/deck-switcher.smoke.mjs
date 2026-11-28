@@ -9,7 +9,8 @@
 //           (a 44 px way back beside the switcher, drawn in a pile only) is walked too, and its way back is centred on
 //           the switcher. One box for all of it: the same at both sizes' own rule, and the same on both pages.
 //   glide   TO OR FROM THE WALL IS ONE TRANSITION, in an engine the deck glides in (document.startViewTransition and
-//           Element.moveBefore — deck.js glide says why); anywhere else every switch is held to be the instant one. Each of
+//           Element.moveBefore — deck.js glide says why); anywhere else every switch is held to start none (the motion is
+//           made by hand there, deck.js flip — deck-glide.smoke.mjs watches the card travel in every engine). Each of
 //           the four presses to or from the wall starts exactly one, stack ⇄ list starts none (it keeps its own glide), and a
 //           page under prefers-reduced-motion starts none and switches at once. Every switch moves the document's scroll (the
 //           pile is on its fifth card, the wall is read far down): that is the case an engine can get wrong. In a transition: the card you are on (stack /
@@ -188,9 +189,9 @@ if (want('glide')) {
     const size = `${width}×${height}`;
     const { ctx, page } = await open('seat-stack', { width, height });
     // the engines the deck glides in (deck.js glide: view transitions AND Element.moveBefore); anywhere else every switch is
-    // the instant one, and that is what is held there
+    // made without one (by hand: deck.js flip), and that is what is held there
     const can = await page.evaluate(() => typeof document.startViewTransition === 'function' && typeof document.documentElement.moveBefore === 'function');
-    console.log(`   ${size}: this engine ${can ? 'is one the deck glides in' : 'is NOT one the deck glides in: every switch is held to be the instant one'}`);
+    console.log(`   ${size}: this engine ${can ? 'is one the deck glides in' : 'is NOT one the deck draws a view transition in: every switch is held to start none'}`);
     // Every switch here moves the document's scroll: the pile is on its fifth card, and the wall is read a long way down
     // before it is left. (A switch that keeps the scroll — the first card, the top of the wall — is the easy case.)
     await page.evaluate(() => window.__deckJump(4)); await page.waitForTimeout(400);
@@ -209,7 +210,7 @@ if (want('glide')) {
         if (FRAMES && wall) for (const ms of [0, 125, 250, 375, 500]) { const t0 = Date.now(); pics.push(await shot(page)); const w = ms + 125 - (Date.now() - t0); if (w > 0) await page.waitForTimeout(Math.min(w, 125)); }
         await settled(page);
         const n1 = await page.evaluate(() => window.__vts);
-        check(`${tag}: no view transition — ${wall ? 'this engine has the instant swap' : 'stack ⇄ list glides on its own'}`, n1 === n0, `${n1 - n0} started`);
+        check(`${tag}: no view transition — ${wall ? 'this engine makes the motion by hand' : 'stack ⇄ list glides on its own'}`, n1 === n0, `${n1 - n0} started`);
         check(`${tag}: the page is on ${to}`, (await view(page)) === to);
         if (FRAMES && wall) pics.forEach((p, i) => writeFileSync(join(FRAMES, `${ENGINE}-${width}-${at}-to-${to}-${i}.png`), p));
         at = to; continue;
@@ -309,4 +310,4 @@ if (want('premise')) {
 await browser.close();
 console.log(`\n${passes} passed, ${failures.length} failed (${ENGINE})`);
 if (failures.length) { console.log('\n' + failures.map((f) => '🔴 ' + f).join('\n')); process.exit(1); }
-console.log(glided ? '✅ the switcher stays put; the wall arrives as one motion' : `✅ the switcher stays put${want('glide') ? '; this engine keeps the instant swap (no transition was looked at)' : ''}`);
+console.log(glided ? '✅ the switcher stays put; the wall arrives as one motion' : `✅ the switcher stays put${want('glide') ? '; this engine starts no view transition (the motion made by hand is deck-glide.smoke.mjs\'s)' : ''}`);

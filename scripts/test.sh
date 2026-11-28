@@ -172,6 +172,9 @@ SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs
              # switch), and the switch to or from the wall as one view transition with no jump at either end.
              # It takes the base URL like the rest and does not need it: its pages are the cardtile worker's
              # own, answered in-process (the generated deck assets production serves).
+             # deck-glide.smoke.mjs: the card you are on travels on a switch to or from the wall. With no --engine it
+             # runs in EVERY engine this Playwright can launch and names the ones it could not (the motion was once
+             # missing in one engine family while the default engine was green).
              packages/cardtile/w3/*.smoke.mjs)
 # 🔴 A SECOND browser list, because the two are invoked differently and merging them would break
 # one of them silently. Every SMOKE_GLOBS entry is called `node <smoke> <base URL>` against the
