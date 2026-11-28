@@ -559,6 +559,36 @@ export const GEOMETRY = {
 };
 
 /**
+ * How to compose: what one tile is for, how much fits on it, and when Cards is the wrong tool.
+ *
+ * 🩸 Why it exists: an agent asked for "a presentation" reached for the cell type NAMED `slides`
+ * (an image carousel) and filled tiles with pictures. Every param was documented and nothing said
+ * what a tile is for. This is that missing half, for the agent door; English, like OPS's text.
+ *
+ * 🔴 Every number here is DERIVED, by ai-ops-composition.test.mjs, from w3/deck.css (the 3:4.2
+ * side, its padding, the text tile's fonts and line heights) and w3/deck.js (the 342 px design
+ * width). Change the card's shape or its type and that test fails until this text is rewritten.
+ * Characters per line assume an average Latin glyph of half an em: an estimate, and it says "about".
+ */
+export const COMPOSITION = {
+  unit: 'Cards is one public address holding tiles in file order. In the `stack` and `list` views each tile is drawn alone on one card: a portrait page, 3:4.2, designed 342 px wide. There is no landscape card. A reader steps through one card at a time; the `wall` view puts every tile on one page.',
+  oneIdea: 'One tile, one idea. A tile has one type: a card is text or a picture or a link, never a mix. For a second point add a tile.',
+  text: 'The default card is a `text` tile: one `### ` heading line (`#` and `##` are drawn small), then the body. A card shows 15 body lines, or a heading of up to 2 lines plus 12; a body line holds about 30 Latin or 16 CJK characters, a heading line about 20 or 10. More scrolls inside the card. Aim for a heading under 40 characters and at most 6 body lines. Text holds no pictures or tables.',
+  pictures: 'A picture only when the picture is the point: one `feature` tile. It is shown whole, not cropped: a 16:9 picture fills about 40% of the card, so prefer portrait. Upload it with put_asset and write `img=asset:<id>`, not a URL on another site, whose file can vanish. No words inside pictures.',
+  links: 'A `link` tile is one card with one address. A `social` tile lists up to 7 links on one card.',
+  cover: 'The first tile is the card on top when the address opens: the cover. Use a `profile` tile (the `title`, one line, optionally a logo) or a `text` tile.',
+  presentation: 'A presentation is a sequence of `text` tiles in speaking order: the cover, one card per point, a last card with the next step. `slides` is not for this: it is an image carousel inside one tile.',
+  notFor: 'Not for long documents, tables, code, wide charts or anything that needs landscape: say so and offer another format.',
+  ask: 'Before building, ask the owner what it is for, who will read it and about how many cards. Afterwards call preview_cards and look before saving.',
+  example:
+    '---\ntitle: Why the launch moved\n---\n\n## grid\n\n' +
+    '- [ ] %% card: profile w=6 %% Product review, March.\n' +
+    '- [ ] %% card: text %%\n\t### The date moved two weeks\n\tTesting found a fault in checkout. Fixing it first removes the largest risk.\n' +
+    '- [ ] %% card: text %%\n\t### What we need from you\n\tApprove the new date by Friday.\n' +
+    '- [ ] %% card: link w=6 %% [Read the full plan](https://example.org/plan)\n',
+};
+
+/**
  * The host ↔ editor contract: a page embeds `/edit?host=<its own origin>` in an iframe and talks to
  * it with postMessage. Exactly what w3/host-bridge.mjs (and its route in serve/card-worker.mjs) does.
  * Every message carries `v` (EDITOR_PROTOCOL.v) and a `type`; messages without both are ignored.

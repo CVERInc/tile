@@ -454,7 +454,11 @@ export const CELL_STRINGS_BY_KEY = {
   },
   'type.slides.hint': {
     zh: '好幾個圖片輪流顯示。', ja: '複数の画像を順に表示します。',
-    en: 'Several pictures, one after another.',
+    // 🩸 `en` is also what an agent is told this tile is for (describe_card_grammar reads the hint in
+    // English). It said only 「Several pictures, one after another.」, and an agent asked for a
+    // presentation took a tile named `slides` at its word. ai-ops-composition.test.mjs pins the
+    // first sentence. The other eight are read by people only, in the editor, and are unchanged.
+    en: 'An image carousel inside one tile, not a way to build a presentation. For a presentation, give each point a tile of its own (see the composition guide).',
     ko: '여러 장의 사진을 차례로 보여 줘요.', 'zh-Hans': '好几张图片轮流显示。',
     de: 'Mehrere Bilder, eines nach dem anderen.',
     fr: 'Plusieurs images, l’une après l’autre.',

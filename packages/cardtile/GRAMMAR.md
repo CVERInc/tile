@@ -16,6 +16,17 @@ rules are exported as data from [ai-ops.mjs](ai-ops.mjs) (`FRONTMATTER`, `CARD_S
 `GEOMETRY`, `EDITOR_PROTOCOL`), and [ai-ops-card.test.mjs](ai-ops-card.test.mjs) holds that data,
 and every whole-card example below, to what the code reads.
 
+## Composing
+
+What one tile is for, how much fits on a card, how to lay out a presentation and when Cards is the
+wrong tool is written once, for agents, as `COMPOSITION` in [ai-ops.mjs](ai-ops.mjs). It is not
+repeated here. Its numbers (lines of text per card, characters per line, links per card) are
+derived from [w3/deck.css](w3/deck.css) and [w3/deck.js](w3/deck.js) by
+[ai-ops-composition.test.mjs](ai-ops-composition.test.mjs), which fails when the card's shape,
+design width or type changes and the guide does not. The short form: in the stack and list views
+each tile is one portrait card, so one tile carries one idea, and a presentation is a sequence of
+`text` tiles. The `slides` tile is an image carousel inside one tile, not a way to build one.
+
 ## Card settings (frontmatter)
 
 One `key: value` per line between the `---` fences at the top of the file. **A key at its default
