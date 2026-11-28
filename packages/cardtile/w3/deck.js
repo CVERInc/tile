@@ -149,6 +149,7 @@
     if(o&&o.glide&&(m==='spread')!==(mode==='spread')&&glide(m)) return true;
     return swap(m,o); };
   const swap=(m,o,up)=>{ if(!VIEWS.includes(m)||m===mode)return false;
+    flyEnd();   // a flight still on its way (flip, below) is over: the newest switch wins at once
     if(!PIN&&!(o&&o.quiet)){ try{localStorage.setItem(LS,m);}catch(_){} }
     const held=seg.contains(document.activeElement)?document.activeElement:null;
     if(mode==='spread'){ const at=up?up.at:vb?vb.at():wallAt(); mode=m; paintRoot(); if(deck) deck.enter(at,up); else deck=buildDeck(at,up); }
@@ -184,20 +185,47 @@
   // transition's own clock and curve. Everything else on the page fades in (the page as it was cannot fade out: there is no
   // picture of it); the switcher is left alone. What lands is whole from the first frame: a card that comes up fades in by
   // its own rule (.4 s), and that is ended here, or the one thing that travels would be the one thing not drawn. Only
-  // transform, opacity and z-index, on animations that take themselves away: nothing is left on any node, and a press in the
-  // middle of it is an ordinary press.
+  // transform, opacity and z-index, on animations that take themselves away: no class, attribute or style is put on any node.
+  // 🔴 ONE OWNER. `fly` is the flight still on its way — what travels, and every animation made for it — and flyEnd() is the
+  // one way it is over before its time: its animations are cancelled (what travels is where it lands, the rest is whole) and
+  // input is let through again. Whatever comes next calls it FIRST, so the newest action wins at once and plays from where
+  // things really are: any switch (swap, which is also the way out to the wall), a card turned over (open), the fan (fanOut),
+  // the pile re-arranged for any reason (paint: a walk, a jump, a run, a fold), a drag, the list scrolled. An animation made
+  // by script is drawn over a rule's and over an inline style for as long as it plays: left running, the flight held the card
+  // under its neighbours (z-index 9) and off its place while the next motion played unseen beneath it, then let go in one jump.
+  // Left to itself the flight is over when its animations are.
+  // 🔴 NO INPUT REACHES WHAT TRAVELS. It is hit where it is drawn, half-way there, and a tap on it used to turn the card over
+  // in mid-air (and, on the wall, follow the tile's link). For as long as it travels a press or a click on it is stopped at
+  // the window, before any listener of the page, and does nothing. Everything else answers: the switcher, the other cards,
+  // the table, the keys.
+  let fly=null;
+  const MUTED=['pointerdown','mousedown','click','auxclick','dblclick','contextmenu'];
+  const mute=e=>{ if(fly&&e.target&&e.target.nodeType&&fly.on.contains(e.target)){ e.stopImmediatePropagation(); if(e.cancelable) e.preventDefault(); } };
+  const flyEnd=()=>{ const f=fly; if(!f)return; fly=null; for(const k of MUTED) removeEventListener(k,mute,true); for(const x of f.anims){ try{ x.cancel(); }catch(_){} } };
   const flip=(m,up,from,land)=>{
     const a=from&&from.isConnected?from.getBoundingClientRect():null;
     if(!swap(m,null,up)) return false;
     const to=a&&a.width&&a.height?land():null; if(!to||typeof to.animate!=='function') return true;
-    try{ to.getBoundingClientRect(); for(const x of to.getAnimations({subtree:true})) x.finish(); }catch(_){}   // (read first: its transitions start when its style is next worked out)
+    to.getBoundingClientRect();   // (read first: its transitions start when its style is next worked out)
+    // each in a guard of its own: one that never ends (a caret, a spinner inside the tile) throws when asked to finish, and
+    // the ones after it are ended all the same
+    let was=[]; try{ was=to.getAnimations({subtree:true}); }catch(_){}
+    for(const x of was){ try{ x.finish(); }catch(_){} }
     const b=to.getBoundingClientRect(); if(!b.width||!b.height) return true;
+    // the rest: what is beside it, and beside each box that holds it — and of those only what is drawn in the window (a long
+    // pile holds 51 cards: three are drawn in the stack, and in the list the row runs off both sides). One box for all of it
+    // is not to be had: whatever holds the rest holds what travels too, and that has to be whole from the first frame.
     const own=getComputedStyle(to).transform, rest=[];
-    for(let n=to;n.parentNode&&n!==document.body;n=n.parentNode) for(const o of n.parentNode.children){ if(o===n||o.contains(seg))continue; const r=o.getBoundingClientRect(); if(r.width&&r.bottom>0&&r.top<innerHeight) rest.push(o); }
+    const drawn=o=>{ const r=o.getBoundingClientRect(); if(!r.width||r.bottom<=0||r.top>=innerHeight||r.right<=0||r.left>=innerWidth)return false; const c=getComputedStyle(o); return c.visibility!=='hidden'&&c.opacity!=='0'; };
+    for(let n=to;n.parentNode&&n!==document.body;n=n.parentNode) for(const o of n.parentNode.children){ if(o!==n&&!o.contains(seg)&&drawn(o)) rest.push(o); }
+    const anims=[], f={on:to,anims,y:scrollY};
     try{
-      to.animate([{transform:`translate(${a.left+a.width/2-b.left-b.width/2}px,${a.top+a.height/2-b.top-b.height/2}px) scale(${Math.min(a.width/b.width,a.height/b.height)})`+(own&&own!=='none'?' '+own:''),zIndex:9},{zIndex:9}],{duration:500,easing:'cubic-bezier(.3,.7,.3,1)'});
-      for(const o of rest) o.animate([{opacity:0},{}],{duration:500,easing:'ease'});   // (a lone keyframe would be where it ends)
+      anims.push(to.animate([{transform:`translate(${a.left+a.width/2-b.left-b.width/2}px,${a.top+a.height/2-b.top-b.height/2}px) scale(${Math.min(a.width/b.width,a.height/b.height)})`+(own&&own!=='none'?' '+own:''),zIndex:9},{zIndex:9}],{duration:500,easing:'cubic-bezier(.3,.7,.3,1)'}));
+      for(const o of rest) anims.push(o.animate([{opacity:0},{}],{duration:500,easing:'ease'}));   // (a lone keyframe would be where it ends)
     }catch(_){}
+    if(!anims.length) return true;
+    fly=f; for(const k of MUTED) addEventListener(k,mute,true);
+    Promise.allSettled(anims.map(x=>x.finished)).then(()=>{ if(fly===f) flyEnd(); });
     return true; };
   const glide=m=>{
     if(matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
@@ -210,7 +238,8 @@
     const face=toWall&&from&&from.querySelector('.deck-front > .st-cell');   // the tile on the card that is up (null: a card that is no tile)
     // what it lands as, asked once the switch is made
     const land=()=>toWall?(face&&face.isConnected&&face.closest('.deck-card')==null?face:vbTile(vb&&vb.at())):deck&&deck.up();
-    if(typeof document.startViewTransition!=='function'||typeof root.moveBefore!=='function') return flip(m,up,from,land);
+    // (no Element.animate either: no flight can be made — the instant switch, and the pile is dealt)
+    if(typeof document.startViewTransition!=='function'||typeof root.moveBefore!=='function') return typeof root.animate==='function'&&flip(m,up,from,land);
     unname(); if(from) from.setAttribute(vtName,'');
     root.classList.add('deck-glide');
     let t; try{ t=document.startViewTransition(()=>{ unname(); swap(m,null,up);
@@ -418,7 +447,7 @@
   // horizontal drag on the top card: it follows the pointer; released past 30% of its width it is flung to the next (left) / previous (right)
   let drag=null;
   stack.addEventListener('pointerdown',e=>{ if(LIST||openCard||fanned||running)return; const c=e.target.closest('.deck-card'); if(!c||!c.classList.contains('is-top'))return; if(e.target.closest('a,button,input,select,textarea,.cp-icon,#qr-holder'))return; drag={id:e.pointerId,x0:e.clientX,y0:e.clientY,dx:0,card:c,moved:false}; },true);
-  document.addEventListener('pointermove',e=>{ if(!drag||e.pointerId!==drag.id)return; const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0; if(!drag.moved){ if(Math.abs(dx)<8&&Math.abs(dy)<8)return; if(Math.abs(dy)>Math.abs(dx)){drag=null;return;} drag.moved=true; drag.card.classList.add('dragging'); try{drag.card.setPointerCapture(e.pointerId);}catch(_){} } drag.dx=dx; drag.card.style.setProperty('--dragx',(dx>0&&cur===0?dx*0.28:dx)+'px'); e.preventDefault(); },{passive:false});
+  document.addEventListener('pointermove',e=>{ if(!drag||e.pointerId!==drag.id)return; const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0; if(!drag.moved){ if(Math.abs(dx)<8&&Math.abs(dy)<8)return; if(Math.abs(dy)>Math.abs(dx)){drag=null;return;} drag.moved=true; flyEnd(); drag.card.classList.add('dragging'); try{drag.card.setPointerCapture(e.pointerId);}catch(_){} } drag.dx=dx; drag.card.style.setProperty('--dragx',(dx>0&&cur===0?dx*0.28:dx)+'px'); e.preventDefault(); },{passive:false});
   const dragEnd=e=>{ if(!drag||(e&&e.pointerId!==drag.id))return; const d=drag; drag=null; if(!d.moved)return; const w=d.card.getBoundingClientRect().width; d.card.classList.remove('dragging'); d.card.style.removeProperty('--dragx');
     const n=N; const ph=pageH();
     if(SWIPE&&d.dx<-w*0.3&&cur===n-1){ endFlip('drag'); }   /* past the last card it turns over to its back (the try-it button on our own pages); it used to wrap to the first card, and a tester swiped round and round without ever finding the button */
@@ -453,7 +482,7 @@
   // for again turns at once: its back never left it. With reduced motion there is no turn, so nothing waits.
   const PUT_MS=600; let putting=null, putT=0, wants=null;
   const putOver=c=>{ if(putting!==c)return; clearTimeout(putT); putting=null; const k=wants; wants=null; if(k&&ON&&!openCard&&!fanned&&k.isConnected&&idx(k)===cur&&k.querySelector('.deck-back')&&(LIST||k.classList.contains('is-top'))) open(k); };   /* only the card that is still up, and still has a back: anything else and the request is dropped */
-  const open=card=>{if(putting&&putting!==card){wants=card;return;}if(putting){clearTimeout(putT);putting=null;}wants=null;if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');if(bk){bk.scrollTop=0;tellMore(bk);}/* a back is read from its top each time it is turned up, and says at once whether it holds more (the back may have been lent to this tile a moment ago) */bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
+  const open=card=>{flyEnd();/* a card that is turned over while it still travels (glide: flip) has landed */if(putting&&putting!==card){wants=card;return;}if(putting){clearTimeout(putT);putting=null;}wants=null;if(card.dataset.back)lend(card);docksInert(true);ensureQr();openCard=card;card.classList.add('is-open');lastFocus=document.activeElement;try{history.pushState({deck:'open'},'');pushed=true;}catch(_){}card.classList.remove('flipping-close');void card.offsetWidth;card.classList.add('flipping-open','flipped');card.dispatchEvent(new CustomEvent('deck:open',{bubbles:true}));card.addEventListener('animationend',function h(e){if(e.animationName!=='deck-pick')return;card.removeEventListener('animationend',h);card.classList.remove('flipping-open');});document.documentElement.classList.add('open');const bk=card.querySelector('.deck-back');if(bk){bk.scrollTop=0;tellMore(bk);}/* a back is read from its top each time it is turned up, and says at once whether it holds more (the back may have been lent to this tile a moment ago) */bk&&setTimeout(()=>{ if(openCard===card) bk.focus({preventScroll:true}); },620);};   /* only while it is still held: a card put back before the turn ends (a view switch does that) must not take focus to a face nobody sees */
   let lastFocus=null;
   const close=()=>{wants=null;/* putting back is also taking back a card that was asked for and has not turned yet */if(!openCard)return;const c=openCard;if(pushed){pushed=false;try{history.back();}catch(_){}}c.classList.remove('is-open');c.classList.remove('flipping-open');void c.offsetWidth;c.classList.add('flipping-close');c.addEventListener('animationend',function h(e){if(e.animationName!=='deck-put')return;c.removeEventListener('animationend',h);c.classList.remove('flipped');putOver(c);});if(!matchMedia('(prefers-reduced-motion: reduce)').matches){clearTimeout(putT);putting=c;putT=setTimeout(()=>putOver(c),PUT_MS);}else c.classList.remove('flipped');/* no animation, so no animationend: the face goes back now, or the card would show its back for good *//* flipping-close stays: its fill IS the rest pose, so nothing re-animates after the end; the next open() removes it */openCard=null;document.documentElement.classList.remove('open');docksInert(false);if(lastFocus&&lastFocus.focus){lastFocus.focus();lastFocus=null;}};
   // ---- marks: a side that holds more than it shows says so, at the edge that has more beyond it (tile#343) ----
@@ -588,6 +617,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     for(const c of want){ while(node&&(node===shade||node.classList.contains('travel')))node=above(node); if(node!==c)put(c,node); else node=above(node); }
   }
   function paint(){
+    flyEnd();   // the pile is being re-arranged: a card still travelling in from the wall (glide: flip) has landed
     syncWin();
     cards.forEach(c=>{const j=idx(c); const r=rel(j); c.classList.remove('is-next1','is-next2','is-deep','is-top');
       if(r!==0&&!LIST)c.classList.remove('flipping-open','flipping-close','flipped');   // in list any card may be open, not only the centred one
@@ -631,11 +661,14 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // landing, fanOut, the next fanIn, a switch to the list, leave), so nothing of a fold is ever still to come: no timer.
   // The faces too are told not to glide: a card that put its edge shadow down for the fold (deck.css) and is still drawn when
   // the fold is given up (the list, a fan opened again) has it back at once, not a fifth of a second later.
-  let fanIdx=[], fold=null;
-  const foldEnd=()=>{ const f=fold; if(!f)return; fold=null; document.documentElement.classList.remove('fan-folding');
+  // cut: the pile is going out of sight (leave). The cards' flights home are ended too, there and then — left playing, they
+  // were still playing on a pile that came back within the half second, every card but the one that is up.
+  let fanIdx=[], fold=null, foldFlights=[];
+  const foldEnd=cut=>{ const f=fold; if(!f)return; fold=null; if(cut) for(const x of foldFlights){ try{ x.cancel(); }catch(_){} } foldFlights=[]; document.documentElement.classList.remove('fan-folding');
     const still=f.concat(...f.map(c=>[...c.querySelectorAll('.deck-face')]));
     still.forEach(e=>{ e.style.transition='none'; }); f.forEach(c=>{ c.style.opacity=''; c.style.visibility=''; }); void stack.offsetWidth; still.forEach(e=>{ e.style.transition=''; }); };
   const fanOut=()=>{ if(!ON||LIST||fanned||openCard||running||stack.classList.contains('busy'))return; fanned=true; fanHot=-1;
+    flyEnd();   // a card still travelling in from the wall has landed: the fan opens from where the cards are
     foldEnd();   // opened again before a fold was over: that fold is over now, its ending cannot come later and hide this fan's cards
     fanIdx=N<=FANMAX?[...Array(N).keys()]:Array.from({length:FANMAX},(_,k)=>Math.round(k*(N-1)/(FANMAX-1)));
     { const fc=fanIdx.map(card); for(const c of cards) if(!fc.includes(c)) away(c); cards.length=0; fc.forEach(c=>cards.push(c)); }   // during the fan, the window IS the fan
@@ -658,7 +691,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
     // early on a page that hangs as the fold starts (the cards were hidden in mid-air) and late in a tab that is not shown.
     // finally: whatever is thrown in here, the fold still ends, when the animations that did start are over (at once if none
     // did). Only the fold that is still the one under way may end it (`fold===mine`): a fold given up for a newer fan has ended.
-    foldEnd(); const mine=fold=cards.slice(), flights=[];
+    foldEnd(); const mine=fold=cards.slice(), flights=foldFlights=[];
     try{
       document.documentElement.classList.remove('fan'); document.documentElement.classList.add('fan-folding'); paint();
       cards.forEach(c=>{ c.style.transition='none'; c.style.transform=''; c.style.pointerEvents=''; c.classList.remove('fan-hot'); });   // solid while travelling home (opacity/visibility inline stay)
@@ -682,7 +715,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   document.addEventListener('pointerup',e=>{ if(!fanned||notTable(e))return; fanDown=false; e.preventDefault(); e.stopPropagation(); const u=e.pointerType==='mouse'?fanUnder(e.clientX,e.clientY):-1; fanPick(u>=0?u:fanNearest(e.clientX,e.clientY)); },true);
   document.addEventListener('pointercancel',()=>{ fanDown=false; fanHover(-1); },true);
   stack.addEventListener('click',e=>{ if(document.documentElement.classList.contains('fan-closing')){e.preventDefault();e.stopPropagation();} },true);
-  document.addEventListener('click',e=>{ if(!ON||openCard||fanned||document.documentElement.classList.contains('fan-closing'))return; if(e.target.closest('.deck-card,.deck-bar,.deck-seg,.deck-player,a,button,input,label,.cp-icon,#qr-holder,#qr-overlay,#qr-group,dc-dock,[data-dynamic-coral]'))return; fanOut(); });   // dock items retarget shadow clicks to the host: not the table
+  document.addEventListener('click',e=>{ if(!ON||openCard||fanned||document.documentElement.classList.contains('fan-closing'))return; if(e.target.closest('.deck-card,.deck-bar,.deck-seg,.deck-player,a,button,input,label,.cp-icon,#qr-holder,#qr-overlay,#qr-group,dc-dock,[data-dynamic-coral]'))return;
+    if(e.target===root&&root.classList.contains('deck-glide'))return;   // under the wall's view transition a click anywhere lands on the root (the pictures cover the page): one aimed at the card as it flew in opened the fan. Not the table: nothing
+    fanOut(); });   // dock items retarget shadow clicks to the host: not the table
   let queue=0, running=false, runT=0, wrapping=false;   // wrapping: the run queued by wrapBack() is under way
   const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
   let movedOnce=false, moveTimer=null;
@@ -748,7 +783,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   const sync=()=>{ syncQueued=false; if(openCard||fanned)return;
     { const ph=pageH(); const off=scrollY/ph-cur; const f=ph>=innerHeight*0.5?Math.max(-1,Math.min(1,off)):0; const top=card(cur); cards.forEach(c=>{ if(c!==top&&c.style.getPropertyValue('--peek')) c.style.removeProperty('--peek'); }); if(top&&!running&&!top.classList.contains('travel')){ const lift=Math.abs(f)<0.5?f*-180:0; top.classList.toggle('peeking',Math.abs(lift)>0.5); top.style.setProperty('--peek',lift.toFixed(1)+'px'); } } const want=Math.max(0,Math.min(N-1,Math.round(scrollY/pageH()))); if(want!==0) settleWrap(); const d=want-(cur+queue); if(Math.abs(d)>JUMP&&!openCard){ queue=0; cur=want; unask(); paint(); } else if(d)step(d); };   // far = a jump (thumb-drag across a long deck), near = the walk   // one swipe = one card is the browser's job (scroll-snap-stop: always); clamping here broke thumb-drag and End
   // list: the vertical scroll position IS the horizontal position — one rail, one scrollbar, one snap per card
-  const listTx=()=>{ if(!ON||!LIST)return; const ph=pageH(); const k=scrollY/ph; const want=Math.max(0,Math.min(N-1,Math.round(k))); if(want!==cur){ cur=want; unask(); if(openCard&&openCard!==card(cur)) close(); paint(); }
+  const listTx=()=>{ if(!ON||!LIST)return; if(fly&&Math.abs(scrollY-fly.y)>2) flyEnd(); /* the row is being scrolled: a card still travelling in from the wall has landed, in the row */ const ph=pageH(); const k=scrollY/ph; const want=Math.max(0,Math.min(N-1,Math.round(k))); if(want!==cur){ cur=want; unask(); if(openCard&&openCard!==card(cur)) close(); paint(); }
     const w=cards[0]?cards[0].getBoundingClientRect().width:400; const s0=cards[0]?idx(cards[0]):0; const kk=N>SNAPMAX&&Math.abs(k-Math.round(k))<0.06?Math.round(k):k; stack.style.setProperty('--tx',(-(kk-s0)*(w+18)).toFixed(1)+'px');   /* a long deck's card is ~17px of scroll and scrollY is whole pixels: at rest, sit exactly on the card */   /* the row starts at the window's first card */ if(Date.now()-homing>=800) document.documentElement.classList.toggle('list-away',scrollY>ph/2); };
   // a long deck has no snap points (SNAPMAX): when scrolling stops between two cards, glide to the nearer one
   let settleT=0; const settle=()=>{ if(N<=SNAPMAX)return; clearTimeout(settleT); settleT=setTimeout(()=>{ const ph=pageH(); const k=Math.round(scrollY/ph); if(Math.abs(scrollY-k*ph)>0.5) scrollTo({top:k*ph,behavior:'smooth'}); },160); };
@@ -814,7 +849,7 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   let LD=null;
   stack.addEventListener('pointerdown',e=>{ if(!SWIPE||!LIST||openCard||e.pointerType!=='touch')return; LD={id:e.pointerId,x0:e.clientX,y0:e.clientY,s0:scrollY,on:false,lx:e.clientX,lt:performance.now(),v:0}; },true);
   document.addEventListener('pointermove',e=>{ if(!LD||e.pointerId!==LD.id)return; const dx=e.clientX-LD.x0, dy=e.clientY-LD.y0;
-    if(!LD.on){ if(Math.abs(dx)<8&&Math.abs(dy)<8)return; if(Math.abs(dy)>Math.abs(dx)){LD=null;return;} LD.on=true; html.style.scrollSnapType='none'; }
+    if(!LD.on){ if(Math.abs(dx)<8&&Math.abs(dy)<8)return; if(Math.abs(dy)>Math.abs(dx)){LD=null;return;} LD.on=true; flyEnd(); html.style.scrollSnapType='none'; }
     const c=card(cur), w=(c?c.getBoundingClientRect().width:300)+18, t=performance.now();
     LD.v=(e.clientX-LD.lx)/Math.max(1,t-LD.lt); LD.lx=e.clientX; LD.lt=t;
     scrollTo({top:LD.s0-dx*(pageH()/w),behavior:'instant'}); e.preventDefault(); },{passive:false});
@@ -827,9 +862,9 @@ const FILEDECK=document.documentElement.hasAttribute('data-card-src');   /* the 
   // what the pile answers the page with (the dice asks these); taken away on the wall, where there is no pile to jump
   const API={}; for(const k of ['__mdFirst','__mdCount','__deckJump','__deckRiffle','__deckCount','__deckCur']) API[k]=window[k];
   const seatOf=c=>typeof c==='number'?Math.max(0,Math.min(N-1,P+c)):Math.max(0,cells.indexOf(c));   // a tile's card has the tile's own place in the dealt order as its number; a number is an item of the card file (the file wall's vb.at)
-  // leave: put a held card back, fold the fan, stop answering, and send every tile home. Returns the tile of the card that was up
+  // leave: put a held card back, fold the fan (and end the fold: its flights too), stop answering, and send every tile home. Returns the tile of the card that was up
   // (over a card file: the number of the item that was up).
-  const leave=()=>{ settleWrap(); if(fanned)fanIn(); foldEnd(); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
+  const leave=()=>{ settleWrap(); if(fanned)fanIn(); foldEnd(true); close(); const up=M?(cur>=P+M?M-1:cur>=P?cur-P:-1):cells.length?cells[Math.min(cur,cells.length-1)]:null;   // over a card file: the item's number (−1: a card before the items)
     queue=0; drag=null; LD=null; hx=-1; ON=false; stack.classList.remove('hov'); root.classList.remove('list-away','fan','fan-folding','fan-closing','moving','open');
     cards.forEach(c=>c.style.removeProperty('--peek')); rehome(true); for(const k in API) delete window[k]; return up; };
   // enter: the tiles take their seats again and the pile is dealt, open on the card whose tile was in the middle of the wall

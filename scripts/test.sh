@@ -174,7 +174,9 @@ SMOKE_GLOBS=(hosts/web/*/*.smoke.mjs hosts/web/*/smoke.mjs
              # own, answered in-process (the generated deck assets production serves).
              # deck-glide.smoke.mjs: the card you are on travels on a switch to or from the wall. With no --engine it
              # runs in EVERY engine this Playwright can launch and names the ones it could not (the motion was once
-             # missing in one engine family while the default engine was green).
+             # missing in one engine family while the default engine was green). In each it also runs with
+             # Element.moveBefore taken away, so the flight deck.js makes by hand is run whatever launches;
+             # a run where that flight was never seen travelling fails.
              packages/cardtile/w3/*.smoke.mjs)
 # 🔴 A SECOND browser list, because the two are invoked differently and merging them would break
 # one of them silently. Every SMOKE_GLOBS entry is called `node <smoke> <base URL>` against the
