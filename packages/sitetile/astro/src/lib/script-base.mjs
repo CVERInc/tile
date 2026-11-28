@@ -11,6 +11,11 @@
 // setting. Nothing calls `runtimeSrc` yet, so no page changes whether the setting is on or off;
 // `astro.config.mjs` calls `scriptBase()` once so that a bad value stops the build.
 //
+// READ ONCE. The first `scriptBase()` (or `runtimeSrc()`) of a process reads the environment,
+// validates it and keeps the outcome — a base, off, or the refusal — for the life of the process.
+// Changing `process.env` afterwards changes nothing: one build cannot have the setting off on one
+// page and on on the next, or two bases. The config's call is that first read. See "The one read".
+//
 // ── This is security code ──────────────────────────────────────────────────────────────────────
 // The value decides which origin a page's scripts load from, and it is written in two places that
 // must agree byte for byte: the `src` of every runtime script, and the policy that allows them.
@@ -164,12 +169,68 @@ export function parseScriptBase(raw) {
     + `The build stops here on purpose: a mistyped script base must not be treated as off.`);
 }
 
+// ── The one read ───────────────────────────────────────────────────────────────────────────────
+// An outcome is what one read of an environment came to: `{ value }` (a base, or `''` for off) or
+// `{ error }` (the refusal). It is made once and never recomputed.
+function readOnce(env) {
+  try { return Object.freeze({ value: parseScriptBase(env[SCRIPT_BASE_ENV]) }); } catch (error) { return Object.freeze({ error }); }
+}
+
+/** A reader over `outcome()`, which must return the same outcome every time it is called. */
+function readerOver(outcome) {
+  const base = () => {
+    const first = outcome();
+    if (first?.error) throw first.error;
+    // The kept value goes through the grammar again on its way out, every time. It costs nothing,
+    // and it means that what this function returns has been validated in this very call — also
+    // when the outcome on the process was put there by something other than this reader.
+    if (typeof first?.value !== 'string') {
+      throw new ScriptBaseError('grammar', `${SCRIPT_BASE_ENV}: the kept outcome of this process's first read is not one this reader wrote. The build stops rather than use it.`);
+    }
+    return parseScriptBase(first.value);
+  };
+  return Object.freeze({
+    scriptBase() { return base(); },
+    runtimeSrc(entry, version) { return srcUnder(base, entry, version); },
+  });
+}
+
+/**
+ * A reader of the setting in `env`: `{ scriptBase(), runtimeSrc(entry, version) }`. Its first use
+ * reads `env.SCRIPT_BASE`; every later use gives that same answer (or throws that same error),
+ * whatever has happened to `env` since.
+ *
+ * This is the only way to read a second environment in one process, and it is what the tests use:
+ * one reader per case, each over its own object. There is deliberately no way to reset a reader,
+ * and none to reset the build's own (below) — a reset that exists is a reset something can call.
+ */
+export function scriptBaseReader(env) {
+  if (env === null || typeof env !== 'object') throw new TypeError('scriptBaseReader: pass the environment object to read');
+  let first = null;
+  return readerOver(() => (first ??= readOnce(env)));
+}
+
+// The build's own reader, over `process.env`. Its outcome is kept on the process, not in this
+// module: a bundler may evaluate a second copy of this file (the config loads one, the built pages
+// another), and both copies must give the answer the first read gave. The slot is written once and
+// is neither writable nor configurable.
+const PROCESS_SLOT = Symbol.for('sitetile.script-base.first-read');
+const ofThisProcess = readerOver(() => {
+  if (!Object.hasOwn(globalThis, PROCESS_SLOT)) Object.defineProperty(globalThis, PROCESS_SLOT, { value: readOnce(process.env) });
+  return globalThis[PROCESS_SLOT];
+});
+
 /**
  * The script base this build was given, or `''` when the setting is off. Throws when it is set to
  * anything that is not exactly `https://<host>/corals`.
+ *
+ * Read once per process: the first call decides, and every later call returns the same value (or
+ * throws the same error) even if `process.env` has changed. It takes no argument; to read another
+ * environment, make a reader with `scriptBaseReader(env)`.
  */
-export function scriptBase(env = process.env) {
-  return parseScriptBase(env[SCRIPT_BASE_ENV]);
+export function scriptBase(...rest) {
+  if (rest.length) throw new TypeError('scriptBase() takes no argument: it is the one read of this process. Use scriptBaseReader(env) to read another environment.');
+  return ofThisProcess.scriptBase();
 }
 
 /**
@@ -180,10 +241,18 @@ export function scriptBase(env = process.env) {
  * the setting is off — there is no URL to give, and an empty string in a `src` attribute means the
  * page's own URL. Branch on `scriptBase()` first.
  *
+ * The base is the one `scriptBase()` returns: the same read, frozen for the process.
+ *
  * The version is an argument because the runtime's release is not part of this package yet; the
  * runtime package will supply its own.
  */
-export function runtimeSrc(entry, version, env = process.env) {
+export function runtimeSrc(entry, version, ...rest) {
+  if (rest.length) throw new TypeError('runtimeSrc(entry, version) takes no environment: the base is the one read of this process. Use scriptBaseReader(env).runtimeSrc(entry, version) to read another.');
+  return ofThisProcess.runtimeSrc(entry, version);
+}
+
+/** `runtimeSrc` for a reader: the arguments are checked first, then `base()` is asked. */
+function srcUnder(base, entry, version) {
   if (typeof entry !== 'string' || !ENTRY_GRAMMAR.test(entry)) {
     throw new ScriptBaseError('entry',
       `runtimeSrc: ${shown(entry)} is not a runtime entry name. It must be one plain file name: `
@@ -194,10 +263,10 @@ export function runtimeSrc(entry, version, env = process.env) {
       `runtimeSrc: ${shown(version)} is not an exact runtime version. It must be major.minor.patch in digits, `
       + `never a channel, a range or a pre-release tag. (The base comes from ${SCRIPT_BASE_ENV}.)`);
   }
-  const base = scriptBase(env);
-  if (!base) {
+  const value = base();
+  if (!value) {
     throw new ScriptBaseError('off',
       `runtimeSrc: ${SCRIPT_BASE_ENV} is not set, so there is no URL for "${entry}". Check scriptBase() before asking for one.`);
   }
-  return `${base}/${RUNTIME_ID}/${version}/${entry}`;
+  return `${value}/${RUNTIME_ID}/${version}/${entry}`;
 }

@@ -11,7 +11,10 @@
 //   4. `new URL()` would have accepted most of those refused values, and quietly turned them into
 //      something else — that table is pinned here so nobody "simplifies" the reader into it;
 //   5. `runtimeSrc` cannot be made to name a URL outside the base;
-//   6. a build with a bad value fails before it writes a page (needs the renderer's dependencies).
+//   6. the setting is read ONCE per process and the outcome kept: a later change of the environment
+//      changes nothing. Tests read other environments through `scriptBaseReader(env)`, one reader
+//      per case; there is no reset, here or anywhere;
+//   7. a build with a bad value fails before it writes a page (needs the renderer's dependencies).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,12 +25,29 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   SCRIPT_BASE_ENV, SCRIPT_BASE_GRAMMAR, RUNTIME_ID, ScriptBaseError,
-  parseScriptBase, scriptBase, runtimeSrc,
+  parseScriptBase, scriptBase, runtimeSrc, scriptBaseReader,
 } from './astro/src/lib/script-base.mjs';
+import * as scriptBaseModule from './astro/src/lib/script-base.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ASTRO = join(HERE, 'astro');
 const GOOD = 'https://scripts.example.net/corals';
+const OTHER = 'https://other.example.org/corals';
+const MODULE_URL = new URL('./astro/src/lib/script-base.mjs', import.meta.url).href;
+
+/** What a fresh reader makes of an environment: each call is a new reader over a new object. */
+const readEnv = (env) => scriptBaseReader({ ...env }).scriptBase();
+const srcIn = (env, entry, version) => scriptBaseReader({ ...env }).runtimeSrc(entry, version);
+
+/** Runs `body` (module source; `m` is the reader module) in a new process with `env` as given. */
+function inFreshProcess(env, body) {
+  const clean = { ...process.env };
+  delete clean.SCRIPT_BASE;
+  const source = `import * as m from ${JSON.stringify(MODULE_URL)};\nimport assert from 'node:assert/strict';\n${body}\nconsole.log('FRESH-PROCESS-OK');`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', source], { encoding: 'utf8', env: { ...clean, ...env } });
+  assert.equal(r.status, 0, `the child process failed:\n${r.stderr}`);
+  assert.match(r.stdout, /FRESH-PROCESS-OK/);
+}
 
 /** Asserts that `raw` is refused for `reason`, by an error that names the setting. */
 function refused(raw, reason, parse = parseScriptBase) {
@@ -51,8 +71,8 @@ test('the setting is the environment variable SCRIPT_BASE', () => {
 test('unset or empty means off — and only those do', () => {
   assert.equal(parseScriptBase(undefined), '');
   assert.equal(parseScriptBase(''), '');
-  assert.equal(scriptBase({}), '');
-  assert.equal(scriptBase({ SCRIPT_BASE: '' }), '');
+  assert.equal(readEnv({}), '');
+  assert.equal(readEnv({ SCRIPT_BASE: '' }), '');
   // Things a shell or a config layer writes when it means "nothing" are NOT nothing here.
   for (const raw of [' ', '\t', '\n', '0', 'off', 'false', 'no', 'null', 'undefined', 'none', '-']) {
     assert.throws(() => parseScriptBase(raw), ScriptBaseError, `${JSON.stringify(raw)} was read as off`);
@@ -83,7 +103,7 @@ test('valid values come back byte for byte, and the URL parser agrees with every
   ];
   for (const v of valid) {
     assert.equal(parseScriptBase(v), v);
-    assert.equal(scriptBase({ SCRIPT_BASE: v }), v);
+    assert.equal(readEnv({ SCRIPT_BASE: v }), v);
     const u = new URL(v);
     assert.equal(u.href, v, 'the URL parser rewrote an accepted value');
     assert.equal(u.origin, v.slice(0, -'/corals'.length));
@@ -258,7 +278,7 @@ const INVALID = [
 test('every other value throws, naming the setting and the reason', () => {
   for (const [raw, reason] of INVALID) {
     refused(raw, reason);
-    refused(raw, reason, (v) => scriptBase({ SCRIPT_BASE: v }));
+    refused(raw, reason, (v) => readEnv({ SCRIPT_BASE: v }));
   }
   // The classes the reader must cover, each present in the table above at least once.
   const reasons = new Set(INVALID.map(([, r]) => r));
@@ -362,15 +382,15 @@ test('🔴 what `new URL()` would have accepted, and what it would have turned i
 });
 
 test('runtimeSrc: one plain file name under <base>/site-runtime/<exact version>/', () => {
-  const env = { SCRIPT_BASE: GOOD };
-  assert.equal(runtimeSrc('head.js', '1.2.3', env), `${GOOD}/site-runtime/1.2.3/head.js`);
-  assert.equal(runtimeSrc('announce-guard.js', '0.0.1', env), `${GOOD}/site-runtime/0.0.1/announce-guard.js`);
-  assert.equal(runtimeSrc('chunk-AB12CD34.js', '10.20.30', env), `${GOOD}/site-runtime/10.20.30/chunk-AB12CD34.js`);
-  assert.equal(runtimeSrc('a.js', '0.0.0', env), `${GOOD}/site-runtime/0.0.0/a.js`);
-  assert.equal(runtimeSrc('grid_filter2.js', '1.0.0', env), `${GOOD}/site-runtime/1.0.0/grid_filter2.js`);
+  const on = scriptBaseReader({ SCRIPT_BASE: GOOD });
+  assert.equal(on.runtimeSrc('head.js', '1.2.3'), `${GOOD}/site-runtime/1.2.3/head.js`);
+  assert.equal(on.runtimeSrc('announce-guard.js', '0.0.1'), `${GOOD}/site-runtime/0.0.1/announce-guard.js`);
+  assert.equal(on.runtimeSrc('chunk-AB12CD34.js', '10.20.30'), `${GOOD}/site-runtime/10.20.30/chunk-AB12CD34.js`);
+  assert.equal(on.runtimeSrc('a.js', '0.0.0'), `${GOOD}/site-runtime/0.0.0/a.js`);
+  assert.equal(on.runtimeSrc('grid_filter2.js', '1.0.0'), `${GOOD}/site-runtime/1.0.0/grid_filter2.js`);
   // Whatever it returns is exactly the base, three more segments, and nothing a parser rewrites.
   for (const entry of ['head.js', 'chunk-AB12CD34.js', 'a.js', `${'a'.repeat(64)}.js`]) {
-    const src = runtimeSrc(entry, '1.2.3', env);
+    const src = on.runtimeSrc(entry, '1.2.3');
     const u = new URL(src);
     assert.equal(u.href, src);
     assert.equal(u.origin, 'https://scripts.example.net');
@@ -379,7 +399,7 @@ test('runtimeSrc: one plain file name under <base>/site-runtime/<exact version>/
 });
 
 test('runtimeSrc refuses every entry name that is not a plain file name', () => {
-  const env = { SCRIPT_BASE: GOOD };
+  const on = scriptBaseReader({ SCRIPT_BASE: GOOD });
   const bad = [
     '', '.js', 'head', 'head.mjs', 'head.css', 'head.json', 'head.js.map', 'head.JS', 'head.js ', ' head.js', 'head.js\n',
     '/head.js', 'x/head.js', './head.js', '../head.js', '..', '.', '..js', 'a..js', 'a.b.js', '.head.js', '-head.js', '_head.js',
@@ -390,21 +410,21 @@ test('runtimeSrc refuses every entry name that is not a plain file name', () => 
     `${'a'.repeat(65)}.js`,
   ];
   for (const entry of bad) {
-    assert.throws(() => runtimeSrc(entry, '1.2.3', env), (e) => e instanceof ScriptBaseError && e.reason === 'entry',
+    assert.throws(() => on.runtimeSrc(entry, '1.2.3'), (e) => e instanceof ScriptBaseError && e.reason === 'entry',
       `accepted the entry name ${JSON.stringify(entry)}`);
   }
   for (const entry of [undefined, null, 7, ['head.js'], { toString: () => 'head.js' }, new String('head.js')]) {
-    assert.throws(() => runtimeSrc(entry, '1.2.3', env), (e) => e instanceof ScriptBaseError && e.reason === 'entry');
+    assert.throws(() => on.runtimeSrc(entry, '1.2.3'), (e) => e instanceof ScriptBaseError && e.reason === 'entry');
   }
 });
 
 test('runtimeSrc takes an exact version, never a channel or a range', () => {
-  const env = { SCRIPT_BASE: GOOD };
+  const on = scriptBaseReader({ SCRIPT_BASE: GOOD });
   const bad = [undefined, null, '', 'v0', 'v1', 'latest', '1', '1.2', '1.2.3.4', 'v1.2.3', '1.2.x', '^1.2.3', '~1.2.3', '>=1.2.3', '*',
     '1.2.3-beta', '1.2.3-beta.1', '1.2.3+build', '01.2.3', '1.02.3', '1.2.03', '1.2.3 ', ' 1.2.3', '1.2.3\n', '1.2.3/..', '../1.2.3',
     '1.2.3/x', '1%2e2.3', '1..3', '.1.2.3', '1.2.3.', '-1.2.3', '1e1.2.3', 123, 1.2, ['1.2.3'], `1.2.${'9'.repeat(10)}`];
   for (const version of bad) {
-    assert.throws(() => runtimeSrc('head.js', version, env), (e) => e instanceof ScriptBaseError && e.reason === 'version',
+    assert.throws(() => on.runtimeSrc('head.js', version), (e) => e instanceof ScriptBaseError && e.reason === 'version',
       `accepted the version ${JSON.stringify(version)}`);
   }
 });
@@ -412,33 +432,166 @@ test('runtimeSrc takes an exact version, never a channel or a range', () => {
 test('runtimeSrc with the setting off or invalid throws: there is no URL to give', () => {
   // A caller must branch on scriptBase() first. An empty string here would be written into a
   // `src=""` attribute, which a browser resolves to the page's own URL.
-  assert.throws(() => runtimeSrc('head.js', '1.2.3', {}), (e) => e instanceof ScriptBaseError && e.reason === 'off');
-  assert.throws(() => runtimeSrc('head.js', '1.2.3', { SCRIPT_BASE: '' }), (e) => e instanceof ScriptBaseError && e.reason === 'off');
-  assert.throws(() => runtimeSrc('head.js', '1.2.3', { SCRIPT_BASE: 'http://scripts.example.net/corals' }),
+  assert.throws(() => srcIn({}, 'head.js', '1.2.3'), (e) => e instanceof ScriptBaseError && e.reason === 'off');
+  assert.throws(() => srcIn({ SCRIPT_BASE: '' }, 'head.js', '1.2.3'), (e) => e instanceof ScriptBaseError && e.reason === 'off');
+  assert.throws(() => srcIn({ SCRIPT_BASE: 'http://scripts.example.net/corals' }, 'head.js', '1.2.3'),
     (e) => e instanceof ScriptBaseError && e.reason === 'scheme');
   // …and a bad entry is refused whether or not the setting is on (the name is checked first).
-  assert.throws(() => runtimeSrc('../head.js', '1.2.3', {}), (e) => e instanceof ScriptBaseError && e.reason === 'entry');
+  assert.throws(() => srcIn({}, '../head.js', '1.2.3'), (e) => e instanceof ScriptBaseError && e.reason === 'entry');
 });
 
-test('scriptBase() and runtimeSrc() read the process environment by default', () => {
-  const had = Object.hasOwn(process.env, 'SCRIPT_BASE');
-  const before = process.env.SCRIPT_BASE;
-  try {
+// ── Read once ──────────────────────────────────────────────────────────────────────────────────
+// One build must not be able to have the setting off on one page and on on another, or two bases.
+// So a reader's first use is its only read: the outcome — a base, off, or the refusal — is kept.
+
+test('🔴 a reader reads its environment once: a later change does not change the answer', () => {
+  // on stays on, with the same base
+  let env = { SCRIPT_BASE: GOOD };
+  let reader = scriptBaseReader(env);
+  assert.equal(reader.scriptBase(), GOOD);
+  env.SCRIPT_BASE = OTHER;
+  assert.equal(reader.scriptBase(), GOOD, 'a second valid origin replaced the first within one reader');
+  assert.equal(reader.runtimeSrc('head.js', '1.2.3'), `${GOOD}/site-runtime/1.2.3/head.js`);
+  delete env.SCRIPT_BASE;
+  assert.equal(reader.scriptBase(), GOOD, 'the setting went from on to off within one reader');
+  env.SCRIPT_BASE = GOOD + '/';
+  assert.equal(reader.scriptBase(), GOOD, 'a later invalid value was read');
+
+  // off stays off — "off" is an outcome like any other, not "not read yet"
+  env = {};
+  reader = scriptBaseReader(env);
+  assert.equal(reader.scriptBase(), '');
+  env.SCRIPT_BASE = GOOD;
+  assert.equal(reader.scriptBase(), '', 'the setting went from off to on within one reader');
+  assert.throws(() => reader.runtimeSrc('head.js', '1.2.3'), (e) => e instanceof ScriptBaseError && e.reason === 'off');
+
+  // a refusal stays a refusal: the same error, not a second reading that might pass
+  env = { SCRIPT_BASE: GOOD + '/' };
+  reader = scriptBaseReader(env);
+  let first = null;
+  try { reader.scriptBase(); } catch (e) { first = e; }
+  assert.ok(first instanceof ScriptBaseError && first.reason === 'trailing-slash');
+  env.SCRIPT_BASE = GOOD;
+  assert.throws(() => reader.scriptBase(), (e) => e === first, 'a refused value was read again and accepted');
+  assert.throws(() => reader.runtimeSrc('head.js', '1.2.3'), (e) => e === first);
+
+  // the first use is the read, whichever function it is and however late it comes
+  env = {};
+  reader = scriptBaseReader(env);
+  env.SCRIPT_BASE = GOOD;
+  assert.equal(reader.runtimeSrc('head.js', '1.2.3'), `${GOOD}/site-runtime/1.2.3/head.js`);
+  delete env.SCRIPT_BASE;
+  assert.equal(reader.scriptBase(), GOOD);
+  // an argument that is refused before the base is asked for is not a read
+  env = {};
+  reader = scriptBaseReader(env);
+  assert.throws(() => reader.runtimeSrc('../head.js', '1.2.3'), (e) => e.reason === 'entry');
+  env.SCRIPT_BASE = GOOD;
+  assert.equal(reader.scriptBase(), GOOD);
+
+  // readers do not share anything, and a reader cannot be altered
+  assert.equal(readEnv({ SCRIPT_BASE: OTHER }), OTHER);
+  assert.ok(Object.isFrozen(reader));
+  assert.deepEqual(Object.keys(reader).sort(), ['runtimeSrc', 'scriptBase']);
+  for (const notAnEnv of [undefined, null, GOOD, 7]) assert.throws(() => scriptBaseReader(notAnEnv), TypeError);
+});
+
+test('🔴 the build\'s own read is once per process: process.env may change, the answer does not', () => {
+  // Each case is a new process, because this is the one thing that cannot be done twice in one.
+  inFreshProcess({ SCRIPT_BASE: GOOD }, `
+    assert.equal(m.scriptBase(), ${JSON.stringify(GOOD)});
+    process.env.SCRIPT_BASE = ${JSON.stringify(OTHER)};
+    assert.equal(m.scriptBase(), ${JSON.stringify(GOOD)}, 'a second origin within one process');
+    assert.equal(m.runtimeSrc('head.js', '1.2.3'), ${JSON.stringify(GOOD + '/site-runtime/1.2.3/head.js')});
     delete process.env.SCRIPT_BASE;
-    assert.equal(scriptBase(), '');
-    process.env.SCRIPT_BASE = GOOD;
-    assert.equal(scriptBase(), GOOD);
-    assert.equal(runtimeSrc('head.js', '1.2.3'), `${GOOD}/site-runtime/1.2.3/head.js`);
-    process.env.SCRIPT_BASE = GOOD + '/';
-    assert.throws(() => scriptBase(), (e) => e instanceof ScriptBaseError && e.reason === 'trailing-slash');
-  } finally {
-    if (had) process.env.SCRIPT_BASE = before; else delete process.env.SCRIPT_BASE;
-  }
+    assert.equal(m.scriptBase(), ${JSON.stringify(GOOD)}, 'on became off within one process');
+    process.env.SCRIPT_BASE = 'not a base';
+    assert.equal(m.scriptBase(), ${JSON.stringify(GOOD)});
+  `);
+  inFreshProcess({}, `
+    assert.equal(m.scriptBase(), '');
+    process.env.SCRIPT_BASE = ${JSON.stringify(GOOD)};
+    assert.equal(m.scriptBase(), '', 'off became on within one process');
+    assert.throws(() => m.runtimeSrc('head.js', '1.2.3'), (e) => e.reason === 'off');
+  `);
+  inFreshProcess({ SCRIPT_BASE: GOOD + '/' }, `
+    let first = null;
+    try { m.scriptBase(); } catch (e) { first = e; }
+    assert.equal(first?.reason, 'trailing-slash');
+    process.env.SCRIPT_BASE = ${JSON.stringify(GOOD)};
+    assert.throws(() => m.scriptBase(), (e) => e === first, 'a refused value was read again');
+    assert.throws(() => m.runtimeSrc('head.js', '1.2.3'), (e) => e === first);
+  `);
+  // The first read may be runtimeSrc's; and the environment as it is AT that read is what counts.
+  inFreshProcess({}, `
+    process.env.SCRIPT_BASE = ${JSON.stringify(GOOD)};
+    assert.equal(m.runtimeSrc('head.js', '1.2.3'), ${JSON.stringify(GOOD + '/site-runtime/1.2.3/head.js')});
+    delete process.env.SCRIPT_BASE;
+    assert.equal(m.scriptBase(), ${JSON.stringify(GOOD)});
+  `);
+});
+
+test('🔴 a second copy of the module in the same process gives the first copy\'s answer', () => {
+  // A bundler evaluates this file again for the pages it builds; the config has already read the
+  // setting through the first copy. Both must agree, so the outcome is kept on the process.
+  inFreshProcess({ SCRIPT_BASE: GOOD }, `
+    assert.equal(m.scriptBase(), ${JSON.stringify(GOOD)});
+    process.env.SCRIPT_BASE = ${JSON.stringify(OTHER)};
+    const again = await import(${JSON.stringify(MODULE_URL + '?a-second-copy')});
+    assert.notEqual(again.scriptBase, m.scriptBase, 'the second import was not a second copy');
+    assert.equal(again.scriptBase(), ${JSON.stringify(GOOD)}, 'a second copy read the environment again');
+    assert.equal(again.runtimeSrc('head.js', '1.2.3'), ${JSON.stringify(GOOD + '/site-runtime/1.2.3/head.js')});
+    // …and the kept outcome cannot be replaced or removed.
+    const slot = Object.getOwnPropertySymbols(globalThis).filter((k) => /script-base/.test(String(k)));
+    assert.equal(slot.length, 1);
+    const d = Object.getOwnPropertyDescriptor(globalThis, slot[0]);
+    assert.equal(d.writable, false);
+    assert.equal(d.configurable, false);
+    assert.equal(d.enumerable, false);
+    assert.ok(Object.isFrozen(d.value));
+    assert.throws(() => { delete globalThis[slot[0]]; }, TypeError);
+    assert.throws(() => { globalThis[slot[0]] = { value: ${JSON.stringify(OTHER)} }; }, TypeError);
+    assert.equal(m.scriptBase(), ${JSON.stringify(GOOD)});
+  `);
+});
+
+test('🔴 an outcome planted on the process before the first read is not believed', () => {
+  // The kept outcome lives where other code in the process could have written first. Whatever is
+  // there is put through the grammar again before it is returned, so the worst a planted outcome
+  // can do is stop the build.
+  const plant = (outcome) => `
+    Object.defineProperty(globalThis, Symbol.for('sitetile.script-base.first-read'), { value: ${outcome} });
+    process.env.SCRIPT_BASE = ${JSON.stringify(GOOD)};
+    assert.throws(() => m.scriptBase(), (e) => e instanceof m.ScriptBaseError, 'a planted outcome was returned');
+    assert.throws(() => m.runtimeSrc('head.js', '1.2.3'), (e) => e instanceof m.ScriptBaseError);
+  `;
+  inFreshProcess({}, plant(`{ value: 'https://other.example.org/elsewhere' }`));
+  inFreshProcess({}, plant(`{ value: 'http://scripts.example.net/corals' }`));
+  inFreshProcess({}, plant(`{}`));
+  inFreshProcess({}, plant(`{ value: undefined }`));
+  inFreshProcess({}, plant(`null`));
+  inFreshProcess({}, plant(`{ value: ['https://scripts.example.net/corals'] }`));
+});
+
+test('🔴 there is no reset, and no way to hand the build\'s reader another environment', () => {
+  // The whole public surface. A reset, a "for tests" export or a setter would have to be added here.
+  assert.deepEqual(Object.keys(scriptBaseModule).sort(), [
+    'RUNTIME_ID', 'SCRIPT_BASE_ENV', 'SCRIPT_BASE_GRAMMAR', 'ScriptBaseError',
+    'parseScriptBase', 'runtimeSrc', 'scriptBase', 'scriptBaseReader',
+  ]);
+  // The old spelling, `scriptBase(env)`, would now be silently ignored — so it is refused instead.
+  // (Refused before anything is read: this process's own outcome is not touched by these calls.)
+  assert.throws(() => scriptBase({ SCRIPT_BASE: GOOD }), TypeError);
+  assert.throws(() => scriptBase(undefined), TypeError);
+  assert.throws(() => runtimeSrc('head.js', '1.2.3', { SCRIPT_BASE: GOOD }), TypeError);
+  assert.equal(scriptBase.length, 0);
 });
 
 // A reader nobody calls refuses nothing. The renderer's config reads the setting when it loads, so
 // a bad value stops `astro build` before a page is rendered. This needs the renderer's
 // dependencies and SAYS SO when they are absent — the same shape as the other build-backed tests.
+// The config's call is also the process's one read (above): whatever the build asks later comes
+// from it.
 test('🔴 a build with an invalid SCRIPT_BASE fails, naming the setting and the reason, and writes nothing', (t) => {
   if (!existsSync(join(ASTRO, 'node_modules'))) {
     console.log('  · SKIPPED — no packages/sitetile/astro/node_modules (run npm install there): a real build was NOT shown to fail on a bad SCRIPT_BASE');

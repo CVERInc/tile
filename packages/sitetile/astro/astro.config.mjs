@@ -23,8 +23,10 @@ import { agentListTwins } from './agent-list-twins.mjs';
 // time and adds `corner-shape: round` beside every full `border-radius`, so there is no list to keep.
 import roundCorners from '@cvernet/signet/postcss-round-corners';
 // SCRIPT_BASE names a separate origin for the renderer's own scripts (see the module). Nothing
-// emits a URL from it yet; it is read here, once, so that a value that is neither empty nor exactly
+// emits a URL from it yet; it is read here so that a value that is neither empty nor exactly
 // `https://<host>/corals` stops the build before a page is rendered instead of being taken as off.
+// This call is the process's ONE read of the setting: its outcome is kept, and every later
+// `scriptBase()` / `runtimeSrc()` in this build answers from it, whatever `process.env` says by then.
 import { scriptBase } from './src/lib/script-base.mjs';
 
 scriptBase();
