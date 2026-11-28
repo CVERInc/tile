@@ -22,6 +22,12 @@ import { agentListTwins } from './agent-list-twins.mjs';
 // at 50%) was drawn as a rounded square in Chromium. signet's plugin reads the stylesheet at build
 // time and adds `corner-shape: round` beside every full `border-radius`, so there is no list to keep.
 import roundCorners from '@cvernet/signet/postcss-round-corners';
+// SCRIPT_BASE names a separate origin for the renderer's own scripts (see the module). Nothing
+// emits a URL from it yet; it is read here, once, so that a value that is neither empty nor exactly
+// `https://<host>/corals` stops the build before a page is rendered instead of being taken as off.
+import { scriptBase } from './src/lib/script-base.mjs';
+
+scriptBase();
 
 export default defineConfig({
   integrations: [svgAttachmentHeaders(), locale404Pages(), noindexPass(), agentListTwins()],
