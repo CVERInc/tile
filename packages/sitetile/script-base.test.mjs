@@ -14,7 +14,8 @@
 //   5. `runtimeSrc` cannot be made to name a URL outside the base;
 //   6. the setting is read ONCE per process and the outcome kept: a later change of the environment
 //      changes nothing. Tests read other environments through `scriptBaseReader(env)`, one reader
-//      per case; there is no reset, here or anywhere;
+//      per case; there is no reset, here or anywhere. What is kept on the process is taken back
+//      only in the exact shape the reader writes; anything else found there stops the build;
 //   7. a build with a bad value fails before it writes a page (needs the renderer's dependencies).
 
 import test from 'node:test';
@@ -669,22 +670,159 @@ test('🔴 a second copy of the module in the same process gives the first copy\
   `);
 });
 
-test('🔴 an outcome planted on the process before the first read is not believed', () => {
-  // The kept outcome lives where other code in the process could have written first. Whatever is
-  // there is put through the grammar again before it is returned, so the worst a planted outcome
-  // can do is stop the build.
-  const plant = (outcome) => `
-    Object.defineProperty(globalThis, Symbol.for('sitetile.script-base.first-read'), { value: ${outcome} });
+// ── The slot on the process ────────────────────────────────────────────────────────────────────
+// The kept outcome lives on `globalThis`, under a registered symbol any code in the process can
+// name. What the reader guarantees about it is exactly this, and no more:
+//   · ONE ANSWER PER PROCESS, and that answer ALWAYS PASSES THE GRAMMAR (or is off, or a refusal);
+//   · anything in the slot that is not of the exact shape the reader writes stops the build.
+// It does NOT guarantee that the answer came from the environment: see the last test of the three.
+const SLOT = `Symbol.for('sitetile.script-base.first-read')`;
+const sealed = (outcome) => `Object.defineProperty(globalThis, ${SLOT}, { value: ${outcome} });`;
+
+test('🔴 a refusal is kept as its reason only: a second copy throws its own error for it, not the first copy\'s object', () => {
+  inFreshProcess({ SCRIPT_BASE: GOOD + '/' }, `
+    let first = null;
+    try { m.scriptBase(); } catch (e) { first = e; }
+    assert.equal(first?.reason, 'trailing-slash');
+    // what is on the process is plain data: one frozen object with one string in it
+    const d = Object.getOwnPropertyDescriptor(globalThis, ${SLOT});
+    assert.deepEqual(Reflect.ownKeys(d.value), ['refused']);
+    assert.equal(d.value.refused, 'trailing-slash');
+    assert.ok(Object.isFrozen(d.value));
+    assert.equal(Object.getPrototypeOf(d.value), Object.prototype);
+    assert.equal([d.writable, d.configurable, d.enumerable].join(), 'false,false,false');
+
     process.env.SCRIPT_BASE = ${JSON.stringify(GOOD)};
-    assert.throws(() => m.scriptBase(), (e) => e instanceof m.ScriptBaseError, 'a planted outcome was returned');
-    assert.throws(() => m.runtimeSrc('head.js', '1.2.3'), (e) => e instanceof m.ScriptBaseError);
-  `;
-  inFreshProcess({}, plant(`{ value: 'https://other.example.org/elsewhere' }`));
-  inFreshProcess({}, plant(`{ value: 'http://scripts.example.net/corals' }`));
-  inFreshProcess({}, plant(`{}`));
-  inFreshProcess({}, plant(`{ value: undefined }`));
-  inFreshProcess({}, plant(`null`));
-  inFreshProcess({}, plant(`{ value: ['https://scripts.example.net/corals'] }`));
+    const again = await import(${JSON.stringify(MODULE_URL + '?a-second-copy')});
+    assert.notEqual(again.ScriptBaseError, m.ScriptBaseError, 'the second import was not a second copy');
+    let second = null;
+    try { again.scriptBase(); } catch (e) { second = e; }
+    assert.ok(second instanceof again.ScriptBaseError, 'the second copy threw an error that is not its own type');
+    assert.ok(!(second instanceof m.ScriptBaseError));
+    assert.notEqual(second, first);
+    assert.equal(second.reason, 'trailing-slash');
+    assert.ok(second.message.includes('SCRIPT_BASE') && second.message.includes('trailing-slash'));
+    assert.ok(!second.message.includes('scripts.example'), 'the re-created refusal shows the value');
+    // each copy keeps throwing its own one error
+    assert.throws(() => again.scriptBase(), (e) => e === second);
+    assert.throws(() => again.runtimeSrc('head.js', '1.2.3'), (e) => e === second);
+    assert.throws(() => m.scriptBase(), (e) => e === first);
+  `);
+  // Every reason the reader can refuse for can be kept and re-created — none is mistaken for
+  // tampering. (A value with a NUL in it cannot be put in a child's environment; another of the
+  // same reason is used.)
+  for (const reason of new Set(INVALID.map(([, r]) => r))) {
+    const [raw] = INVALID.find(([v, r]) => r === reason && typeof v === 'string' && !v.includes('\0'));
+    inFreshProcess({ SCRIPT_BASE: raw }, `
+      assert.throws(() => m.scriptBase(), (e) => e.reason === ${JSON.stringify(reason)});
+      const again = await import(${JSON.stringify(MODULE_URL + '?a-second-copy')});
+      assert.throws(() => again.scriptBase(), (e) => e instanceof again.ScriptBaseError && e.reason === ${JSON.stringify(reason)});
+    `);
+  }
+});
+
+test('🔴 anything in the slot that is not exactly what the reader writes is refused as tampering, and nothing of it is shown', () => {
+  // `setup` runs before the first read, with SCRIPT_BASE set to a good value the planted thing
+  // would override. Every case must stop the build, every time, with this copy's own error.
+  const tampering = (setup, after = '') => inFreshProcess({ SCRIPT_BASE: GOOD }, `
+    const S = ${SLOT};
+    ${setup}
+    for (const read of [() => m.scriptBase(), () => m.runtimeSrc('head.js', '1.2.3'), () => m.scriptBase()]) {
+      let err = null, got;
+      try { got = read(); } catch (e) { err = e; }
+      assert.ok(err, 'a planted outcome was returned: ' + got);
+      assert.ok(err instanceof m.ScriptBaseError, 'not this reader\\'s own error: ' + err);
+      assert.equal(err.reason, 'slot-tampered', err.message);
+      assert.match(err.message, /SCRIPT_BASE/);
+      assert.match(err.message, /tampered/);
+      assert.ok(!/attacker|planted|example/.test(err.message + err.stack), 'the error shows what was planted: ' + err.message);
+      assert.deepEqual(Object.keys(err), ['name', 'reason']);
+      assert.equal(err.cause, undefined);
+      ${after}
+    }
+  `);
+  const BAD = `'https://attacker.example/corals'`;
+  // a non-frozen object: it could be changed between two calls
+  tampering(sealed(`{ value: ${BAD} }`));
+  tampering(`const o = { value: '' }; ${sealed('o')}`, `o.value = ${BAD};`);
+  tampering(sealed(`Object.seal({ value: ${BAD} })`));
+  tampering(sealed(`Object.preventExtensions({ value: ${BAD} })`));
+  // a getter, on the process or inside the outcome
+  tampering(`Object.defineProperty(globalThis, S, { get() { return Object.freeze({ value: ${BAD} }); } });`);
+  tampering(`let n = 0; Object.defineProperty(globalThis, S, { get() { return Object.freeze({ value: n++ ? ${BAD} : '' }); } });`);
+  tampering(sealed(`Object.freeze(Object.defineProperty({}, 'value', { enumerable: true, get() { return ${BAD}; } }))`));
+  // a property that is not sealed the way the reader seals it
+  tampering(`globalThis[S] = Object.freeze({ value: ${BAD} });`);
+  tampering(`Object.defineProperty(globalThis, S, { value: Object.freeze({ value: ${BAD} }), writable: true });`);
+  tampering(`Object.defineProperty(globalThis, S, { value: Object.freeze({ value: ${BAD} }), configurable: true });`);
+  tampering(`Object.defineProperty(globalThis, S, { value: Object.freeze({ value: ${BAD} }), enumerable: true });`);
+  // extra keys, in any combination
+  tampering(sealed(`Object.freeze({ value: ${BAD}, extra: 1 })`));
+  tampering(sealed(`Object.freeze({ value: ${BAD}, refused: 'port' })`));
+  tampering(sealed(`Object.freeze({ value: ${BAD}, [Symbol('extra')]: 1 })`));
+  tampering(sealed(`Object.freeze(Object.defineProperty({ value: ${BAD} }, 'hidden', { value: 1 }))`));
+  tampering(sealed(`Object.freeze({})`));
+  // a foreign error object, however it is wrapped — it is never thrown onwards
+  tampering(sealed(`Object.freeze({ error: new Error('planted, from https://attacker.example/corals') })`));
+  tampering(sealed(`Object.freeze({ error: new m.ScriptBaseError('port', 'planted') })`));
+  tampering(sealed(`Object.freeze({ refused: new m.ScriptBaseError('port', 'planted') })`));
+  tampering(sealed(`Object.freeze(new Error('planted'))`));
+  tampering(sealed(`Object.freeze(Object.assign(new m.ScriptBaseError('port', 'planted'), { refused: 'port' }))`));
+  // a refusal that is not one of the reader's own reason codes for the setting
+  tampering(sealed(`Object.freeze({ refused: 'planted' })`));
+  tampering(sealed(`Object.freeze({ refused: 'slot-tampered' })`));
+  tampering(sealed(`Object.freeze({ refused: 'off' })`));
+  tampering(sealed(`Object.freeze({ refused: '' })`));
+  tampering(sealed(`Object.freeze({ refused: 7 })`));
+  tampering(sealed(`Object.freeze({ refused: ['port'] })`));
+  // the right shape around a value the grammar refuses, or around no string at all
+  tampering(sealed(`Object.freeze({ value: 'https://attacker.example/elsewhere' })`));
+  tampering(sealed(`Object.freeze({ value: 'http://attacker.example/corals' })`));
+  tampering(sealed(`Object.freeze({ value: undefined })`));
+  tampering(sealed(`Object.freeze({ value: [${BAD}] })`));
+  tampering(sealed(`Object.freeze({ value: new String(${BAD}) })`));
+  tampering(sealed(`Object.freeze({ value: Object.freeze({ toString() { return ${BAD}; } }) })`));
+  // not a plain object
+  tampering(sealed(`null`));
+  tampering(sealed(`undefined`));
+  tampering(sealed(BAD));
+  tampering(sealed(`Object.freeze([${BAD}])`));
+  tampering(sealed(`Object.freeze(Object.assign(Object.create(null), { value: ${BAD} }))`));
+  tampering(sealed(`Object.freeze(Object.assign(Object.create({ inherited: 1 }), { value: ${BAD} }))`));
+  tampering(sealed(`Object.freeze(Object.create({ value: ${BAD} }))`));
+  tampering(sealed(`Object.freeze(Object.assign(() => {}, { value: ${BAD} }))`));
+  tampering(sealed(`new Proxy({ value: ${BAD} }, {})`));
+});
+
+test('a planted outcome of exactly the reader\'s own shape, holding a base that passes the grammar, IS accepted — by design: '
+  + 'it cannot be told from the reader\'s own write, and code that runs before the first read can set SCRIPT_BASE itself; '
+  + 'the guarantee is one answer per process that always passes the grammar, not that the answer came from the environment', () => {
+  // Not something the slot adds: whatever can run this line before the config's read can run
+  // `process.env.SCRIPT_BASE = …` instead, and the two are indistinguishable by construction.
+  inFreshProcess({ SCRIPT_BASE: GOOD }, `
+    ${sealed(`Object.freeze({ value: ${JSON.stringify(OTHER)} })`)}
+    assert.equal(m.scriptBase(), ${JSON.stringify(OTHER)});
+    assert.equal(m.runtimeSrc('head.js', '1.2.3'), ${JSON.stringify(OTHER + '/site-runtime/1.2.3/head.js')});
+    assert.equal(m.scriptBase(), ${JSON.stringify(OTHER)}, 'one answer per process');
+  `);
+  // the same thing, done the way that needs no slot
+  inFreshProcess({ SCRIPT_BASE: GOOD }, `
+    process.env.SCRIPT_BASE = ${JSON.stringify(OTHER)};
+    assert.equal(m.scriptBase(), ${JSON.stringify(OTHER)});
+  `);
+  // "off" and a refusal can be planted the same way; they are the other two things an environment can say
+  inFreshProcess({ SCRIPT_BASE: GOOD }, `
+    ${sealed(`Object.freeze({ value: '' })`)}
+    assert.equal(m.scriptBase(), '');
+    assert.throws(() => m.runtimeSrc('head.js', '1.2.3'), (e) => e.reason === 'off');
+  `);
+  inFreshProcess({ SCRIPT_BASE: GOOD }, `
+    ${sealed(`Object.freeze({ refused: 'port' })`)}
+    let first = null;
+    try { m.scriptBase(); } catch (e) { first = e; }
+    assert.ok(first instanceof m.ScriptBaseError && first.reason === 'port');
+    assert.throws(() => m.runtimeSrc('head.js', '1.2.3'), (e) => e === first);
+  `);
 });
 
 test('🔴 there is no reset, and no way to hand the build\'s reader another environment', () => {

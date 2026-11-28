@@ -198,13 +198,9 @@ function readOnce(env) {
 function readerOver(outcome) {
   const base = () => {
     const first = outcome();
-    if (first?.error) throw first.error;
+    if (first.error) throw first.error;
     // The kept value goes through the grammar again on its way out, every time. It costs nothing,
-    // and it means that what this function returns has been validated in this very call — also
-    // when the outcome on the process was put there by something other than this reader.
-    if (typeof first?.value !== 'string') {
-      throw new ScriptBaseError('grammar', `${SCRIPT_BASE_ENV}: the kept outcome of this process's first read is not one this reader wrote. The build stops rather than use it.`);
-    }
+    // and it means that what this function returns has been validated in this very call.
     return parseScriptBase(first.value);
   };
   return Object.freeze({
@@ -230,12 +226,82 @@ export function scriptBaseReader(env) {
 
 // The build's own reader, over `process.env`. Its outcome is kept on the process, not in this
 // module: a bundler may evaluate a second copy of this file (the config loads one, the built pages
-// another), and both copies must give the answer the first read gave. The slot is written once and
-// is neither writable nor configurable.
+// another), and both copies must give the answer the first read gave.
+//
+// THE SLOT. The outcome is kept on `globalThis` under a registered symbol, as plain data:
+//   a frozen `{ value: <base or ''> }`, or a frozen `{ refused: <reason code> }`,
+// in a property that is not writable, not configurable and not enumerable. A refusal is kept as
+// its reason code only — never as the error object: a second copy of this module has its own
+// `ScriptBaseError` class, and an object out of a shared slot is not something to throw onwards.
+//
+// Any code in the process can name that symbol, so the slot is READ BACK STRICTLY, on every use.
+// What is found is taken only if it has exactly the shape written here: an own data property
+// sealed as above, holding a frozen plain object with exactly one own key, a data property, that
+// is either `value` (a string the grammar accepts, or '') or `refused` (one of this reader's own
+// reason codes). Anything else — an object that could still change, a getter, extra keys, an error
+// object, a value the grammar refuses — stops the build as tampering, and nothing of it is shown.
+//
+// What this guarantees, and what it does not. It guarantees ONE ANSWER PER PROCESS, and that the
+// answer ALWAYS PASSES THE GRAMMAR. It does not guarantee that the answer came from the
+// environment: code that runs before the first read can plant a correctly shaped, valid outcome,
+// and that cannot be told from this module's own write. Nothing is lost by that — the same code
+// can set `process.env.SCRIPT_BASE` before the first read, which is the setting itself. Whoever
+// runs code in the build process before the config loads already chooses the script base.
 const PROCESS_SLOT = Symbol.for('sitetile.script-base.first-read');
+
+/** Every reason `parseScriptBase` can refuse a setting for: the only codes a kept refusal may carry. */
+const REFUSALS = Object.freeze(['not-a-string', 'non-ascii', 'control-character', 'whitespace', 'forbidden-character',
+  'percent-escape', 'scheme', 'userinfo', 'ip-literal', 'port', 'empty-host', 'query', 'fragment', 'trailing-dot',
+  'upper-case-host', 'idn', 'host', 'trailing-slash', 'extra-path', 'wrong-prefix', 'grammar']);
+
+const tampered = () => new ScriptBaseError('slot-tampered',
+  `${SCRIPT_BASE_ENV}: the outcome kept on this process for the first read has been tampered with: it is not what this reader writes. `
+  + `Something else in the build process put it there or changed it. The build stops rather than use it. (Nothing of it is shown.)`);
+
+/** The one own key of a frozen plain object and its value, read through the property's descriptor
+ *  so that an accessor is seen as one and never called; `null` when `kept` is anything else.
+ *  (Frozen is what makes the answer final: not even a proxy can report a frozen object and later
+ *  give another key or value for it.) */
+function soleEntry(kept) {
+  if (kept === null || typeof kept !== 'object' || Object.getPrototypeOf(kept) !== Object.prototype || !Object.isFrozen(kept)) return null;
+  const keys = Reflect.ownKeys(kept);
+  if (keys.length !== 1) return null;
+  const d = Object.getOwnPropertyDescriptor(kept, keys[0]);
+  return d && Object.hasOwn(d, 'value') ? [keys[0], d.value] : null;
+}
+
+// The error this copy throws for the kept refusal: the original when this copy made the first
+// read, otherwise one made here from the kept reason code. One object per copy, thrown every time.
+let refusal = null;
+
 const ofThisProcess = readerOver(() => {
-  if (!Object.hasOwn(globalThis, PROCESS_SLOT)) Object.defineProperty(globalThis, PROCESS_SLOT, { value: readOnce(process.env) });
-  return globalThis[PROCESS_SLOT];
+  if (!Object.hasOwn(globalThis, PROCESS_SLOT)) {
+    const first = readOnce(process.env);
+    let kept = null;
+    if (first.error) {
+      refusal = first.error;
+      kept = { refused: first.error instanceof ScriptBaseError && REFUSALS.includes(first.error.reason) ? first.error.reason : 'grammar' };
+    } else {
+      kept = { value: first.value };
+    }
+    Object.defineProperty(globalThis, PROCESS_SLOT, { value: Object.freeze(kept) });
+  }
+  // Read back the same way whoever wrote it — this call, an earlier one, another copy, or not
+  // this module at all.
+  const slot = Object.getOwnPropertyDescriptor(globalThis, PROCESS_SLOT);
+  if (!slot || !Object.hasOwn(slot, 'value') || slot.writable || slot.configurable || slot.enumerable) throw tampered();
+  const [key, kept] = soleEntry(slot.value) ?? [];
+  if (key === 'value' && typeof kept === 'string') {
+    try { return { value: parseScriptBase(kept) }; } catch { throw tampered(); }
+  }
+  if (key === 'refused' && typeof kept === 'string' && REFUSALS.includes(kept)) {
+    refusal ??= new ScriptBaseError(kept,
+      `${SCRIPT_BASE_ENV} was refused when this process first read it (reason: ${kept}), and that refusal stands for the whole process. `
+      + `It must be exactly https://<host>/corals (lower case, no port, no trailing slash), or empty/unset to turn it off. `
+      + `(The value itself is not shown, in case it holds a secret.)`);
+    return { error: refusal };
+  }
+  throw tampered();
 });
 
 /**
