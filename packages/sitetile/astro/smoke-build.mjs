@@ -362,8 +362,8 @@ const badChunks = auditChunks();
 
 // ---- the script inventory golden (script-inventory.mjs; script-inventory.golden.json) ----
 // Every <script> on every page of the build above — inline ones by the hash of their exact bytes,
-// external ones by src, each with its attributes, in source order — and every .js file the build
-// wrote, compared with the committed golden. The allowlist audit above answers "is every script one
+// external ones by src, each with its attributes, in source order — and every script file (.js or
+// .mjs) the build wrote, compared with the committed golden. The allowlist audit above answers "is every script one
 // we know"; this answers "did any script on any page change at all", which is the question a change
 // that claims to leave the output alone has to answer. A red run prints the page and the script.
 // To accept a difference ON PURPOSE: run this file with the regenerate switch set to `write`. That
@@ -2207,7 +2207,7 @@ const checks = [
   ['zero framework hydration (no astro-island)', () => pages.every((p) => !readFileSync(p, 'utf8').includes('astro-island'))],
   ['every script accounted (PE allowlist)', () => unaccounted.length === 0],
   // -- the script inventory golden (see the block that computes it, near the script audit) --
-  ['script inventory: every script on every page, and every .js file, equals the committed golden (SCRIPT_BASE unset)', () => {
+  ['script inventory: every script on every page, and every script file (.js, .mjs), equals the committed golden (SCRIPT_BASE unset)', () => {
     assert.ok(scriptGolden.ok, `${scriptGolden.differences.length} difference(s) from script-inventory.golden.json — listed below`);
     return scriptGolden.counts.pages === pages.length && scriptGolden.counts.inline > 0 && scriptGolden.counts.external > 0;
   }],
@@ -3010,7 +3010,7 @@ if (!scriptGolden.ok) {
   console.log(`    If every line above is a change you meant: ${REGENERATE}\n    (${REGENERATE_THEN}).`);
 }
 // Printed even when green, like the data blocks below: what the golden covered in this run.
-console.log(`  · script inventory: ${scriptGolden.counts.pages} pages, ${scriptGolden.counts.scripts} scripts (${scriptGolden.counts.inline} inline, ${scriptGolden.counts.external} external), ${scriptGolden.counts.jsFiles} .js files`);
+console.log(`  · script inventory: ${scriptGolden.counts.pages} pages, ${scriptGolden.counts.scripts} scripts (${scriptGolden.counts.inline} inline, ${scriptGolden.counts.external} external), ${scriptGolden.counts.jsFiles} script files (.js, .mjs)`);
 // Printed even when green: what this gate declined to inspect is part of its result, not a detail.
 if (dataBlocks.length) console.log(`  · ${dataBlocks.length} non-executable data blocks skipped (${[...new Set(dataBlocks.map((a) => (/type\s*=\s*"([^"]*)"/i.exec(a) || [, '?'])[1]))].join(', ')})`);
 if (badChunks.length) console.log('  ⚠ unaccounted chunks: ' + badChunks.join(', '));

@@ -12,8 +12,14 @@
 //   · an external script — its `src` and its other attributes.
 // Data blocks (`type="application/json"`, JSON-LD) are scripts to this file too: their `type`
 // attribute is in the record, and their bytes are what a later reader of them receives.
-// Also recorded: every .js file the build wrote, by path, hash and length — a chunk that only an
+// Also recorded: every script file the build wrote, by path, hash and length — a chunk that only an
 // `import()` reaches is on no page, and its bytes should not be able to change unseen either.
+// A script file is one whose name ends in `.js` or `.mjs`, in any case: the two extensions served
+// as JavaScript (`text/javascript` in the MIME table the build tool itself uses; a module script is
+// only run under such a type). The bundler names its own chunks `.js`; `.mjs` is what a file copied
+// from `public/` or written by an endpoint route could be called. `.cjs` is not served as
+// JavaScript and source maps are not scripts, so neither is recorded. (The golden's `about` line
+// and its `jsFiles` count keep their first wording, so that this widening leaves the file as it is.)
 //
 // REGENERATE ON PURPOSE, never to make a red run green without reading it:
 //   cd packages/sitetile/astro && SITETILE_SCRIPT_GOLDEN=write node smoke-build.mjs
@@ -151,15 +157,18 @@ export function pageScripts(file, parse, variableParts = []) {
   });
 }
 
-/** Every file under `dir` whose name ends with `ext`, as sorted `/`-separated relative paths. */
-function filesUnder(dir, ext) {
+/** The file extensions served as JavaScript. Matched at the end of a name, whatever its case. */
+export const SCRIPT_FILE_EXTENSIONS = Object.freeze(['.js', '.mjs']);
+
+/** Every file under `dir` whose name ends with one of `exts` (in any case), as sorted `/`-separated relative paths. */
+function filesUnder(dir, exts) {
   const out = [];
   (function walk(abs, rel) {
     for (const name of readdirSync(abs)) {
       const p = join(abs, name);
       const r = rel ? `${rel}/${name}` : name;
       if (statSync(p).isDirectory()) walk(p, r);
-      else if (name.endsWith(ext)) out.push(r);
+      else if (exts.some((ext) => name.toLowerCase().endsWith(ext))) out.push(r);
     }
   })(dir, '');
   return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -171,9 +180,9 @@ function filesUnder(dir, ext) {
  */
 export function scriptInventory(distDir, parse, variableParts = []) {
   const pages = {};
-  for (const rel of filesUnder(distDir, '.html')) pages[rel] = pageScripts(readFileSync(join(distDir, rel)), parse, variableParts);
+  for (const rel of filesUnder(distDir, ['.html'])) pages[rel] = pageScripts(readFileSync(join(distDir, rel)), parse, variableParts);
   const files = {};
-  for (const rel of filesUnder(distDir, '.js')) {
+  for (const rel of filesUnder(distDir, SCRIPT_FILE_EXTENSIONS)) {
     const buf = readFileSync(join(distDir, rel));
     files[rel] = { sha256: sha256(buf), bytes: buf.length };
   }
@@ -276,10 +285,10 @@ export function compareInventory(golden, built) {
   const gFiles = golden.files || {};
   const bFiles = built.files || {};
   for (const f of Object.keys(gFiles)) {
-    if (!Object.hasOwn(bFiles, f)) out.push(`${f}: the .js file is in the golden but the build did not write it`);
-    else if (!same(gFiles[f], bFiles[f])) out.push(`${f}: the .js file's bytes changed\n      golden: ${gFiles[f].bytes} bytes, ${gFiles[f].sha256}\n      built:  ${bFiles[f].bytes} bytes, ${bFiles[f].sha256}`);
+    if (!Object.hasOwn(bFiles, f)) out.push(`${f}: the script file is in the golden but the build did not write it`);
+    else if (!same(gFiles[f], bFiles[f])) out.push(`${f}: the script file's bytes changed\n      golden: ${gFiles[f].bytes} bytes, ${gFiles[f].sha256}\n      built:  ${bFiles[f].bytes} bytes, ${bFiles[f].sha256}`);
   }
-  for (const f of Object.keys(bFiles)) if (!Object.hasOwn(gFiles, f)) out.push(`${f}: a .js file the golden does not have (${bFiles[f].bytes} bytes)`);
+  for (const f of Object.keys(bFiles)) if (!Object.hasOwn(gFiles, f)) out.push(`${f}: a script file the golden does not have (${bFiles[f].bytes} bytes)`);
   return out;
 }
 

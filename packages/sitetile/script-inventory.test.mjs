@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import {
   GOLDEN_PATH, REGENERATE, pageScripts, scriptByteRanges, scriptInventory, inventoryCounts,
   serializeInventory, compareInventory, checkScriptInventory, writeScriptGolden,
-  GOLDEN_SWITCH, REGENERATED_EXIT, REFUSED_EXIT, goldenMode, smokeExitCode,
+  GOLDEN_SWITCH, REGENERATED_EXIT, REFUSED_EXIT, goldenMode, smokeExitCode, SCRIPT_FILE_EXTENSIONS,
 } from './astro/script-inventory.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -50,7 +50,7 @@ const HOME = [
   '</body></html>',
 ].join('\n');
 
-/** A small build output: three pages and two .js files. Returns its directory. */
+/** A small build output: three pages and four script files (two .js, two .mjs). Returns its directory. */
 function fixtureDist() {
   const dir = mkdtempSync(join(tmpdir(), 'script-inventory-'));
   mkdirSync(join(dir, 'blog', 'post'), { recursive: true });
@@ -61,6 +61,16 @@ function fixtureDist() {
   writeFileSync(join(dir, '_astro', 'page.abc123.js'), 'export const page = 1;\n');
   writeFileSync(join(dir, '_astro', 'lazy.def456.js'), 'export const lazy = 2;\n');
   writeFileSync(join(dir, 'not-a-page.txt'), '<script>ignored: not an .html file</script>');
+  // A module a page can import, under the other extension that is served as JavaScript — and one
+  // spelled in capitals, which a host that ignores case serves the same way.
+  writeFileSync(join(dir, '_astro', 'worker.ghi789.mjs'), 'export const worker = 3;\n');
+  mkdirSync(join(dir, 'vendor'));
+  writeFileSync(join(dir, 'vendor', 'LEGACY.MJS'), 'export const legacy = 4;\n');
+  // Not script files: a source map, a CommonJS file (not served as JavaScript), look-alike names.
+  writeFileSync(join(dir, '_astro', 'page.abc123.js.map'), '{"version":3}');
+  writeFileSync(join(dir, 'vendor', 'tool.cjs'), 'module.exports = 5;\n');
+  writeFileSync(join(dir, 'vendor', 'notes.mjs.txt'), 'not a module');
+  writeFileSync(join(dir, 'vendor', 'mjs'), 'no extension');
   return dir;
 }
 
@@ -101,16 +111,21 @@ test('an unclosed script runs to the end of the file, and an external script wit
     [{ src: '/a.js', inline: sha('fallback()'), bytes: 10, attrs: {} }]);
 });
 
-test('the inventory of a build output: every .html page by path, every .js file by hash', needsParser, () => {
+test('🔴 the inventory of a build output: every .html page by path, every script file (.js and .mjs) by hash', needsParser, () => {
   const dist = fixtureDist();
   try {
     const inv = scriptInventory(dist, parse);
     assert.deepEqual(Object.keys(inv.pages), ['blog/index.html', 'blog/post/index.html', 'index.html']);
     assert.deepEqual(inv.pages['blog/post/index.html'], []);
-    assert.deepEqual(Object.keys(inv.files), ['_astro/lazy.def456.js', '_astro/page.abc123.js']);
+    // The extensions served as JavaScript — text/javascript in the MIME table the build tool
+    // itself uses — whatever their case. `.cjs` is not one (application/node), nor is a source map.
+    assert.deepEqual(SCRIPT_FILE_EXTENSIONS, ['.js', '.mjs']);
+    assert.deepEqual(Object.keys(inv.files), ['_astro/lazy.def456.js', '_astro/page.abc123.js', '_astro/worker.ghi789.mjs', 'vendor/LEGACY.MJS']);
     assert.deepEqual(inv.files['_astro/page.abc123.js'], { sha256: sha('export const page = 1;\n'), bytes: 23 });
+    assert.deepEqual(inv.files['_astro/worker.ghi789.mjs'], { sha256: sha('export const worker = 3;\n'), bytes: 25 });
+    assert.deepEqual(inv.files['vendor/LEGACY.MJS'], { sha256: sha('export const legacy = 4;\n'), bytes: 25 });
     assert.deepEqual(inventoryCounts(inv), {
-      pages: 3, scripts: 9, inline: 7, external: 2, pagesWithoutScripts: 1, distinctInline: 6, distinctExternal: 2, jsFiles: 2,
+      pages: 3, scripts: 9, inline: 7, external: 2, pagesWithoutScripts: 1, distinctInline: 6, distinctExternal: 2, jsFiles: 4,
     });
     // The file it writes is JSON, one script per line, and reads back as the same inventory.
     const text = serializeInventory(inv, BUILD);
@@ -225,14 +240,34 @@ test('every other kind of difference is named: attribute, src, added, removed, r
 
   d = edit('lazy = 2', 'lazy = 3', join(dist, '_astro', 'lazy.def456.js'));
   assert.equal(d.length, 1);
-  assert.match(d[0], /^_astro\/lazy\.def456\.js: the \.js file's bytes changed\n/);
+  assert.match(d[0], /^_astro\/lazy\.def456\.js: the script file's bytes changed\n/);
   writeFileSync(join(dist, '_astro', 'extra.js'), 'x');
-  assert.deepEqual(check(dist, goldenPath).differences, ['_astro/extra.js: a .js file the golden does not have (1 bytes)']);
+  assert.deepEqual(check(dist, goldenPath).differences, ['_astro/extra.js: a script file the golden does not have (1 bytes)']);
   rmSync(join(dist, '_astro', 'extra.js'));
   const lazy = readFileSync(join(dist, '_astro', 'lazy.def456.js'));
   rmSync(join(dist, '_astro', 'lazy.def456.js'));
-  assert.deepEqual(check(dist, goldenPath).differences, ['_astro/lazy.def456.js: the .js file is in the golden but the build did not write it']);
+  assert.deepEqual(check(dist, goldenPath).differences, ['_astro/lazy.def456.js: the script file is in the golden but the build did not write it']);
   writeFileSync(join(dist, '_astro', 'lazy.def456.js'), lazy);
+
+  // 🔴 the same three, for a module file: an .mjs that changes, appears or disappears is seen
+  d = edit('worker = 3', 'worker = 4', join(dist, '_astro', 'worker.ghi789.mjs'));
+  assert.equal(d.length, 1);
+  assert.match(d[0], /^_astro\/worker\.ghi789\.mjs: the script file's bytes changed\n/);
+  for (const name of ['extra.mjs', 'EXTRA.Mjs', 'extra.JS']) {
+    writeFileSync(join(dist, '_astro', name), 'xy');
+    assert.deepEqual(check(dist, goldenPath).differences, [`_astro/${name}: a script file the golden does not have (2 bytes)`]);
+    rmSync(join(dist, '_astro', name));
+  }
+  const worker = readFileSync(join(dist, '_astro', 'worker.ghi789.mjs'));
+  rmSync(join(dist, '_astro', 'worker.ghi789.mjs'));
+  assert.deepEqual(check(dist, goldenPath).differences, ['_astro/worker.ghi789.mjs: the script file is in the golden but the build did not write it']);
+  writeFileSync(join(dist, '_astro', 'worker.ghi789.mjs'), worker);
+  // …and what is not a script file still is not: adding one changes nothing
+  writeFileSync(join(dist, '_astro', 'extra.cjs'), 'x');
+  writeFileSync(join(dist, '_astro', 'extra.mjs.map'), 'x');
+  assert.deepEqual(check(dist, goldenPath).differences, []);
+  rmSync(join(dist, '_astro', 'extra.cjs'));
+  rmSync(join(dist, '_astro', 'extra.mjs.map'));
 
   assert.equal(check(dist, goldenPath).ok, true, 'the fixture was not restored');
 }));
