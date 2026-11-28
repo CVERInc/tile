@@ -31,7 +31,10 @@ import {
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { checkScriptInventory, writeScriptGolden, scriptByteRanges, GOLDEN_PATH, REGENERATE } from './script-inventory.mjs';
+import {
+  checkScriptInventory, writeScriptGolden, scriptByteRanges, GOLDEN_PATH, REGENERATE, REGENERATE_THEN,
+  GOLDEN_SWITCH, REFUSED_EXIT, goldenMode, smokeExitCode,
+} from './script-inventory.mjs';
 import { PLATFORM_RULE, parseRules, writeMergedHeaders } from './svg-attachment-headers.mjs';
 import { fileForPath } from './noindex-pass.mjs';
 import { bubbleLoaderScript, CORAL_FLOOR } from './src/lib/inbox-bubble-loader.mjs';
@@ -49,6 +52,16 @@ const LILAC_STAGED = join(HERE, 'src/themes/lilac.css');
 // measures — and script-inventory.golden.json is, by definition, the unset build's inventory.
 delete process.env.SCRIPT_BASE;
 const SCRIPT_GOLDEN_BUILD = { SITE_ID: 'smoke-site', PLATFORM_ORIGIN: 'https://feelreef.com', SCRIPT_BASE: null };
+
+// The regenerate switch (script-inventory.mjs) is settled HERE, before anything is built, staged or
+// written: `check` normally, `write` when a person asked for the golden to be rewritten. A value
+// that is not `write`, or the switch at all where CI is set, stops the run now. A `write` run can
+// never exit 0 — see the end of this file.
+let GOLDEN_MODE = 'check';
+try { GOLDEN_MODE = goldenMode(process.env); } catch (e) {
+  console.error(`❌ sitetile-astro smoke did not run: ${e.message}`);
+  process.exit(REFUSED_EXIT);
+}
 
 console.log('▸ astro build → dist-smoke/ (themeless + staged Lilac custom-theme fixtures)…');
 if (existsSync(LILAC_STAGED)) throw new Error(`refusing to shadow an existing staged theme: ${LILAC_STAGED}`);
@@ -353,13 +366,13 @@ const badChunks = auditChunks();
 // wrote, compared with the committed golden. The allowlist audit above answers "is every script one
 // we know"; this answers "did any script on any page change at all", which is the question a change
 // that claims to leave the output alone has to answer. A red run prints the page and the script.
-// To accept a difference ON PURPOSE: `SITETILE_SCRIPT_GOLDEN=write node smoke-build.mjs` here, then
-// read the golden's diff line by line and commit it with the change that caused it.
-if (process.env.SITETILE_SCRIPT_GOLDEN === 'write') {
+// To accept a difference ON PURPOSE: run this file with the regenerate switch set to `write`. That
+// run writes the golden and exits 3 — it is not a check, because the comparison just below is then
+// of the build with itself. Read the golden's diff line by line, commit it with the change that
+// caused it, and run again without the switch. (The switch was read at the top; refused under CI.)
+if (GOLDEN_MODE === 'write') {
   const wrote = writeScriptGolden(DIST, parseHtml, { build: SCRIPT_GOLDEN_BUILD });
-  console.log(`▸ SITETILE_SCRIPT_GOLDEN=write: wrote ${GOLDEN_PATH} (${JSON.stringify(wrote)}) — read its diff before committing it`);
-} else if (process.env.SITETILE_SCRIPT_GOLDEN) {
-  throw new Error(`SITETILE_SCRIPT_GOLDEN=${process.env.SITETILE_SCRIPT_GOLDEN}: the only value is "write" (${REGENERATE})`);
+  console.log(`▸ ${GOLDEN_SWITCH}=write: wrote ${GOLDEN_PATH} (${JSON.stringify(wrote)}) — this run will not pass; read the file's diff before committing it`);
 }
 const scriptGolden = checkScriptInventory(DIST, parseHtml, { build: SCRIPT_GOLDEN_BUILD });
 
@@ -2994,12 +3007,21 @@ for (const [name, fn] of checks) {
 if (unaccounted.length) console.log('  ⚠ unaccounted scripts:\n    ' + unaccounted.join('\n    '));
 if (!scriptGolden.ok) {
   console.log(`  ⚠ script inventory differs from the golden (${scriptGolden.differences.length}):\n    ` + scriptGolden.differences.join('\n    '));
-  console.log(`    If every line above is a change you meant: ${REGENERATE}\n    then read the golden's diff and commit it with the change that caused it.`);
+  console.log(`    If every line above is a change you meant: ${REGENERATE}\n    (${REGENERATE_THEN}).`);
 }
 // Printed even when green, like the data blocks below: what the golden covered in this run.
 console.log(`  · script inventory: ${scriptGolden.counts.pages} pages, ${scriptGolden.counts.scripts} scripts (${scriptGolden.counts.inline} inline, ${scriptGolden.counts.external} external), ${scriptGolden.counts.jsFiles} .js files`);
 // Printed even when green: what this gate declined to inspect is part of its result, not a detail.
 if (dataBlocks.length) console.log(`  · ${dataBlocks.length} non-executable data blocks skipped (${[...new Set(dataBlocks.map((a) => (/type\s*=\s*"([^"]*)"/i.exec(a) || [, '?'])[1]))].join(', ')})`);
 if (badChunks.length) console.log('  ⚠ unaccounted chunks: ' + badChunks.join(', '));
-console.log(`\n${fail === 0 ? '✅ sitetile-astro smoke PASS' : `❌ smoke FAIL (${fail})`} (${checks.length - fail}/${checks.length})`);
-process.exit(fail === 0 ? 0 : 1);
+if (GOLDEN_MODE === 'write') {
+  // Writing the golden is never a passing check: every script comparison above was of this build
+  // with the file this run wrote from it. Say so last, where it is read, and exit non-zero.
+  console.log(`\n❌ sitetile-astro smoke: NOT A PASSING RUN — the script inventory golden was REGENERATED by this run (${GOLDEN_SWITCH}=write).`
+    + `\n   It must be reviewed and committed: read \`git diff -- ${GOLDEN_PATH}\` line by line, commit it with the change that caused it,`
+    + `\n   then run the smoke again without ${GOLDEN_SWITCH}. The other checks: ${checks.length - fail}/${checks.length}${fail === 0 ? '' : ` (${fail} FAILED)`}.`
+    + `\n   Exit ${smokeExitCode({ failed: fail, regenerated: true })}.`);
+} else {
+  console.log(`\n${fail === 0 ? '✅ sitetile-astro smoke PASS' : `❌ smoke FAIL (${fail})`} (${checks.length - fail}/${checks.length})`);
+}
+process.exit(smokeExitCode({ failed: fail, regenerated: GOLDEN_MODE === 'write' }));

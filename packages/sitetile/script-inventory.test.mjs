@@ -4,20 +4,23 @@
 // The golden itself is checked against a real build by astro/smoke-build.mjs, which also flips one
 // byte in a copy of that build and requires the check to go red. What is here needs no build: the
 // reader on pages written for the purpose, every kind of difference the check must name, and the
-// committed golden's own shape.
+// committed golden's own shape — and the rules of the switch that regenerates it: writing the golden
+// is never a passing run, and is refused outright where `CI` is set.
 //
 // It needs parse5 from the renderer's dependencies and SAYS SO when they are absent.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   GOLDEN_PATH, REGENERATE, pageScripts, scriptByteRanges, scriptInventory, inventoryCounts,
   serializeInventory, compareInventory, checkScriptInventory, writeScriptGolden,
+  GOLDEN_SWITCH, REGENERATED_EXIT, REFUSED_EXIT, goldenMode, smokeExitCode,
 } from './astro/script-inventory.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -312,4 +315,96 @@ test('the committed golden is whole: counts match its pages, it names how to reg
       assert.ok(s.src !== undefined || /^sha256-[A-Za-z0-9+/]{43}=$/.test(s.inline), `${page}: ${JSON.stringify(s)}`);
     }
   }
+});
+
+// ── The regenerate switch ──────────────────────────────────────────────────────────────────────
+// `SITETILE_SCRIPT_GOLDEN=write` makes the smoke write the golden from the build it has just made.
+// A run that does that has compared the build with itself, so it must never be a passing run: left
+// set by accident, the switch would turn the check into one that cannot fail.
+
+test('🔴 the switch: unset is a check; "write" is a write, never under CI; anything else is refused', () => {
+  assert.equal(GOLDEN_SWITCH, 'SITETILE_SCRIPT_GOLDEN');
+  assert.ok(REGENERATE.includes(`${GOLDEN_SWITCH}=write`));
+  assert.equal(goldenMode({}), 'check');
+  assert.equal(goldenMode({ [GOLDEN_SWITCH]: '' }), 'check');
+  assert.equal(goldenMode({ CI: 'true' }), 'check');
+  assert.equal(goldenMode({ [GOLDEN_SWITCH]: 'write' }), 'write');
+  assert.equal(goldenMode({ [GOLDEN_SWITCH]: 'write', CI: '' }), 'write');
+  // Under CI the switch is refused, whatever CI is set to: nobody is there to read the diff.
+  for (const ci of ['true', '1', 'yes', 'false', '0', ' ']) {
+    assert.throws(() => goldenMode({ [GOLDEN_SWITCH]: 'write', CI: ci }), (e) => /refused/.test(e.message) && /\bCI\b/.test(e.message) && e.message.includes(GOLDEN_SWITCH),
+      `the switch was accepted with CI=${JSON.stringify(ci)}`);
+  }
+  // Only the one spelling writes. A near miss is refused, not read as "check" — and not as "write".
+  for (const v of ['WRITE', 'Write', 'write ', ' write', '1', 'true', 'yes', 'update', 'check', 'w']) {
+    assert.throws(() => goldenMode({ [GOLDEN_SWITCH]: v }), (e) => /refused/.test(e.message) && e.message.includes(GOLDEN_SWITCH), `accepted ${JSON.stringify(v)}`);
+    assert.throws(() => goldenMode({ [GOLDEN_SWITCH]: v, CI: 'true' }), /refused/);
+  }
+});
+
+test('🔴 a run that wrote the golden never exits 0, whatever else it found', () => {
+  assert.equal(smokeExitCode({ failed: 0, regenerated: false }), 0);
+  assert.equal(smokeExitCode({ failed: 3, regenerated: false }), 1);
+  assert.notEqual(REGENERATED_EXIT, 0);
+  assert.notEqual(REGENERATED_EXIT, 1, 'a regenerated golden must be told apart from a failed check');
+  assert.notEqual(REFUSED_EXIT, 0);
+  assert.equal(smokeExitCode({ failed: 0, regenerated: true }), REGENERATED_EXIT);
+  assert.equal(smokeExitCode({ failed: 2, regenerated: true }), 1);
+  for (const failed of [0, 1, 313]) assert.notEqual(smokeExitCode({ failed, regenerated: true }), 0);
+  // Anything that is not plainly "no failures" is a failure.
+  for (const failed of [undefined, null, NaN, -1, '0']) assert.notEqual(smokeExitCode({ failed, regenerated: false }), 0);
+  // The smoke's one exit goes through that function, and its one write is behind the switch.
+  const smoke = readFileSync(join(HERE, 'astro', 'smoke-build.mjs'), 'utf8');
+  assert.equal(smoke.match(/process\.exit\(/g).length, 2, 'the smoke has an exit this test does not know');
+  assert.ok(smoke.includes('process.exit(REFUSED_EXIT)'));
+  assert.ok(smoke.includes('process.exit(smokeExitCode({ failed: fail, regenerated: GOLDEN_MODE === \'write\' }))'));
+  assert.equal(smoke.match(/writeScriptGolden\(/g).length, 1);
+  assert.match(smoke, /if \(GOLDEN_MODE === 'write'\) \{\n\s*const wrote = writeScriptGolden\(/);
+  assert.ok(!/process\.env\.SITETILE_SCRIPT_GOLDEN/.test(smoke), 'the smoke reads the switch somewhere other than goldenMode()');
+});
+
+// The real file, run for real, up to the point where it would start a build. `npx` is not on the
+// PATH these runs are given, so a smoke that got as far as building would stop there, with another
+// exit code and after printing its build line: nothing here can run a build or write the golden.
+test('🔴 the smoke refuses the switch under CI before it builds or writes anything', needsParser, () => {
+  const astro = join(HERE, 'astro');
+  const before = readFileSync(GOLDEN_PATH);
+  const beforeTime = statSync(GOLDEN_PATH).mtimeMs;
+  const run = (extra) => {
+    const env = { ...process.env, PATH: join(tmpdir(), 'no-such-directory-for-script-inventory-test'), ...extra };
+    for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
+    return spawnSync(process.execPath, ['smoke-build.mjs'], { cwd: astro, encoding: 'utf8', env, timeout: 120000 });
+  };
+  for (const [extra, says] of [
+    [{ SITETILE_SCRIPT_GOLDEN: 'write', CI: 'true' }, /\bCI\b/],
+    [{ SITETILE_SCRIPT_GOLDEN: 'write', CI: '1' }, /\bCI\b/],
+    [{ SITETILE_SCRIPT_GOLDEN: 'yes', CI: undefined }, /"write"/],
+  ]) {
+    const r = run(extra);
+    const said = `${r.stdout}\n${r.stderr}`;
+    assert.equal(r.status, REFUSED_EXIT, `expected the refusal's exit code, got ${r.status}:\n${said.slice(-1500)}`);
+    assert.match(said, /refused/);
+    assert.match(said, says);
+    assert.ok(said.includes('SITETILE_SCRIPT_GOLDEN'));
+    assert.ok(!/astro build/.test(said), `the smoke started its build before refusing:\n${said.slice(0, 600)}`);
+    assert.ok(!/PASS/.test(said));
+    assert.ok(readFileSync(GOLDEN_PATH).equals(before), 'the golden was rewritten');
+    assert.equal(statSync(GOLDEN_PATH).mtimeMs, beforeTime, 'the golden was touched');
+    assert.equal(existsSync(join(astro, 'src', 'themes', 'lilac.css')), false, 'the smoke staged its fixtures before refusing');
+  }
+});
+
+// Nothing that runs unattended may set the switch. (This file names it, to test it; the smoke and
+// the inventory module read it. Nothing else in the repository's automation may mention it.)
+test('no script, hook, workflow or package script sets the switch', () => {
+  const root = join(HERE, '..', '..');
+  const mentions = [];
+  const scan = (abs) => {
+    if (!existsSync(abs)) return;
+    if (statSync(abs).isDirectory()) { for (const name of readdirSync(abs)) if (name !== 'node_modules') scan(join(abs, name)); return; }
+    if (readFileSync(abs, 'latin1').includes('SCRIPT_GOLDEN')) mentions.push(abs.slice(root.length + 1));
+  };
+  for (const place of ['scripts', 'hooks', '.github', 'package.json', 'packages/sitetile/package.json', 'packages/sitetile/astro/package.json', 'packages/build']) scan(join(root, place));
+  assert.deepEqual(mentions, []);
+  assert.ok(existsSync(join(root, 'scripts', 'test.sh')), 'scripts/test.sh was not where this test looked');
 });
