@@ -101,7 +101,9 @@ async function mount({ desktop = false } = {}) {
 	};
 	root.parentNode = document; // events bubble from the drawer up to the document
 	globalThis.document = document;
-	globalThis.window = { location: { search: '', href: '' }, history: { replaceState() {} } };
+	// header-actions.js listens on window for `hashchange` / `pageshow` (a history step closes the
+	// drawers); nothing here fires either, so the listeners are only accepted.
+	globalThis.window = { location: { search: '', href: '' }, history: { replaceState() {} }, addEventListener() {} };
 	globalThis.requestAnimationFrame = (fn) => fn();
 	globalThis.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 	// A fresh module instance per mount: the island is an IIFE that reads the document on import.

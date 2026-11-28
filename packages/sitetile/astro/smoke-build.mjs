@@ -190,7 +190,8 @@ const occ = (s) => occIn(html, s);
 // pv-gate/resume  1f53aff: preview content-notice gate + resume link (reader is a product feature)
 // reader chunk    1f53aff: pagetile Kindle-grade reader (paged/scroll/spread/scrubber)
 // ha-toggle       header-actions / nav-mobile a11y polish: Escape-to-close + Enter/Space on the
-//                 role="button" toggle labels (open/close itself is a pure CSS checkbox). Self-gates:
+//                 role="button" toggle labels, and close on a link followed in this tab / a history
+//                 step back to the page (open/close itself is a pure CSS checkbox). Self-gates:
 //                 no [data-ha-toggle] on the page → no-op. Loads once a site has a nav (mobile
 //                 hamburger) or a header-actions drawer — the nav fixture is the first to reach it.
 // pkg-runtimes    SiteLayout body-end conditional imports (bleedblend et al) — Astro emits the

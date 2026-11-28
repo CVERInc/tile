@@ -87,6 +87,8 @@ packages/sitetile/.smoke-search-drawer/
 packages/sitetile/.smoke-announce-card/
 # the surface= band smoke build (throwaway sibling of astro/; see real-render/surface-band.smoke.mjs)
 packages/sitetile/.smoke-surface-band/
+# the drawer-closes-on-link smoke build (throwaway sibling of astro/; see real-render/nav-drawer-link.smoke.mjs)
+packages/sitetile/.smoke-nav-drawer-link/
 
 packages/sitetile/.smoke-share-buttons-*/
 # the reef#2554 noindex smoke builds (throwaway siblings of astro/; see astro/smoke-build.mjs buildNoindexFixture)
