@@ -1,0 +1,76 @@
+{
+  "//": "Written by w3/deck-composition.smoke.mjs --write (chromium). Do not edit by hand: measure again.",
+  "engine": "chromium",
+  "viewport": [
+    390,
+    844
+  ],
+  "tile": [
+    343.2,
+    480.5
+  ],
+  "box": {
+    "textW": 261.19,
+    "bodyLine": 26.4,
+    "headLine": 30,
+    "headGap": 10,
+    "tilePadV": 28,
+    "tilePadH": 30,
+    "tileBorder": 0,
+    "sidePad": 10,
+    "sideBorder": 1,
+    "sideH": 480.45,
+    "sideW": 343.19
+  },
+  "lines": {
+    "bodyOnly": 15,
+    "head1": 13,
+    "head2": 12
+  },
+  "perLine": {
+    "latinBody": 34,
+    "latinHead": 23,
+    "cjkBody": 16,
+    "cjkHead": 10
+  },
+  "picture": {
+    "wide": 35,
+    "tall": 83
+  },
+  "social": {
+    "rows": 7,
+    "row": 40,
+    "gap": 14,
+    "pad": 28,
+    "border": 1
+  },
+  "wall": {
+    "column": 44,
+    "of": 332
+  },
+  "advice": {
+    "headLatin": 40,
+    "headCjk": 18,
+    "bodyLatin": 200,
+    "bodyCjk": 90,
+    "bodyLines": 6
+  },
+  "fonts": {
+    "body": "-apple-system, \"PingFang TC\", system-ui, sans-serif",
+    "head": "\"Hoefler Text\", \"Iowan Old Style\", Palatino, \"Palatino Linotype\", Georgia, serif"
+  },
+  "drawnWith": {
+    "latinBody": "WenQuanYi Zen Hei",
+    "latinHead": "Liberation Serif",
+    "cjkBody": "WenQuanYi Zen Hei",
+    "cjkHead": "WenQuanYi Zen Hei"
+  },
+  "desktop": {
+    "viewport": [
+      1280,
+      800
+    ],
+    "bodyOnly": 21,
+    "latinBody": 52
+  }
+}

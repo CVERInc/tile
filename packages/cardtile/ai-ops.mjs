@@ -254,6 +254,12 @@ export const CELL_TYPES = {
       w: WIDTH,
     },
     spelling: LEGACY_SLIDES.fromSlides,
+    // 🩸 The type's NAME is what misleads: an agent asked for a presentation took `slides` at its
+    // word. `hint` cannot say so: it is a key into w/cell-i18n.mjs and a person reads it in the
+    // editor's palette. `note` is for the agent door only, like `spelling`: English, not a key, shown
+    // in no form. A consumer's grammar answer is to give it beside the type's hint, the way it gives
+    // `spelling`; one that picks a type's fields by name has to add `note` to the names it picks.
+    note: 'An image carousel inside one tile; not a way to build a presentation. For a presentation give each point a `text` tile of its own: see COMPOSITION.presentation.',
   },
 
   // 🔴 HTML, scripts included (reef#2725). Rendered in `<iframe sandbox="allow-scripts" srcdoc>` —
@@ -553,33 +559,41 @@ export const GEOMETRY = {
   width: '`w=1`…`w=6` is the only size. Values are clamped to 1–6; a cell with no `w` is one column wide.',
   height: 'There is no height param. Height comes from content: a row is at least one column-width square and grows to fit. `h=` is retired: it is ignored, never offered, and the editor never writes it.',
   fullWidth: '`text` cells and any cell with `bleed` always span all six columns and break the grid into separate runs; their `w` does nothing.',
-  pictures: 'A picture keeps its own aspect ratio instead of filling a box. An `embed` is as tall as it is wide.',
+  pictures: 'On the wall a picture at `w=6` keeps its own aspect ratio; narrower, it is cropped to a square. In the stack and list it is always shown whole. An `embed` is as tall as it is wide.',
   order: 'Cells pack in file order, but a later narrow cell may fill a gap left earlier in the row.',
   views: 'Width only matters on the wall view. Stack and list show every tile as a card of its own, full width, so in the editor width is set on the wall only.',
 };
 
 /**
- * How to compose: what one tile is for, how much fits on it, and when Cards is the wrong tool.
+ * How to compose: what one tile is for, how much fits on it, what the wall does with it, and when
+ * Cards is the wrong tool.
  *
- * 🩸 Why it exists: an agent asked for "a presentation" reached for the cell type NAMED `slides`
+ * 🩸 Why it exists: an agent asked for "a presentation" reached for the tile type NAMED `slides`
  * (an image carousel) and filled tiles with pictures. Every param was documented and nothing said
  * what a tile is for. This is that missing half, for the agent door; English, like OPS's text.
  *
- * 🔴 Every number here is DERIVED, by ai-ops-composition.test.mjs, from w3/deck.css (the 3:4.2
- * side, its padding, the text tile's fonts and line heights) and w3/deck.js (the 342 px design
- * width). Change the card's shape or its type and that test fails until this text is rewritten.
- * Characters per line assume an average Latin glyph of half an em: an estimate, and it says "about".
+ * 🔴 Every sentence says which view it speaks of, because the three views draw one tile three ways:
+ * alone on a portrait front (stack, list) or in a six-column grid (wall).
+ *
+ * 🔴 Every number here was MEASURED IN A BROWSER by w3/deck-composition.smoke.mjs, which writes
+ * w3/deck-composition.measured.json; ai-ops-composition.test.mjs holds this text to that receipt and
+ * the receipt to the stylesheet. Lines, rows and a picture's share follow from px the stylesheet
+ * fixes. Characters per line depend on the reader's fonts: those say "about".
+ *
+ * The words: docs/VOCABULARY.md. The unit is a tile and its visible side is its front; the singular
+ * noun for one of Cards is retired, so it is not used here.
  */
 export const COMPOSITION = {
-  unit: 'Cards is one public address holding tiles in file order. In the `stack` and `list` views each tile is drawn alone on one card: a portrait page, 3:4.2, designed 342 px wide. There is no landscape card. A reader steps through one card at a time; the `wall` view puts every tile on one page.',
-  oneIdea: 'One tile, one idea. A tile has one type: a card is text or a picture or a link, never a mix. For a second point add a tile.',
-  text: 'The default card is a `text` tile: one `### ` heading line (`#` and `##` are drawn small), then the body. A card shows 15 body lines, or a heading of up to 2 lines plus 12; a body line holds about 30 Latin or 16 CJK characters, a heading line about 20 or 10. More scrolls inside the card. Aim for a heading under 40 characters and at most 6 body lines. Text holds no pictures or tables.',
-  pictures: 'A picture only when the picture is the point: one `feature` tile. It is shown whole, not cropped: a 16:9 picture fills about 40% of the card, so prefer portrait. Upload it with put_asset and write `img=asset:<id>`, not a URL on another site, whose file can vanish. No words inside pictures.',
-  links: 'A `link` tile is one card with one address. A `social` tile lists up to 7 links on one card.',
-  cover: 'The first tile is the card on top when the address opens: the cover. Use a `profile` tile (the `title`, one line, optionally a logo) or a `text` tile.',
-  presentation: 'A presentation is a sequence of `text` tiles in speaking order: the cover, one card per point, a last card with the next step. `slides` is not for this: it is an image carousel inside one tile.',
-  notFor: 'Not for long documents, tables, code, wide charts or anything that needs landscape: say so and offer another format.',
-  ask: 'Before building, ask the owner what it is for, who will read it and about how many cards. Afterwards call preview_cards and look before saving.',
+  unit: 'Cards is one public address: tiles in file order. In the `stack` and `list` views each tile has a portrait 3:4.2 front to itself; the `wall` shows all tiles on one six-column page. No front is landscape.',
+  oneIdea: 'One tile, one idea, one type. A `feature` is one picture, optionally with a `title` and a `cta` button; `text` may hold links.',
+  text: 'Default to `text` tiles: one `### ` heading line (`#`, `##` are drawn small), then the body. In the stack on a phone a tile shows 15 body lines (12 under a two-line heading) of about 34 Latin or 16 CJK characters; more scrolls. Aim for a heading within 40 Latin or 18 CJK characters, a body within 200 or 90. No pictures or tables.',
+  pictures: 'A picture only when it is the point: one `feature` tile, uploaded with put_asset, written `img=asset:<id>`, not a remote URL. Stack and list show it whole: 16:9 covers about 35% of the tile, 3:4 about 83%, so prefer portrait. The wall crops it square unless `w=6`. No words inside pictures.',
+  links: 'A `link` tile is one address; `social` lists links: labelled rows in stack and list (7 fit, more scroll), icons only on the wall.',
+  wall: '`w=1`…`w=6` is width in wall columns; no `w` is one column (about 45 px on a phone), so write `w=6` on `profile`, `link`, `feature` and `social` tiles. `text` is always full width and frameless there: a run of them reads as one page.',
+  cover: 'The first tile is the cover, on top when the address opens: `profile` (the `title`, one line, optional logo) or `text`.',
+  presentation: 'A presentation is `text` tiles in speaking order: the cover, one per point, the next step last. Leave `view` out so it opens on the stack; `views: stack list` removes the wall. Not `slides`: an image carousel inside one tile, not a way to build a presentation.',
+  notFor: 'Not for long documents, tables, code or wide charts: say so and offer another format.',
+  ask: 'First ask the owner what it is for, who reads it and about how many tiles. Then call preview_cards and look before saving.',
   example:
     '---\ntitle: Why the launch moved\n---\n\n## grid\n\n' +
     '- [ ] %% card: profile w=6 %% Product review, March.\n' +

@@ -18,14 +18,19 @@ and every whole-card example below, to what the code reads.
 
 ## Composing
 
-What one tile is for, how much fits on a card, how to lay out a presentation and when Cards is the
-wrong tool is written once, for agents, as `COMPOSITION` in [ai-ops.mjs](ai-ops.mjs). It is not
-repeated here. Its numbers (lines of text per card, characters per line, links per card) are
-derived from [w3/deck.css](w3/deck.css) and [w3/deck.js](w3/deck.js) by
-[ai-ops-composition.test.mjs](ai-ops-composition.test.mjs), which fails when the card's shape,
-design width or type changes and the guide does not. The short form: in the stack and list views
-each tile is one portrait card, so one tile carries one idea, and a presentation is a sequence of
-`text` tiles. The `slides` tile is an image carousel inside one tile, not a way to build one.
+What one tile is for, how much fits on it, what the wall does with it, how to lay out a presentation
+and when Cards is the wrong tool is written once, for agents, as `COMPOSITION` in
+[ai-ops.mjs](ai-ops.mjs). It is not repeated here. Each of its sentences says which view it speaks
+of. Its numbers (lines of text a tile shows, characters per line, a picture's share of a tile, rows
+of links, the width of one wall column) were measured in a browser by
+[w3/deck-composition.smoke.mjs](w3/deck-composition.smoke.mjs), which writes
+[w3/deck-composition.measured.json](w3/deck-composition.measured.json);
+[ai-ops-composition.test.mjs](ai-ops-composition.test.mjs) holds the guide to that receipt and the
+receipt to the stylesheet, so a change to a tile's shape or type fails until it is measured again
+and the guide rewritten. The short form: in the stack and list views each tile has a portrait front
+to itself, so one tile carries one idea, and a presentation is a sequence of `text` tiles. The
+`slides` tile is an image carousel inside one tile, not a way to build one; agents are told so in
+`CELL_TYPES.slides.note`, a field for the agent door only (people read the type's `hint`).
 
 ## Card settings (frontmatter)
 
@@ -148,7 +153,8 @@ title: Aster
 - **There is no height parameter.** Height comes from content: a row is at least one column-width
   square and grows to fit. `h=` is retired: ignored by the layout, never offered, never written.
 - `text` cells and cells with `bleed` always span all six columns, whatever their `w`.
-- A picture keeps its own aspect ratio; an `embed` is as tall as it is wide.
+- On the wall a picture at `w=6` keeps its own aspect ratio; narrower, it is cropped to a square. In the
+  stack and list it is always shown whole. An `embed` is as tall as it is wide.
 - Cells pack in file order, but a later narrow cell may fill a gap left earlier.
 - Width only matters on the wall view. Stack and list show each tile as a full-width card, which
   is why the editor sets width on the wall only.
